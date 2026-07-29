@@ -1,0 +1,51 @@
+import type { Domain } from "../schema";
+
+export const career: Domain[] = [
+  {
+    slug: "behavioral-interviews",
+    title: "Behavioral Interviews",
+    summary: "Telling your engineering story with structure and impact.",
+    icon: "🗣️",
+    group: "Career",
+    categories: [
+      {
+        slug: "behavioral-core",
+        title: "Core Behavioral",
+        summary: "Frameworks and the questions that recur.",
+        topics: [
+          { slug: "star-method", title: "The STAR Method", summary: "Situation, Task, Action, Result.", level: "Beginner", tags: ["behavioral"], contentReady: ["quick-summary", "detailed-explanation", "interview-qa"] },
+          { slug: "common-behavioral-questions", title: "Common Behavioral Questions", summary: "Conflict, failure, leadership, ambiguity.", level: "Beginner", tags: ["behavioral"] },
+          { slug: "leadership-principles", title: "Leadership Principles", summary: "Answering values-based interviews.", level: "Intermediate", tags: ["behavioral"] },
+        ],
+      },
+    ],
+  },
+  {
+    slug: "hr-interviews",
+    title: "HR Interviews",
+    summary: "Navigating screening, culture-fit, and offer conversations.",
+    icon: "💼",
+    group: "Career",
+    categories: [
+      {
+        slug: "hr-core",
+        title: "Core HR",
+        summary: "The non-technical rounds and negotiation.",
+        topics: [
+          { slug: "hr-fundamentals", title: "HR Round Fundamentals", summary: "What HR screens for and how to prepare.", level: "Beginner", tags: ["hr"] },
+          { slug: "common-hr-questions", title: "Common HR Questions", summary: "Strengths, weaknesses, and 'why us?'.", level: "Beginner", tags: ["hr"] },
+          { slug: "salary-negotiation", title: "Salary Negotiation", summary: "Getting to a fair offer, professionally.", level: "Intermediate", tags: ["hr"] },
+        ],
+      },
+    ],
+  },
+  {
+    slug: "coding-interview-preparation",
+    title: "Coding Interview Preparation",
+    summary: "A full coding-interview curriculum is on the way.",
+    icon: "⌨️",
+    group: "Career",
+    status: "coming-soon",
+    categories: [],
+  },
+];
