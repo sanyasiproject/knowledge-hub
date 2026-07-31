@@ -190,6 +190,458 @@ A good postmortem produces 3-5 specific action items. A great one changes a proc
       back: "Through SLOs and error budgets. 100% is not the target. The SLO sets the threshold; the error budget quantifies how much unreliability is acceptable, enabling data-driven trade-offs.",
     },
   ],
+  deepDive: [
+    `## The Philosophy Behind Error Budgets and Risk Management
+
+Site Reliability Engineering fundamentally reframes how organizations think about **risk** and **failure**. Traditional operations teams treat every outage as a crisis and every deployment as a threat. SRE inverts this by recognizing that *some amount of failure is not only acceptable but necessary* for innovation. The **error budget** is the mathematical expression of this philosophy: if your SLO is **99.9%**, you have a budget of **0.1%** unreliability — roughly **43 minutes per month**. This is not a target to hit but a *resource to spend*. Product teams can "spend" error budget on risky deployments, experiments, and rapid feature releases. When the budget is healthy, velocity is encouraged; when it is depleted, the organization **automatically** shifts focus to reliability. This mechanism eliminates the perennial "ship vs. stabilize" debate by replacing opinion with data. The key insight is that the error budget belongs to the *product*, not to SRE — it is the product team's risk allowance, and SRE's job is to measure and enforce it.`,
+
+    `## Observability, SLIs, and the Art of Meaningful Measurement
+
+Effective SRE depends on choosing the right **Service Level Indicators (SLIs)** — the metrics that genuinely reflect user experience. A common anti-pattern is monitoring *system* metrics (CPU utilization, disk I/O) rather than *user-facing* metrics (request latency at the \`p99\`, error rate on critical endpoints, availability as seen from the client). The **USE method** (*Utilization, Saturation, Errors*) is valuable for infrastructure troubleshooting, but SLOs should be built on **RED metrics** (*Rate, Errors, Duration*) because these directly correlate with what users perceive. Beyond metrics, modern SRE embraces the **three pillars of observability**: *metrics* for aggregate health, *logs* for event-level detail, and *distributed traces* for request-path analysis. Tools like **Prometheus** with **Grafana**, **Jaeger** for tracing, and **Loki** for log aggregation form a common open-source observability stack. The goal is not to collect more data but to ask better questions — observability means you can understand *why* a system is misbehaving, not just *that* it is misbehaving.`,
+
+    `## Building a Culture of Reliability: On-Call, Postmortems, and Continuous Improvement
+
+SRE is as much a **cultural practice** as a technical one. The on-call rotation is a critical touchpoint: SRE insists that on-call engineers should receive *no more than two pages per 12-hour shift* on average. If page volume exceeds this, it signals either poor alert quality or systemic reliability issues that must be addressed. Each page should be **actionable, urgent, and user-impacting** — anything else is noise that erodes trust and causes **alert fatigue**. After incidents, the *blameless postmortem* is the primary learning mechanism. The word "blameless" is precise: it means analyzing the **system conditions** that allowed a failure, not exonerating individuals from accountability. Engineers are expected to act in good faith with the information available at the time; the postmortem asks what *systemic guardrails* were missing. Action items from postmortems should be tracked with the same rigor as product features — they go into the backlog, get prioritized, and are reviewed in retrospectives. Organizations that treat postmortem action items as optional suggestions will repeat the same incidents. The SRE book recommends publishing postmortems broadly within the organization to maximize *organizational learning* and normalize the discussion of failure.`,
+  ],
+
+  code: [
+    {
+      language: "bash",
+      caption: "Incident Response Runbook — automated triage script for on-call engineers",
+      source: `#!/usr/bin/env bash
+# =============================================================
+# SRE Incident Response Runbook — Quick Triage
+# Run this script when paged for a service degradation alert.
+# Usage: ./incident-triage.sh <service-name> <environment>
+# =============================================================
+
+set -euo pipefail
+
+SERVICE="\${1:?Usage: ./incident-triage.sh <service-name> <environment>}"
+ENV="\${2:-production}"
+TIMESTAMP=\$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+LOG_DIR="/var/log/incident-triage"
+mkdir -p "\$LOG_DIR"
+REPORT="\$LOG_DIR/\${SERVICE}_\${TIMESTAMP}.log"
+
+echo "=== Incident Triage Report ===" | tee "\$REPORT"
+echo "Service:     \$SERVICE" | tee -a "\$REPORT"
+echo "Environment: \$ENV" | tee -a "\$REPORT"
+echo "Timestamp:   \$TIMESTAMP" | tee -a "\$REPORT"
+echo "" | tee -a "\$REPORT"
+
+# Step 1: Check pod/container health (Kubernetes)
+echo "--- Step 1: Pod Health ---" | tee -a "\$REPORT"
+kubectl get pods -n "\$SERVICE" -o wide 2>&1 | tee -a "\$REPORT"
+echo "" | tee -a "\$REPORT"
+
+# Step 2: Check for recent restarts or OOMKills
+echo "--- Step 2: Recent Restarts / OOMKills ---" | tee -a "\$REPORT"
+kubectl get pods -n "\$SERVICE" -o json \\
+  | jq -r '.items[] | select(.status.containerStatuses[]?.restartCount > 2)
+           | "\\(.metadata.name) restarts=\\(.status.containerStatuses[0].restartCount)"' \\
+  2>&1 | tee -a "\$REPORT"
+echo "" | tee -a "\$REPORT"
+
+# Step 3: Check error rate from Prometheus
+echo "--- Step 3: Error Rate (last 15 min) ---" | tee -a "\$REPORT"
+curl -sG "http://prometheus.\$ENV:9090/api/v1/query" \\
+  --data-urlencode "query=sum(rate(http_requests_total{service=\\"\$SERVICE\\",code=~\\"5..\\"}[15m])) / sum(rate(http_requests_total{service=\\"\$SERVICE\\"}[15m])) * 100" \\
+  | jq -r '.data.result[0].value[1] // "no data"' \\
+  2>&1 | tee -a "\$REPORT"
+echo "" | tee -a "\$REPORT"
+
+# Step 4: Check p99 latency
+echo "--- Step 4: p99 Latency (last 15 min) ---" | tee -a "\$REPORT"
+curl -sG "http://prometheus.\$ENV:9090/api/v1/query" \\
+  --data-urlencode "query=histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{service=\\"\$SERVICE\\"}[15m])) by (le))" \\
+  | jq -r '.data.result[0].value[1] // "no data"' \\
+  2>&1 | tee -a "\$REPORT"
+echo "" | tee -a "\$REPORT"
+
+# Step 5: Check recent deployments
+echo "--- Step 5: Recent Deployments (last 2 hours) ---" | tee -a "\$REPORT"
+kubectl rollout history deployment/"\$SERVICE" -n "\$SERVICE" 2>&1 \\
+  | tail -5 | tee -a "\$REPORT"
+echo "" | tee -a "\$REPORT"
+
+# Step 6: Tail recent error logs
+echo "--- Step 6: Recent Error Logs (last 50 lines) ---" | tee -a "\$REPORT"
+kubectl logs -n "\$SERVICE" -l app="\$SERVICE" --tail=50 \\
+  --since=15m 2>&1 | grep -i -E "error|fatal|panic|exception" \\
+  | tee -a "\$REPORT"
+
+echo ""
+echo "Triage report saved to: \$REPORT"
+echo "Next steps:"
+echo "  1. If error rate > 1%, check recent deploys and consider rollback"
+echo "  2. If pods are crash-looping, inspect logs and resource limits"
+echo "  3. If latency is high, check downstream dependencies"
+echo "  4. Open an incident channel: #inc-\$SERVICE-\$(date +%Y%m%d)"`,
+    },
+    {
+      language: "yaml",
+      caption: "Prometheus alerting rules — multi-window, multi-burn-rate SLO alerts",
+      source: `# =============================================================
+# Prometheus Alerting Rules — SLO-Based Multi-Burn-Rate Alerts
+# Implements the multi-window, multi-burn-rate approach from
+# the Google SRE Workbook for a 99.9% availability SLO.
+# =============================================================
+
+groups:
+  - name: slo_burn_rate_alerts
+    rules:
+      # -------------------------------------------------------
+      # SLI Recording Rules — precompute error ratios
+      # -------------------------------------------------------
+      - record: sli:error_ratio:rate5m
+        expr: >
+          sum(rate(http_requests_total{code=~"5.."}[5m])) by (service)
+          /
+          sum(rate(http_requests_total[5m])) by (service)
+
+      - record: sli:error_ratio:rate30m
+        expr: >
+          sum(rate(http_requests_total{code=~"5.."}[30m])) by (service)
+          /
+          sum(rate(http_requests_total[30m])) by (service)
+
+      - record: sli:error_ratio:rate1h
+        expr: >
+          sum(rate(http_requests_total{code=~"5.."}[1h])) by (service)
+          /
+          sum(rate(http_requests_total[1h])) by (service)
+
+      - record: sli:error_ratio:rate6h
+        expr: >
+          sum(rate(http_requests_total{code=~"5.."}[6h])) by (service)
+          /
+          sum(rate(http_requests_total[6h])) by (service)
+
+      - record: sli:error_ratio:rate3d
+        expr: >
+          sum(rate(http_requests_total{code=~"5.."}[3d])) by (service)
+          /
+          sum(rate(http_requests_total[3d])) by (service)
+
+      # -------------------------------------------------------
+      # Fast Burn Alert — 14.4x burn rate
+      # Burns through 30-day budget in ~2 days.
+      # Short window (1h) + long window (5m) = high confidence.
+      # Severity: PAGE (wake someone up).
+      # -------------------------------------------------------
+      - alert: SLO_HighErrorRate_FastBurn
+        expr: >
+          sli:error_ratio:rate1h > (14.4 * 0.001)
+          and
+          sli:error_ratio:rate5m > (14.4 * 0.001)
+        for: 2m
+        labels:
+          severity: page
+          slo: availability
+          burn_rate: "14.4x"
+        annotations:
+          summary: >
+            High error rate: {{ $labels.service }} is burning
+            error budget at 14.4x (budget exhaustion in ~2 days)
+          description: >
+            1h error ratio: {{ $value | humanizePercentage }}.
+            SLO target: 99.9%. Immediate investigation required.
+          runbook_url: https://wiki.internal/runbooks/slo-fast-burn
+
+      # -------------------------------------------------------
+      # Medium Burn Alert — 6x burn rate
+      # Burns through 30-day budget in ~5 days.
+      # Severity: PAGE (but less urgent than fast burn).
+      # -------------------------------------------------------
+      - alert: SLO_HighErrorRate_MediumBurn
+        expr: >
+          sli:error_ratio:rate6h > (6 * 0.001)
+          and
+          sli:error_ratio:rate30m > (6 * 0.001)
+        for: 5m
+        labels:
+          severity: page
+          slo: availability
+          burn_rate: "6x"
+        annotations:
+          summary: >
+            Elevated error rate: {{ $labels.service }} is burning
+            error budget at 6x (budget exhaustion in ~5 days)
+          description: >
+            6h error ratio: {{ $value | humanizePercentage }}.
+            Sustained degradation detected. Investigate promptly.
+          runbook_url: https://wiki.internal/runbooks/slo-medium-burn
+
+      # -------------------------------------------------------
+      # Slow Burn Alert — 1x burn rate
+      # Consuming budget at the exact SLO threshold.
+      # Severity: TICKET (not a page, but needs attention).
+      # -------------------------------------------------------
+      - alert: SLO_HighErrorRate_SlowBurn
+        expr: >
+          sli:error_ratio:rate3d > (1 * 0.001)
+          and
+          sli:error_ratio:rate6h > (1 * 0.001)
+        for: 30m
+        labels:
+          severity: ticket
+          slo: availability
+          burn_rate: "1x"
+        annotations:
+          summary: >
+            Gradual error budget erosion: {{ $labels.service }}
+            is consuming budget at 1x rate over 3 days
+          description: >
+            3d error ratio: {{ $value | humanizePercentage }}.
+            At this rate, the monthly budget will be fully consumed.
+            Create a ticket and investigate during business hours.
+          runbook_url: https://wiki.internal/runbooks/slo-slow-burn
+
+      # -------------------------------------------------------
+      # Error Budget Remaining — informational recording rule
+      # -------------------------------------------------------
+      - record: slo:error_budget_remaining:ratio
+        expr: >
+          1 - (
+            sum_over_time(sli:error_ratio:rate5m[30d])
+            / (30 * 24 * 60 / 5)
+          ) / 0.001`,
+    },
+    {
+      language: "yaml",
+      caption: "SLO definition document — YAML template for defining service SLOs",
+      source: `# =============================================================
+# SLO Definition Document — Template
+# Defines the SLOs, SLIs, and error budget policy for a service.
+# =============================================================
+
+service:
+  name: checkout-api
+  owner: payments-team
+  tier: critical   # critical | standard | best-effort
+
+slos:
+  - name: availability
+    description: "Proportion of successful HTTP requests"
+    sli:
+      type: request-based
+      # Good events / Total events
+      good_event: 'http_requests_total{code!~"5.."}'
+      total_event: 'http_requests_total'
+    target: 99.9        # percentage
+    window: 30d         # rolling window
+    error_budget: 0.1%  # = 43.2 min/month
+
+  - name: latency
+    description: "Proportion of requests served within 300ms"
+    sli:
+      type: request-based
+      good_event: 'http_request_duration_seconds_bucket{le="0.3"}'
+      total_event: 'http_request_duration_seconds_count'
+    target: 99.0
+    window: 30d
+    error_budget: 1.0%
+
+error_budget_policy:
+  # Actions triggered at each threshold
+  thresholds:
+    - remaining: 75%
+      action: "Normal operations — ship features freely"
+    - remaining: 50%
+      action: "Caution — increase canary duration, add integration tests"
+    - remaining: 25%
+      action: "Warning — require SRE approval for deployments"
+    - remaining: 0%
+      action: >
+        FREEZE — halt feature deployments, redirect engineering to
+        reliability work. VP-level override required for exceptions.
+        Conduct reliability sprint until budget recovers to 25%.
+
+  review_cadence: weekly
+  escalation_path:
+    - eng-manager
+    - director-of-engineering
+    - vp-engineering`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "SRE Incident Response Flow",
+      kind: "flow",
+      caption: "End-to-end incident lifecycle from detection through postmortem and follow-up action items.",
+      mermaid: `flowchart TD
+    A["Alert Fires\\n(SLO burn rate exceeded)"] --> B{"On-Call\\nAcknowledges?"}
+    B -- "Yes" --> C["Assess Severity\\n& Declare Incident Level"]
+    B -- "No (5 min)" --> B2["Escalate to\\nBackup On-Call"]
+    B2 --> C
+    C --> D{"Severity?"}
+    D -- "SEV1/SEV2" --> E["Open War Room\\n#inc-service-date"]
+    D -- "SEV3/SEV4" --> F["Individual\\nTroubleshooting"]
+    E --> G["Assign Roles:\\nIC / Ops Lead / Comms Lead"]
+    G --> H["Mitigate First:\\nRollback / Scale / Failover"]
+    F --> H
+    H --> I{"Service\\nRestored?"}
+    I -- "No" --> J["Escalate to\\nNext Expertise Tier"]
+    J --> H
+    I -- "Yes" --> K["Confirm Steady State\\n& Close Incident"]
+    K --> L["Schedule Blameless\\nPostmortem (48h)"]
+    L --> M["Write Postmortem:\\nTimeline + Root Cause + Actions"]
+    M --> N["Review & Publish\\nPostmortem"]
+    N --> O["Track Action Items\\nin Backlog"]
+    O --> P["Retrospective:\\nVerify Completion"]`,
+    },
+    {
+      title: "SRE Error Budget Lifecycle",
+      kind: "state",
+      caption: "State transitions of the error budget over a 30-day rolling window, showing policy actions at each threshold.",
+      mermaid: `stateDiagram-v2
+    [*] --> Healthy
+    Healthy: Budget > 75%\\nShip features freely
+    Healthy --> Caution: Budget drops below 75%
+
+    Caution: Budget 50-75%\\nIncrease canary duration
+    Caution --> Healthy: Budget recovers above 75%
+    Caution --> Warning: Budget drops below 50%
+
+    Warning: Budget 25-50%\\nRequire SRE approval for deploys
+    Warning --> Caution: Budget recovers above 50%
+    Warning --> Critical: Budget drops below 25%
+
+    Critical: Budget < 25%\\nFreeze feature deployments
+    Critical --> Warning: Budget recovers above 25%
+    Critical --> Exhausted: Budget reaches 0%
+
+    Exhausted: Budget = 0%\\nReliability sprint\\nVP override required
+    Exhausted --> Critical: Budget recovers above 0%`,
+    },
+    {
+      title: "SRE Observability Architecture",
+      kind: "architecture",
+      caption: "How metrics, logs, and traces flow from services through the observability stack to dashboards and alerts.",
+      mermaid: `flowchart LR
+    subgraph Services
+      S1["Service A"]
+      S2["Service B"]
+      S3["Service C"]
+    end
+
+    subgraph Collection["Collection Layer"]
+      P["Prometheus\\n(Metrics)"]
+      L["Loki\\n(Logs)"]
+      J["Jaeger\\n(Traces)"]
+    end
+
+    subgraph Storage["Storage & Query"]
+      TS["Thanos / Cortex\\n(Long-term metrics)"]
+      LS["Log Storage\\n(S3 / GCS)"]
+      TS2["Trace Storage\\n(Elasticsearch)"]
+    end
+
+    subgraph Presentation["Presentation & Action"]
+      G["Grafana\\n(Dashboards)"]
+      AM["Alertmanager\\n(Routing)"]
+      PD["PagerDuty\\n(Paging)"]
+      SL["Slack\\n(Notifications)"]
+      TK["Jira / Linear\\n(Tickets)"]
+    end
+
+    S1 & S2 & S3 -->|"/metrics"| P
+    S1 & S2 & S3 -->|"stdout/stderr"| L
+    S1 & S2 & S3 -->|"OpenTelemetry"| J
+
+    P --> TS
+    L --> LS
+    J --> TS2
+
+    TS & LS & TS2 --> G
+    P -->|"alert rules"| AM
+    AM -->|"SEV1/SEV2"| PD
+    AM -->|"SEV3"| SL
+    AM -->|"SEV4"| TK`,
+    },
+  ],
+
+  comparison: {
+    columns: ["Aspect", "SRE", "DevOps", "Traditional Ops"],
+    rows: [
+      [
+        "**Philosophy**",
+        "Apply *software engineering* to operations; treat ops as a software problem",
+        "Cultural movement emphasizing *collaboration* between Dev and Ops",
+        "Separate teams with *handoffs*; Ops receives what Dev builds",
+      ],
+      [
+        "**Reliability Target**",
+        "Defined by **SLOs** and **error budgets**; 100% is explicitly *not* the goal",
+        "Continuous improvement; reliability goals vary by team maturity",
+        "Target is often **100% uptime**; any outage is a failure",
+      ],
+      [
+        "**Failure Response**",
+        "**Blameless postmortems** with systemic analysis and tracked action items",
+        "Retrospectives and *feedback loops*; varies by implementation",
+        "Root cause analysis often assigns *individual blame*; post-incident reviews may be punitive",
+      ],
+      [
+        "**Automation**",
+        "Mandatory: **toil budget < 50%**; automate or the team cannot function",
+        "Encouraged through *CI/CD*, IaC, and tooling; no hard threshold",
+        "Automation is *nice-to-have*; manual runbooks are the norm",
+      ],
+      [
+        "**Change Management**",
+        "Progressive rollouts, *canary deploys*, automated rollback tied to SLOs",
+        "CI/CD pipelines with *automated testing*; deployment frequency as a metric",
+        "**Change Advisory Boards (CABs)**, scheduled maintenance windows, manual approvals",
+      ],
+      [
+        "**On-Call**",
+        "Max **2 pages per 12h shift**; excess paging triggers reliability improvements",
+        "Shared on-call between Dev and Ops; structure varies",
+        "Ops team bears *all on-call burden*; no limit on page volume",
+      ],
+      [
+        "**Team Structure**",
+        "Embedded SRE teams or *platform teams*; engineers rotate between SRE and product",
+        "Cross-functional teams; *\"you build it, you run it\"*",
+        "**Siloed** Dev, QA, and Ops teams with formal handoff processes",
+      ],
+      [
+        "**Prescriptiveness**",
+        "Highly prescriptive: specific practices like error budgets, toil tracking, SLOs",
+        "Principles-based: *CALMS* (Culture, Automation, Lean, Measurement, Sharing)",
+        "Process-heavy: *ITIL* frameworks, formal change management",
+      ],
+    ],
+  },
+
+  exercises: [
+    "**Error Budget Calculation**: Your service has an SLO of **99.95%** availability over a **30-day** window. Calculate the error budget in *minutes*. If the service experienced **15 minutes** of downtime in the first week, what percentage of the budget has been consumed? Should you adjust your deployment velocity?",
+    "**SLO Design Exercise**: You are the SRE for an e-commerce checkout service. Define appropriate **SLIs** and **SLOs** for *availability* and *latency*. Consider: what percentile should the latency SLI use? What window? Write the SLO in the format: `99.X% of requests complete successfully within Y ms over a Z-day window`.",
+    "**Postmortem Writing**: Given this scenario — a database connection pool exhaustion caused a **45-minute outage** during peak traffic because the connection limit was hardcoded and not monitored — write a *blameless postmortem* including: timeline, root cause analysis (use **Five Whys**), impact assessment, and **3-5 concrete action items** with owners and deadlines.",
+    "**Toil Audit**: Track your team's work for one week and categorize each task as **toil** or **engineering**. For each toil item, assess: frequency, time-per-occurrence, and automation feasibility. Prioritize the top 3 automation candidates by `frequency x time_per_occurrence` and write a one-page proposal for automating the highest-ROI item.",
+    "**Burn-Rate Alert Design**: Design a *multi-window, multi-burn-rate* alerting configuration for a service with a **99.9%** availability SLO. Define the burn rates, time windows, and severity levels for each alert tier. Explain *why* you chose each burn rate multiplier and what response each alert should trigger.",
+  ],
+
+  cheatSheet: [
+    "**Error Budget Formula**: `Error Budget = 1 - SLO`. For 99.9% SLO: budget = 0.1% = **43.2 min/month** or **~8.76 hours/year**. Track consumption: `budget_consumed = (bad_minutes / total_minutes) / (1 - SLO)`.",
+    "**SLO Targets to Downtime**: `99%` = 7.3h/mo | `99.9%` = 43.2min/mo | `99.95%` = 21.6min/mo | `99.99%` = 4.3min/mo | `99.999%` = 26s/mo. Each additional **nine** is roughly **10x harder** and more expensive.",
+    "**Burn Rate Multipliers**: Fast burn = **14.4x** (1h window, pages immediately), Medium burn = **6x** (6h window, pages for sustained issues), Slow burn = **1x** (3d window, creates ticket). Formula: `burn_rate = error_rate / (1 - SLO_target)`.",
+    "**Toil Checklist**: Is it *manual*? Is it *repetitive*? Is it *automatable*? Is it *tactical* (not strategic)? Does it *scale linearly* with service size? Does it produce *no enduring value*? If **yes to all six**, it is toil.",
+    "**Postmortem Template**: 1) *Title and date*, 2) *Impact summary* (duration, users affected, revenue impact), 3) *Timeline* (detection to resolution), 4) *Root cause* (Five Whys), 5) *What went well*, 6) *What went wrong*, 7) *Action items* (owner + deadline), 8) *Lessons learned*.",
+    "**On-Call Health Metrics**: Target max **2 pages per 12h shift**. Track: pages per shift, *time-to-acknowledge*, *time-to-mitigate*, % of pages that were **actionable** vs. noise. If >50% noise, fix alerting before adding more alerts.",
+  ],
+
+  revisionNotes: [
+    "SRE is *not* just \"ops with a new name\" — the defining characteristic is that SRE teams spend **at least 50%** of their time on *engineering* (automation, tooling, platform work) rather than manual operations. If toil exceeds 50%, the team enters a **death spiral** where there is no capacity to automate.",
+    "**Error budgets** are the bridge between product and reliability. They replace subjective arguments with *objective data*. The budget belongs to the **product team** as their risk allowance; SRE *measures and enforces* it. When budget is exhausted, the error budget policy (agreed upon in advance) dictates the response — typically a **deployment freeze**.",
+    "**SLO-based alerting** uses *multi-window, multi-burn-rate* alerts instead of static thresholds. The key insight: a CPU spike that does not affect users should **not** page anyone. Alerts should fire only when the *error budget is being consumed faster than sustainable*. This dramatically reduces **alert fatigue** and ensures every page is actionable.",
+    "**Blameless postmortems** focus on *systemic causes*, not individual mistakes. The question is never \"*who* broke it?\" but \"*what system conditions* allowed this to happen?\" This is critical because blame discourages reporting, hides near-misses, and prevents organizational learning. Action items must be **concrete, assigned, and tracked** — not vague recommendations.",
+    "The **SRE book** identifies three key practices for managing complexity: *simplicity* (actively fight accidental complexity), *release engineering* (make deploys safe, frequent, and reversible), and *capacity planning* (predict demand and provision ahead of need). All three reduce the probability and blast radius of incidents.",
+  ],
+
   glossary: [
     {
       term: "Site Reliability Engineering (SRE)",

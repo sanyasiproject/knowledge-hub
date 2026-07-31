@@ -112,6 +112,365 @@ export const systemDesignFramework: TopicContent = {
       back: "Functional: what the system does (user can post, search, follow). Non-functional: how the system performs (99.99% availability, p99 latency < 200ms, support 100M DAU, data durability, GDPR compliance).",
     },
   ],
+  deepDive: [
+    `## The Art of Requirements Gathering: Asking the Right Questions
+
+Requirements gathering is not a checklist -- it is a **structured conversation** that reveals the constraints shaping your design. The most common failure mode in system design interviews is solving the wrong problem because requirements were assumed rather than clarified. Begin with **scope**: "Should this system support only text posts, or also images and videos?" This single question can change the architecture from a simple CRUD application to a media processing pipeline with CDN, transcoding, and object storage.
+
+For **non-functional requirements**, use the acronym **CALSDR**: Consistency (strong or eventual?), Availability (99.9% or 99.99%?), Latency (p50 and p99 targets), Scalability (current and projected DAU), Durability (can we lose data?), and Regulatory (GDPR, data residency). Each answer constrains the design space. A 99.99% availability target (52 minutes of downtime per year) requires multi-region deployment and eliminates single points of failure -- a fundamentally different architecture than 99.9% (8.7 hours of downtime). Quantify whenever possible: "low latency" means nothing; "p99 < 200ms for timeline reads" is a design constraint you can work with.`,
+
+    `## Back-of-the-Envelope Estimation: The Numbers That Drive Decisions
+
+Estimation is not about precision -- it is about **determining the order of magnitude** that selects the right architectural tier. The difference between 100 QPS and 100K QPS is not 1000x more servers; it is a fundamentally different architecture (single server vs. distributed system with sharding, caching, and load balancing). Master these **estimation building blocks**: 1 day = 86,400 seconds (~100K for quick math). 1 million seconds = ~12 days. 1 billion seconds = ~32 years. A single server can handle ~1K-10K simple HTTP requests/sec. A single PostgreSQL node handles ~5K-10K simple queries/sec. Redis handles ~100K-200K operations/sec. A single SSD can do ~100K random reads/sec.
+
+**Storage estimation template**: records_per_day x bytes_per_record x retention_days x replication_factor. Example: a chat application with 100M DAU, 50 messages/day, 200 bytes/message, 5-year retention, 3x replication = 100M x 50 x 200 x 1825 x 3 = ~5.5 PB. This tells you immediately that a single database will not suffice -- you need distributed storage with sharding. These numbers are not meant to be exact; they are meant to **eliminate impossible architectures** and **highlight bottlenecks** before you start drawing boxes.`,
+
+    `## The High-Level Design Canvas: Building Blocks and Composition
+
+The high-level design phase is about **composing well-known building blocks** into a system that satisfies the requirements. Think of it as a vocabulary: clients, load balancers, API gateways, application servers, caches, databases, message queues, CDNs, object storage, search indices, notification services. Your job is to select the right components and connect them with the right communication patterns.
+
+**Communication patterns** are as important as the components themselves. **Synchronous** (HTTP/gRPC) for request-response where the client needs an immediate answer. **Asynchronous** (message queues like Kafka, SQS) for work that can be deferred -- email sending, analytics processing, feed generation. **Event-driven** (pub/sub) for decoupling producers from consumers -- a new order triggers inventory update, payment processing, and notification independently. **Streaming** (WebSockets, SSE) for real-time updates -- chat, live dashboards, collaborative editing. Drawing these communication patterns explicitly on your diagram shows the interviewer you understand not just *what* the components are but *how they interact*.`,
+
+    `## Deep Dive Mastery: Going from Boxes to Implementation
+
+The deep dive is where you differentiate yourself from candidates who can only draw generic architecture diagrams. The key is to **pick the right components** (those critical to the system's core value proposition) and discuss them with **implementation-level depth**. For each deep-dive component, cover five dimensions: (1) **Data model** -- what is the schema, what are the access patterns, what are the indexes? (2) **Technology choice** -- why this specific technology and not the alternatives? (3) **Scaling strategy** -- how does it handle 10x growth? (4) **Failure modes** -- what breaks and how do you recover? (5) **Trade-offs** -- what are you giving up with this choice?
+
+For example, deep-diving on the **notification service** of a social media platform: the data model is a fan-out from an event (new post) to followers (potentially millions). Technology: Kafka for event ingestion (durable, replayable, high throughput), Redis sorted sets for per-user notification feeds (fast reads, automatic ordering). Scaling: partition Kafka by user_id for parallelism, shard Redis by user_id range. Failure: if Kafka consumer falls behind, notifications are delayed but not lost (durability guarantee); if Redis fails, rebuild from Kafka replay. Trade-off: eventual consistency (notifications may be slightly delayed) is acceptable for this use case.`,
+  ],
+  code: [
+    {
+      language: "cpp",
+      caption: "Back-of-the-envelope estimation calculator for system design interviews",
+      source: `#include <iostream>
+#include <string>
+#include <cmath>
+#include <iomanip>
+
+struct SystemEstimate {
+    // Input parameters
+    long long dau;             // Daily Active Users
+    double actionsPerUserDay;  // average actions per user per day
+    double avgPayloadBytes;    // average request/response size
+    double readWriteRatio;     // reads per write
+    int retentionDays;
+    int replicationFactor;
+
+    // Computed metrics
+    double avgQPS() const {
+        return dau * actionsPerUserDay / 86400.0;
+    }
+
+    double peakQPS(double multiplier = 3.0) const {
+        return avgQPS() * multiplier;
+    }
+
+    double readQPS() const {
+        return avgQPS() * readWriteRatio / (1.0 + readWriteRatio);
+    }
+
+    double writeQPS() const {
+        return avgQPS() / (1.0 + readWriteRatio);
+    }
+
+    double bandwidthMBps() const {
+        return peakQPS() * avgPayloadBytes / (1024.0 * 1024.0);
+    }
+
+    double dailyStorageGB() const {
+        return (writeQPS() * 86400.0 * avgPayloadBytes * replicationFactor)
+               / (1024.0 * 1024.0 * 1024.0);
+    }
+
+    double totalStorageTB() const {
+        return dailyStorageGB() * retentionDays / 1024.0;
+    }
+
+    // Cache sizing: 80/20 rule -- cache 20% of daily read data
+    double cacheSizeGB() const {
+        double dailyReadDataGB = readQPS() * 86400.0 * avgPayloadBytes
+                                 / (1024.0 * 1024.0 * 1024.0);
+        return dailyReadDataGB * 0.2; // 20% covers 80% of traffic
+    }
+
+    int estimatedAppServers(int rpsPerServer = 1000) const {
+        return static_cast<int>(std::ceil(peakQPS() / rpsPerServer)) * 2;
+        // 2x for redundancy
+    }
+
+    void print() const {
+        std::cout << std::fixed << std::setprecision(1);
+        std::cout << "=== System Design Estimation ===" << std::endl;
+        std::cout << "DAU:                " << dau / 1e6 << "M" << std::endl;
+        std::cout << "Avg QPS:            " << avgQPS() << std::endl;
+        std::cout << "Peak QPS (3x):      " << peakQPS() << std::endl;
+        std::cout << "Read QPS:           " << readQPS() << std::endl;
+        std::cout << "Write QPS:          " << writeQPS() << std::endl;
+        std::cout << "Bandwidth:          " << bandwidthMBps() << " MB/s" << std::endl;
+        std::cout << "Daily new storage:  " << dailyStorageGB() << " GB" << std::endl;
+        std::cout << "Total storage:      " << totalStorageTB() << " TB" << std::endl;
+        std::cout << "Cache size (80/20): " << cacheSizeGB() << " GB" << std::endl;
+        std::cout << "App servers needed: " << estimatedAppServers() << std::endl;
+
+        std::cout << "\\n=== Architecture Tier ===" << std::endl;
+        if (peakQPS() < 1000)
+            std::cout << "Tier: Single server + DB (monolith)" << std::endl;
+        else if (peakQPS() < 50000)
+            std::cout << "Tier: Load balancer + app cluster + DB replicas + cache" << std::endl;
+        else if (peakQPS() < 500000)
+            std::cout << "Tier: Distributed system with sharding + CDN + message queues" << std::endl;
+        else
+            std::cout << "Tier: Global multi-region with edge + event-driven architecture" << std::endl;
+    }
+};
+
+int main() {
+    // Example: Twitter-like social media platform
+    SystemEstimate twitter{
+        .dau = 200'000'000,          // 200M DAU
+        .actionsPerUserDay = 20,     // reads + writes
+        .avgPayloadBytes = 1024,     // 1KB average
+        .readWriteRatio = 100,       // 100 reads per write
+        .retentionDays = 365 * 5,    // 5 year retention
+        .replicationFactor = 3,
+    };
+    twitter.print();
+
+    std::cout << "\\n========================================\\n" << std::endl;
+
+    // Example: URL shortener
+    SystemEstimate urlShortener{
+        .dau = 50'000'000,
+        .actionsPerUserDay = 5,
+        .avgPayloadBytes = 256,
+        .readWriteRatio = 1000,      // heavily read
+        .retentionDays = 365 * 10,
+        .replicationFactor = 3,
+    };
+    std::cout << "URL Shortener:" << std::endl;
+    urlShortener.print();
+
+    return 0;
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "Consistent hashing implementation for understanding database sharding",
+      source: `#include <iostream>
+#include <map>
+#include <string>
+#include <functional>
+#include <vector>
+#include <cmath>
+
+class ConsistentHash {
+    std::map<size_t, std::string> ring;
+    int virtualNodes;
+    std::hash<std::string> hasher;
+
+public:
+    explicit ConsistentHash(int vnodes = 150) : virtualNodes(vnodes) {}
+
+    void addNode(const std::string& node) {
+        for (int i = 0; i < virtualNodes; ++i) {
+            std::string key = node + "#" + std::to_string(i);
+            ring[hasher(key)] = node;
+        }
+        std::cout << "Added node: " << node
+                  << " (" << virtualNodes << " virtual nodes)" << std::endl;
+    }
+
+    void removeNode(const std::string& node) {
+        for (int i = 0; i < virtualNodes; ++i) {
+            std::string key = node + "#" + std::to_string(i);
+            ring.erase(hasher(key));
+        }
+        std::cout << "Removed node: " << node << std::endl;
+    }
+
+    std::string getNode(const std::string& dataKey) const {
+        if (ring.empty()) return "";
+        size_t hash = hasher(dataKey);
+        // Find the first node clockwise from this hash
+        auto it = ring.lower_bound(hash);
+        if (it == ring.end()) it = ring.begin(); // wrap around
+        return it->second;
+    }
+
+    // Analyze distribution across nodes
+    void analyzeDistribution(int numKeys = 10000) const {
+        std::map<std::string, int> distribution;
+        for (int i = 0; i < numKeys; ++i) {
+            std::string key = "key_" + std::to_string(i);
+            distribution[getNode(key)]++;
+        }
+        std::cout << "\\nKey distribution (" << numKeys << " keys):" << std::endl;
+        for (const auto& [node, count] : distribution) {
+            double pct = 100.0 * count / numKeys;
+            std::cout << "  " << node << ": " << count
+                      << " (" << pct << "%)" << std::endl;
+        }
+    }
+};
+
+int main() {
+    ConsistentHash ch(150);
+
+    // Initial cluster
+    ch.addNode("db-server-1");
+    ch.addNode("db-server-2");
+    ch.addNode("db-server-3");
+    ch.analyzeDistribution();
+
+    // Check which shard a key maps to
+    std::cout << "\\nuser:12345 -> " << ch.getNode("user:12345") << std::endl;
+    std::cout << "user:67890 -> " << ch.getNode("user:67890") << std::endl;
+
+    // Add a node (simulating horizontal scaling)
+    std::cout << "\\n--- Adding db-server-4 ---" << std::endl;
+    ch.addNode("db-server-4");
+    ch.analyzeDistribution();
+
+    // Only ~1/N keys are remapped when adding a node
+    std::cout << "\\nuser:12345 -> " << ch.getNode("user:12345") << std::endl;
+    std::cout << "user:67890 -> " << ch.getNode("user:67890") << std::endl;
+
+    return 0;
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "Rate limiter implementation (Token Bucket algorithm) -- a common deep-dive component",
+      source: `#include <iostream>
+#include <chrono>
+#include <thread>
+#include <string>
+
+class TokenBucket {
+    double tokens;
+    double maxTokens;
+    double refillRatePerSec;
+    std::chrono::steady_clock::time_point lastRefill;
+
+    void refill() {
+        auto now = std::chrono::steady_clock::now();
+        double elapsed = std::chrono::duration<double>(now - lastRefill).count();
+        tokens = std::min(maxTokens, tokens + elapsed * refillRatePerSec);
+        lastRefill = now;
+    }
+
+public:
+    TokenBucket(double maxTok, double refillRate)
+        : tokens(maxTok)
+        , maxTokens(maxTok)
+        , refillRatePerSec(refillRate)
+        , lastRefill(std::chrono::steady_clock::now()) {}
+
+    bool tryConsume(double numTokens = 1.0) {
+        refill();
+        if (tokens >= numTokens) {
+            tokens -= numTokens;
+            return true;
+        }
+        return false; // rate limited
+    }
+
+    double availableTokens() {
+        refill();
+        return tokens;
+    }
+};
+
+// Per-user rate limiter (common in API gateways)
+#include <unordered_map>
+
+class RateLimiter {
+    double maxTokens;
+    double refillRate;
+    std::unordered_map<std::string, TokenBucket> buckets;
+
+public:
+    RateLimiter(double maxTok, double refillRate)
+        : maxTokens(maxTok), refillRate(refillRate) {}
+
+    bool allowRequest(const std::string& userId) {
+        auto it = buckets.find(userId);
+        if (it == buckets.end()) {
+            buckets.emplace(userId, TokenBucket(maxTokens, refillRate));
+            it = buckets.find(userId);
+        }
+        return it->second.tryConsume();
+    }
+};
+
+int main() {
+    // Allow 10 requests per second, burst of 20
+    RateLimiter limiter(20, 10);
+
+    std::cout << "Simulating API requests for user 'alice':" << std::endl;
+
+    // Burst: send 25 requests rapidly
+    int allowed = 0, denied = 0;
+    for (int i = 0; i < 25; ++i) {
+        if (limiter.allowRequest("alice")) {
+            ++allowed;
+        } else {
+            ++denied;
+            std::cout << "  Request " << (i + 1) << ": RATE LIMITED" << std::endl;
+        }
+    }
+    std::cout << "Burst result: " << allowed << " allowed, "
+              << denied << " denied" << std::endl;
+
+    // Wait for tokens to refill
+    std::cout << "\\nWaiting 2 seconds for refill..." << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    // Now requests should work again
+    allowed = 0;
+    for (int i = 0; i < 10; ++i) {
+        if (limiter.allowRequest("alice")) ++allowed;
+    }
+    std::cout << "After refill: " << allowed << "/10 allowed" << std::endl;
+
+    // Different user has separate bucket
+    std::cout << "\\nBob (new user): "
+              << (limiter.allowRequest("bob") ? "ALLOWED" : "DENIED")
+              << " (independent bucket)" << std::endl;
+
+    return 0;
+}`,
+    },
+  ],
+  exercises: [
+    "**Requirements Gathering (Easy):** You are asked to design a URL shortener. Write down at least 8 clarifying questions you would ask the interviewer, covering functional requirements, non-functional requirements, and constraints. For each question, explain how the answer would change your design.",
+    "**Estimation Practice (Medium):** Estimate the storage, QPS, and bandwidth requirements for a photo-sharing app like Instagram with 500M DAU. Assume each user uploads 1 photo/day (2MB average), views 100 photos/day, and photos are stored for 10 years with 3x replication. How many storage servers do you need if each server has 10TB?",
+    "**High-Level Design (Medium):** Draw the high-level architecture for a ride-sharing application (like Uber). Identify the major components, data stores, communication patterns (sync vs. async), and real-time requirements. For each component, note whether it should be CP or AP.",
+    "**Deep Dive: Notification System (Hard):** Design the notification system for a social media platform with 100M DAU. Cover: how notifications are generated (fan-out), stored, delivered (push vs. pull), and displayed. Address: how to handle users with 10M followers, read/unread tracking, notification preferences, and rate limiting to prevent notification storms.",
+    "**Full Mock Interview (Hard):** Design a distributed task scheduler (like cron at scale). Walk through all 5 phases: requirements (what kinds of tasks? recurring? one-time? what scale?), estimation (how many tasks per second?), high-level design (scheduler, worker pool, task queue, result store), deep dive (exactly-once execution, failure handling, priority scheduling), and wrap-up (scaling to 10x, monitoring, operational concerns).",
+  ],
+  cheatSheet: [
+    "**Interview time split:** Requirements (5 min) -> Estimation (5 min) -> HLD (10 min) -> Deep Dive (15 min) -> Wrap-up (5 min).",
+    "**QPS formula:** DAU x actions/user / 86400. Peak = avg x 3-5. Round 86400 to 100K for quick math.",
+    "**Storage formula:** records/day x bytes/record x retention_days x replication_factor.",
+    "**Cache sizing (80/20 rule):** 20% of daily unique data covers 80% of traffic. Cache_GB = read_QPS x 86400 x avg_size x 0.2.",
+    "**Server capacity rules of thumb:** App server: 1K simple RPS. PostgreSQL: 5-10K QPS. Redis: 100K+ ops/sec. Kafka: 100K+ msgs/sec per broker.",
+    "**CALSDR non-functional checklist:** Consistency, Availability, Latency, Scalability, Durability, Regulatory.",
+    "**Communication patterns:** Sync (HTTP/gRPC) for request-response. Async (queues) for deferred work. Pub/sub for fan-out. WebSocket/SSE for real-time.",
+    "**Deep dive dimensions:** Data model, Technology choice, Scaling strategy, Failure modes, Trade-offs.",
+    "**Architecture tiers:** <1K QPS = single server. <50K = clustered + cache + replicas. <500K = sharded + CDN + queues. >500K = multi-region + edge.",
+    "**Wrap-up checklist:** SPOFs, monitoring metrics, scaling path, bottlenecks, deployment strategy, security.",
+  ],
+  revisionNotes: [
+    "System design interviews follow a 5-phase structure: Requirements (5 min), Estimation (5 min), High-Level Design (10 min), Deep Dive (15 min), Wrap-up (5 min). Spending too long on any phase starves the others.",
+    "Requirements gathering is **the most underrated phase**. Asking 'Is this system read-heavy or write-heavy?' can change the entire architecture.",
+    "Estimation determines **architectural tier**, not exact numbers. The difference between 1K QPS and 100K QPS is a different architecture, not just more servers.",
+    "High-level design should have **5-8 components** connected by arrows with **labeled protocols**. Draw the primary data flow end-to-end before adding secondary flows.",
+    "In the deep dive, cover 5 dimensions for each component: **data model, technology choice, scaling strategy, failure modes, and trade-offs**.",
+    "The wrap-up should address **what is NOT in your design**: single points of failure, monitoring gaps, scaling limitations, and what you would build with more time.",
+    "Never say 'just use Kafka' or 'just add a cache.' Always explain **why** and **what trade-off you accept**.",
+    "The 80/20 rule for caching: 20% of data serves 80% of requests. Use this to estimate cache memory requirements.",
+    "Read/write ratio fundamentally shapes the architecture. >100:1 = aggressive caching. ~1:1 = write-optimized with sync replication.",
+  ],
   glossary: [
     {
       term: "DAU",

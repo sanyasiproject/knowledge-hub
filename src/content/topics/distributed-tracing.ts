@@ -200,4 +200,373 @@ In practice, most teams combine head-based sampling (e.g., 5%) with tail-based r
         "A sampling strategy where the keep/drop decision is made after a trace completes, allowing retention of traces with errors or high latency.",
     },
   ],
+  deepDive: [
+    `**Trace-Based Testing** is an emerging practice that uses distributed traces as *test assertions* in integration and end-to-end test suites. Instead of merely checking HTTP status codes, trace-based tests verify the **internal behavior** of a request: Did the \`order-service\` create a span for the database write? Did the \`payment-gateway\` span complete in under 200ms? Tools like **Tracetest** and **Malabi** let you write assertions against span attributes, timing, and tree structure. For example, you can assert that a checkout trace contains *exactly* three service hops, that the \`db.statement\` attribute on the Postgres span matches a parameterized query, and that no span has \`status = ERROR\`. This catches **regressions in service interactions** that unit tests miss entirely. Trace-based testing also validates that *context propagation* is working correctly across all boundaries — if a span is orphaned, the test fails, surfacing broken instrumentation before it reaches production.`,
+
+    `**Service mesh integration** with distributed tracing unlocks *infrastructure-level observability* without modifying application code. Meshes like **Istio**, **Linkerd**, and **Consul Connect** inject sidecar proxies (e.g., \`Envoy\`) that automatically generate spans for every network hop between pods. The sidecar captures \`upstream_cluster\`, \`response_flags\`, **mTLS handshake duration**, and \`retry_count\` as span attributes. However, the mesh can only propagate context if the application *forwards* incoming trace headers on outgoing requests — the sidecar does not inspect application payloads. A common pitfall is assuming the mesh handles everything: without header forwarding, each sidecar produces **disconnected root spans**. Best practice is to combine mesh-generated spans (capturing infrastructure concerns like *TLS negotiation*, *load balancer selection*, and *circuit breaker state*) with application-level spans (capturing **business logic** like order validation or inventory checks). The \`OpenTelemetry Collector\` can merge both sources, enriching application spans with \`k8s.pod.name\`, \`k8s.namespace\`, and \`container.id\` via the \`k8sattributes\` processor.`,
+
+    `**Production debugging workflows** with distributed tracing follow a systematic pattern. When an alert fires for elevated **p99 latency** on the \`/api/checkout\` endpoint, the first step is to query the tracing backend for *slow traces* matching that operation (e.g., \`service=api-gateway operation=POST /api/checkout duration>2s\`). Examine the **waterfall view** to identify the longest span — often a downstream call to \`inventory-service\` or a database query. Check span attributes: \`db.statement\` reveals unoptimized queries, \`http.status_code\` shows upstream failures, and \`retry.count > 0\` indicates flaky dependencies. Use **trace comparison** (available in Jaeger and Grafana Tempo) to diff a slow trace against a fast one, highlighting which spans diverged. For intermittent failures, use *exemplar links* from Prometheus metrics to jump directly to a trace exhibiting the anomaly. Cross-reference with logs using the embedded \`traceId\` — run \`grep\` or a Loki query like \`{service="payment"} |= "abc123traceid"\` to see detailed error messages within the trace's time window. Finally, for **root cause in async workflows**, follow the trace through message queue spans: the \`messaging.destination\` and \`messaging.message_id\` attributes link the producer span to the consumer span, even across Kafka partitions or SQS queues.`,
+  ],
+  code: [
+    {
+      language: "typescript",
+      caption: "OpenTelemetry tracing setup for a Node.js Express application",
+      source: `import { NodeSDK } from "@opentelemetry/sdk-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc";
+import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
+import { Resource } from "@opentelemetry/resources";
+import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
+import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { W3CTraceContextPropagator } from "@opentelemetry/core";
+
+const traceExporter = new OTLPTraceExporter({
+  url: "http://otel-collector:4317",
+});
+
+const sdk = new NodeSDK({
+  resource: new Resource({
+    [ATTR_SERVICE_NAME]: "order-service",
+    [ATTR_SERVICE_VERSION]: "1.4.0",
+  }),
+  spanProcessors: [new BatchSpanProcessor(traceExporter)],
+  textMapPropagator: new W3CTraceContextPropagator(),
+  instrumentations: [
+    getNodeAutoInstrumentations({
+      "@opentelemetry/instrumentation-http": {
+        ignoreIncomingPaths: ["/health", "/ready"],
+      },
+      "@opentelemetry/instrumentation-express": { enabled: true },
+      "@opentelemetry/instrumentation-pg": { enhancedDatabaseReporting: true },
+    }),
+  ],
+});
+
+sdk.start();
+console.log("OpenTelemetry tracing initialized");
+
+process.on("SIGTERM", async () => {
+  await sdk.shutdown();
+  console.log("Tracing shut down gracefully");
+});`,
+    },
+    {
+      language: "typescript",
+      caption: "Manual span creation and context propagation across an async boundary",
+      source: `import { trace, context, SpanKind, SpanStatusCode } from "@opentelemetry/api";
+
+const tracer = trace.getTracer("order-service", "1.0.0");
+
+async function processOrder(orderId: string): Promise<void> {
+  // Create a parent span for the entire order processing workflow
+  await tracer.startActiveSpan(
+    "processOrder",
+    { kind: SpanKind.INTERNAL, attributes: { "order.id": orderId } },
+    async (parentSpan) => {
+      try {
+        // Validate inventory — creates a child span automatically
+        await tracer.startActiveSpan("validateInventory", async (span) => {
+          const available = await checkInventory(orderId);
+          span.setAttribute("inventory.available", available);
+          if (!available) {
+            span.setStatus({ code: SpanStatusCode.ERROR, message: "Out of stock" });
+            throw new Error("Insufficient inventory");
+          }
+          span.end();
+        });
+
+        // Charge payment — propagate context to external HTTP call
+        await tracer.startActiveSpan(
+          "chargePayment",
+          { kind: SpanKind.CLIENT },
+          async (span) => {
+            const headers: Record<string, string> = {};
+            // Inject current context into outgoing HTTP headers
+            const { W3CTraceContextPropagator } = await import("@opentelemetry/core");
+            const propagator = new W3CTraceContextPropagator();
+            propagator.inject(context.active(), headers, {
+              set: (carrier, key, value) => { carrier[key] = value; },
+            });
+
+            const response = await fetch("https://payment.internal/charge", {
+              method: "POST",
+              headers: { ...headers, "Content-Type": "application/json" },
+              body: JSON.stringify({ orderId, amount: 99.99 }),
+            });
+
+            span.setAttribute("http.status_code", response.status);
+            span.end();
+          }
+        );
+
+        parentSpan.addEvent("order.completed", { "order.id": orderId });
+        parentSpan.setStatus({ code: SpanStatusCode.OK });
+      } catch (error) {
+        parentSpan.recordException(error as Error);
+        parentSpan.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
+      } finally {
+        parentSpan.end();
+      }
+    }
+  );
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "C++ structured logging with trace context injection using OpenTelemetry C++ SDK",
+      source: `#include <opentelemetry/trace/provider.h>
+#include <opentelemetry/context/propagation/global_propagator.h>
+#include <opentelemetry/trace/span.h>
+#include <spdlog/spdlog.h>
+#include <nlohmann/json.hpp>
+
+namespace trace_api = opentelemetry::trace;
+using json = nlohmann::json;
+
+// Extract trace context and inject into structured log entries
+void logWithTraceContext(const std::string& message, const std::string& level) {
+    auto span = trace_api::Tracer::GetCurrentSpan();
+    auto spanContext = span->GetContext();
+
+    char traceIdHex[32];
+    char spanIdHex[16];
+    spanContext.trace_id().ToLowerBase16(traceIdHex);
+    spanContext.span_id().ToLowerBase16(spanIdHex);
+
+    json logEntry = {
+        {"message", message},
+        {"level", level},
+        {"trace_id", std::string(traceIdHex, 32)},
+        {"span_id", std::string(spanIdHex, 16)},
+        {"trace_flags", static_cast<int>(spanContext.trace_flags().IsSet()
+            ? opentelemetry::trace::TraceFlags::kIsSampled : 0)},
+        {"service", "inventory-service"},
+    };
+
+    spdlog::info(logEntry.dump());
+}
+
+// Usage within a traced operation
+void handleInventoryCheck(const std::string& productId) {
+    auto provider = trace_api::Provider::GetTracerProvider();
+    auto tracer = provider->GetTracer("inventory-service", "2.1.0");
+
+    auto span = tracer->StartSpan("checkInventory",
+        {{"product.id", productId}, {"db.system", "postgresql"}});
+    auto scope = tracer->WithActiveSpan(span);
+
+    logWithTraceContext("Starting inventory lookup for product " + productId, "info");
+
+    // ... perform DB query ...
+
+    span->SetAttribute("inventory.count", 42);
+    span->SetStatus(trace_api::StatusCode::kOk);
+    logWithTraceContext("Inventory check completed", "info");
+    span->End();
+}`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Distributed Trace Flow Across Microservices",
+      kind: "sequence",
+      caption:
+        "Sequence diagram showing how a single user request generates spans across four services, with context propagation via W3C traceparent headers.",
+      mermaid: `sequenceDiagram
+    participant User
+    participant APIGateway as API Gateway
+    participant OrderSvc as Order Service
+    participant PaymentSvc as Payment Service
+    participant InventorySvc as Inventory Service
+
+    User->>APIGateway: POST /checkout
+    Note right of APIGateway: Root Span created<br/>traceId: abc123
+
+    APIGateway->>OrderSvc: POST /orders (traceparent: 00-abc123-span1-01)
+    Note right of OrderSvc: Child Span created<br/>parentId: span1
+
+    OrderSvc->>InventorySvc: GET /stock (traceparent: 00-abc123-span2-01)
+    Note right of InventorySvc: Child Span created<br/>parentId: span2
+    InventorySvc-->>OrderSvc: 200 OK (items available)
+
+    OrderSvc->>PaymentSvc: POST /charge (traceparent: 00-abc123-span3-01)
+    Note right of PaymentSvc: Child Span created<br/>parentId: span3
+    PaymentSvc-->>OrderSvc: 200 OK (charged)
+
+    OrderSvc-->>APIGateway: 201 Created
+    APIGateway-->>User: 201 Order Confirmed`,
+    },
+    {
+      title: "OpenTelemetry Collector Architecture",
+      kind: "architecture",
+      caption:
+        "Architecture diagram showing the OpenTelemetry Collector pipeline with receivers, processors, and exporters connecting applications to multiple backends.",
+      mermaid: `flowchart LR
+    subgraph Applications
+        A1[Order Service<br/>OTel SDK]
+        A2[Payment Service<br/>OTel SDK]
+        A3[Inventory Service<br/>OTel SDK]
+    end
+
+    subgraph OTel Collector
+        direction TB
+        subgraph Receivers
+            R1[OTLP gRPC :4317]
+            R2[OTLP HTTP :4318]
+            R3[Zipkin :9411]
+        end
+        subgraph Processors
+            P1[Batch Processor]
+            P2[Tail Sampling]
+            P3[k8s Attributes]
+            P4[Span Metrics]
+        end
+        subgraph Exporters
+            E1[OTLP Exporter]
+            E2[Jaeger Exporter]
+            E3[Prometheus Exporter]
+        end
+        R1 --> P1
+        R2 --> P1
+        R3 --> P1
+        P1 --> P2
+        P2 --> P3
+        P3 --> P4
+        P4 --> E1
+        P4 --> E2
+        P4 --> E3
+    end
+
+    subgraph Backends
+        B1[(Grafana Tempo)]
+        B2[(Jaeger)]
+        B3[(Prometheus)]
+    end
+
+    A1 -->|OTLP/gRPC| R1
+    A2 -->|OTLP/gRPC| R1
+    A3 -->|OTLP/HTTP| R2
+
+    E1 --> B1
+    E2 --> B2
+    E3 --> B3`,
+    },
+    {
+      title: "Trace Lifecycle State Machine",
+      kind: "state",
+      caption:
+        "State diagram showing the lifecycle of a span from creation to export, including error handling and sampling decisions.",
+      mermaid: `stateDiagram-v2
+    [*] --> Created: tracer.startSpan()
+    Created --> Active: scope activated
+    Active --> Active: addEvent() / setAttribute()
+    Active --> Error: exception recorded
+    Error --> Ended: span.end()
+    Active --> Ended: span.end()
+    Ended --> Sampled: sampling decision = RECORD_AND_SAMPLE
+    Ended --> Dropped: sampling decision = DROP
+    Sampled --> Batched: BatchSpanProcessor
+    Batched --> Exported: OTLP export to backend
+    Exported --> Stored: backend ingestion
+    Stored --> [*]
+    Dropped --> [*]`,
+    },
+  ],
+  comparison: {
+    columns: [
+      "Feature",
+      "Jaeger",
+      "Grafana Tempo",
+      "Zipkin",
+      "Datadog APM",
+      "AWS X-Ray",
+    ],
+    rows: [
+      [
+        "License",
+        "Apache 2.0 (open source)",
+        "AGPLv3 (open source)",
+        "Apache 2.0 (open source)",
+        "Proprietary (SaaS)",
+        "Proprietary (AWS)",
+      ],
+      [
+        "Storage Backends",
+        "Elasticsearch, Cassandra, Kafka, Badger",
+        "S3, GCS, Azure Blob (object storage)",
+        "Elasticsearch, Cassandra, MySQL",
+        "Managed (Datadog cloud)",
+        "Managed (AWS cloud)",
+      ],
+      [
+        "Query Capability",
+        "Tag-based search, service/operation filter",
+        "Trace ID lookup only (uses Grafana for discovery)",
+        "Tag and annotation search",
+        "Full-text search, analytics, APM queries",
+        "Filter expressions, annotations, groups",
+      ],
+      [
+        "Sampling Support",
+        "Head-based, remote sampling",
+        "Head and tail-based via OTel Collector",
+        "Head-based, rate limiting",
+        "Head and tail-based, priority sampling",
+        "Reservoir sampling, fixed rate",
+      ],
+      [
+        "OTel Native Support",
+        "OTLP receiver, OTel SDK compatible",
+        "OTLP native, built for OTel",
+        "OTLP via Collector, native Zipkin format",
+        "OTLP ingestion, proprietary agent",
+        "OTLP via ADOT Collector, X-Ray SDK",
+      ],
+      [
+        "Service Dependency Map",
+        "Yes (auto-generated from traces)",
+        "Via Grafana (derived from metrics)",
+        "Yes (built-in dependency view)",
+        "Yes (auto-generated service map)",
+        "Yes (X-Ray service map)",
+      ],
+      [
+        "Cost Model",
+        "Self-hosted infrastructure cost",
+        "Low (object storage is cheap)",
+        "Self-hosted infrastructure cost",
+        "Per ingested span pricing",
+        "Per traced request pricing",
+      ],
+      [
+        "Best For",
+        "Teams wanting full tag search, self-hosted",
+        "High-volume, cost-sensitive Grafana users",
+        "Simple deployments, small-medium scale",
+        "Full-stack APM with metrics and logs",
+        "AWS-native workloads",
+      ],
+    ],
+  },
+  exercises: [
+    "Set up a three-service application (API gateway, order service, inventory service) with **OpenTelemetry auto-instrumentation** in Node.js. Deploy the **OTel Collector** and **Jaeger** backend using Docker Compose. Send a request through the gateway and verify that the full trace appears in Jaeger's waterfall view with all three services linked.",
+    "Implement **manual span creation** for a business-critical workflow (e.g., payment processing). Add custom span attributes like `payment.method`, `payment.amount`, and `payment.currency`. Record span events for key milestones (authorization, capture, confirmation). Verify the enriched spans appear in the backend.",
+    "Configure **tail-based sampling** in the OpenTelemetry Collector to retain 100% of error traces and traces with latency exceeding 2 seconds, while sampling only 5% of successful fast traces. Generate a mix of fast, slow, and error requests and verify that the sampling rules produce the expected trace retention behavior.",
+    "Implement **cross-boundary context propagation** through a message queue (Kafka or RabbitMQ). Produce a message with trace context injected into message headers, consume it in a separate service, extract the context, and create a child span. Verify the producer and consumer spans appear in the same trace in the backend.",
+    "Build a **trace-based integration test** that asserts on span structure. After sending a request through your instrumented services, query the tracing backend API for the trace, and assert: (1) the trace contains the expected number of spans, (2) no span has an ERROR status, (3) the database span's `db.statement` attribute matches the expected query pattern, and (4) total trace duration is under a threshold.",
+  ],
+  cheatSheet: [
+    "**W3C Traceparent format**: `00-<traceId 32hex>-<spanId 16hex>-<flags 2hex>` — inject via `traceparent` HTTP header for cross-service propagation.",
+    "**Start OTel Collector**: `docker run -p 4317:4317 -p 4318:4318 -v ./otel-config.yaml:/etc/otelcol/config.yaml otel/opentelemetry-collector-contrib` — accepts OTLP on gRPC (4317) and HTTP (4318).",
+    "**Create a span**: `tracer.startActiveSpan('operationName', (span) => { /* work */ span.end(); })` — always call `span.end()` or spans leak.",
+    "**Add attributes**: `span.setAttribute('http.method', 'POST')` — use **OpenTelemetry Semantic Conventions** (`http.method`, `db.system`, `rpc.service`) for consistent naming across services.",
+    "**Record errors**: `span.recordException(error)` then `span.setStatus({ code: SpanStatusCode.ERROR, message: error.message })` — both are needed for proper error visibility in backends.",
+    "**Log correlation**: embed `trace_id` and `span_id` in every structured log entry — query logs with `{service=\"myapp\"} |= \"<traceId>\"` in Loki or `traceId: \"<traceId>\"` in Elasticsearch to jump from traces to logs.",
+  ],
+  revisionNotes: [
+    "A **trace** is a tree of **spans** sharing a `traceId`. Each span has a `spanId`, `parentSpanId`, *start time*, *duration*, **attributes**, **events**, and a **status** (`OK`, `ERROR`, `UNSET`). Context propagation via the `traceparent` header links spans across service boundaries.",
+    "**OpenTelemetry** separates the *API* (interfaces your code depends on), the *SDK* (implementation with exporters and samplers), and the *Collector* (standalone pipeline for receiving, processing, and exporting telemetry). **Auto-instrumentation** wraps frameworks automatically; **manual instrumentation** adds custom spans for business logic.",
+    "**Head-based sampling** decides at trace start (simple, predictable cost, but randomly drops interesting traces). **Tail-based sampling** decides after completion in the Collector (retains errors and slow traces, but requires buffering). Production systems typically combine both: a low head-based rate (e.g., `5%`) plus tail-based rules for anomalies.",
+    "**Backends compared**: *Jaeger* offers tag-based search and a rich UI but requires managed storage. *Tempo* is cheapest at scale (object storage, no indexing) but only supports trace ID lookups. *Zipkin* is simplest for small deployments. *Datadog APM* and *AWS X-Ray* are managed SaaS options with integrated metrics and logs.",
+    "**Key practices**: instrument at service boundaries (HTTP, gRPC, queues), propagate context through async boundaries (inject `traceparent` into message headers), embed `traceId` in logs for correlation, use **semantic conventions** for span attribute names, and avoid unbounded attribute cardinality to prevent storage blowup.",
+  ],
 };

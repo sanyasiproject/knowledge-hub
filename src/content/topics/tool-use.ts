@@ -14,6 +14,252 @@ export const toolUse: TopicContent = {
     "## Parallel Tool Use\n\nSome APIs allow the model to request multiple tool calls in a single turn. This is useful when several independent pieces of information are needed: for example, fetching weather, calendar, and email simultaneously. The system executes all calls in parallel and returns all results at once. This reduces round trips and latency. Not all calls can be parallelized: if tool B's arguments depend on tool A's result, they must be sequential. The model should be able to express these dependencies, and the orchestration layer should respect them.",
     "## Security Considerations\n\nTool use introduces security surface area. Key concerns: **prompt injection** (malicious input causing unintended tool calls), **argument injection** (crafted inputs that exploit tool parameters), **excessive permissions** (tools with destructive capabilities like delete or write), and **data exfiltration** (tools that send data to external endpoints). Mitigations include: input validation before tool execution, least-privilege tool permissions, confirmation prompts for destructive operations, output sanitization, and audit logging of all tool invocations.",
   ],
+  deepDive: [
+    "## Advanced Tool Orchestration Patterns\n\nBeyond simple single-tool calls, production systems employ sophisticated orchestration patterns. **Routing** uses a classifier (often the LLM itself) to select which tool or toolset is appropriate before making the call, reducing irrelevant tool invocations and lowering latency. **Chaining** sequences tool calls so the output of one becomes the input of the next, e.g., `search_documents` -> `summarize_text` -> `send_email`. Orchestration frameworks like LangGraph or custom state machines manage these chains, handling branching logic, error recovery, and conditional execution. The key design decision is whether orchestration is model-driven (the LLM decides the next step) or system-driven (a deterministic workflow invokes the LLM at specific nodes).",
+    "## Multi-Agent Tool Sharing\n\nIn multi-agent architectures, multiple LLM agents may need access to overlapping toolsets. A shared tool registry acts as a central catalog: agents discover tools dynamically, and access control policies determine which agents can invoke which tools. This avoids tool definition duplication and ensures consistent schemas. Patterns include **tool delegation** (Agent A asks Agent B to run a tool on its behalf), **tool namespacing** (each agent sees a scoped subset of tools), and **capability-based access** (agents request tool permissions at runtime). MCP (Model Context Protocol) standardizes this by exposing tools as server-hosted resources that any compliant client can discover and invoke.",
+    "## Tool Schema Evolution and Versioning\n\nAs systems evolve, tool schemas change: parameters are added, types are refined, or tools are deprecated. Without versioning, schema changes can silently break tool calls. Best practices include: **semantic versioning** of tool schemas (breaking changes increment the major version), **additive-only changes** where possible (new optional parameters preserve backward compatibility), **deprecation periods** where old and new versions coexist, and **schema migration tooling** that validates existing prompts and few-shot examples against updated schemas. Include a `version` field in your tool registry and test schema changes against a suite of historical tool call examples to catch regressions.",
+  ],
+  code: [
+    {
+      language: "cpp",
+      caption: "Defining tools and calling the Anthropic API",
+      source: `#include <iostream>
+#include <string>
+#include <nlohmann/json.hpp>
+#include <curl/curl.h>
+
+using json = nlohmann::json;
+
+// Callback for libcurl to capture response data
+size_t write_callback(char* ptr, size_t size, size_t nmemb, std::string* data) {
+    data->append(ptr, size * nmemb);
+    return size * nmemb;
+}
+
+json create_tool_definition() {
+    return {
+        {"name", "get_weather"},
+        {"description", "Get the current weather for a given location. "
+                        "Use when the user asks about weather conditions. "
+                        "Returns temperature in Celsius, conditions, and humidity."},
+        {"input_schema", {
+            {"type", "object"},
+            {"properties", {
+                {"location", {
+                    {"type", "string"},
+                    {"description", "City name, e.g. 'San Francisco, CA'"}
+                }},
+                {"units", {
+                    {"type", "string"},
+                    {"enum", {"celsius", "fahrenheit"}},
+                    {"description", "Temperature units (default: celsius)"}
+                }}
+            }},
+            {"required", {"location"}}
+        }}
+    };
+}
+
+json call_anthropic_api(const json& tools, const json& messages) {
+    CURL* curl = curl_easy_init();
+    std::string response_body;
+
+    json request_body = {
+        {"model", "claude-sonnet-4-20250514"},
+        {"max_tokens", 1024},
+        {"tools", tools},
+        {"messages", messages}
+    };
+
+    struct curl_slist* headers = nullptr;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    headers = curl_slist_append(headers, "x-api-key: YOUR_API_KEY");
+    headers = curl_slist_append(headers, "anthropic-version: 2023-06-01");
+
+    std::string body = request_body.dump();
+    curl_easy_setopt(curl, CURLOPT_URL, "https://api.anthropic.com/v1/messages");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
+
+    curl_easy_perform(curl);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    return json::parse(response_body);
+}
+
+int main() {
+    json tools = json::array({create_tool_definition()});
+    json messages = json::array({
+        {{"role", "user"}, {"content", "What's the weather in Tokyo?"}}
+    });
+
+    json response = call_anthropic_api(tools, messages);
+    std::cout << response.dump(2) << std::endl;
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "Handling tool results in a conversation loop",
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
+
+// Forward declaration (see previous example for implementation)
+json call_anthropic_api(const json& tools, const json& messages);
+
+std::string execute_tool(const std::string& name, const json& input) {
+    // Dispatch tool calls to actual implementations
+    if (name == "get_weather") {
+        // Replace with real API call
+        json result = {{"temp", 22}, {"conditions", "sunny"}, {"humidity", 65}};
+        return result.dump();
+    }
+    json err = {{"error", "Unknown tool: " + name}};
+    return err.dump();
+}
+
+std::string run_agent(const std::string& user_message, const json& tools) {
+    json messages = json::array({
+        {{"role", "user"}, {"content", user_message}}
+    });
+
+    while (true) {
+        json response = call_anthropic_api(tools, messages);
+
+        // If no tool use, return the text response
+        if (response["stop_reason"] == "end_turn") {
+            std::string result;
+            for (const auto& block : response["content"]) {
+                if (block["type"] == "text") {
+                    result += block["text"].get<std::string>();
+                }
+            }
+            return result;
+        }
+
+        // Process all tool use blocks (handles parallel tool calls)
+        json tool_results = json::array();
+        for (const auto& block : response["content"]) {
+            if (block["type"] == "tool_use") {
+                std::string result = execute_tool(
+                    block["name"].get<std::string>(), block["input"]);
+                tool_results.push_back({
+                    {"type", "tool_result"},
+                    {"tool_use_id", block["id"]},
+                    {"content", result}
+                });
+            }
+        }
+
+        // Append assistant response and tool results, then loop
+        messages.push_back({{"role", "assistant"}, {"content", response["content"]}});
+        messages.push_back({{"role", "user"}, {"content", tool_results}});
+    }
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "Parallel tool call processing with async execution",
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <future>
+#include <thread>
+#include <chrono>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
+
+std::string execute_tool_async(const std::string& name, const json& input) {
+    // Simulate async tool dispatch with latency
+    if (name == "get_weather") {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        json result = {{"temp", 22}, {"conditions", "sunny"}};
+        return result.dump();
+    }
+    if (name == "get_calendar") {
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        json result = {{"events", {{{"title", "Standup"}, {"time", "10:00"}}}}};
+        return result.dump();
+    }
+    json err = {{"error", "Unknown tool: " + name}};
+    return err.dump();
+}
+
+json process_parallel_tool_calls(const json& response) {
+    // Collect all tool_use blocks
+    std::vector<json> tool_blocks;
+    for (const auto& block : response["content"]) {
+        if (block["type"] == "tool_use") {
+            tool_blocks.push_back(block);
+        }
+    }
+
+    // Launch all tool calls in parallel using std::async
+    std::vector<std::future<std::string>> futures;
+    for (const auto& block : tool_blocks) {
+        futures.push_back(std::async(std::launch::async,
+            execute_tool_async,
+            block["name"].get<std::string>(),
+            block["input"]));
+    }
+
+    // Collect results
+    json tool_results = json::array();
+    for (size_t i = 0; i < tool_blocks.size(); ++i) {
+        tool_results.push_back({
+            {"type", "tool_result"},
+            {"tool_use_id", tool_blocks[i]["id"]},
+            {"content", futures[i].get()}
+        });
+    }
+    return tool_results;
+}`,
+    },
+  ],
+  comparison: {
+    columns: ["Feature", "Claude (Anthropic)", "GPT-4 (OpenAI)", "Gemini (Google)"],
+    rows: [
+      ["Schema format", "JSON Schema in `input_schema`", "JSON Schema in `parameters`", "OpenAPI-subset in `parameters`"],
+      ["Parallel tool calls", "Yes, multiple `tool_use` blocks in one response", "Yes, multiple tool calls in one message", "Yes, multiple `functionCall` parts"],
+      ["Tool choice control", "`tool_choice`: `auto`, `any`, or `{name}`", "`tool_choice`: `auto`, `required`, or `{name}`", "`tool_config` with `mode` and `allowed_function_names`"],
+      ["Result format", "`tool_result` content block with `tool_use_id`", "`tool` role message with `tool_call_id`", "`functionResponse` part with `name`"],
+      ["Streaming tool calls", "SSE with `content_block_delta` for incremental JSON", "SSE with `tool_calls` delta chunks", "SSE with `functionCall` chunks"],
+      ["Max tools per request", "No hard limit (recommended < 64)", "128 tools per request", "No documented hard limit"],
+      ["Nested/complex schemas", "Full JSON Schema support including `$ref`", "Full JSON Schema support", "Subset of OpenAPI 3.0 schema"],
+    ],
+  },
+  diagrams: [
+    {
+      title: "Tool Call Lifecycle",
+      kind: "sequence",
+      caption: "Sequence diagram showing the full lifecycle of a tool call: user request, model decision, tool execution, result incorporation, and final response.",
+    },
+    {
+      title: "Multi-Agent Tool Orchestration",
+      kind: "architecture",
+      caption: "Architecture diagram showing a tool registry serving multiple agents, with routing, access control, and shared tool execution infrastructure.",
+    },
+  ],
+  animations: [
+    {
+      title: "Tool Call Cycle",
+      steps: [
+        { label: "User sends message", detail: "The user sends a natural language request like 'What is the weather in Paris?' to the application." },
+        { label: "Message sent with tool definitions", detail: "The application forwards the user message to the LLM API along with an array of tool schemas (name, description, input_schema) that define available capabilities." },
+        { label: "Model selects tool and generates arguments", detail: "The model analyzes the request against available tools, selects `get_weather`, and generates a JSON object `{\"location\": \"Paris, France\"}` matching the tool's input schema." },
+        { label: "Application executes the tool", detail: "The application receives the `tool_use` block, extracts the tool name and arguments, validates them against the schema, and calls the actual weather API." },
+        { label: "Tool result returned to model", detail: "The application sends a `tool_result` message back to the model containing the API response: temperature, conditions, humidity, etc." },
+        { label: "Model generates final response", detail: "The model incorporates the tool result into a natural language response: 'The weather in Paris is currently 18 degrees C and partly cloudy with 72% humidity.'" },
+      ],
+    },
+  ],
   interviewQA: [
     {
       q: "How does function calling work in LLMs?",
@@ -86,6 +332,47 @@ export const toolUse: TopicContent = {
     { front: "Why is negative guidance important in tool descriptions?", back: "Telling the model when NOT to use a tool prevents incorrect tool selection. For example: 'Do not use for real-time data; results may be up to 24 hours old.'" },
     { front: "What is argument injection?", back: "A security attack where malicious input is crafted to manipulate tool call arguments, potentially causing unintended actions or data access." },
     { front: "What makes an error message actionable for an LLM?", back: "It describes what went wrong, what the correct format/values should be, and provides enough context for the model to retry with corrected arguments." },
+  ],
+  followUps: [
+    "How does MCP (Model Context Protocol) standardize tool discovery and invocation across different LLM providers?",
+    "What are the trade-offs between model-driven vs. system-driven tool orchestration in production?",
+    "How do you test and validate tool schemas against a suite of expected tool call patterns?",
+    "What strategies exist for gracefully deprecating tools without breaking existing agent workflows?",
+    "How do you implement rate limiting and cost controls when an LLM agent has access to paid external APIs?",
+  ],
+  exercises: [
+    "Build a tool-calling loop that handles three tools (`search_web`, `get_weather`, `calculate`) with proper error handling and a maximum of 3 retries per tool call.",
+    "Design a tool schema for a `manage_calendar` tool that supports creating, updating, deleting, and listing events, using discriminated unions for the action parameter.",
+    "Implement a fallback chain where if `search_primary_db` fails, the system tries `search_cache`, then `search_backup_db`, returning the first successful result to the model.",
+    "Write input validation middleware that sanitizes tool call arguments before execution, blocking SQL injection patterns and path traversal attempts in string parameters.",
+    "Create an audit logging system that records every tool invocation (tool name, arguments, result, latency, caller identity) and flags anomalous patterns like rapid repeated calls to destructive tools.",
+  ],
+  cheatSheet: [
+    "Tool schema = `name` + `description` + `input_schema` (JSON Schema with types, required, enums)",
+    "The `description` field is the most important: it drives tool selection more than the name",
+    "Use `tool_choice: 'any'` to force the model to call a tool; `auto` lets it decide; `{name: 'x'}` forces a specific tool",
+    "Always return `tool_use_id` in tool results so the model can match results to requests",
+    "Parallel tool calls: check for multiple `tool_use` blocks in `response.content` and execute concurrently",
+    "Error responses should include error type, message, and corrective guidance, not just 'failed'",
+    "Validate arguments before execution: check types, ranges, enum membership, and sanitize strings",
+    "Set `max_tokens` high enough that the model can generate complete tool call JSON without truncation",
+  ],
+  revisionNotes: [
+    "Tool use is a structured I/O protocol: the model outputs JSON, the application executes, the result feeds back into the conversation",
+    "Schema quality directly determines tool call reliability; invest in descriptions, examples, and constraints",
+    "Parallel tool calls reduce latency for independent operations but require careful dependency analysis",
+    "Security surface area includes prompt injection, argument injection, excessive permissions, and data exfiltration",
+    "Orchestration patterns: routing (select tool), chaining (sequence tools), branching (conditional paths), and looping (retry/iterate)",
+    "Multi-agent tool sharing requires a registry, access control, and namespacing to prevent conflicts",
+    "Schema versioning prevents silent breakage: use semantic versioning, additive changes, and deprecation periods",
+    "Always implement audit logging, rate limiting, and confirmation prompts for destructive tool operations",
+  ],
+  resources: [
+    { label: "Anthropic Tool Use Documentation", kind: "docs", note: "Official guide covering tool definition, tool choice, parallel calls, and best practices for Claude" },
+    { label: "OpenAI Function Calling Guide", kind: "docs", note: "Comparison reference for OpenAI's function calling API, useful for understanding cross-provider differences" },
+    { label: "Model Context Protocol (MCP) Specification", kind: "docs", note: "Open standard for connecting LLMs to external tools and data sources via a unified protocol" },
+    { label: "Building Effective Agents - Anthropic Cookbook", kind: "article", note: "Practical patterns for tool-calling agents including orchestration, error handling, and evaluation" },
+    { label: "Gorilla: Large Language Model Connected with Massive APIs", kind: "paper", note: "Research on training LLMs for accurate API/tool invocation with reduced hallucination" },
   ],
   glossary: [
     { term: "Function Calling", definition: "An LLM capability where the model generates structured JSON arguments to invoke external functions, with execution handled by the application." },

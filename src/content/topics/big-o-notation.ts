@@ -19,26 +19,36 @@ export const bigONotation: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "O(1) vs O(n) vs O(n²)",
-      source: `# O(1) — constant: one operation regardless of n
-def first(items):
-    return items[0]
+      source: `#include <vector>
+#include <string>
 
-# O(n) — linear: work grows with n
-def contains(items, target):
-    for x in items:          # runs n times
-        if x == target:
-            return True
-    return False
+// O(1) — constant: one operation regardless of n
+template <typename T>
+T first(const std::vector<T>& items) {
+    return items[0];
+}
 
-# O(n^2) — quadratic: nested loop over n
-def has_duplicate(items):
-    for i in range(len(items)):        # n
-        for j in range(i + 1, len(items)):  # n
-            if items[i] == items[j]:
-                return True
-    return False`,
+// O(n) — linear: work grows with n
+template <typename T>
+bool contains(const std::vector<T>& items, const T& target) {
+    for (const auto& x : items) {   // runs n times
+        if (x == target) return true;
+    }
+    return false;
+}
+
+// O(n^2) — quadratic: nested loop over n
+template <typename T>
+bool has_duplicate(const std::vector<T>& items) {
+    for (size_t i = 0; i < items.size(); ++i) {           // n
+        for (size_t j = i + 1; j < items.size(); ++j) {   // n
+            if (items[i] == items[j]) return true;
+        }
+    }
+    return false;
+}`,
     },
   ],
   comparison: {

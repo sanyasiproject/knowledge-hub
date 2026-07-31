@@ -249,6 +249,83 @@ function sleep(ms: number) {
 }`,
     },
   ],
+  diagrams: [
+    {
+      title: "Idempotency Key Request Flow",
+      kind: "sequence",
+      caption: "Sequence diagram showing how the **idempotency key middleware** handles a *first request*, a *duplicate retry*, and a *concurrent duplicate* scenario.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant MW as Idempotency Middleware
+    participant DB as Idempotency Keys Table
+    participant H as Request Handler
+    participant Ext as External Service
+
+    rect rgb(200, 255, 220)
+    Note over C,Ext: **First Request** — key is new
+    C->>MW: POST /payments<br/>Idempotency-Key: abc-123
+    MW->>DB: INSERT key abc-123<br/>status = processing
+    DB-->>MW: Inserted (new key)
+    MW->>H: Process payment
+    H->>Ext: Charge $99.99
+    Ext-->>H: Success
+    H->>DB: UPDATE key abc-123<br/>status = completed<br/>response = {txId: ...}
+    H-->>C: 200 OK {txId: tx_456}
+    end
+
+    rect rgb(200, 220, 255)
+    Note over C,Ext: **Retry** — same key, already completed
+    C->>MW: POST /payments<br/>Idempotency-Key: abc-123
+    MW->>DB: INSERT key abc-123
+    DB-->>MW: Conflict (key exists)
+    MW->>DB: SELECT response WHERE key = abc-123
+    DB-->>MW: status=completed, response={txId: tx_456}
+    MW-->>C: 200 OK {txId: tx_456}<br/>(cached response, no re-processing)
+    end`
+    },
+    {
+      title: "Transactional Outbox Pattern",
+      kind: "architecture",
+      caption: "Architecture of the **transactional outbox pattern** showing how *business writes* and *event records* are committed in the same transaction, solving the **dual-write problem**.",
+      mermaid: `graph TD
+    API["**API Handler**"] --> TX["**Database Transaction**"]
+
+    subgraph TX ["Same Transaction"]
+        BizWrite["**Business Write**<br/>INSERT INTO orders<br/>VALUES (...)"]
+        OutboxWrite["**Outbox Write**<br/>INSERT INTO outbox<br/>(event_type, payload)"]
+    end
+
+    BizWrite --> Commit["**COMMIT**"]
+    OutboxWrite --> Commit
+
+    Commit --> Poller["**Outbox Poller / CDC**<br/>*reads new outbox rows*"]
+    Poller --> Broker["**Message Broker**<br/>*RabbitMQ / Kafka*"]
+    Broker --> Consumer["**Consumer**<br/>*idempotent processing*"]
+    Consumer --> DedupCheck{"**Already processed?**<br/>*check event_id*"}
+    DedupCheck -->|"No"| Process["Process event"]
+    DedupCheck -->|"Yes"| Skip["Skip (idempotent)"]`
+    },
+    {
+      title: "Idempotent vs Non-Idempotent Operations",
+      kind: "flow",
+      caption: "Decision flow for determining whether an operation is **naturally idempotent** or requires an *artificial idempotency mechanism* like idempotency keys.",
+      mermaid: `graph TD
+    Op["**Operation**"] --> Q1{"Does repeating it<br/>produce the **same state**?"}
+    Q1 -->|"Yes"| Natural["**Naturally Idempotent**<br/>*SET, UPSERT, DELETE*<br/>No extra mechanism needed"]
+    Q1 -->|"No"| Q2{"Can it be made<br/>idempotent with a<br/>**unique constraint**?"}
+    Q2 -->|"Yes"| DBLevel["**DB-Level Idempotency**<br/>*UPSERT, unique index*<br/>*optimistic locking*"]
+    Q2 -->|"No"| Q3{"Does it involve<br/>**external side effects**?<br/>*(email, payment, SMS)*"}
+    Q3 -->|"No"| AppLevel["**Idempotency Key**<br/>*client UUID + server store*<br/>*return cached response*"]
+    Q3 -->|"Yes"| TwoPhase["**Two-Phase Approach**<br/>*1. Record intent in DB*<br/>*2. Call external API*<br/>*3. Mark as done*<br/>*Check status on retry*"]`
+    },
+  ],
+  exercises: [
+    "**Build idempotency middleware for Express:** Implement a complete **idempotency key middleware** in Node.js/Express that intercepts `POST` requests with an `Idempotency-Key` header. Use PostgreSQL to store keys with `status`, `response_code`, `response_body`, and `expires_at`. Handle three cases: *new key* (process and store), *completed key* (return cached response), and *in-progress key* (return `409 Conflict`). Add a background job to clean up expired keys.",
+    "**Implement optimistic locking:** Create an Express API for updating a `BankAccount` resource. Each account has a `version` column. The `PUT /accounts/:id` endpoint must include the expected `version` in the request body. Use `UPDATE ... WHERE version = $expected` and return `409 Conflict` if zero rows are updated. Write tests proving that *concurrent updates* with the same version result in only one success.",
+    "**Design an idempotent event consumer:** Build a Node.js consumer that reads `order.created` events from a Redis stream (`XREAD`). Each event has an `eventId`. Use a `processed_events` table to deduplicate. The consumer should create an invoice in the same **database transaction** as the dedup record insertion. Test by publishing the same event three times and verifying only one invoice exists.",
+    "**Implement the transactional outbox pattern:** Create an Express API where `POST /orders` writes the order to the `orders` table and an event to the `outbox` table in the *same transaction*. Build a separate poller process that reads unprocessed outbox rows, publishes them to a Redis stream, and marks them as published. Verify that if the API crashes after the DB commit, the poller still picks up and publishes the event.",
+    "**Test non-idempotent external call handling:** Build a payment endpoint that calls a mock external payment API. Implement the **two-phase approach**: record `payment_pending` in the DB, call the external API, then update to `payment_completed`. Simulate three failure scenarios: (1) crash before external call, (2) crash after external call but before DB update, (3) successful completion. Verify correct behavior on retry for each scenario.",
+  ],
   comparison: {
     columns: ["Technique", "Scope", "Pros", "Cons"],
     rows: [
@@ -383,7 +460,7 @@ function sleep(ms: number) {
     { label: "Designing Data-Intensive Applications, Ch. 11", kind: "book", note: "Covers exactly-once semantics, idempotent consumers, and the outbox pattern." },
     { label: "Brandur Leach: Implementing Stripe-like Idempotency Keys", kind: "article", note: "Detailed walkthrough of building an idempotency key system with PostgreSQL." },
     { label: "RFC 7231 Section 4.2.2", kind: "docs", note: "HTTP specification defining which methods are idempotent and why." },
-    { label: "Martin Kleppmann: Turning the database inside-out", kind: "talk", note: "Explains event sourcing, change data capture, and how idempotency fits into event-driven architectures." },
+    { label: "Martin Kleppmann: Turning the database inside-out", kind: "video", note: "Explains event sourcing, change data capture, and how idempotency fits into event-driven architectures." },
   ],
   glossary: [
     { term: "Idempotency", definition: "The property of an operation where executing it multiple times produces the same result as executing it once." },

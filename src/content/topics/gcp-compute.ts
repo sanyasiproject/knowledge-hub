@@ -160,4 +160,331 @@ export const gcpCompute: TopicContent = {
         "A GKE security feature that enforces deploy-time policies requiring container images to be signed by trusted attestors before they can run on the cluster.",
     },
   ],
+  deepDive: [
+    "**GCE Live Migration and Maintenance Event Internals** — When Google needs to perform *host maintenance* (hardware repairs, firmware updates, security patches), it uses **live migration** to move running VMs to a healthy host *without any downtime*. The process works in three phases: (1) **pre-copy phase** — the VM's memory pages are copied to the destination host while the VM continues running; dirty pages (modified during copy) are *re-copied iteratively* until the delta is small enough; (2) **blackout phase** — the VM is briefly paused (typically *sub-second*, often under `100ms`) while the final dirty pages and CPU state are transferred; (3) **post-copy phase** — the VM resumes on the new host, and any remaining memory pages are fetched on demand via **demand paging**. The `maintenancePolicy` on the instance determines behavior: `MIGRATE` (default) triggers live migration, while `TERMINATE` stops the instance instead. **Preemptible and Spot VMs** *always* use `TERMINATE` since they cannot be live-migrated. You can monitor maintenance events via the *metadata server* at `http://metadata.google.internal/computeMetadata/v1/instance/maintenance-event` — it returns `MIGRATE_ON_HOST_MAINTENANCE` when a migration is imminent. The `gcloud compute instances describe` command shows the `scheduling.onHostMaintenance` field. Instances with **local SSDs** can be live-migrated on *most* machine types, though some older types require `TERMINATE`. The entire process is transparent to the guest OS — *no reboot, no IP change, no dropped connections*.",
+    "**Cloud Run Autoscaling Algorithm and Cold Start Optimization** — Cloud Run's autoscaler operates on a *request-based* model that considers **concurrency**, **CPU utilization**, and **request queue depth**. Each Cloud Run instance handles up to `containerConcurrency` requests simultaneously (default `80`, max `1000`). When the *average concurrency* across all instances approaches the configured maximum, the autoscaler provisions **new instances**. The scaling decision uses an *exponentially weighted moving average (EWMA)* to smooth out spikes and avoid thrashing. **Cold starts** occur when a new instance must be created — this involves *pulling the container image*, starting the container runtime, and executing the application's *startup code*. Optimization strategies include: (a) setting `--min-instances` to keep a **warm pool** (e.g., `gcloud run services update my-svc --min-instances=2`); (b) using **startup CPU boost** (`--cpu-boost`) which *temporarily doubles CPU* during startup for faster initialization; (c) keeping container images **small** — use *distroless* or `alpine` base images and multi-stage builds; (d) enabling **lazy loading** of dependencies and deferring heavy initialization; (e) using `--cpu-throttling=false` (CPU always allocated) for workloads that do background work. The `--max-instances` flag caps scaling to prevent runaway costs. Cloud Run also supports **gradual rollouts** with `--revision-traffic` to send a *percentage of traffic* to new revisions, letting you observe cold start behavior under production load before full rollout.",
+    "**GKE Autopilot Scheduling and Bin-Packing Mechanics** — GKE Autopilot fundamentally changes the Kubernetes scheduling model by *abstracting away nodes entirely*. When you deploy a pod, Autopilot's **resource management layer** examines the pod's `requests` and `limits` (which *must be set* — Autopilot enforces this via a **mutating admission webhook** that injects defaults if missing). The scheduler then performs **bin-packing**: it fits pods onto nodes using a *best-fit decreasing* algorithm that minimizes wasted resources. Unlike Standard mode, Autopilot **automatically provisions nodes** of the right *machine type and size* — it selects from the `e2-standard`, `e2-medium`, or other families based on the aggregate resource requests. **Pod overhead** is automatically accounted for: each pod has a fixed overhead for the *sandbox, networking, and logging agents* that Autopilot adds transparently. If a pod requests a **GPU** (`nvidia.com/gpu` resource), Autopilot provisions `g2-standard` or `a2-highgpu` nodes as needed. The billing model charges for `max(requests, actual_usage)` per pod, rounded up to predefined **SKU tiers** — you can see these with `kubectl describe pod` in the `autopilot.gke.io/resource-adjustments` annotation. Autopilot enforces **security constraints** via built-in `PodSecurityStandard` policies: *no privileged containers*, no `hostNetwork`, no `hostPID`, and restricted volume types. **Vertical Pod Autoscaler (VPA)** recommendations are applied automatically in Autopilot to right-size pods over time, and the **Horizontal Pod Autoscaler (HPA)** works as expected with custom metrics from *Cloud Monitoring*.",
+  ],
+  code: [
+    {
+      language: "bash",
+      caption: "Deploy a Cloud Run service with min instances, CPU boost, and concurrency settings",
+      source: `# Build and push container image to Artifact Registry
+gcloud builds submit --tag us-central1-docker.pkg.dev/my-project/my-repo/my-app:v1 .
+
+# Deploy to Cloud Run with autoscaling and cold start optimization
+gcloud run deploy my-app \\
+  --image us-central1-docker.pkg.dev/my-project/my-repo/my-app:v1 \\
+  --region us-central1 \\
+  --platform managed \\
+  --min-instances 2 \\
+  --max-instances 100 \\
+  --concurrency 80 \\
+  --cpu-boost \\
+  --cpu-throttling \\
+  --memory 512Mi \\
+  --cpu 1 \\
+  --timeout 300 \\
+  --set-env-vars "NODE_ENV=production" \\
+  --allow-unauthenticated
+
+# Split traffic between revisions for canary deployment
+gcloud run services update-traffic my-app \\
+  --region us-central1 \\
+  --to-revisions my-app-v2=10,my-app-v1=90`,
+    },
+    {
+      language: "bash",
+      caption: "Create a GKE Autopilot cluster with Workload Identity and deploy a workload",
+      source: `# Create GKE Autopilot cluster
+gcloud container clusters create-auto my-autopilot-cluster \\
+  --region us-central1 \\
+  --project my-project \\
+  --release-channel regular \\
+  --enable-master-authorized-networks \\
+  --master-authorized-networks 10.0.0.0/8
+
+# Get cluster credentials
+gcloud container clusters get-credentials my-autopilot-cluster \\
+  --region us-central1
+
+# Create a Kubernetes service account and bind to GCP service account
+kubectl create serviceaccount my-ksa --namespace default
+
+gcloud iam service-accounts add-iam-policy-binding \\
+  my-gsa@my-project.iam.gserviceaccount.com \\
+  --role roles/iam.workloadIdentityUser \\
+  --member "serviceAccount:my-project.svc.id.goog[default/my-ksa]"
+
+kubectl annotate serviceaccount my-ksa \\
+  --namespace default \\
+  iam.gke.io/gcp-service-account=my-gsa@my-project.iam.gserviceaccount.com`,
+    },
+    {
+      language: "yaml",
+      caption: "Configure a Managed Instance Group with Spot VMs and autoscaling",
+      source: `# instance-template.yaml — Create via gcloud:
+# gcloud compute instance-templates create spot-template \\
+#   --machine-type e2-standard-4 \\
+#   --provisioning-model SPOT \\
+#   --instance-termination-action STOP \\
+#   --maintenance-policy TERMINATE \\
+#   --image-family debian-12 \\
+#   --image-project debian-cloud \\
+#   --boot-disk-size 50GB \\
+#   --boot-disk-type pd-balanced \\
+#   --metadata-from-file shutdown-script=shutdown.sh \\
+#   --scopes cloud-platform
+
+# Create MIG with autoscaling:
+# gcloud compute instance-groups managed create spot-mig \\
+#   --template spot-template \\
+#   --size 3 \\
+#   --zone us-central1-a
+
+# Configure autoscaler:
+# gcloud compute instance-groups managed set-autoscaling spot-mig \\
+#   --zone us-central1-a \\
+#   --min-num-replicas 1 \\
+#   --max-num-replicas 20 \\
+#   --target-cpu-utilization 0.6 \\
+#   --cool-down-period 90
+
+# --- Equivalent Terraform configuration ---
+resource "google_compute_instance_template" "spot" {
+  name_prefix  = "spot-"
+  machine_type = "e2-standard-4"
+
+  scheduling {
+    preemptible                 = false
+    provisioning_model          = "SPOT"
+    instance_termination_action = "STOP"
+    on_host_maintenance         = "TERMINATE"
+    automatic_restart           = false
+  }
+
+  disk {
+    source_image = "debian-cloud/debian-12"
+    disk_size_gb = 50
+    disk_type    = "pd-balanced"
+    auto_delete  = true
+    boot         = true
+  }
+
+  network_interface {
+    network = "default"
+  }
+
+  metadata = {
+    shutdown-script = file("shutdown.sh")
+  }
+}`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "GCP Compute Decision Tree",
+      kind: "flow",
+      caption: "Choosing the right GCP compute service based on workload requirements",
+      mermaid: `flowchart TD
+    A["Need to run\\ncompute workload?"] --> B{"Need full\\nVM control?"}
+    B -- Yes --> C{"Need dedicated\\nhardware?"}
+    C -- Yes --> D["Sole-Tenant Nodes"]
+    C -- No --> E{"Cost-sensitive &\\nfault-tolerant?"}
+    E -- Yes --> F["Spot / Preemptible VMs"]
+    E -- No --> G["Compute Engine\\nStandard VMs"]
+    B -- No --> H{"Container-based?"}
+    H -- Yes --> I{"Need Kubernetes\\norchestration?"}
+    I -- Yes --> J{"Want managed\\nnodes?"}
+    J -- Yes --> K["GKE Autopilot"]
+    J -- No --> L["GKE Standard"]
+    I -- No --> M{"Stateless\\nHTTP/events?"}
+    M -- Yes --> N["Cloud Run"]
+    M -- No --> O["Cloud Run Jobs"]
+    H -- No --> P{"Simple event-driven\\nfunction?"}
+    P -- Yes --> Q["Cloud Functions\\n2nd Gen"]
+    P -- No --> R["Cloud Run with\\ncustom container"]
+
+    style D fill:#4285F4,color:#fff
+    style F fill:#EA4335,color:#fff
+    style G fill:#4285F4,color:#fff
+    style K fill:#34A853,color:#fff
+    style L fill:#34A853,color:#fff
+    style N fill:#FBBC04,color:#000
+    style O fill:#FBBC04,color:#000
+    style Q fill:#EA4335,color:#fff
+    style R fill:#FBBC04,color:#000`,
+    },
+    {
+      title: "Cloud Run Request Lifecycle",
+      kind: "sequence",
+      caption: "How Cloud Run handles an incoming request from load balancer to response",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant GCLB as Google Cloud<br/>Load Balancer
+    participant Autoscaler
+    participant Instance as Cloud Run<br/>Instance
+    participant Container as User Container
+
+    Client->>GCLB: HTTPS Request
+    GCLB->>Autoscaler: Route request
+
+    alt No warm instances available
+        Autoscaler->>Instance: Provision new instance (cold start)
+        Instance->>Container: Pull image & start container
+        Container-->>Instance: Listening on PORT
+        Note over Instance,Container: Startup CPU boost active<br/>if --cpu-boost enabled
+    end
+
+    Autoscaler->>Instance: Forward request
+    Instance->>Container: HTTP request on $PORT
+
+    Note over Container: Process request<br/>(concurrency up to 1000)
+
+    Container-->>Instance: HTTP response
+    Instance-->>GCLB: Response
+    GCLB-->>Client: HTTPS Response
+
+    alt CPU throttled mode
+        Note over Instance,Container: CPU throttled between requests<br/>Billing stops
+    else CPU always allocated
+        Note over Instance,Container: CPU remains available<br/>Background work continues
+    end
+
+    alt No requests for idle timeout
+        Autoscaler->>Instance: Scale down to min-instances
+    end`,
+    },
+    {
+      title: "GKE Autopilot Pod Scheduling Flow",
+      kind: "flow",
+      caption: "How GKE Autopilot provisions nodes and schedules pods with bin-packing",
+      mermaid: `flowchart TD
+    A["Pod submitted via\\nkubectl apply"] --> B["Admission Webhook\\nintercepts"]
+    B --> C{"Resource requests\\n& limits set?"}
+    C -- No --> D["Mutating webhook\\ninjects defaults"]
+    C -- Yes --> E["Validate against\\nAutopilot constraints"]
+    D --> E
+    E --> F{"Passes security\\npolicies?"}
+    F -- No --> G["Pod rejected\\nwith error"]
+    F -- Yes --> H["Resource adjustment\\nannotation added"]
+    H --> I["Scheduler evaluates\\nresource requests"]
+    I --> J{"Existing node\\nwith capacity?"}
+    J -- Yes --> K["Bin-pack onto\\nexisting node"]
+    J -- No --> L["Provision new node\\nof optimal type"]
+    L --> M["Node joins cluster\\n& becomes Ready"]
+    M --> K
+    K --> N["Pod scheduled\\n& running"]
+    N --> O["Billing: per-pod\\nresource SKU tier"]
+
+    style G fill:#EA4335,color:#fff
+    style N fill:#34A853,color:#fff
+    style O fill:#FBBC04,color:#000
+    style D fill:#4285F4,color:#fff
+    style H fill:#4285F4,color:#fff`,
+    },
+  ],
+  comparison: {
+    columns: [
+      "Feature",
+      "Compute Engine (GCE)",
+      "Cloud Run",
+      "GKE (Autopilot)",
+      "Cloud Functions",
+    ],
+    rows: [
+      [
+        "**Abstraction Level**",
+        "*IaaS* — full VM control",
+        "*Serverless* containers",
+        "*Managed* Kubernetes",
+        "*FaaS* — function-level",
+      ],
+      [
+        "**Scaling**",
+        "MIG autoscaler or manual",
+        "Automatic, *0 to N* instances",
+        "HPA/VPA + node auto-provisioning",
+        "Automatic, *0 to N* instances",
+      ],
+      [
+        "**Min Scale**",
+        "`1` instance (always running)",
+        "`0` (scale to zero)",
+        "`0` pods (nodes scale too)",
+        "`0` (scale to zero)",
+      ],
+      [
+        "**Max Timeout**",
+        "Unlimited",
+        "`60 minutes`",
+        "Unlimited",
+        "`60 minutes` (2nd gen)",
+      ],
+      [
+        "**Concurrency**",
+        "OS-level, unlimited",
+        "Up to `1000` per instance",
+        "Pod-level, configurable",
+        "Up to `1000` (2nd gen)",
+      ],
+      [
+        "**Billing**",
+        "Per-second, *vCPU + memory*",
+        "Per-request, *100ms granularity*",
+        "Per-pod resource request",
+        "Per-invocation + compute time",
+      ],
+      [
+        "**GPU Support**",
+        "Yes — *A2, G2* families",
+        "No",
+        "Yes — via `nvidia.com/gpu` resource",
+        "No",
+      ],
+      [
+        "**Cold Start**",
+        "Minutes (boot VM)",
+        "Seconds (*sub-second* with min instances)",
+        "Seconds (pod scheduling)",
+        "Seconds to minutes",
+      ],
+      [
+        "**Networking**",
+        "Full VPC, *custom IPs*",
+        "VPC connector, *no static IP* by default",
+        "Full VPC, *pod IPs*",
+        "VPC connector required",
+      ],
+      [
+        "**Best For**",
+        "Legacy apps, HPC, *stateful* workloads",
+        "Stateless APIs, *microservices*",
+        "Complex *multi-service* architectures",
+        "Lightweight *event handlers*",
+      ],
+    ],
+  },
+  exercises: [
+    "**Lab 1: Deploy a Scalable API on Cloud Run** — Containerize a simple REST API using a *Dockerfile* with a **multi-stage build** (builder + distroless runtime). Push the image to `Artifact Registry` with `gcloud builds submit`. Deploy to Cloud Run with `--min-instances 1`, `--max-instances 10`, `--concurrency 50`, and `--cpu-boost`. Use `hey` or `ab` to generate load and observe autoscaling behavior in the *Cloud Run metrics dashboard*. Compare cold start times with and without `--cpu-boost` enabled.",
+    "**Lab 2: Set Up a GKE Autopilot Cluster with Workload Identity** — Create an Autopilot cluster using `gcloud container clusters create-auto`. Deploy a pod that reads from a **Cloud Storage bucket** using *Workload Identity* (no service account key). Configure a `HorizontalPodAutoscaler` targeting `80%` CPU utilization with `minReplicas: 2` and `maxReplicas: 20`. Verify that Autopilot automatically provisions nodes of the correct machine type by checking `kubectl get nodes` and the `autopilot.gke.io/resource-adjustments` annotation on your pods.",
+    "**Lab 3: Implement a Cost-Optimized Batch Pipeline with Spot VMs** — Create an *instance template* with `--provisioning-model SPOT` and a **shutdown script** that checkpoints work to Cloud Storage. Build a *Managed Instance Group* with autoscaling based on a Pub/Sub queue backlog metric using `gcloud compute instance-groups managed set-autoscaling`. Submit 1000 tasks to the Pub/Sub topic and monitor how the MIG scales up. Observe preemption events in *Cloud Logging* and verify that checkpointed tasks are retried on replacement instances.",
+    "**Lab 4: Canary Deployment with Cloud Run Traffic Splitting** — Deploy *version 1* of a service to Cloud Run. Make a code change and deploy *version 2* as a new revision with `--no-traffic` flag. Use `gcloud run services update-traffic` to send `10%` of traffic to v2. Monitor **error rates** and **latency** in Cloud Monitoring for both revisions. Gradually increase to `50%`, then `100%` if metrics are healthy. Practice *rollback* by shifting `100%` traffic back to v1 with a single command.",
+    "**Lab 5: Event-Driven Architecture with Cloud Functions and Eventarc** — Create a *Cloud Storage bucket* and deploy a **2nd gen Cloud Function** triggered by `google.cloud.storage.object.v1.finalized` events via Eventarc. The function should process uploaded CSV files, transform the data, and write results to **BigQuery**. Configure `--retry` for at-least-once delivery. Test with files of varying sizes and observe *concurrent execution* in Cloud Functions metrics. Set up a *dead-letter topic* in Pub/Sub to capture failed events after retry exhaustion.",
+  ],
+  cheatSheet: [
+    "List all VM instances: `gcloud compute instances list --project my-project`",
+    "SSH into a VM: `gcloud compute ssh my-instance --zone us-central1-a --tunnel-through-iap`",
+    "Deploy to Cloud Run: `gcloud run deploy SERVICE --image IMAGE --region REGION --allow-unauthenticated`",
+    "Create GKE Autopilot cluster: `gcloud container clusters create-auto CLUSTER --region REGION`",
+    "Get GKE credentials: `gcloud container clusters get-credentials CLUSTER --region REGION`",
+    "Set Cloud Run min instances: `gcloud run services update SERVICE --min-instances N --region REGION`",
+  ],
+  revisionNotes: [
+    "**GCE machine type families**: *E2* (cost-optimized), *N2/N2D* (balanced), *C2/C2D* (compute-optimized), *M2/M3* (memory-optimized up to `12 TiB`), *A2/G2* (GPU-accelerated). Custom machine types allow exact `vCPU:memory` ratios. **Sustained Use Discounts** apply automatically at up to `30%` off for full-month usage, but *not* to E2, A2, or Spot VMs.",
+    "**Cloud Run key limits**: max `1000` concurrent requests per instance, `60-minute` request timeout, scale to zero by default, `--min-instances` for warm pools, `--cpu-boost` for faster cold starts. *CPU allocation modes*: `always allocated` (background work) vs. `throttled` (cost savings). Billing is per-request at `100ms` granularity.",
+    "**GKE Autopilot vs Standard**: Autopilot *manages nodes*, enforces **security policies** (no privileged containers, no SSH, no `hostNetwork`), and bills *per pod resource request*. Standard mode gives full node control but requires you to manage upgrades, scaling, and security. **Workload Identity** is the recommended way to authenticate pods — it eliminates `service account key files`.",
+    "**Spot VMs vs Preemptible VMs**: Both offer `60-91%` discounts using spare capacity with `30-second` preemption notice. Key difference: Preemptible VMs *always terminate after 24 hours*; Spot VMs have **no maximum lifetime**. For new workloads, always prefer Spot VMs. Best practices: use MIGs with *autohealing*, implement **checkpointing**, distribute across *multiple zones*.",
+    "**Cloud Functions 2nd gen** is built on *Cloud Run + Eventarc*. Improvements over 1st gen: `60-min` timeout (vs `9 min`), `16 GiB` RAM and `4 vCPUs` (vs `8 GiB` and `2 vCPUs`), concurrency up to `1000` (vs `1`), **traffic splitting** between revisions, and broader event sources. Use **Serverless VPC Access** connector to reach private VPC resources.",
+  ],
 };

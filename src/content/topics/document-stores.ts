@@ -398,6 +398,13 @@ const resumed = db.orders.watch(pipeline, {
     "curl http://host:5984/db/_changes?feed=continuous — CouchDB changes feed",
     "curl -X POST http://host:5984/db/_find -d '{\"selector\":{...}}' — CouchDB Mango query",
   ],
+  exercises: [
+    "Design a MongoDB schema for an **e-commerce product catalog** where each product has variants (color, size) with independent prices and stock levels. Decide whether to *embed* or *reference* variants, justify your choice based on access patterns, and write the `insertOne` command with sample data.",
+    "Write a MongoDB **aggregation pipeline** that computes the *top 5 customers by total spend* in the last 90 days, including each customer's order count, average order value, and most frequently purchased category. Use `$match`, `$group`, `$sort`, and `$project` stages.",
+    "You have a single-node MongoDB deployment showing **yellow cluster health** (replica cannot be placed). Set up a 3-member replica set with `w: majority` write concern. Describe the `rs.initiate()` configuration, explain what happens during a primary failover, and how *read preference* `secondaryPreferred` affects consistency.",
+    "Implement a **change stream** listener in Node.js that watches an `orders` collection for documents transitioning to `status: 'shipped'`. The listener should persist a *resume token* to a file so it can recover after a crash. Include error handling for `ChangeStreamInvalidate` events.",
+    "A CouchDB deployment has two nodes that independently updated the same document, creating a **conflict**. Write a script using CouchDB's HTTP API that fetches the document with `?conflicts=true`, reads both conflicting revisions, merges them using a *last-writer-wins* strategy based on a `updatedAt` timestamp, and deletes the losing revision.",
+  ],
   resources: [
     { label: "MongoDB Manual", kind: "docs", note: "Official reference for all MongoDB features, operators, and best practices." },
     { label: "MongoDB University (free courses)", kind: "video", note: "Free self-paced courses covering development, administration, and aggregation." },

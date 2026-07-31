@@ -22,61 +22,84 @@ export const arraysStrings: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Sliding window: longest substring without repeating characters",
-      source: `def length_of_longest_substring(s: str) -> int:
-    """O(n) time, O(min(n, alphabet)) space."""
-    seen = {}          # char -> most recent index
-    left = 0
-    max_len = 0
+      source: `#include <iostream>
+#include <string>
+#include <unordered_map>
+#include <algorithm>
 
-    for right, ch in enumerate(s):
-        if ch in seen and seen[ch] >= left:
-            left = seen[ch] + 1      # shrink window past the duplicate
-        seen[ch] = right
-        max_len = max(max_len, right - left + 1)
+// O(n) time, O(min(n, alphabet)) space.
+int lengthOfLongestSubstring(const std::string& s) {
+    std::unordered_map<char, int> seen; // char -> most recent index
+    int left = 0;
+    int maxLen = 0;
 
-    return max_len
+    for (int right = 0; right < static_cast<int>(s.size()); ++right) {
+        char ch = s[right];
+        auto it = seen.find(ch);
+        if (it != seen.end() && it->second >= left) {
+            left = it->second + 1;   // shrink window past the duplicate
+        }
+        seen[ch] = right;
+        maxLen = std::max(maxLen, right - left + 1);
+    }
+    return maxLen;
+}
 
-# Example
-print(length_of_longest_substring("abcabcbb"))  # 3 ("abc")
-print(length_of_longest_substring("bbbbb"))      # 1 ("b")
-print(length_of_longest_substring("pwwkew"))     # 3 ("wke")`,
+int main() {
+    std::cout << lengthOfLongestSubstring("abcabcbb") << "\\n"; // 3 ("abc")
+    std::cout << lengthOfLongestSubstring("bbbbb") << "\\n";    // 1 ("b")
+    std::cout << lengthOfLongestSubstring("pwwkew") << "\\n";   // 3 ("wke")
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "KMP string matching algorithm",
-      source: `def kmp_search(text: str, pattern: str) -> list[int]:
-    """Return all start indices where pattern occurs in text. O(n+m)."""
-    n, m = len(text), len(pattern)
-    if m == 0:
-        return []
+      source: `#include <iostream>
+#include <string>
+#include <vector>
 
-    # Build failure function (longest proper prefix = suffix)
-    fail = [0] * m
-    k = 0
-    for j in range(1, m):
-        while k > 0 and pattern[k] != pattern[j]:
-            k = fail[k - 1]
-        if pattern[k] == pattern[j]:
-            k += 1
-        fail[j] = k
+// Return all start indices where pattern occurs in text. O(n+m).
+std::vector<int> kmpSearch(const std::string& text, const std::string& pattern) {
+    int n = static_cast<int>(text.size());
+    int m = static_cast<int>(pattern.size());
+    if (m == 0) return {};
 
-    # Search
-    matches = []
-    k = 0
-    for i in range(n):
-        while k > 0 and pattern[k] != text[i]:
-            k = fail[k - 1]          # fall back
-        if pattern[k] == text[i]:
-            k += 1
-        if k == m:
-            matches.append(i - m + 1)
-            k = fail[k - 1]          # continue searching
+    // Build failure function (longest proper prefix = suffix)
+    std::vector<int> fail(m, 0);
+    int k = 0;
+    for (int j = 1; j < m; ++j) {
+        while (k > 0 && pattern[k] != pattern[j])
+            k = fail[k - 1];
+        if (pattern[k] == pattern[j])
+            ++k;
+        fail[j] = k;
+    }
 
-    return matches
+    // Search
+    std::vector<int> matches;
+    k = 0;
+    for (int i = 0; i < n; ++i) {
+        while (k > 0 && pattern[k] != text[i])
+            k = fail[k - 1];         // fall back
+        if (pattern[k] == text[i])
+            ++k;
+        if (k == m) {
+            matches.push_back(i - m + 1);
+            k = fail[k - 1];         // continue searching
+        }
+    }
+    return matches;
+}
 
-print(kmp_search("ababcababcabc", "abc"))  # [2, 7, 10]`,
+int main() {
+    auto results = kmpSearch("ababcababcabc", "abc");
+    for (int idx : results) std::cout << idx << " ";  // 2 7 10
+    std::cout << "\\n";
+    return 0;
+}`,
     },
   ],
   diagrams: [

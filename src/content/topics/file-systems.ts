@@ -136,60 +136,77 @@ void list_directory(const char *path) {
 }`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Parsing the ext4 superblock from a raw disk image",
-      source: `import struct
-import sys
+      source: `#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
 
-def parse_ext4_superblock(device_path):
-    """Read and decode the ext4 superblock at offset 1024."""
-    with open(device_path, 'rb') as f:
-        f.seek(1024)  # Superblock starts at byte 1024
-        sb_data = f.read(1024)
+// ext4 superblock key fields (little-endian on disk)
+#pragma pack(push, 1)
+struct Ext4Superblock {
+    uint32_t s_inodes_count;
+    uint32_t s_blocks_count_lo;
+    uint32_t s_r_blocks_count_lo;   // Reserved blocks
+    uint32_t s_free_blocks_lo;
+    uint32_t s_free_inodes_count;
+    uint32_t s_first_data_block;    // 0 for 4K blocks, 1 for 1K
+    uint32_t s_log_block_size;      // block_size = 1024 << this
+    uint32_t s_log_cluster_size;
+    uint32_t s_blocks_per_group;
+    uint32_t s_clusters_per_group;
+    uint32_t s_inodes_per_group;
+    uint32_t s_mtime;               // Last mount time
+    uint32_t s_wtime;               // Last write time
+    uint16_t s_mnt_count;
+    uint16_t s_max_mnt_count;
+    uint16_t s_magic;               // Must be 0xEF53
+    // ... remaining fields omitted for brevity
+};
+#pragma pack(pop)
 
-    # Unpack key fields (all little-endian)
-    fields = struct.unpack_from('<IIIIIIIIIIIIIHHI', sb_data, 0)
-
-    sb = {
-        's_inodes_count':      fields[0],
-        's_blocks_count_lo':   fields[1],
-        's_r_blocks_count_lo': fields[2],   # Reserved blocks
-        's_free_blocks_lo':    fields[3],
-        's_free_inodes_count': fields[4],
-        's_first_data_block':  fields[5],   # 0 for 4K blocks, 1 for 1K
-        's_log_block_size':    fields[6],   # block_size = 1024 << this
-        's_log_cluster_size':  fields[7],
-        's_blocks_per_group':  fields[8],
-        's_clusters_per_group': fields[9],
-        's_inodes_per_group':  fields[10],
-        's_mtime':             fields[11],  # Last mount time
-        's_wtime':             fields[12],  # Last write time
-        's_mnt_count':         fields[13],
-        's_max_mnt_count':     fields[14],
-        's_magic':             fields[15],  # Must be 0xEF53
+void parse_ext4_superblock(const char* device_path) {
+    std::ifstream file(device_path, std::ios::binary);
+    if (!file) {
+        std::cerr << "Error: cannot open " << device_path << "\\n";
+        return;
     }
 
-    block_size = 1024 << sb['s_log_block_size']
-    total_size_bytes = sb['s_blocks_count_lo'] * block_size
+    // Superblock starts at byte offset 1024
+    file.seekg(1024);
+    Ext4Superblock sb{};
+    file.read(reinterpret_cast<char*>(&sb), sizeof(sb));
+    if (!file) {
+        std::cerr << "Error: could not read superblock\\n";
+        return;
+    }
 
-    print(f"Magic:          0x{sb['s_magic']:04X}"
-          f" ({'valid' if sb['s_magic'] == 0xEF53 else 'INVALID'})")
-    print(f"Block size:     {block_size} bytes")
-    print(f"Total blocks:   {sb['s_blocks_count_lo']}")
-    print(f"Free blocks:    {sb['s_free_blocks_lo']}")
-    print(f"Total inodes:   {sb['s_inodes_count']}")
-    print(f"Free inodes:    {sb['s_free_inodes_count']}")
-    print(f"Blocks/group:   {sb['s_blocks_per_group']}")
-    print(f"Inodes/group:   {sb['s_inodes_per_group']}")
-    print(f"Volume size:    {total_size_bytes / (1024**3):.2f} GiB")
+    uint64_t block_size = 1024ULL << sb.s_log_block_size;
+    uint64_t total_size = static_cast<uint64_t>(sb.s_blocks_count_lo) * block_size;
+    double size_gib = static_cast<double>(total_size) / (1024.0 * 1024.0 * 1024.0);
 
-    return sb
+    std::printf("Magic:          0x%04X (%s)\\n",
+                sb.s_magic, sb.s_magic == 0xEF53 ? "valid" : "INVALID");
+    std::printf("Block size:     %llu bytes\\n", (unsigned long long)block_size);
+    std::printf("Total blocks:   %u\\n", sb.s_blocks_count_lo);
+    std::printf("Free blocks:    %u\\n", sb.s_free_blocks_lo);
+    std::printf("Total inodes:   %u\\n", sb.s_inodes_count);
+    std::printf("Free inodes:    %u\\n", sb.s_free_inodes_count);
+    std::printf("Blocks/group:   %u\\n", sb.s_blocks_per_group);
+    std::printf("Inodes/group:   %u\\n", sb.s_inodes_per_group);
+    std::printf("Volume size:    %.2f GiB\\n", size_gib);
+}
 
-if __name__ == '__main__':
-    if len(sys.argv) != 2:
-        print("Usage: python parse_superblock.py /dev/sdX1")
-        sys.exit(1)
-    parse_ext4_superblock(sys.argv[1])`,
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        std::cerr << "Usage: " << argv[0] << " /dev/sdX1\\n";
+        return 1;
+    }
+    parse_ext4_superblock(argv[1]);
+    return 0;
+}`,
     },
   ],
   diagrams: [

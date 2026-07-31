@@ -22,69 +22,108 @@ export const booleanLogic: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Truth table generation and De Morgan's law verification",
-      source: `from itertools import product
+      source: `#include <iostream>
+#include <functional>
+#include <vector>
+#include <string>
+#include <cassert>
 
-def truth_table(n_vars: int, func):
-    """Generate a truth table for a Boolean function of n variables."""
-    headers = [chr(65 + i) for i in range(n_vars)]  # A, B, C, ...
-    print(" | ".join(headers) + " | F")
-    print("-" * (4 * n_vars + 4))
-    for values in product([0, 1], repeat=n_vars):
-        result = func(*values)
-        row = " | ".join(str(v) for v in values)
-        print(f"{row} | {result}")
+// Generate a truth table for a Boolean function of n variables
+void truth_table(int n_vars, std::function<int(const std::vector<int>&)> func) {
+    // Print headers: A, B, C, ...
+    for (int i = 0; i < n_vars; ++i) {
+        if (i > 0) std::cout << " | ";
+        std::cout << static_cast<char>('A' + i);
+    }
+    std::cout << " | F\\n";
+    std::cout << std::string(4 * n_vars + 4, '-') << "\\n";
 
-# De Morgan's first law: NOT(A AND B) == (NOT A) OR (NOT B)
-def lhs(a, b): return int(not (a and b))
-def rhs(a, b): return int((not a) or (not b))
+    // Iterate all combinations of 0/1
+    int total = 1 << n_vars;
+    for (int mask = 0; mask < total; ++mask) {
+        std::vector<int> values(n_vars);
+        for (int i = 0; i < n_vars; ++i)
+            values[i] = (mask >> (n_vars - 1 - i)) & 1;
+        int result = func(values);
+        for (int i = 0; i < n_vars; ++i) {
+            if (i > 0) std::cout << " | ";
+            std::cout << values[i];
+        }
+        std::cout << " | " << result << "\\n";
+    }
+}
 
-print("De Morgan's first law verification:")
-truth_table(2, lhs)
-print()
-truth_table(2, rhs)
+int main() {
+    // De Morgan's first law: NOT(A AND B) == (NOT A) OR (NOT B)
+    auto lhs = [](const std::vector<int>& v) { return !(v[0] && v[1]) ? 1 : 0; };
+    auto rhs = [](const std::vector<int>& v) { return (!v[0] || !v[1]) ? 1 : 0; };
 
-# Verify they are identical for all inputs
-assert all(
-    lhs(a, b) == rhs(a, b)
-    for a, b in product([0, 1], repeat=2)
-), "De Morgan's law violated!"
-print("\\nVerified: NOT(A AND B) == (NOT A) OR (NOT B)")`,
+    std::cout << "De Morgan's first law verification:\\n";
+    truth_table(2, lhs);
+    std::cout << "\\n";
+    truth_table(2, rhs);
+
+    // Verify they are identical for all inputs
+    for (int a = 0; a <= 1; ++a)
+        for (int b = 0; b <= 1; ++b)
+            assert(lhs({a, b}) == rhs({a, b}));
+
+    std::cout << "\\nVerified: NOT(A AND B) == (NOT A) OR (NOT B)\\n";
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Full adder implementation and ripple-carry adder",
-      source: `def half_adder(a: int, b: int) -> tuple[int, int]:
-    """Returns (sum, carry)."""
-    return (a ^ b, a & b)
+      source: `#include <vector>
+#include <iostream>
+#include <utility>
+#include <algorithm>
 
-def full_adder(a: int, b: int, cin: int) -> tuple[int, int]:
-    """Returns (sum, carry_out)."""
-    s1, c1 = half_adder(a, b)
-    s2, c2 = half_adder(s1, cin)
-    return (s2, c1 | c2)
+// Returns {sum, carry}
+std::pair<int, int> half_adder(int a, int b) {
+    return {a ^ b, a & b};
+}
 
-def ripple_carry_add(a_bits: list[int], b_bits: list[int]) -> list[int]:
-    """Add two binary numbers (LSB first). Returns result bits (LSB first)."""
-    n = max(len(a_bits), len(b_bits))
-    a_bits += [0] * (n - len(a_bits))
-    b_bits += [0] * (n - len(b_bits))
+// Returns {sum, carry_out}
+std::pair<int, int> full_adder(int a, int b, int cin) {
+    auto [s1, c1] = half_adder(a, b);
+    auto [s2, c2] = half_adder(s1, cin);
+    return {s2, c1 | c2};
+}
 
-    result = []
-    carry = 0
-    for i in range(n):
-        s, carry = full_adder(a_bits[i], b_bits[i], carry)
-        result.append(s)
-    if carry:
-        result.append(carry)
-    return result
+// Add two binary numbers (LSB first). Returns result bits (LSB first).
+std::vector<int> ripple_carry_add(std::vector<int> a_bits, std::vector<int> b_bits) {
+    size_t n = std::max(a_bits.size(), b_bits.size());
+    a_bits.resize(n, 0);
+    b_bits.resize(n, 0);
 
-# Example: 5 (101) + 3 (011) = 8 (1000)
-a = [1, 0, 1]  # 5 in LSB-first binary
-b = [1, 1, 0]  # 3 in LSB-first binary
-result = ripple_carry_add(a, b)
-print(f"5 + 3 = {result[::-1]} (binary) = {sum(b * 2**i for i, b in enumerate(result))}")`,
+    std::vector<int> result;
+    int carry = 0;
+    for (size_t i = 0; i < n; ++i) {
+        auto [s, c] = full_adder(a_bits[i], b_bits[i], carry);
+        result.push_back(s);
+        carry = c;
+    }
+    if (carry) result.push_back(carry);
+    return result;
+}
+
+int main() {
+    // Example: 5 (101) + 3 (011) = 8 (1000)
+    std::vector<int> a = {1, 0, 1};  // 5 in LSB-first binary
+    std::vector<int> b = {1, 1, 0};  // 3 in LSB-first binary
+    auto result = ripple_carry_add(a, b);
+
+    int value = 0;
+    for (size_t i = 0; i < result.size(); ++i)
+        value += result[i] * (1 << i);
+
+    std::cout << "5 + 3 = " << value << "\\n";  // 8
+    return 0;
+}`,
     },
   ],
   diagrams: [

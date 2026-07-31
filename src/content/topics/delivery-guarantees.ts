@@ -90,48 +90,92 @@ while (true) {
 }`,
     },
     {
-      language: "python",
-      caption: "Idempotent consumer with deduplication table in PostgreSQL",
-      source: `import psycopg2
-import json
-from kafka import KafkaConsumer
+      language: "cpp",
+      caption: "Idempotent consumer with deduplication table in C++ (librdkafka + libpqxx)",
+      source: `#include <iostream>
+#include <string>
+#include <librdkafka/rdkafkacpp.h>
+#include <pqxx/pqxx>
+#include <nlohmann/json.hpp>
 
-consumer = KafkaConsumer(
-    'orders',
-    bootstrap_servers='localhost:9092',
-    group_id='order-processor',
-    enable_auto_commit=False,
-    auto_offset_reset='earliest',
-    value_deserializer=lambda m: json.loads(m.decode('utf-8'))
-)
+using json = nlohmann::json;
 
-conn = psycopg2.connect("dbname=orders user=app")
+int main() {
+    // Configure Kafka consumer
+    RdKafka::Conf* conf = RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL);
+    std::string errstr;
+    conf->set("bootstrap.servers", "localhost:9092", errstr);
+    conf->set("group.id", "order-processor", errstr);
+    conf->set("enable.auto.commit", "false", errstr);
+    conf->set("auto.offset.reset", "earliest", errstr);
 
-for message in consumer:
-    order = message.value
-    message_id = message.headers.get('message-id', f"{message.topic}-{message.partition}-{message.offset}")
+    RdKafka::KafkaConsumer* consumer = RdKafka::KafkaConsumer::create(conf, errstr);
+    consumer->subscribe({"orders"});
+    delete conf;
 
-    with conn.cursor() as cur:
-        # Check if already processed (deduplication)
-        cur.execute("SELECT 1 FROM processed_messages WHERE message_id = %s", (message_id,))
-        if cur.fetchone():
-            consumer.commit()
-            continue
+    pqxx::connection conn("dbname=orders user=app");
 
-        # Process: insert order and dedup record in same transaction
-        cur.execute("""
-            INSERT INTO orders (order_id, customer_id, amount, status)
-            VALUES (%s, %s, %s, 'confirmed')
-            ON CONFLICT (order_id) DO NOTHING
-        """, (order['id'], order['customer_id'], order['amount']))
+    while (true) {
+        RdKafka::Message* msg = consumer->consume(1000);
+        if (msg->err() != RdKafka::ERR_NO_ERROR) {
+            delete msg;
+            continue;
+        }
 
-        cur.execute("""
-            INSERT INTO processed_messages (message_id, processed_at)
-            VALUES (%s, NOW())
-        """, (message_id,))
+        std::string payload(static_cast<const char*>(msg->payload()), msg->len());
+        json order = json::parse(payload);
 
-        conn.commit()
-    consumer.commit()`,
+        // Build message ID from headers or topic-partition-offset
+        std::string message_id;
+        RdKafka::Headers* headers = msg->headers();
+        if (headers) {
+            std::vector<RdKafka::Headers::Header> hdr = headers->get("message-id");
+            if (!hdr.empty()) {
+                message_id.assign(static_cast<const char*>(hdr[0].value()), hdr[0].value_size());
+            }
+        }
+        if (message_id.empty()) {
+            message_id = msg->topic_name() + "-"
+                + std::to_string(msg->partition()) + "-"
+                + std::to_string(msg->offset());
+        }
+
+        pqxx::work txn(conn);
+
+        // Check if already processed (deduplication)
+        pqxx::result res = txn.exec_params(
+            "SELECT 1 FROM processed_messages WHERE message_id = $1",
+            message_id);
+        if (!res.empty()) {
+            txn.abort();
+            consumer->commitSync(msg);
+            delete msg;
+            continue;
+        }
+
+        // Process: insert order and dedup record in same transaction
+        txn.exec_params(
+            "INSERT INTO orders (order_id, customer_id, amount, status) "
+            "VALUES ($1, $2, $3, 'confirmed') "
+            "ON CONFLICT (order_id) DO NOTHING",
+            order["id"].get<std::string>(),
+            order["customer_id"].get<std::string>(),
+            order["amount"].get<double>());
+
+        txn.exec_params(
+            "INSERT INTO processed_messages (message_id, processed_at) "
+            "VALUES ($1, NOW())",
+            message_id);
+
+        txn.commit();
+        consumer->commitSync(msg);
+        delete msg;
+    }
+
+    consumer->close();
+    delete consumer;
+    return 0;
+}`,
     },
     {
       language: "typescript",
@@ -356,6 +400,13 @@ async function publishOutboxEvents(): Promise<void> {
     "CDC outbox: Debezium tails WAL/binlog -> publishes outbox rows to Kafka automatically",
     "SQS FIFO dedup: set MessageDeduplicationId, 5-minute window, 300 msg/s (3000 batched)",
     "Cross-system EOS: store Kafka offset in target DB, seek on restart",
+  ],
+  exercises: [
+    "Design an **idempotent consumer** for a payment processing service that receives `PaymentCompleted` events via Kafka. Describe the deduplication strategy, the database schema for the dedup table, and how you would handle the case where the consumer crashes *after* processing but *before* committing the offset.",
+    "You have a microservice that must update its **PostgreSQL** database and publish an event to **Kafka** atomically. Implement the *transactional outbox pattern*: write the SQL schema for the outbox table, the transaction that writes both business data and the outbox row, and outline the polling publisher logic including `SELECT ... FOR UPDATE SKIP LOCKED`.",
+    "Compare the behavior of a Kafka producer configured with `acks=0`, `acks=1`, and `acks=all` when the **leader broker crashes** mid-write. For each setting, describe whether the message is lost, duplicated, or safely persisted. Then explain how `enable.idempotence=true` changes the picture for `acks=all`.",
+    "An **SQS FIFO queue** has a 5-minute deduplication window. Design a scenario where this window is *insufficient* for your application's needs, and propose an application-level deduplication strategy using DynamoDB to extend the window. Include the DynamoDB table schema and the consumer pseudocode.",
+    "You are tasked with achieving **exactly-once semantics** across system boundaries: consuming from Kafka and writing to PostgreSQL. Implement the pattern where the Kafka consumer offset is stored *in the PostgreSQL database* alongside business data. Explain how this avoids the dual-write problem and what happens on consumer restart.",
   ],
   resources: [
     { label: "Kafka Exactly-Once Semantics (KIP-98)", kind: "docs", note: "The original Kafka proposal for transactional messaging" },

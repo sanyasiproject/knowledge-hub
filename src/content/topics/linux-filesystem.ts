@@ -127,6 +127,256 @@ export const linuxFilesystem: TopicContent = {
       back: "find / -perm -4000 -type f — searches for regular files with the setuid bit set.",
     },
   ],
+  deepDive: [
+    "## The Virtual Filesystem (VFS) Layer\n\nThe Linux **Virtual Filesystem (VFS)** is an *abstraction layer* inside the kernel that provides a **uniform interface** to every filesystem implementation. When a user-space program calls `open()`, `read()`, or `write()`, it talks to VFS, which then dispatches the request to the correct filesystem driver -- be it **ext4**, **XFS**, **Btrfs**, **NFS**, or even pseudo-filesystems like **/proc** and **/sys**. VFS defines a set of *object types* -- `super_block`, `inode`, `dentry`, and `file` -- that every filesystem must implement. The `super_block` represents a mounted filesystem, the `inode` represents a file on disk, the `dentry` (directory entry) caches the *name-to-inode* mapping for fast path resolution, and the `file` object represents an *open file descriptor* in a process. This design means applications never need to know which filesystem they are working with; the VFS translates everything transparently. The **dentry cache** (dcache) is particularly critical for performance: it caches directory lookups so that repeated path resolutions like `/usr/local/bin/python3` do not require re-reading directory blocks from disk each time.",
+
+    "## Journaling Modes and Crash Recovery in Depth\n\nThe ext4 journal is a *circular log* stored in a dedicated area of the filesystem (often inode 8). When the filesystem writes metadata -- such as updating an inode's block pointers after appending data -- it first writes the changes as a **transaction** to the journal. Only after the journal transaction is safely on disk does ext4 **commit** the actual metadata to its final location. This two-phase approach ensures that a power failure during the commit leaves the journal intact for replay on the next mount. ext4 supports three journaling modes: **journal** mode writes *both* data and metadata to the journal (safest but slowest, roughly 2x write amplification); **ordered** mode (the default) journals only metadata but forces data blocks to be written *before* the metadata commit, so you never get metadata pointing to stale data; **writeback** mode journals metadata only with no data ordering, giving the best performance but risking stale data exposure after a crash. The journaling mode is set at mount time via `data=journal|ordered|writeback` in `/etc/fstab`. For most production workloads, **ordered** is the right trade-off between *safety* and *throughput*.",
+
+    "## Copy-on-Write Filesystems: Btrfs and ZFS\n\nUnlike ext4's *in-place update* model, **copy-on-write (COW)** filesystems like **Btrfs** and **ZFS** never overwrite existing data. When a block is modified, the filesystem writes the new version to a *free location* and updates the parent pointers, creating a new *tree path* from root to leaf. This makes **snapshots** essentially free -- a snapshot is just a reference to the old root pointer, and only blocks that change after the snapshot consume additional space. Btrfs, included in the mainline kernel, offers features like *transparent compression* (`zstd`, `lzo`), *checksumming* of both data and metadata (detecting silent corruption), *subvolumes* (independent filesystem trees within a single Btrfs pool), *RAID support* at the filesystem level, and *online defragmentation*. ZFS, originally from Sun Microsystems, provides similar capabilities with **raidz** (its RAID implementation), `send/receive` for incremental replication, and **ARC** (Adaptive Replacement Cache) for intelligent caching. ZFS runs on Linux via the **OpenZFS** project as a kernel module but is not included in the mainline kernel due to *licensing incompatibilities* between CDDL and GPL. For production servers requiring data integrity guarantees, COW filesystems provide a fundamentally stronger safety model than traditional journaling."
+  ],
+  code: [
+    {
+      language: "bash",
+      caption: "Filesystem inspection and management commands",
+      source: `# Show inode information for a file
+stat /etc/passwd
+# Output: File, Size, Blocks, IO Block, Inode, Links, Access, Modify, Change
+
+# List files with their inode numbers
+ls -li /etc/passwd
+
+# Create a hard link and observe shared inode
+ln /etc/hosts /tmp/hosts-hardlink
+ls -li /etc/hosts /tmp/hosts-hardlink   # same inode number
+
+# Create a symbolic link
+ln -s /var/log/syslog /tmp/syslog-link
+readlink -f /tmp/syslog-link            # resolve full target path
+
+# Show filesystem disk usage and mount points
+df -hT                                  # -T shows filesystem type
+findmnt --real                          # tree view of real mounts
+
+# Check filesystem type and features
+dumpe2fs /dev/sda1 | grep -i 'filesystem features'
+
+# Find all setuid binaries (security audit)
+find / -perm -4000 -type f -exec ls -la {} \\; 2>/dev/null
+
+# Show directory entry cache statistics
+cat /proc/sys/fs/dentry-state`
+    },
+    {
+      language: "cpp",
+      caption: "C++ system calls for filesystem operations (stat, opendir, readlink)",
+      source: `#include <sys/stat.h>
+#include <dirent.h>
+#include <unistd.h>
+#include <iostream>
+#include <cstring>
+
+// Retrieve and display inode metadata using stat()
+void inspect_inode(const char* path) {
+    struct stat st;
+    if (stat(path, &st) == -1) {
+        perror("stat");
+        return;
+    }
+    std::cout << "File: " << path << "\\n"
+              << "  Inode:      " << st.st_ino << "\\n"
+              << "  Size:       " << st.st_size << " bytes\\n"
+              << "  Hard links: " << st.st_nlink << "\\n"
+              << "  Permissions: " << std::oct << (st.st_mode & 0777)
+              << std::dec << "\\n"
+              << "  Block size: " << st.st_blksize << "\\n";
+}
+
+// List directory entries with their inode numbers
+void list_directory(const char* dirpath) {
+    DIR* dir = opendir(dirpath);
+    if (!dir) { perror("opendir"); return; }
+
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        std::cout << "  inode=" << entry->d_ino
+                  << "  type=" << (int)entry->d_type
+                  << "  name=" << entry->d_name << "\\n";
+    }
+    closedir(dir);
+}
+
+// Resolve a symbolic link target using readlink()
+void resolve_symlink(const char* linkpath) {
+    char target[PATH_MAX];
+    ssize_t len = readlink(linkpath, target, sizeof(target) - 1);
+    if (len == -1) { perror("readlink"); return; }
+    target[len] = '\\0';
+    std::cout << linkpath << " -> " << target << "\\n";
+}
+
+int main() {
+    inspect_inode("/etc/passwd");
+    list_directory("/etc");
+    resolve_symlink("/usr/bin/python3");
+    return 0;
+}`
+    },
+    {
+      language: "bash",
+      caption: "Advanced filesystem operations: mount, fstab, and filesystem checks",
+      source: `# Mount a filesystem with specific options
+sudo mount -t ext4 -o noatime,data=ordered /dev/sdb1 /mnt/data
+
+# Create a loop device from a file (useful for testing)
+dd if=/dev/zero of=/tmp/test.img bs=1M count=100
+mkfs.ext4 /tmp/test.img
+sudo mount -o loop /tmp/test.img /mnt/test
+
+# Check and repair a filesystem (unmounted only)
+sudo fsck.ext4 -f /dev/sdb1
+
+# Show extent layout for a file on ext4
+sudo filefrag -v /var/log/syslog
+
+# Display superblock information
+sudo tune2fs -l /dev/sda1
+
+# Example /etc/fstab entry:
+# /dev/sda1  /         ext4  defaults,noatime       0  1
+# UUID=abc.. /home     ext4  defaults               0  2
+# tmpfs      /tmp      tmpfs nodev,nosuid,size=2G   0  0
+
+# Lazy unmount (detach even if busy)
+sudo umount -l /mnt/busy-mount
+
+# Show open files on a mount point (why umount fails)
+lsof +D /mnt/data`
+    }
+  ],
+  diagrams: [
+    {
+      title: "Linux Filesystem Hierarchy",
+      kind: "mindmap",
+      caption: "Key directories in the FHS and their purposes",
+      mermaid: `mindmap
+  root["/  (root)"]
+    /bin
+      Essential user binaries
+    /sbin
+      System binaries
+    /etc
+      Configuration files
+    /home
+      User home directories
+    /var
+      /var/log
+      /var/spool
+      /var/tmp
+    /tmp
+      Temporary files
+    /usr
+      /usr/bin
+      /usr/lib
+      /usr/share
+    /proc
+      Virtual kernel info
+    /sys
+      Device/driver info
+    /dev
+      Device files
+    /mnt & /media
+      Mount points`
+    },
+    {
+      title: "Inode and Directory Entry Architecture",
+      kind: "architecture",
+      caption: "How directory entries map filenames to inodes, and inodes point to data blocks on disk",
+      mermaid: `graph LR
+    subgraph Directory
+        DE1["Entry: passwd → inode 42"]
+        DE2["Entry: shadow → inode 78"]
+        DE3["Entry: hosts → inode 42"]
+    end
+    subgraph Inode_Table
+        I42["Inode 42<br/>perms: 644<br/>links: 2<br/>size: 2.4K"]
+        I78["Inode 78<br/>perms: 640<br/>links: 1<br/>size: 1.1K"]
+    end
+    subgraph Data_Blocks
+        DB1["Block 1001"]
+        DB2["Block 1002"]
+        DB3["Block 2005"]
+    end
+    DE1 --> I42
+    DE3 --> I42
+    DE2 --> I78
+    I42 --> DB1
+    I42 --> DB2
+    I78 --> DB3`
+    },
+    {
+      title: "VFS Layer and Filesystem Dispatch",
+      kind: "flow",
+      caption: "How user-space system calls flow through VFS to the concrete filesystem driver",
+      mermaid: `flowchart TB
+    APP["User Application<br/>open(), read(), write()"]
+    VFS["VFS Layer<br/>super_block, inode,<br/>dentry, file objects"]
+    DCACHE["Dentry Cache<br/>(dcache)"]
+    EXT4["ext4 Driver"]
+    XFS["XFS Driver"]
+    BTRFS["Btrfs Driver"]
+    PROC["/proc Driver"]
+    BLK["Block Device Layer"]
+    DISK["Physical Disk"]
+
+    APP --> VFS
+    VFS --> DCACHE
+    VFS --> EXT4
+    VFS --> XFS
+    VFS --> BTRFS
+    VFS --> PROC
+    EXT4 --> BLK
+    XFS --> BLK
+    BTRFS --> BLK
+    BLK --> DISK`
+    }
+  ],
+  comparison: {
+    columns: ["Feature", "ext4", "XFS", "Btrfs", "ZFS"],
+    rows: [
+      ["**Max Volume Size**", "1 EiB", "8 EiB", "16 EiB", "256 ZiB"],
+      ["**Max File Size**", "16 TiB", "8 EiB", "16 EiB", "16 EiB"],
+      ["**Journaling**", "Yes (metadata + optional data)", "Yes (metadata only)", "No (COW instead)", "No (COW instead)"],
+      ["**Copy-on-Write**", "No", "No (reflink support added)", "Yes", "Yes"],
+      ["**Snapshots**", "No", "No", "Yes (subvolume snapshots)", "Yes (dataset snapshots)"],
+      ["**Data Checksumming**", "Metadata only", "Metadata only", "Yes (data + metadata)", "Yes (data + metadata)"],
+      ["**Compression**", "No", "No", "Yes (`zstd`, `lzo`, `zlib`)", "Yes (`lz4`, `zstd`, `gzip`)"],
+      ["**RAID Support**", "Via `mdadm`", "Via `mdadm`", "Built-in (RAID 0/1/10/5/6)", "Built-in (`raidz1/2/3`)"],
+      ["**Default Distro**", "Ubuntu, Debian", "RHEL, CentOS, Rocky", "openSUSE (optional)", "FreeBSD (Linux via OpenZFS)"],
+      ["**Kernel Inclusion**", "Yes (mainline)", "Yes (mainline)", "Yes (mainline)", "No (license conflict)"]
+    ]
+  },
+  exercises: [
+    "**Inode Exhaustion Drill**: Create a small ext4 filesystem with `mkfs.ext4 -N 100` on a loop device. Write a script to create empty files until inode exhaustion occurs. Observe the error, check `df -i`, and explain why disk space remains but no files can be created. What `tune2fs` setting controls inode allocation?",
+    "**Hard Link vs Symlink Lab**: Create a file, a hard link, and a symlink to it. Use `ls -li` to compare inodes. Delete the original file -- what happens to each link? Use `stat` to observe link counts before and after. Then move the original to a different filesystem and repeat -- why does the hard link fail?",
+    "**Permission Debugging Challenge**: Set up a directory `/tmp/permlab` with sticky bit. As *user A*, create a file. As *user B*, try to delete it and explain the error. Then add setgid to the directory, create new files from both users, and verify group ownership inheritance. Document each step with `ls -la` output.",
+    "**Journaling Recovery Simulation**: Create an ext4 filesystem on a loop device, mount it, write data, and simulate a crash with `echo 1 > /proc/sysrq-trigger` (in a VM). Observe journal replay on remount via `dmesg`. Compare recovery time with `fsck` on a non-journaled filesystem.",
+    "**Mount Namespace Exploration**: Use `unshare --mount` to create a new mount namespace. Mount a tmpfs inside it, create files, and exit. Verify the mount is invisible from the host. Explain how this relates to container isolation and how `findmnt` shows different views per namespace."
+  ],
+  cheatSheet: [
+    "`ls -li` -- list files with **inode numbers**; `stat <file>` -- full inode metadata including *atime*, *mtime*, *ctime*",
+    "`df -hT` -- disk usage per filesystem with **type**; `df -i` -- inode usage; `du -sh <dir>` -- directory size summary",
+    "`chmod 755 <file>` -- set **rwxr-xr-x**; `chmod u+s` -- set **setuid**; `chmod +t <dir>` -- set **sticky bit**; `umask 022` -- default mask",
+    "`ln <target> <link>` -- create **hard link** (same inode); `ln -s <target> <link>` -- create **symlink**; `readlink -f` -- resolve symlink chain",
+    "`mount -t ext4 /dev/sdb1 /mnt` -- mount filesystem; `umount -l /mnt` -- **lazy unmount**; `findmnt --real` -- show mount tree",
+    "`tune2fs -l /dev/sda1` -- ext4 superblock info; `dumpe2fs` -- detailed filesystem dump; `filefrag -v` -- file extent/fragmentation map"
+  ],
+  revisionNotes: [
+    "An **inode** stores *all* file metadata (permissions, ownership, timestamps, data block pointers) **except the filename**. Directory entries map names to inode numbers. This is why hard links work -- multiple names can reference the same inode.",
+    "**ext4 journaling** uses three modes: `journal` (safest, logs data + metadata), `ordered` (default, metadata journal with data-ordering guarantee), and `writeback` (fastest, metadata only, risk of stale data after crash). The journal enables fast recovery by *replaying* committed transactions instead of running a full `fsck`.",
+    "**Hard links** share the same inode and cannot cross filesystem boundaries or link directories. **Symbolic links** are separate files containing a path, can cross filesystems and link directories, but may **dangle** if the target is deleted. Use `ls -li` to distinguish them.",
+    "The **VFS layer** provides a uniform `open()`/`read()`/`write()` interface across all filesystem types. It defines four core objects: `super_block` (mounted FS), `inode` (file metadata), `dentry` (name-to-inode cache), and `file` (open file descriptor). The **dentry cache** is critical for path resolution performance.",
+    "Special permission bits: **setuid** (`4000`) runs process as file owner (e.g., `/usr/bin/passwd`); **setgid** (`2000`) runs as file group and on directories forces group inheritance; **sticky bit** (`1000`) on directories prevents users from deleting others' files (e.g., `/tmp`)."
+  ],
   glossary: [
     {
       term: "FHS",

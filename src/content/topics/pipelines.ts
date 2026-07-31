@@ -108,4 +108,404 @@ export const pipelines: TopicContent = {
     { term: "Pipeline-as-Code", definition: "The practice of defining CI/CD pipelines in version-controlled files alongside application source code." },
     { term: "DAG (Directed Acyclic Graph)", definition: "A pipeline execution model where jobs declare specific dependencies rather than running in rigid stage order, enabling greater parallelism." },
   ],
+  deepDive: [
+    "## Pipeline Design Patterns\n\nPipeline architectures fall into four main patterns. **Linear pipelines** execute stages sequentially: Build -> Test -> Deploy. They are simple and easy to reason about but slow because nothing runs in parallel. **Fan-out / fan-in pipelines** run multiple jobs in parallel after a shared build stage (e.g., unit tests, integration tests, SAST, and linting all run concurrently), then converge at a quality gate before deployment. This pattern dramatically reduces wall-clock time. **DAG pipelines** (supported natively in GitLab CI and GitHub Actions) allow fine-grained job dependencies: a job declares exactly which upstream jobs it needs, skipping the rigid stage model entirely. This enables maximum parallelism -- for example, deploying a frontend as soon as its tests pass without waiting for unrelated backend tests. **Matrix pipelines** generate job variants from parameter combinations (OS x language version x database), ensuring compatibility across environments without duplicating pipeline definitions.",
+
+    "## Pipeline Optimization and Observability\n\nPipeline duration is a developer-experience metric: slow pipelines erode trust and encourage bypassing CI. Key optimization strategies include: **incremental builds** that skip unchanged modules (Nx, Turborepo, Bazel); **dependency caching** to avoid re-downloading node_modules or Maven artifacts; **test splitting** that distributes a test suite across parallel runners proportionally by historical duration (e.g., CircleCI's test splitting, Jest `--shard`); and **ephemeral runners** that scale to zero when idle (GitHub-hosted runners, GitLab autoscaling runners on Kubernetes). Observability means tracking pipeline metrics -- p50/p95 duration, failure rate, flake rate, queue wait time -- and alerting when they degrade. Tools like Datadog CI Visibility, Honeycomb, and GitLab's pipeline analytics dashboards provide this. Treat your pipeline as production infrastructure: monitor it, set SLOs for build time, and run incident reviews when it breaks.",
+
+    "## Security in Pipelines (Supply Chain Hardening)\n\nPipelines are a high-value attack surface because they have write access to production. Supply chain hardening includes: **pinning action/image versions by SHA** (not mutable tags) to prevent dependency hijacking; **least-privilege credentials** scoped to the specific stage and environment; **OIDC federation** with cloud providers (GitHub Actions OIDC, GitLab CI ID tokens) to eliminate long-lived static secrets; **SLSA provenance** generation to create a verifiable build attestation; **artifact signing** with Sigstore/cosign so downstream consumers can verify image integrity; and **network isolation** for self-hosted runners to prevent lateral movement. Review third-party actions and orbs before use -- a compromised GitHub Action can exfiltrate every secret in your repository.",
+  ],
+  code: [
+    {
+      language: "yaml",
+      caption: "GitHub Actions: Multi-stage CI/CD with matrix testing, caching, and environment deployments",
+      source: `name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write  # OIDC federation
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+      - run: npx jest --shard=\${{ matrix.shard }}/3 --ci --coverage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-\${{ matrix.shard }}
+          path: coverage/
+
+  lint-and-scan:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm audit --audit-level=high
+
+  deploy-staging:
+    if: github.ref == 'refs/heads/main'
+    needs: [test, lint-and-scan]
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/deploy-staging
+          aws-region: us-east-1
+      - run: aws s3 sync dist/ s3://my-app-staging --delete
+
+  deploy-production:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://my-app.example.com
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/deploy-prod
+          aws-region: us-east-1
+      - run: aws s3 sync dist/ s3://my-app-prod --delete`,
+    },
+    {
+      language: "groovy",
+      caption: "Jenkinsfile: Declarative pipeline with parallel stages, Docker agent, and approval gate",
+      source: `pipeline {
+    agent none
+
+    environment {
+        REGISTRY = 'registry.example.com'
+        IMAGE    = 'myorg/myapp'
+    }
+
+    stages {
+        stage('Build') {
+            agent {
+                docker { image 'node:20-alpine' }
+            }
+            steps {
+                sh 'npm ci'
+                sh 'npm run build'
+                stash includes: 'dist/**', name: 'build-artifacts'
+            }
+        }
+
+        stage('Quality Checks') {
+            parallel {
+                stage('Unit Tests') {
+                    agent {
+                        docker { image 'node:20-alpine' }
+                    }
+                    steps {
+                        sh 'npm ci'
+                        unstash 'build-artifacts'
+                        sh 'npm test -- --ci --coverage'
+                    }
+                    post {
+                        always {
+                            junit 'reports/junit.xml'
+                            publishHTML(target: [
+                                reportDir: 'coverage/lcov-report',
+                                reportFiles: 'index.html',
+                                reportName: 'Coverage Report'
+                            ])
+                        }
+                    }
+                }
+                stage('SAST') {
+                    agent {
+                        docker { image 'semgrep/semgrep:latest' }
+                    }
+                    steps {
+                        sh 'semgrep scan --config=auto --error'
+                    }
+                }
+                stage('Lint') {
+                    agent {
+                        docker { image 'node:20-alpine' }
+                    }
+                    steps {
+                        sh 'npm ci'
+                        sh 'npm run lint'
+                    }
+                }
+            }
+        }
+
+        stage('Docker Image') {
+            agent any
+            steps {
+                unstash 'build-artifacts'
+                script {
+                    def tag = "\${env.REGISTRY}/\${env.IMAGE}:\${env.GIT_COMMIT[0..7]}"
+                    sh "docker build -t \${tag} ."
+                    sh "docker push \${tag}"
+                }
+            }
+        }
+
+        stage('Deploy to Staging') {
+            agent any
+            steps {
+                sh "kubectl set image deployment/myapp myapp=\${REGISTRY}/\${IMAGE}:\${env.GIT_COMMIT[0..7]} -n staging"
+                sh 'kubectl rollout status deployment/myapp -n staging --timeout=120s'
+            }
+        }
+
+        stage('Approval') {
+            steps {
+                input message: 'Deploy to production?', submitter: 'release-managers'
+            }
+        }
+
+        stage('Deploy to Production') {
+            agent any
+            steps {
+                sh "kubectl set image deployment/myapp myapp=\${REGISTRY}/\${IMAGE}:\${env.GIT_COMMIT[0..7]} -n production"
+                sh 'kubectl rollout status deployment/myapp -n production --timeout=180s'
+            }
+        }
+    }
+
+    post {
+        failure {
+            slackSend channel: '#ci-alerts', color: 'danger',
+                      message: "Pipeline failed: \${env.JOB_NAME} #\${env.BUILD_NUMBER}"
+        }
+    }
+}`,
+    },
+    {
+      language: "yaml",
+      caption: "GitLab CI: Multi-stage pipeline with DAG mode, review apps, and container scanning",
+      source: `stages:
+  - build
+  - test
+  - scan
+  - deploy
+
+variables:
+  IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+
+build:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $IMAGE .
+    - docker push $IMAGE
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+unit-tests:
+  stage: test
+  image: $IMAGE
+  needs: [build]
+  script:
+    - npm test -- --ci --coverage
+  coverage: '/Statements\\s*:\\s*(\\d+\\.?\\d*)%/'
+  artifacts:
+    reports:
+      junit: reports/junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura-coverage.xml
+
+integration-tests:
+  stage: test
+  image: $IMAGE
+  needs: [build]
+  services:
+    - postgres:16-alpine
+  variables:
+    POSTGRES_DB: testdb
+    POSTGRES_USER: runner
+    POSTGRES_PASSWORD: secret
+    DATABASE_URL: postgresql://runner:secret@postgres:5432/testdb
+  script:
+    - npm run test:integration
+
+container-scan:
+  stage: scan
+  needs: [build]
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - trivy image --exit-code 1 --severity HIGH,CRITICAL $IMAGE
+
+sast:
+  stage: scan
+  needs: []  # No dependencies -- runs immediately
+  image: semgrep/semgrep:latest
+  script:
+    - semgrep scan --config=auto --error --json -o semgrep-report.json .
+  artifacts:
+    reports:
+      sast: semgrep-report.json
+
+deploy-review:
+  stage: deploy
+  needs: [unit-tests, integration-tests]
+  environment:
+    name: review/$CI_COMMIT_REF_SLUG
+    url: https://$CI_COMMIT_REF_SLUG.review.example.com
+    on_stop: stop-review
+    auto_stop_in: 1 week
+  script:
+    - helm upgrade --install review-$CI_COMMIT_REF_SLUG ./chart
+      --set image=$IMAGE
+      --set ingress.host=$CI_COMMIT_REF_SLUG.review.example.com
+      --namespace review
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+stop-review:
+  stage: deploy
+  environment:
+    name: review/$CI_COMMIT_REF_SLUG
+    action: stop
+  script:
+    - helm uninstall review-$CI_COMMIT_REF_SLUG --namespace review
+  when: manual
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+
+deploy-production:
+  stage: deploy
+  needs: [unit-tests, integration-tests, container-scan]
+  environment:
+    name: production
+    url: https://app.example.com
+  script:
+    - helm upgrade --install myapp ./chart
+      --set image=$IMAGE
+      --namespace production
+      --wait --timeout 180s
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual`,
+    },
+  ],
+  comparison: {
+    columns: ["Pattern", "Parallelism", "Complexity", "Use Case", "Platform Support"],
+    rows: [
+      ["Linear", "None -- stages run sequentially", "Low", "Simple projects with few stages; quick to set up and debug", "All platforms"],
+      ["Fan-out / Fan-in", "High -- multiple jobs run in parallel within a stage, converging at a gate", "Medium", "Most production pipelines; balances speed with clear stage boundaries", "All platforms (native parallel stages)"],
+      ["DAG (Directed Acyclic Graph)", "Maximum -- jobs depend on specific upstream jobs, not entire stages", "High", "Large monorepos, microservices; minimizes wait time by removing artificial stage barriers", "GitLab CI (needs:), GitHub Actions (needs:), Azure Pipelines"],
+      ["Matrix", "High -- generates job variants from parameter combinations", "Medium", "Cross-platform libraries; testing across OS, language, and database versions", "GitHub Actions (strategy.matrix), GitLab CI (parallel:matrix), Azure Pipelines"],
+    ],
+  },
+  diagrams: [
+    {
+      title: "Fan-out / Fan-in Pipeline Architecture",
+      kind: "flow",
+      caption: "A typical production pipeline: build fans out to parallel quality checks (unit tests, integration tests, SAST, lint), which converge at a quality gate before deploying to staging and then production with a manual approval step.",
+    },
+    {
+      title: "DAG Pipeline Execution Order",
+      kind: "architecture",
+      caption: "DAG mode removes rigid stage boundaries. Frontend deploy depends only on frontend tests; backend deploy depends only on backend tests and container scan. Neither waits for the other track, maximizing parallelism.",
+    },
+  ],
+  animations: [
+    {
+      title: "CI/CD Pipeline Execution Lifecycle",
+      steps: [
+        { label: "Trigger", detail: "A developer pushes a commit or opens a pull request. The CI platform detects the event via webhook and enqueues a pipeline run." },
+        { label: "Runner Allocation", detail: "The platform assigns available runners (containers or VMs) to each job. GitHub Actions spins up fresh Ubuntu VMs; GitLab may use a Kubernetes executor to create pods on demand." },
+        { label: "Build Stage", detail: "Source code is checked out, dependencies are restored from cache, and the application is compiled. Build artifacts (dist/, Docker image) are uploaded to artifact storage." },
+        { label: "Parallel Testing", detail: "Multiple jobs fan out: unit tests (sharded across 3 runners), integration tests (with a Postgres service container), linting, and SAST scanning all execute simultaneously." },
+        { label: "Quality Gate", detail: "All parallel jobs must succeed. The platform evaluates pass/fail status, test coverage thresholds, and security scan results. If any check fails, the pipeline stops and the developer is notified." },
+        { label: "Deploy to Staging", detail: "Artifacts are deployed to the staging environment. For Kubernetes, this means updating the Deployment image tag and waiting for rollout to complete. For static sites, syncing to an S3 bucket." },
+        { label: "Manual Approval", detail: "A release manager reviews the staging deployment and approves production release via the CI platform's UI. This is a manual quality gate." },
+        { label: "Deploy to Production", detail: "The same artifact (immutable, built once) is deployed to production. Post-deploy health checks verify the application is serving traffic correctly." },
+      ],
+    },
+  ],
+  exercises: [
+    "Write a GitHub Actions workflow that builds a Node.js app, runs tests with 3 shards in parallel using strategy.matrix, uploads coverage artifacts from each shard, and only deploys to staging if all shards pass.",
+    "Create a Jenkinsfile with a parallel stage that runs unit tests, integration tests, and a security scan concurrently. Add a post block that sends a Slack notification on failure.",
+    "Design a GitLab CI pipeline for a monorepo containing a frontend (React) and backend (Go) service. Use DAG mode (needs:) so each service's test and deploy jobs run independently without waiting for the other service.",
+    "Implement a pipeline that builds a Docker image, pushes it to a registry, scans it with Trivy for HIGH/CRITICAL vulnerabilities, and blocks deployment if any are found. Include proper OIDC-based authentication to avoid static credentials.",
+    "Set up branch protection rules and a GitHub Actions workflow so that: PRs require passing CI, at least one approval, and no critical SAST findings before merging to main. Write the workflow YAML and describe the branch protection settings.",
+  ],
+  cheatSheet: [
+    "GitHub Actions job dependency: `needs: [job-a, job-b]` -- job waits for listed jobs to succeed",
+    "GitHub Actions matrix: `strategy: { matrix: { node: [18, 20], os: [ubuntu-latest, macos-latest] } }` generates 4 job variants",
+    "GitHub Actions cache: `actions/cache@v4` with `path` and `key` (use hashFiles for cache busting)",
+    "GitLab CI DAG mode: add `needs: [job-name]` to skip stage ordering and depend on specific jobs",
+    "GitLab CI rules: `rules: [{ if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH' }]` for conditional job execution",
+    "Jenkins parallel: `parallel { stage('A') { ... } stage('B') { ... } }` inside a parent stage",
+    "Jenkins input gate: `input message: 'Deploy?', submitter: 'release-managers'` pauses for manual approval",
+    "Pin actions by SHA, not tag: `uses: actions/checkout@<full-sha>` prevents supply chain attacks from tag mutation",
+  ],
+  revisionNotes: [
+    "A pipeline is a DAG of stages/jobs triggered by events (push, PR, schedule, manual). Stages run sequentially; jobs within a stage can run in parallel.",
+    "Artifacts are build outputs (binaries, images, reports) tied to a specific run. Caches are reusable data (dependencies) shared across runs to speed up builds.",
+    "Quality gates block pipeline progression: automated (coverage >= 80%, zero critical CVEs) or manual (release manager approval).",
+    "GitHub Actions uses YAML in .github/workflows/, triggered by events. Jobs use `needs:` for ordering. Matrix builds test across parameter combinations.",
+    "Jenkins uses a Groovy-based Jenkinsfile. Declarative syntax: `pipeline { agent, stages, post }`. Supports parallel stages, input steps for approval, and extensive plugins.",
+    "GitLab CI uses .gitlab-ci.yml. Supports DAG mode via `needs:`, review apps for per-MR environments, built-in container registry, and SAST/DAST scanning.",
+    "Security: pin dependencies by SHA, use OIDC for cloud auth (no static secrets), scan containers with Trivy/Grype, generate SLSA provenance, sign artifacts with Sigstore.",
+    "Optimization: fail fast (lint before E2E), cache dependencies, shard tests across parallel runners, use ephemeral runners, and monitor pipeline metrics (p50 duration, flake rate).",
+  ],
+  resources: [
+    { label: "GitHub Actions Documentation", kind: "docs", note: "Official reference for workflow syntax, events, runners, expressions, and reusable workflows." },
+    { label: "GitLab CI/CD Documentation", kind: "docs", note: "Comprehensive guide covering .gitlab-ci.yml syntax, DAG mode, environments, review apps, and Auto DevOps." },
+    { label: "Continuous Delivery by Jez Humble and David Farley", kind: "book", note: "The foundational text on deployment pipelines, build automation, and release engineering practices." },
+    { label: "SLSA (Supply-chain Levels for Software Artifacts)", kind: "docs", note: "Framework for end-to-end software supply chain integrity, including build provenance and verification." },
+    { label: "Fireship: CI/CD in 100 Seconds", kind: "video", note: "Quick visual overview of CI/CD pipeline concepts, ideal as a refresher before diving into platform-specific details." },
+  ],
 };

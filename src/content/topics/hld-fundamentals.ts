@@ -132,6 +132,434 @@ NFRs constrain the design space and must be quantified early. Vague requirements
 - Designing the data model before understanding access patterns.
 - Not quantifying NFRs, leading to vague, unvalidatable designs.`,
   ],
+  deepDive: [
+    `## Distributed Caching Strategies
+
+**Caching** is deceptively simple at a single-node level but becomes a *critical architectural concern* at scale. There are several **cache topology** options, each with distinct trade-offs:
+
+- **Local in-process cache** (e.g., \`Map\` or \`LRU\` in application memory): *Zero network overhead*, but each instance has its own copy, leading to **inconsistency** across nodes and **wasted memory**. Best for *immutable* or *rarely changing* reference data.
+- **Distributed cache** (e.g., \`Redis Cluster\`, \`Memcached\`): A shared cache layer all instances talk to. Provides **consistency** across nodes but adds *network latency* (~0.5-1ms per call). Supports **eviction policies** like \`LRU\`, \`LFU\`, and \`TTL\`-based expiry.
+- **Two-tier cache**: Combine a *local L1 cache* (short TTL, small size) with a *distributed L2 cache* (longer TTL, larger). Reads check L1 first, then L2, then the database. This **minimizes network calls** while maintaining reasonable consistency.
+
+**Cache invalidation** remains one of the hardest problems. The three main strategies are:
+- **TTL-based expiry**: Simple but allows **stale reads** up to the TTL duration. Good for data where *staleness is tolerable* (product catalog, user profiles).
+- **Event-driven invalidation**: Publish a \`cache.invalidate\` event when data changes. More complex but ensures **near-real-time freshness**. Requires a *reliable event bus*.
+- **Write-through with versioning**: Every write updates both the cache and the database. Use a **version counter** or **timestamp** to detect and resolve conflicts.`,
+
+    `## Database Sharding and Partitioning
+
+When a *single database instance* cannot handle the required **throughput** or **storage**, you must distribute data across multiple nodes. This is **sharding** (horizontal partitioning).
+
+**Sharding strategies:**
+- **Range-based sharding**: Partition by a range of a key (e.g., users A-M on shard 1, N-Z on shard 2). *Simple to implement* but prone to **hotspots** if data distribution is uneven.
+- **Hash-based sharding**: Apply a \`hash(key) % num_shards\` function. Provides **uniform distribution** but makes *range queries across shards* expensive. **Consistent hashing** (used by DynamoDB, Cassandra) minimizes data movement when adding/removing nodes.
+- **Directory-based sharding**: A lookup service maps keys to shards. *Most flexible* but the directory becomes a **single point of failure** and a potential *bottleneck*.
+
+**Cross-shard challenges:**
+- **Joins**: Cannot efficiently join data across shards. Denormalize data or perform *application-level joins*.
+- **Transactions**: Distributed transactions (2PC) are *slow and complex*. Prefer **saga patterns** or design schemas to keep related data on the same shard.
+- **Rebalancing**: Adding shards requires **data migration**. Consistent hashing minimizes this; range-based may require *splitting and moving entire ranges*.
+- **Global secondary indexes**: Either maintain a *local index per shard* (scatter-gather queries) or a **global index** (write amplification). Neither is free.`,
+
+    `## Event-Driven Architecture (EDA)
+
+**Event-driven architecture** decouples producers from consumers by communicating through *events* rather than direct API calls. This enables **independent scaling**, **fault isolation**, and **temporal decoupling**.
+
+**Core patterns:**
+- **Event notification**: A service publishes a *lightweight event* (e.g., \`OrderPlaced { orderId }\`). Consumers react by fetching details themselves. **Low coupling** but adds *chattiness*.
+- **Event-carried state transfer**: Events carry the *full payload* (e.g., \`OrderPlaced { orderId, items, total, customer }\`). Consumers have all data locally. **Reduces calls** but increases *event size* and coupling to the schema.
+- **Event sourcing**: Store the *sequence of events* as the source of truth rather than current state. Current state is derived by **replaying events**. Enables *audit trails*, *temporal queries*, and *debugging*. Adds complexity for read models (use **CQRS**).
+
+**Technology choices:**
+- \`Apache Kafka\`: **Durable, ordered, replayable** log. Best for high-throughput event streaming. Supports \`consumer groups\` for parallel processing.
+- \`Amazon SQS\`: **Managed queue** with at-least-once delivery. Simpler to operate, no ordering guarantees (unless using FIFO queues). Good for *task distribution*.
+- \`RabbitMQ\`: **Flexible routing** with exchanges and bindings. Supports *complex routing topologies*. Lower throughput than Kafka but richer messaging semantics.
+
+**Idempotency** is *critical* in EDA: consumers must handle **duplicate events** gracefully using idempotency keys or deduplication logic.`,
+
+    `## Service Mesh and API Gateway Patterns
+
+As the number of **microservices** grows, managing *service-to-service communication* becomes a significant challenge. Two architectural patterns address this:
+
+**API Gateway** sits at the *edge* and handles **north-south traffic** (client-to-service). Responsibilities include:
+- **Request routing** and protocol translation (REST to gRPC)
+- **Authentication and authorization** (JWT validation, API key checks)
+- **Rate limiting** and *throttling* per client
+- **Response aggregation** (BFF -- Backend for Frontend pattern)
+- **SSL termination** and *request/response transformation*
+
+Popular implementations: \`Kong\`, \`AWS API Gateway\`, \`Envoy\` (as edge proxy).
+
+**Service Mesh** handles **east-west traffic** (service-to-service) using a *sidecar proxy* deployed alongside each service. The mesh provides:
+- **Mutual TLS** (mTLS) for *encrypted, authenticated* inter-service communication
+- **Traffic management**: canary deployments, A/B routing, circuit breaking, retries with *exponential backoff*
+- **Observability**: distributed tracing, metrics collection, access logging -- *without code changes*
+- **Policy enforcement**: rate limits, access control between services
+
+Popular implementations: \`Istio\` (with Envoy sidecars), \`Linkerd\`, \`AWS App Mesh\`.
+
+The **trade-off**: a service mesh adds *operational complexity* and *resource overhead* (each sidecar consumes CPU/memory). For fewer than ~10 services, the overhead may not be justified. For large-scale microservice deployments, it becomes *essential infrastructure*.`,
+  ],
+  code: [
+    {
+      language: "typescript",
+      caption: "Cache-aside pattern with TTL and error handling",
+      source: `import Redis from 'ioredis';
+
+const redis = new Redis({ host: 'cache.internal', port: 6379 });
+const DEFAULT_TTL = 300; // 5 minutes
+
+interface CacheOptions {
+  ttl?: number;       // seconds
+  prefix?: string;
+}
+
+/**
+ * Cache-aside (lazy-loading) wrapper.
+ * Checks cache first; on miss, calls the loader,
+ * stores the result, and returns it.
+ */
+async function cacheAside<T>(
+  key: string,
+  loader: () => Promise<T>,
+  options: CacheOptions = {}
+): Promise<T> {
+  const { ttl = DEFAULT_TTL, prefix = 'app' } = options;
+  const cacheKey = \`\${prefix}:\${key}\`;
+
+  // 1. Try cache first
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached !== null) {
+      return JSON.parse(cached) as T;
+    }
+  } catch (err) {
+    // Cache failure should NOT block the request
+    console.warn(\`Cache read failed for \${cacheKey}:\`, err);
+  }
+
+  // 2. Cache miss -- load from source
+  const data = await loader();
+
+  // 3. Store in cache (fire-and-forget)
+  try {
+    await redis.setex(cacheKey, ttl, JSON.stringify(data));
+  } catch (err) {
+    console.warn(\`Cache write failed for \${cacheKey}:\`, err);
+  }
+
+  return data;
+}
+
+// Usage example
+async function getUserProfile(userId: string) {
+  return cacheAside(
+    \`user:\${userId}\`,
+    () => db.query('SELECT * FROM users WHERE id = $1', [userId]),
+    { ttl: 600, prefix: 'profiles' }
+  );
+}`,
+    },
+    {
+      language: "typescript",
+      caption: "Circuit breaker pattern for downstream service calls",
+      source: `enum CircuitState {
+  CLOSED = 'CLOSED',     // Normal operation
+  OPEN = 'OPEN',         // Failing -- reject immediately
+  HALF_OPEN = 'HALF_OPEN' // Testing recovery
+}
+
+interface CircuitBreakerConfig {
+  failureThreshold: number;   // failures before opening
+  recoveryTimeout: number;    // ms before trying half-open
+  successThreshold: number;   // successes in half-open to close
+}
+
+class CircuitBreaker {
+  private state = CircuitState.CLOSED;
+  private failureCount = 0;
+  private successCount = 0;
+  private lastFailureTime = 0;
+
+  constructor(
+    private readonly name: string,
+    private readonly config: CircuitBreakerConfig
+  ) {}
+
+  async execute<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.state === CircuitState.OPEN) {
+      // Check if recovery timeout has elapsed
+      if (Date.now() - this.lastFailureTime >= this.config.recoveryTimeout) {
+        this.state = CircuitState.HALF_OPEN;
+        this.successCount = 0;
+        console.log(\`[CircuitBreaker:\${this.name}] HALF_OPEN -- testing\`);
+      } else {
+        throw new Error(\`Circuit \${this.name} is OPEN -- request rejected\`);
+      }
+    }
+
+    try {
+      const result = await fn();
+      this.onSuccess();
+      return result;
+    } catch (error) {
+      this.onFailure();
+      throw error;
+    }
+  }
+
+  private onSuccess(): void {
+    if (this.state === CircuitState.HALF_OPEN) {
+      this.successCount++;
+      if (this.successCount >= this.config.successThreshold) {
+        this.state = CircuitState.CLOSED;
+        this.failureCount = 0;
+        console.log(\`[CircuitBreaker:\${this.name}] CLOSED -- recovered\`);
+      }
+    } else {
+      this.failureCount = 0;
+    }
+  }
+
+  private onFailure(): void {
+    this.failureCount++;
+    this.lastFailureTime = Date.now();
+    if (this.failureCount >= this.config.failureThreshold) {
+      this.state = CircuitState.OPEN;
+      console.log(\`[CircuitBreaker:\${this.name}] OPEN -- too many failures\`);
+    }
+  }
+}
+
+// Usage
+const paymentBreaker = new CircuitBreaker('payment-service', {
+  failureThreshold: 5,
+  recoveryTimeout: 30_000,  // 30 seconds
+  successThreshold: 3
+});
+
+async function processPayment(orderId: string, amount: number) {
+  return paymentBreaker.execute(() =>
+    fetch('https://payment.internal/charge', {
+      method: 'POST',
+      body: JSON.stringify({ orderId, amount })
+    }).then(r => {
+      if (!r.ok) throw new Error(\`Payment failed: \${r.status}\`);
+      return r.json();
+    })
+  );
+}`,
+    },
+    {
+      language: "typescript",
+      caption: "Simple token-bucket rate limiter middleware (Express)",
+      source: `import { Request, Response, NextFunction } from 'express';
+
+interface Bucket {
+  tokens: number;
+  lastRefill: number;
+}
+
+class TokenBucketRateLimiter {
+  private buckets = new Map<string, Bucket>();
+
+  constructor(
+    private readonly maxTokens: number,    // bucket capacity
+    private readonly refillRate: number,    // tokens per second
+    private readonly keyExtractor: (req: Request) => string = (req) =>
+      req.ip ?? 'unknown'
+  ) {}
+
+  middleware() {
+    return (req: Request, res: Response, next: NextFunction): void => {
+      const key = this.keyExtractor(req);
+      const now = Date.now();
+      let bucket = this.buckets.get(key);
+
+      if (!bucket) {
+        bucket = { tokens: this.maxTokens, lastRefill: now };
+        this.buckets.set(key, bucket);
+      }
+
+      // Refill tokens based on elapsed time
+      const elapsed = (now - bucket.lastRefill) / 1000;
+      bucket.tokens = Math.min(
+        this.maxTokens,
+        bucket.tokens + elapsed * this.refillRate
+      );
+      bucket.lastRefill = now;
+
+      if (bucket.tokens >= 1) {
+        bucket.tokens -= 1;
+        res.setHeader('X-RateLimit-Remaining', Math.floor(bucket.tokens));
+        next();
+      } else {
+        const retryAfter = Math.ceil((1 - bucket.tokens) / this.refillRate);
+        res.setHeader('Retry-After', retryAfter);
+        res.status(429).json({
+          error: 'Too Many Requests',
+          retryAfter
+        });
+      }
+    };
+  }
+}
+
+// Usage: 100 requests max, refill 10/sec per IP
+const limiter = new TokenBucketRateLimiter(100, 10);
+app.use('/api/', limiter.middleware());`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Typical Web Application HLD Architecture",
+      kind: "architecture",
+      caption: "A standard high-level architecture showing clients, CDN, load balancer, application tier, caching, database, and async processing layers.",
+      mermaid: `graph TB
+    subgraph Clients
+        WEB[Web Browser]
+        MOB[Mobile App]
+    end
+
+    CDN[CDN / Edge Cache]
+    LB[Load Balancer]
+
+    subgraph Application Tier
+        API1[API Server 1]
+        API2[API Server 2]
+        API3[API Server N]
+    end
+
+    CACHE[(Redis Cache)]
+
+    subgraph Data Stores
+        PRIMARY[(Primary DB\nPostgreSQL)]
+        REPLICA[(Read Replica)]
+        BLOB[(Blob Storage\nS3)]
+    end
+
+    MQ[Message Queue\nKafka / SQS]
+
+    subgraph Async Workers
+        W1[Worker 1]
+        W2[Worker 2]
+    end
+
+    NOTIFY[Notification\nService]
+
+    WEB --> CDN --> LB
+    MOB --> LB
+    LB --> API1
+    LB --> API2
+    LB --> API3
+    API1 --> CACHE
+    API2 --> CACHE
+    CACHE --> PRIMARY
+    API1 --> PRIMARY
+    API2 --> REPLICA
+    API3 --> BLOB
+    API1 --> MQ
+    MQ --> W1
+    MQ --> W2
+    W1 --> PRIMARY
+    W2 --> NOTIFY`,
+    },
+    {
+      title: "Request Flow Through System Components",
+      kind: "sequence",
+      caption: "Sequence diagram showing a typical read request path with cache-aside pattern, including cache miss and database fallback.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant LB as Load Balancer
+    participant API as API Server
+    participant Cache as Redis Cache
+    participant DB as PostgreSQL
+
+    C->>LB: GET /api/products/123
+    LB->>API: Forward request
+    API->>Cache: GET product:123
+    alt Cache Hit
+        Cache-->>API: Product data (cached)
+        API-->>LB: 200 OK (from cache)
+    else Cache Miss
+        Cache-->>API: null
+        API->>DB: SELECT * FROM products WHERE id=123
+        DB-->>API: Product row
+        API->>Cache: SETEX product:123 300 {data}
+        Cache-->>API: OK
+        API-->>LB: 200 OK (from DB)
+    end
+    LB-->>C: Response`,
+    },
+    {
+      title: "Circuit Breaker State Machine",
+      kind: "state",
+      caption: "State transitions for a circuit breaker protecting downstream service calls.",
+      mermaid: `stateDiagram-v2
+    [*] --> Closed
+    Closed --> Open: Failure count >= threshold
+    Open --> HalfOpen: Recovery timeout elapsed
+    HalfOpen --> Closed: Success count >= threshold
+    HalfOpen --> Open: Any failure
+    Closed --> Closed: Success (reset counter)
+
+    note right of Closed
+        Normal operation.
+        Requests pass through.
+        Track failure count.
+    end note
+
+    note right of Open
+        Requests rejected immediately.
+        Wait for recovery timeout.
+    end note
+
+    note right of HalfOpen
+        Allow limited test requests.
+        Success closes circuit.
+        Failure re-opens it.
+    end note`,
+    },
+  ],
+  comparison: {
+    columns: ["Aspect", "Monolith", "Microservices", "Serverless"],
+    rows: [
+      ["**Deployment**", "Single deployable unit", "Independent per-service deployment", "Per-function deployment"],
+      ["**Scaling**", "Scale entire application vertically/horizontally", "Scale individual services independently", "Auto-scales per invocation, zero to infinity"],
+      ["**Complexity**", "Low initial, grows with codebase size", "High operational overhead from day one", "Low operational, high architectural complexity"],
+      ["**Latency**", "In-process calls (*lowest*)", "Network calls between services (~1-10ms)", "Cold starts possible (~100ms-2s)"],
+      ["**Team Structure**", "Entire team works on one codebase", "Small teams own individual services", "Functions may lack clear ownership"],
+      ["**Data Management**", "Single shared database", "Database per service (*data isolation*)", "Typically stateless, external state stores"],
+      ["**Debugging**", "Simple stack traces, single process", "Requires *distributed tracing* (Jaeger, Zipkin)", "Requires cloud-specific logging and tracing"],
+      ["**Best For**", "Small teams, early-stage products, well-understood domains", "Large orgs, independent scaling needs, polyglot tech", "Event-driven workloads, variable traffic, rapid prototyping"],
+    ],
+  },
+  exercises: [
+    "**Design a URL Shortener**: Define the HLD for a service that creates short URLs and redirects users. Address: *key generation* (base62 vs. MD5), read vs. write ratio (~100:1), **caching strategy** for hot URLs, database choice for `billions of records`, and how to handle `analytics tracking` for click counts.",
+    "**Design a Notification System**: Architect a system that sends **push notifications**, *emails*, and *SMS* at scale. Consider: `message queue` for decoupling, priority levels, template management, **delivery guarantees** (at-least-once), rate limiting per user, and handling *device token management*.",
+    "**Design a File Storage Service** (like Dropbox): Define components for *file upload/download*, **chunked uploads** for large files, `deduplication` using content hashing, metadata storage vs. blob storage separation, **sync conflict resolution**, and sharing/permission management.",
+    "**Design a Real-Time Chat System**: Cover *WebSocket* vs. **SSE** vs. long polling, message storage (hot vs. cold), **presence tracking** (online/offline/typing), group chat fan-out, `end-to-end encryption` considerations, and message delivery status (*sent/delivered/read*).",
+    "**Estimate and Design for Scale**: Given a social media app with *500M DAU*, each user posts 2 times/day and reads 100 posts/day: Calculate **write QPS**, read QPS, daily storage growth, and `cache memory` needed. Then sketch the HLD that handles these numbers.",
+  ],
+  cheatSheet: [
+    "**HLD Process**: Requirements -> Estimation -> Components -> Data Flow -> Data Stores -> Scale -> Failures -> Walkthrough",
+    "**QPS Formula**: `DAU x actions_per_user / 86400` -- multiply by 2-5x for **peak QPS**",
+    "**Cache sizing (80/20 rule)**: Cache *20% of daily unique requests* to serve **80% of traffic**",
+    "**Availability math**: 99.9% = 8.7h/year, 99.99% = 52min/year, 99.999% = 5.2min/year",
+    "**Caching strategies**: *Cache-aside* (app controls), *Write-through* (sync write to both), *Write-behind* (async flush to DB)",
+    "**Database selection**: SQL for *ACID, joins, complex queries*; NoSQL for **high write throughput, flexible schema, key-value access**",
+    "**Scaling patterns**: Vertical (bigger machine) -> Horizontal (more machines) -> Sharding (split data) -> **CQRS** (split read/write)",
+    "**Failure handling**: Redundancy + Health checks + **Circuit breakers** + Retries with `exponential backoff` + Graceful degradation",
+  ],
+  revisionNotes: [
+    "**Always start with requirements**: Clarify *functional* (what) and *non-functional* (how well) requirements before touching architecture. Quantify NFRs with specific numbers.",
+    "**Back-of-envelope estimation** grounds decisions: Calculate *QPS*, storage, bandwidth, and cache needs. These numbers determine whether you need 1 server or 1000.",
+    "**Component design** follows SRP: Each component (API gateway, services, databases, caches, queues) has a *single clear responsibility* with well-defined interfaces.",
+    "**Data flow** is the backbone: Trace how requests move from client through each component. Separate *read paths* (cache-heavy) from **write paths** (consistency-focused).",
+    "**Choose databases by access pattern**, not by popularity: SQL for transactions and complex queries, NoSQL for key-value lookups and horizontal scaling, search engines for full-text search.",
+    "**Design for failure**: Every component *will* fail. Add redundancy, health checks, circuit breakers, retries with backoff, and **graceful degradation** for non-critical features.",
+    "**Caching is critical** for read-heavy systems: Understand *cache-aside* vs. *write-through* vs. *write-behind*, and always have a **cache invalidation strategy** (TTL, event-driven, or versioned).",
+  ],
   interviewQA: [
     {
       q: "How do you approach a high-level system design problem?",

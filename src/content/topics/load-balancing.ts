@@ -174,6 +174,443 @@ Best practice: use both active and passive checks. The health endpoint should re
       back: "Pick two random backends and send the request to the one with fewer connections. Achieves near-optimal distribution with O(1) overhead, useful for very large backend pools.",
     },
   ],
+  deepDive: [
+    `**Load balancing** is one of the most critical components in any distributed system, acting as the *single entry point* that governs how millions of requests reach their destination servers. At its core, a load balancer maintains a **pool of backend servers** and applies a *selection algorithm* to decide which server handles each incoming request. Modern load balancers like **NGINX**, **HAProxy**, and **Envoy** go far beyond simple traffic distribution — they perform \`SSL/TLS termination\`, inject and inspect **HTTP headers**, enforce \`rate limits\`, and even transform requests before forwarding them. The distinction between *stateless* and *stateful* load balancing is fundamental: stateless balancers treat each request independently (ideal for **REST APIs**), while stateful balancers use \`sticky sessions\` or \`session affinity\` to route a client's requests to the same backend (necessary for applications storing **in-memory session data**). Understanding this distinction is key to designing systems that are both *scalable* and *reliable*.`,
+
+    `The **health checking subsystem** within a load balancer deserves deep attention because it directly determines *availability*. An **active health check** sends periodic probes — typically an \`HTTP GET /health\` request — to each backend and tracks consecutive successes and failures against configurable thresholds (e.g., \`3 failures to mark unhealthy\`, \`2 successes to restore\`). A well-designed health endpoint returns **structured JSON** indicating the status of critical dependencies: \`{"status": "healthy", "db": "ok", "cache": "ok"}\`. **Passive health checks** complement this by monitoring *real traffic*: if a backend starts returning \`502\` or \`503\` errors above a threshold, the balancer removes it from rotation *without waiting* for the next active probe. The combination of both strategies — sometimes called **hybrid health checking** — provides the fastest detection of failures while minimizing false positives. In *Kubernetes* environments, this maps to the distinction between \`livenessProbe\` (is the process running?) and \`readinessProbe\` (can it serve traffic?), which the **kube-proxy** or *service mesh* uses to update endpoint lists.`,
+
+    `**Consistent hashing** deserves special attention as it solves one of the hardest problems in distributed load balancing: maintaining *request locality* while allowing the backend pool to scale dynamically. Traditional \`hash(key) % N\` breaks catastrophically when \`N\` changes — nearly all keys remap, causing a **cache stampede**. Consistent hashing arranges backends on a *virtual ring* (typically using **MD5** or \`xxHash\` of the server identifier) and maps each request key to the *next clockwise node*. When a node is added or removed, only \`~1/N\` of keys are redistributed. To address *non-uniform distribution*, each physical node is assigned multiple **virtual nodes** (typically \`100-200\`) spread across the ring. This technique is used extensively in **CDN routing**, *distributed caches* like **Memcached** and **Redis Cluster**, and *service meshes* like **Envoy**. The \`ketama\` algorithm, originally developed at *Last.fm*, remains one of the most widely deployed consistent hashing implementations and is supported natively by \`NGINX\` and \`HAProxy\`.`,
+  ],
+
+  code: [
+    {
+      language: "cpp",
+      caption: "Simple Round-Robin Load Balancer in C++",
+      source: `#include <iostream>
+#include <vector>
+#include <string>
+#include <mutex>
+#include <atomic>
+
+// A minimal **round-robin** load balancer implementation.
+// Each call to \`getNextServer()\` returns the *next* backend in sequence.
+
+class RoundRobinBalancer {
+private:
+    std::vector<std::string> servers_;
+    std::atomic<uint64_t> counter_{0};   // thread-safe rotation index
+    mutable std::mutex mu_;              // guards server list mutations
+    std::vector<bool> healthy_;          // per-server health status
+
+public:
+    // Initialize with a list of backend server addresses
+    explicit RoundRobinBalancer(const std::vector<std::string>& servers)
+        : servers_(servers), healthy_(servers.size(), true) {}
+
+    // Add a new backend to the pool
+    void addServer(const std::string& server) {
+        std::lock_guard<std::mutex> lock(mu_);
+        servers_.push_back(server);
+        healthy_.push_back(true);
+    }
+
+    // Mark a server as **unhealthy** (skip during selection)
+    void markUnhealthy(size_t index) {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (index < healthy_.size()) healthy_[index] = false;
+    }
+
+    // Mark a server as **healthy** again
+    void markHealthy(size_t index) {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (index < healthy_.size()) healthy_[index] = true;
+    }
+
+    // Select the *next healthy server* using round-robin
+    std::string getNextServer() {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (servers_.empty()) return "";
+
+        size_t n = servers_.size();
+        // Try up to \`n\` times to find a healthy server
+        for (size_t i = 0; i < n; ++i) {
+            size_t idx = counter_.fetch_add(1) % n;
+            if (healthy_[idx]) {
+                return servers_[idx];
+            }
+        }
+        return "";  // all servers unhealthy
+    }
+};
+
+int main() {
+    RoundRobinBalancer lb({
+        "backend-1:8080",
+        "backend-2:8080",
+        "backend-3:8080"
+    });
+
+    // Simulate 6 requests — observe the *sequential rotation*
+    for (int i = 0; i < 6; ++i) {
+        std::cout << "Request " << i << " -> " << lb.getNextServer() << "\\n";
+    }
+
+    // Mark backend-2 as unhealthy; it will be **skipped**
+    lb.markUnhealthy(1);
+    std::cout << "\\n--- backend-2 marked unhealthy ---\\n";
+    for (int i = 0; i < 4; ++i) {
+        std::cout << "Request -> " << lb.getNextServer() << "\\n";
+    }
+    return 0;
+}`,
+    },
+    {
+      language: "nginx",
+      caption: "NGINX L7 Load Balancer Configuration",
+      source: `# **NGINX** upstream load balancing configuration
+# Demonstrates *weighted round-robin*, health checks, and L7 routing
+
+# Define the backend server pool
+upstream api_backends {
+    # **Weighted round-robin**: backend-1 gets 3x the traffic
+    server backend-1.internal:8080 weight=3;
+    server backend-2.internal:8080 weight=1;
+    server backend-3.internal:8080 weight=1;
+
+    # \`max_fails\` and \`fail_timeout\` configure **passive health checks**
+    # Mark unhealthy after 3 failures within a 30-second window
+    server backend-4.internal:8080 max_fails=3 fail_timeout=30s;
+
+    # A **backup** server — only receives traffic when all primaries are down
+    server backend-5.internal:8080 backup;
+
+    # Enable \`least_conn\` algorithm instead of default round-robin
+    # least_conn;
+
+    # Enable **consistent hashing** based on client IP
+    # hash $remote_addr consistent;
+
+    # Connection pool: keep *up to 32* idle upstream connections alive
+    keepalive 32;
+}
+
+# Separate upstream for static assets
+upstream static_backends {
+    server cdn-origin-1.internal:8080;
+    server cdn-origin-2.internal:8080;
+    least_conn;   # Use *least connections* for static content
+}
+
+server {
+    listen 443 ssl http2;
+    server_name api.example.com;
+
+    # **SSL/TLS termination** at the load balancer
+    ssl_certificate     /etc/nginx/certs/api.example.com.crt;
+    ssl_certificate_key /etc/nginx/certs/api.example.com.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    # L7 **content-based routing**: /api/* goes to API backends
+    location /api/ {
+        proxy_pass http://api_backends;
+
+        # Forward *client information* to backends via headers
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # **Timeout** configuration
+        proxy_connect_timeout 5s;
+        proxy_read_timeout    60s;
+        proxy_send_timeout    30s;
+
+        # **Retry** on upstream failure — try next server
+        proxy_next_upstream error timeout http_502 http_503;
+        proxy_next_upstream_tries 2;
+    }
+
+    # Static assets routed to a *separate pool*
+    location /static/ {
+        proxy_pass http://static_backends;
+        proxy_cache_valid 200 1h;    # Cache 200 responses for 1 hour
+        add_header X-Cache-Status $upstream_cache_status;
+    }
+
+    # **Health check** endpoint (for external monitoring)
+    location /health {
+        access_log off;
+        return 200 '{"status":"ok"}';
+        add_header Content-Type application/json;
+    }
+
+    # **Rate limiting**: 10 requests/second per client IP
+    location /api/expensive/ {
+        limit_req zone=api_limit burst=20 nodelay;
+        proxy_pass http://api_backends;
+    }
+}
+
+# Rate limit zone definition
+limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;`,
+    },
+    {
+      language: "cpp",
+      caption: "Consistent Hash Ring Implementation in C++",
+      source: `#include <iostream>
+#include <map>
+#include <string>
+#include <functional>
+
+// **Consistent Hash Ring** — maps keys to servers with minimal
+// redistribution when the server pool changes.
+
+class ConsistentHashRing {
+private:
+    // \`ring_\` maps hash values to server names (sorted by hash)
+    std::map<size_t, std::string> ring_;
+    int virtualNodes_;       // number of *virtual nodes* per server
+    std::hash<std::string> hasher_;
+
+public:
+    // More **virtual nodes** = better distribution (typically 100-200)
+    explicit ConsistentHashRing(int virtualNodes = 150)
+        : virtualNodes_(virtualNodes) {}
+
+    // Add a server with \`virtualNodes_\` points on the ring
+    void addServer(const std::string& server) {
+        for (int i = 0; i < virtualNodes_; ++i) {
+            std::string virtualKey = server + "#" + std::to_string(i);
+            size_t hash = hasher_(virtualKey);
+            ring_[hash] = server;
+        }
+    }
+
+    // Remove a server and all its *virtual node* entries
+    void removeServer(const std::string& server) {
+        for (int i = 0; i < virtualNodes_; ++i) {
+            std::string virtualKey = server + "#" + std::to_string(i);
+            size_t hash = hasher_(virtualKey);
+            ring_.erase(hash);
+        }
+    }
+
+    // Find the server responsible for a given **key**
+    // Walks clockwise on the ring to the next node
+    std::string getServer(const std::string& key) const {
+        if (ring_.empty()) return "";
+        size_t hash = hasher_(key);
+        // \`upper_bound\` finds the first node *clockwise* from the key's hash
+        auto it = ring_.upper_bound(hash);
+        if (it == ring_.end()) {
+            it = ring_.begin();  // wrap around the ring
+        }
+        return it->second;
+    }
+};
+
+int main() {
+    ConsistentHashRing ring(150);
+    ring.addServer("cache-A");
+    ring.addServer("cache-B");
+    ring.addServer("cache-C");
+
+    // Map several keys — same key *always* hits the same server
+    for (const auto& key : {"user:1001", "user:1002", "session:xyz", "order:500"}) {
+        std::cout << key << " -> " << ring.getServer(key) << "\\n";
+    }
+
+    // Remove cache-B: only its keys **redistribute**
+    std::cout << "\\n--- removing cache-B ---\\n";
+    ring.removeServer("cache-B");
+    for (const auto& key : {"user:1001", "user:1002", "session:xyz", "order:500"}) {
+        std::cout << key << " -> " << ring.getServer(key) << "\\n";
+    }
+    return 0;
+}`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "L7 Load Balancer Architecture",
+      kind: "architecture",
+      caption: "Request flow through an L7 load balancer with SSL termination, health checks, and content-based routing to multiple backend pools.",
+      mermaid: `graph TD
+    Client["**Client** (Browser/App)"]
+    DNS["**DNS** (GSLB)"]
+    LB["**L7 Load Balancer**<br/>SSL Termination<br/>Rate Limiting"]
+    HC["**Health Checker**<br/>Active + Passive"]
+
+    subgraph API_Pool["API Backend Pool"]
+        API1["api-server-1:8080"]
+        API2["api-server-2:8080"]
+        API3["api-server-3:8080"]
+    end
+
+    subgraph Static_Pool["Static Backend Pool"]
+        S1["cdn-origin-1:8080"]
+        S2["cdn-origin-2:8080"]
+    end
+
+    Client -->|"HTTPS request"| DNS
+    DNS -->|"Nearest region IP"| LB
+    LB -->|"/api/* routes"| API_Pool
+    LB -->|"/static/* routes"| Static_Pool
+    HC -.->|"GET /health every 5s"| API1
+    HC -.->|"GET /health every 5s"| API2
+    HC -.->|"GET /health every 5s"| API3
+    HC -.->|"probe"| S1
+    HC -.->|"probe"| S2
+    LB --- HC`,
+    },
+    {
+      title: "Consistent Hashing Ring",
+      kind: "flow",
+      caption: "Visualization of how keys are mapped to servers on a consistent hash ring with virtual nodes. When a server is removed, only its keys redistribute to the next clockwise node.",
+      mermaid: `graph LR
+    subgraph HashRing["**Consistent Hash Ring**"]
+        direction LR
+        VN_A1["A#1"]
+        VN_B1["B#1"]
+        VN_C1["C#1"]
+        VN_A2["A#2"]
+        VN_B2["B#2"]
+        VN_C2["C#2"]
+    end
+
+    K1["Key: user:1001"]
+    K2["Key: session:xyz"]
+    K3["Key: order:500"]
+
+    K1 -->|"hash → clockwise"| VN_A1
+    K2 -->|"hash → clockwise"| VN_C1
+    K3 -->|"hash → clockwise"| VN_B2
+
+    VN_A1 --> ServerA["**Server A**"]
+    VN_A2 --> ServerA
+    VN_B1 --> ServerB["**Server B**"]
+    VN_B2 --> ServerB
+    VN_C1 --> ServerC["**Server C**"]
+    VN_C2 --> ServerC`,
+    },
+    {
+      title: "Health Check State Machine",
+      kind: "state",
+      caption: "Backend server health states and transitions based on active/passive health check results.",
+      mermaid: `stateDiagram-v2
+    [*] --> Healthy
+    Healthy --> Suspect : 1 failed probe
+    Suspect --> Healthy : successful probe
+    Suspect --> Unhealthy : threshold failures reached
+    Unhealthy --> Recovery : 1 successful probe
+    Recovery --> Healthy : threshold successes reached
+    Recovery --> Unhealthy : probe fails again
+    Unhealthy --> Draining : graceful shutdown signal
+    Healthy --> Draining : graceful shutdown signal
+    Draining --> Removed : all connections closed
+    Removed --> [*]`,
+    },
+  ],
+
+  comparison: {
+    columns: [
+      "Aspect",
+      "L4 (Transport Layer)",
+      "L7 (Application Layer)",
+    ],
+    rows: [
+      [
+        "**OSI Layer**",
+        "Layer 4 — *TCP/UDP*",
+        "Layer 7 — *HTTP/HTTPS*",
+      ],
+      [
+        "**Routing Criteria**",
+        "Source/destination `IP` and `port`",
+        "URL path, headers, cookies, `query params`",
+      ],
+      [
+        "**SSL Termination**",
+        "No — passes encrypted traffic *as-is* (passthrough)",
+        "Yes — decrypts at LB, forwards *plain HTTP* to backends",
+      ],
+      [
+        "**Performance**",
+        "*Very high* throughput, minimal latency overhead",
+        "Higher overhead due to **protocol parsing**",
+      ],
+      [
+        "**Content Routing**",
+        "Not possible — cannot inspect *payload*",
+        "Full support: path-based, header-based, **canary splits**",
+      ],
+      [
+        "**Health Checks**",
+        "TCP connect or `ping` only",
+        "HTTP endpoint checks with **status code** validation",
+      ],
+      [
+        "**Session Affinity**",
+        "IP hash only (*source IP* based)",
+        "Cookie-based, header-based, or `URL parameter` based",
+      ],
+      [
+        "**Protocol Support**",
+        "*Any* TCP/UDP protocol (databases, gRPC, DNS)",
+        "HTTP, HTTPS, **WebSocket**, gRPC (with HTTP/2)",
+      ],
+      [
+        "**Use Cases**",
+        "Database LB, *high-throughput* passthrough, non-HTTP protocols",
+        "Web apps, **API gateways**, microservice routing, SSL offload",
+      ],
+      [
+        "**Examples**",
+        "AWS *NLB*, HAProxy (TCP), Linux `IPVS`",
+        "AWS *ALB*, **NGINX**, HAProxy (HTTP), `Envoy`, Traefik",
+      ],
+    ],
+  },
+
+  exercises: [
+    `**Design a Weighted Round-Robin Balancer**: Extend the C++ round-robin implementation to support *weights*. Each server should have a configurable \`weight\` (e.g., server A with weight 3 should receive 3x the requests of server B with weight 1). Implement using either a **pre-computed schedule** (flatten weights into a rotation list) or a **current-weight tracking** approach (as used by NGINX). Test with heterogeneous weights and verify the distribution matches the configured ratios.`,
+
+    `**Implement Passive Health Checking**: Build a wrapper around the load balancer that tracks the *last N responses* from each backend. If a backend's **error rate** (HTTP 5xx responses) exceeds a configurable threshold (e.g., \`50%\` over the last \`10 requests\`), automatically mark it as unhealthy. Implement a *recovery mechanism* that periodically sends a single probe request to unhealthy backends and restores them after \`3 consecutive successes\`. Consider thread safety for concurrent request tracking.`,
+
+    `**NGINX Configuration Lab**: Set up an NGINX load balancer configuration that routes \`/api/v1/*\` to one upstream pool using *least connections*, \`/api/v2/*\` to a different pool using **consistent hashing** on the \`X-User-ID\` header, and \`/static/*\` to a third pool with **caching** enabled. Configure \`proxy_next_upstream\` to retry failed requests on the next backend. Add rate limiting of \`100 req/s\` per client IP on the \`/api/\` paths. Test with \`curl\` and verify correct routing behavior.`,
+
+    `**Simulate a Cache Stampede**: Write a program that demonstrates the difference between \`hash(key) % N\` and **consistent hashing** when a node is added or removed. Create \`10,000\` keys distributed across \`5\` nodes. Remove one node and measure what percentage of keys are *remapped* with each approach. With modular hashing, approximately \`80%\` of keys should remap; with consistent hashing, approximately \`20%\`. Visualize the redistribution by printing a histogram of keys per server before and after the change.`,
+
+    `**Blue-Green Deployment Simulation**: Using the NGINX configuration as a base, implement a **blue-green deployment** strategy. Create two upstream pools (\`blue\` and \`green\`). Write a script that gradually shifts traffic from blue to green in \`10%\` increments using NGINX's \`split_clients\` directive or \`weight\` adjustments. Add a *rollback* mechanism that immediately shifts all traffic back to blue if the green pool's error rate exceeds \`5%\`. Log the traffic split at each step and verify with request counting.`,
+  ],
+
+  cheatSheet: [
+    `**L4 vs L7 Quick Rule**: Use *L4* for non-HTTP protocols and raw throughput; use **L7** for HTTP routing, \`SSL termination\`, header inspection, and content-based decisions.`,
+
+    `**Algorithm Selection**: \`Round-robin\` for homogeneous stateless services → \`Least connections\` when request durations vary → **Consistent hashing** for cache layers → \`Weighted\` variants when backend capacities differ.`,
+
+    `**Health Check Formula**: Configure \`interval=5s\`, \`unhealthy_threshold=3\`, \`healthy_threshold=2\`. Time to detect failure: **interval x unhealthy_threshold** = 15 seconds. Always combine *active* + *passive* checks.`,
+
+    `**Sticky Sessions Warning**: Avoid \`cookie-based\` session affinity unless absolutely necessary — it *breaks horizontal scaling* and creates **hotspots**. Prefer externalizing session state to *Redis* or a database.`,
+
+    `**Connection Draining Timeout**: Set drain timeout to your **longest expected request duration** plus a buffer (e.g., if max request time is \`60s\`, set drain to \`90s\`). Too short = dropped requests; too long = slow deployments.`,
+
+    `**NGINX Key Directives**: \`upstream { server ... weight=N; }\` for pools, \`proxy_next_upstream error timeout http_502\` for retries, \`keepalive 32\` for connection reuse, \`limit_req_zone\` for rate limiting, \`hash $key consistent\` for consistent hashing.`,
+  ],
+
+  revisionNotes: [
+    `**Layer distinction is fundamental**: L4 operates on *TCP/UDP tuples* (IP + port) with near-zero overhead; L7 parses **HTTP semantics** (path, headers, cookies) enabling smart routing but at higher CPU cost. Know when each is appropriate — this is the most common interview question on load balancing.`,
+
+    `**Consistent hashing solves the N-change problem**: Standard \`hash % N\` remaps *almost all keys* when N changes. Consistent hashing limits redistribution to \`~1/N\` keys. **Virtual nodes** (100-200 per server) fix the *non-uniform distribution* problem. This concept applies beyond load balancing to distributed caches, sharding, and partition assignment.`,
+
+    `**Health checks have two dimensions**: *Active* checks (LB probes backends) catch total failures; *passive* checks (monitor real traffic) catch partial degradation. A robust system uses **both**. Remember the Kubernetes mapping: \`livenessProbe\` = restart the pod, \`readinessProbe\` = remove from service endpoints.`,
+
+    `**The load balancer itself must be HA**: A single LB is a **single point of failure**. Solutions include *active-passive failover* (VRRP/keepalived), cloud-managed LBs (inherently HA), and **anycast** DNS routing. In production, always plan for LB redundancy.`,
+
+    `**Operational settings matter**: Key tuning parameters are \`connection limits\` per backend (prevent overwhelming), \`timeouts\` (connect, read, idle — too short causes drops, too long wastes resources), \`retry policy\` (which errors trigger retry, max attempts), and \`drain timeout\` (must exceed longest request duration). These settings are where *theory meets production reliability*.`,
+  ],
+
   glossary: [
     {
       term: "L4 Load Balancer",

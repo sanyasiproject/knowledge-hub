@@ -22,96 +22,130 @@ export const combinatorics: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Core combinatorial functions: C(n,r), derangements, Catalan, stars-and-bars",
-      source: `from math import comb, factorial
-from functools import lru_cache
+      source: `#include <iostream>
+#include <vector>
+#include <cstdint>
 
-def derangements(n: int) -> int:
-    """Count derangements (permutations with no fixed points) via inclusion-exclusion.
-    D(n) = n! * sum_{i=0}^{n} (-1)^i / i!  =  (n-1)*(D(n-1) + D(n-2))
-    """
-    if n == 0: return 1
-    if n == 1: return 0
-    dp = [1, 0]  # D(0)=1, D(1)=0
-    for i in range(2, n + 1):
-        dp.append((i - 1) * (dp[-1] + dp[-2]))
-    return dp[n]
+// Binomial coefficient C(n, r)
+long long comb(int n, int r) {
+    if (r < 0 || r > n) return 0;
+    if (r > n - r) r = n - r;  // optimisation: C(n,r) == C(n, n-r)
+    long long result = 1;
+    for (int i = 0; i < r; ++i) {
+        result = result * (n - i) / (i + 1);
+    }
+    return result;
+}
 
-@lru_cache(maxsize=None)
-def catalan(n: int) -> int:
-    """Catalan number: C_n = C(2n, n) / (n + 1)."""
-    return comb(2 * n, n) // (n + 1)
+long long factorial(int n) {
+    long long f = 1;
+    for (int i = 2; i <= n; ++i) f *= i;
+    return f;
+}
 
-def stars_and_bars(n_bins: int, total: int) -> int:
-    """Ways to place 'total' identical items into 'n_bins' distinct bins.
-    Equivalent to non-negative integer solutions of x1+...+x_n = total.
-    """
-    return comb(total + n_bins - 1, total)
+// Count derangements (permutations with no fixed points) via DP.
+// D(n) = (n-1)*(D(n-1) + D(n-2)),  D(0)=1, D(1)=0
+long long derangements(int n) {
+    if (n == 0) return 1;
+    if (n == 1) return 0;
+    long long prev2 = 1, prev1 = 0;
+    for (int i = 2; i <= n; ++i) {
+        long long cur = (i - 1) * (prev1 + prev2);
+        prev2 = prev1;
+        prev1 = cur;
+    }
+    return prev1;
+}
 
-def multinomial(n: int, groups: list[int]) -> int:
-    """Multinomial coefficient: n! / (g1! * g2! * ... * gk!)."""
-    result = factorial(n)
-    for g in groups:
-        result //= factorial(g)
-    return result
+// Catalan number: C_n = C(2n, n) / (n + 1)
+long long catalan(int n) {
+    return comb(2 * n, n) / (n + 1);
+}
 
-# Examples
-print(f"C(10,3) = {comb(10,3)}")              # 120
-print(f"D(5) = {derangements(5)}")              # 44
-print(f"Catalan(5) = {catalan(5)}")             # 42
-print(f"Stars&bars(3,7) = {stars_and_bars(3,7)}")  # 36 (x+y+z=7)
-print(f"Multinomial(7,[2,3,2]) = {multinomial(7,[2,3,2])}")  # 210`,
+// Stars-and-bars: ways to place 'total' identical items into 'n_bins' bins.
+// Equivalent to non-negative integer solutions of x1+...+x_n = total.
+long long stars_and_bars(int n_bins, int total) {
+    return comb(total + n_bins - 1, total);
+}
+
+// Multinomial coefficient: n! / (g1! * g2! * ... * gk!)
+long long multinomial(int n, const std::vector<int>& groups) {
+    long long result = factorial(n);
+    for (int g : groups) result /= factorial(g);
+    return result;
+}
+
+int main() {
+    std::cout << "C(10,3) = "           << comb(10, 3)                      << "\\n";  // 120
+    std::cout << "D(5) = "              << derangements(5)                   << "\\n";  // 44
+    std::cout << "Catalan(5) = "        << catalan(5)                        << "\\n";  // 42
+    std::cout << "Stars&bars(3,7) = "   << stars_and_bars(3, 7)             << "\\n";  // 36
+    std::cout << "Multinomial(7,[2,3,2]) = "
+              << multinomial(7, {2, 3, 2}) << "\\n";  // 210
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Solving linear recurrences with matrix exponentiation",
-      source: `def matrix_power(M: list[list[int]], n: int, mod: int = 10**9+7) -> list[list[int]]:
-    """Compute M^n mod 'mod' using fast exponentiation. O(k^3 log n)."""
-    k = len(M)
-    # Initialize result as identity matrix
-    result = [[1 if i == j else 0 for j in range(k)] for i in range(k)]
+      source: `#include <iostream>
+#include <vector>
 
-    while n > 0:
-        if n % 2 == 1:
-            result = mat_mult(result, M, mod)
-        M = mat_mult(M, M, mod)
-        n //= 2
-    return result
+using Matrix = std::vector<std::vector<long long>>;
+constexpr long long MOD = 1'000'000'007;
 
-def mat_mult(A, B, mod):
-    k = len(A)
-    C = [[0]*k for _ in range(k)]
-    for i in range(k):
-        for j in range(k):
-            for l in range(k):
-                C[i][j] = (C[i][j] + A[i][l] * B[l][j]) % mod
-    return C
+Matrix mat_mult(const Matrix& A, const Matrix& B) {
+    int k = static_cast<int>(A.size());
+    Matrix C(k, std::vector<long long>(k, 0));
+    for (int i = 0; i < k; ++i)
+        for (int j = 0; j < k; ++j)
+            for (int l = 0; l < k; ++l)
+                C[i][j] = (C[i][j] + A[i][l] * B[l][j]) % MOD;
+    return C;
+}
 
-def fibonacci(n: int) -> int:
-    """Compute F(n) in O(log n) via matrix exponentiation.
-    [F(n+1), F(n)] = [[1,1],[1,0]]^n * [F(1), F(0)]
-    """
-    if n <= 1:
-        return n
-    M = [[1, 1], [1, 0]]
-    result = matrix_power(M, n - 1)
-    return result[0][0]  # F(n)
+// Compute M^n mod MOD using fast exponentiation. O(k^3 log n).
+Matrix matrix_power(Matrix M, long long n) {
+    int k = static_cast<int>(M.size());
+    // Identity matrix
+    Matrix result(k, std::vector<long long>(k, 0));
+    for (int i = 0; i < k; ++i) result[i][i] = 1;
 
-def solve_recurrence(n: int) -> int:
-    """Example: a(n) = 2*a(n-1) + 3*a(n-2), a(0)=1, a(1)=2.
-    Transformation matrix: [[2, 3], [1, 0]]
-    """
-    if n == 0: return 1
-    if n == 1: return 2
-    M = [[2, 3], [1, 0]]
-    result = matrix_power(M, n - 1)
-    # result * [a(1), a(0)]^T
-    return (result[0][0] * 2 + result[0][1] * 1) % (10**9+7)
+    while (n > 0) {
+        if (n & 1) result = mat_mult(result, M);
+        M = mat_mult(M, M);
+        n >>= 1;
+    }
+    return result;
+}
 
-print(f"F(10) = {fibonacci(10)}")             # 55
-print(f"F(50) = {fibonacci(50)}")             # 12586269025
-print(f"a(5) = {solve_recurrence(5)}")        # a(5) for 2a+3b recurrence`,
+// Compute F(n) in O(log n) via matrix exponentiation.
+// [F(n+1), F(n)] = [[1,1],[1,0]]^n * [F(1), F(0)]
+long long fibonacci(long long n) {
+    if (n <= 1) return n;
+    Matrix M = {{1, 1}, {1, 0}};
+    Matrix res = matrix_power(M, n - 1);
+    return res[0][0];  // F(n)
+}
+
+// Example: a(n) = 2*a(n-1) + 3*a(n-2), a(0)=1, a(1)=2.
+// Transformation matrix: [[2, 3], [1, 0]]
+long long solve_recurrence(long long n) {
+    if (n == 0) return 1;
+    if (n == 1) return 2;
+    Matrix M = {{2, 3}, {1, 0}};
+    Matrix res = matrix_power(M, n - 1);
+    return (res[0][0] * 2 + res[0][1] * 1) % MOD;
+}
+
+int main() {
+    std::cout << "F(10) = " << fibonacci(10)         << "\\n";  // 55
+    std::cout << "F(50) = " << fibonacci(50)         << "\\n";  // 12586269025
+    std::cout << "a(5) = "  << solve_recurrence(5)   << "\\n";  // a(5) for 2a+3b recurrence
+    return 0;
+}`,
     },
   ],
   diagrams: [

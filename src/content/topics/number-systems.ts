@@ -22,82 +22,165 @@ export const numberSystems: TopicContent = {
   ],
   code: [
     {
-      language: "python",
-      caption: "Base conversion and two's complement utilities",
-      source: `def to_base(n: int, base: int) -> str:
-    """Convert non-negative integer n to given base (2-16)."""
-    if n == 0:
-        return "0"
-    digits = "0123456789ABCDEF"
-    result = []
-    while n > 0:
-        result.append(digits[n % base])
-        n //= base
-    return "".join(reversed(result))
+      language: "cpp",
+      caption: "Base conversion and two's complement utilities in C++",
+      source: `// Base conversion and two's complement utilities.
 
-def twos_complement(n: int, bits: int) -> int:
-    """Return two's complement representation of signed int n in given bit width."""
-    if n >= 0:
-        return n & ((1 << bits) - 1)
-    return (1 << bits) + n
+#include <iostream>
+#include <string>
+#include <algorithm>
+#include <cstdint>
+#include <bitset>
 
-def from_twos_complement(val: int, bits: int) -> int:
-    """Interpret unsigned val as a two's complement signed integer."""
-    if val & (1 << (bits - 1)):  # MSB is set -> negative
-        return val - (1 << bits)
-    return val
+// Convert non-negative integer n to given base (2-16)
+std::string to_base(unsigned long n, int base) {
+    if (n == 0) return "0";
+    const char digits[] = "0123456789ABCDEF";
+    std::string result;
+    while (n > 0) {
+        result.push_back(digits[n % base]);
+        n /= base;
+    }
+    std::reverse(result.begin(), result.end());
+    return result;
+}
 
-# Examples
-print(to_base(255, 16))               # "FF"
-print(to_base(255, 2))                # "11111111"
-print(to_base(255, 8))                # "377"
-print(bin(twos_complement(-1, 8)))     # 0b11111111
-print(from_twos_complement(0b11111110, 8))  # -2`,
+// Return two's complement representation of signed int n in given bit width
+uint32_t twos_complement(int32_t n, int bits) {
+    uint32_t mask = (1u << bits) - 1;
+    if (n >= 0) return static_cast<uint32_t>(n) & mask;
+    return (1u << bits) + static_cast<uint32_t>(n);
+}
+
+// Interpret unsigned val as a two's complement signed integer
+int32_t from_twos_complement(uint32_t val, int bits) {
+    // Check if MSB (sign bit) is set
+    if (val & (1u << (bits - 1))) {
+        return static_cast<int32_t>(val) - (1 << bits);
+    }
+    return static_cast<int32_t>(val);
+}
+
+int main() {
+    // Base conversions
+    std::cout << "255 in hex: " << to_base(255, 16) << std::endl;   // "FF"
+    std::cout << "255 in bin: " << to_base(255, 2)  << std::endl;   // "11111111"
+    std::cout << "255 in oct: " << to_base(255, 8)  << std::endl;   // "377"
+
+    // Two's complement
+    uint32_t tc = twos_complement(-1, 8);
+    std::cout << "-1 in 8-bit two's complement: "
+              << std::bitset<8>(tc) << std::endl;  // 11111111
+
+    int32_t val = from_twos_complement(0b11111110, 8);
+    std::cout << "0b11111110 as signed 8-bit: " << val << std::endl;  // -2
+
+    // Additional: demonstrate negation via flip-and-add-1
+    uint8_t pos = 5;           // 00000101
+    uint8_t neg = ~pos + 1;    // 11111011 = -5
+    std::cout << "Negate 5: " << std::bitset<8>(neg)
+              << " = " << from_twos_complement(neg, 8) << std::endl;
+
+    return 0;
+}`,
     },
     {
-      language: "python",
-      caption: "IEEE 754 float dissection and common bitwise tricks",
-      source: `import struct
+      language: "cpp",
+      caption: "IEEE 754 float dissection and common bitwise tricks in C++",
+      source: `// Decompose IEEE 754 doubles and demonstrate common bitwise tricks.
 
-def float_to_parts(f: float) -> dict:
-    """Decompose a 64-bit IEEE 754 double into sign, exponent, mantissa."""
-    raw = struct.pack(">d", f)
-    bits = int.from_bytes(raw, "big")
-    sign = (bits >> 63) & 1
-    exponent = (bits >> 52) & 0x7FF
-    mantissa = bits & ((1 << 52) - 1)
-    return {
-        "sign": sign,
-        "exponent_biased": exponent,
-        "exponent_actual": exponent - 1023 if exponent != 0 else "denorm/zero",
-        "mantissa_hex": hex(mantissa),
-        "binary": bin(bits),
+#include <iostream>
+#include <cstdint>
+#include <cstring>
+#include <bitset>
+#include <iomanip>
+
+// Decompose a 64-bit IEEE 754 double into sign, exponent, mantissa
+struct FloatParts {
+    int sign;
+    int exponent_biased;
+    int exponent_actual;  // -1 if denorm/zero
+    uint64_t mantissa;
+    bool is_denorm_or_zero;
+};
+
+FloatParts float_to_parts(double f) {
+    uint64_t bits;
+    std::memcpy(&bits, &f, sizeof(bits));
+
+    FloatParts parts;
+    parts.sign = (bits >> 63) & 1;
+    parts.exponent_biased = (bits >> 52) & 0x7FF;
+    parts.mantissa = bits & ((1ULL << 52) - 1);
+    parts.is_denorm_or_zero = (parts.exponent_biased == 0);
+    parts.exponent_actual = parts.is_denorm_or_zero ? -1
+                            : parts.exponent_biased - 1023;
+    return parts;
+}
+
+// Bitwise tricks
+uint32_t lowest_set_bit(uint32_t x) {
+    // Isolate the lowest set bit: 0b1010 -> 0b0010
+    return x & (-x);
+}
+
+uint32_t clear_lowest_set_bit(uint32_t x) {
+    // Clear the lowest set bit: 0b1010 -> 0b1000
+    return x & (x - 1);
+}
+
+bool is_power_of_two(uint32_t x) {
+    // Check if x is a power of 2 (x > 0)
+    return x > 0 && (x & (x - 1)) == 0;
+}
+
+int count_set_bits(uint32_t x) {
+    // Brian Kernighan's algorithm: O(number of set bits)
+    int count = 0;
+    while (x) {
+        x &= x - 1;
+        ++count;
     }
+    return count;
+}
 
-# Common bitwise tricks
-def lowest_set_bit(x: int) -> int:
-    """Isolate the lowest set bit: 0b1010 -> 0b0010."""
-    return x & (-x)
+int main() {
+    // Dissect 0.1 as IEEE 754 double
+    auto parts = float_to_parts(0.1);
+    std::cout << "float_to_parts(0.1):" << std::endl;
+    std::cout << "  sign: " << parts.sign << std::endl;
+    std::cout << "  exponent (biased): " << parts.exponent_biased << std::endl;
+    std::cout << "  exponent (actual): "
+              << (parts.is_denorm_or_zero ? "denorm/zero"
+                  : std::to_string(parts.exponent_actual)) << std::endl;
+    std::cout << "  mantissa (hex): 0x" << std::hex << parts.mantissa
+              << std::dec << std::endl;
 
-def clear_lowest_set_bit(x: int) -> int:
-    """Clear the lowest set bit: 0b1010 -> 0b1000."""
-    return x & (x - 1)
+    // Bitwise tricks
+    std::cout << "\\nlowest set bit of 12 (0b"
+              << std::bitset<8>(12) << "): "
+              << lowest_set_bit(12) << std::endl;  // 4
 
-def is_power_of_two(x: int) -> bool:
-    """Check if x is a power of 2 (x > 0)."""
-    return x > 0 and (x & (x - 1)) == 0
+    std::cout << "clear lowest set bit of 12: "
+              << clear_lowest_set_bit(12) << " (0b"
+              << std::bitset<8>(clear_lowest_set_bit(12)) << ")" << std::endl;  // 8
 
-def count_set_bits(x: int) -> int:
-    """Brian Kernighan's algorithm: O(number of set bits)."""
-    count = 0
-    while x:
-        x &= x - 1
-        count += 1
-    return count
+    std::cout << "is_power_of_two(16): "
+              << (is_power_of_two(16) ? "true" : "false") << std::endl;
+    std::cout << "is_power_of_two(15): "
+              << (is_power_of_two(15) ? "true" : "false") << std::endl;
 
-print(float_to_parts(0.1))
-print(f"lowest set bit of 12: {lowest_set_bit(12)}")  # 4
-print(f"popcount(255): {count_set_bits(255)}")         # 8`,
+    std::cout << "popcount(255): "
+              << count_set_bits(255) << std::endl;  // 8
+
+    // Demonstrate 0.1 + 0.2 != 0.3
+    std::cout << "\\n0.1 + 0.2 == 0.3? "
+              << ((0.1 + 0.2 == 0.3) ? "true" : "false") << std::endl;
+    std::cout << std::setprecision(20) << "0.1 + 0.2 = "
+              << (0.1 + 0.2) << std::endl;
+
+    return 0;
+}`,
     },
   ],
   diagrams: [

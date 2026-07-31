@@ -100,95 +100,94 @@ String toRoman(int number) {
 }`,
     },
     {
-      language: "python",
-      caption: "TDD for a stack data structure with pytest",
-      source: `# test_stack.py - Tests written first in TDD order
+      language: "cpp",
+      caption: "TDD for a stack data structure with assertions in C++",
+      source: `// test_stack.cpp - Tests written first in TDD order, with implementation below
 
-import pytest
-from stack import Stack
+#include <cassert>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
-class TestStack:
-    # RED-GREEN cycle 1: Stack starts empty
-    def test_new_stack_is_empty(self):
-        stack = Stack()
-        assert stack.is_empty() is True
+// stack.h - Implementation driven by tests (final version after all cycles)
+template <typename T>
+class Stack {
+    std::vector<T> items_;
+public:
+    bool is_empty() const { return items_.empty(); }
 
-    # RED-GREEN cycle 2: Push makes it non-empty
-    def test_push_makes_stack_non_empty(self):
-        stack = Stack()
-        stack.push(42)
-        assert stack.is_empty() is False
+    void push(const T& item) { items_.push_back(item); }
 
-    # RED-GREEN cycle 3: Pop returns pushed value
-    def test_pop_returns_last_pushed_value(self):
-        stack = Stack()
-        stack.push(42)
-        assert stack.pop() == 42
+    T pop() {
+        if (is_empty()) throw std::out_of_range("pop from empty stack");
+        T top = std::move(items_.back());
+        items_.pop_back();
+        return top;
+    }
 
-    # RED-GREEN cycle 4: Pop removes element
-    def test_pop_removes_element(self):
-        stack = Stack()
-        stack.push(42)
-        stack.pop()
-        assert stack.is_empty() is True
+    const T& peek() const {
+        if (is_empty()) throw std::out_of_range("peek at empty stack");
+        return items_.back();
+    }
 
-    # RED-GREEN cycle 5: LIFO order
-    def test_pop_returns_in_lifo_order(self):
-        stack = Stack()
-        stack.push(1)
-        stack.push(2)
-        stack.push(3)
-        assert stack.pop() == 3
-        assert stack.pop() == 2
-        assert stack.pop() == 1
+    size_t size() const { return items_.size(); }
+};
 
-    # RED-GREEN cycle 6: Error on empty pop
-    def test_pop_empty_stack_raises_error(self):
-        stack = Stack()
-        with pytest.raises(IndexError, match="pop from empty stack"):
-            stack.pop()
+// Test helpers
+void expect_throws(auto fn, const std::string& msg) {
+    try { fn(); assert(false && "Expected exception"); }
+    catch (const std::out_of_range& e) { assert(std::string(e.what()) == msg); }
+}
 
-    # RED-GREEN cycle 7: Peek without removing
-    def test_peek_returns_top_without_removing(self):
-        stack = Stack()
-        stack.push(42)
-        assert stack.peek() == 42
-        assert stack.is_empty() is False
+int main() {
+    // RED-GREEN cycle 1: Stack starts empty
+    { Stack<int> s; assert(s.is_empty() == true); }
 
-    # RED-GREEN cycle 8: Size tracking
-    def test_size_reflects_push_and_pop(self):
-        stack = Stack()
-        assert stack.size() == 0
-        stack.push(1)
-        stack.push(2)
-        assert stack.size() == 2
-        stack.pop()
-        assert stack.size() == 1
+    // RED-GREEN cycle 2: Push makes it non-empty
+    { Stack<int> s; s.push(42); assert(s.is_empty() == false); }
 
+    // RED-GREEN cycle 3: Pop returns pushed value
+    { Stack<int> s; s.push(42); assert(s.pop() == 42); }
 
-# stack.py - Implementation driven by tests (final version after all cycles)
-class Stack:
-    def __init__(self):
-        self._items = []
+    // RED-GREEN cycle 4: Pop removes element
+    { Stack<int> s; s.push(42); s.pop(); assert(s.is_empty() == true); }
 
-    def is_empty(self) -> bool:
-        return len(self._items) == 0
+    // RED-GREEN cycle 5: LIFO order
+    {
+        Stack<int> s;
+        s.push(1); s.push(2); s.push(3);
+        assert(s.pop() == 3);
+        assert(s.pop() == 2);
+        assert(s.pop() == 1);
+    }
 
-    def push(self, item) -> None:
-        self._items.append(item)
+    // RED-GREEN cycle 6: Error on empty pop
+    {
+        Stack<int> s;
+        expect_throws([&]{ s.pop(); }, "pop from empty stack");
+    }
 
-    def pop(self):
-        if self.is_empty():
-            raise IndexError("pop from empty stack")
-        return self._items.pop()
+    // RED-GREEN cycle 7: Peek without removing
+    {
+        Stack<int> s;
+        s.push(42);
+        assert(s.peek() == 42);
+        assert(s.is_empty() == false);
+    }
 
-    def peek(self):
-        if self.is_empty():
-            raise IndexError("peek at empty stack")
-        return self._items[-1]
+    // RED-GREEN cycle 8: Size tracking
+    {
+        Stack<int> s;
+        assert(s.size() == 0);
+        s.push(1); s.push(2);
+        assert(s.size() == 2);
+        s.pop();
+        assert(s.size() == 1);
+    }
 
-    def size(self) -> int:
-        return len(self._items)`,
+    std::cout << "All tests passed.\\n";
+}`,
     },
     {
       language: "typescript",

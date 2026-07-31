@@ -23,29 +23,85 @@ export const tlsSsl: TopicContent = {
   ],
   code: [
     {
-      language: "python",
-      caption: "Creating a TLS connection and inspecting the peer certificate in Python",
-      source: `import ssl
-import socket
-import pprint
+      language: "cpp",
+      caption: "Creating a TLS connection and inspecting the peer certificate in C++ with OpenSSL",
+      source: `#include <iostream>
+#include <cstring>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/x509.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <unistd.h>
 
-def inspect_tls_connection(hostname: str, port: int = 443) -> None:
-    """Connect to a host over TLS, print protocol and certificate info."""
-    # Create a secure default context (verifies certs, checks hostname)
-    ctx = ssl.create_default_context()
+// Helper: extract one-line subject/issuer string from X509_NAME
+std::string x509_name_str(X509_NAME* name) {
+    char buf[256];
+    X509_NAME_oneline(name, buf, sizeof(buf));
+    return buf;
+}
 
-    with socket.create_connection((hostname, port), timeout=10) as raw_sock:
-        with ctx.wrap_socket(raw_sock, server_hostname=hostname) as tls_sock:
-            print(f"Protocol : {tls_sock.version()}")       # e.g. TLSv1.3
-            print(f"Cipher   : {tls_sock.cipher()}")        # e.g. ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+void inspect_tls_connection(const char* hostname, int port = 443) {
+    // Initialize OpenSSL
+    SSL_library_init();
+    SSL_load_error_strings();
 
-            cert = tls_sock.getpeercert()
-            print(f"Subject  : {dict(x[0] for x in cert['subject'])}")
-            print(f"Issuer   : {dict(x[0] for x in cert['issuer'])}")
-            print(f"Valid    : {cert['notBefore']} -> {cert['notAfter']}")
-            print(f"SANs     : {cert.get('subjectAltName', [])}")
+    // Create a secure context (verifies certs via default CA store)
+    const SSL_METHOD* method = TLS_client_method();
+    SSL_CTX* ctx = SSL_CTX_new(method);
+    SSL_CTX_set_default_verify_paths(ctx);      // load system CA certs
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
 
-inspect_tls_connection("example.com")`,
+    // Resolve hostname and create TCP connection
+    struct hostent* he = gethostbyname(hostname);
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    std::memcpy(&addr.sin_addr, he->h_addr, he->h_length);
+    connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+
+    // Wrap the socket in TLS
+    SSL* ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, sock);
+    SSL_set_tlsext_host_name(ssl, hostname);    // SNI
+    SSL_connect(ssl);
+
+    // Print protocol and cipher info
+    std::cout << "Protocol : " << SSL_get_version(ssl) << "\\n";
+    std::cout << "Cipher   : " << SSL_get_cipher(ssl) << "\\n";
+
+    // Inspect the peer certificate
+    X509* cert = SSL_get_peer_certificate(ssl);
+    if (cert) {
+        std::cout << "Subject  : " << x509_name_str(X509_get_subject_name(cert)) << "\\n";
+        std::cout << "Issuer   : " << x509_name_str(X509_get_issuer_name(cert)) << "\\n";
+
+        // Validity dates
+        BIO* bio = BIO_new(BIO_s_mem());
+        ASN1_TIME_print(bio, X509_get_notBefore(cert));
+        char not_before[64]{};
+        BIO_read(bio, not_before, sizeof(not_before));
+        ASN1_TIME_print(bio, X509_get_notAfter(cert));
+        char not_after[64]{};
+        BIO_read(bio, not_after, sizeof(not_after));
+        BIO_free(bio);
+        std::cout << "Valid    : " << not_before << " -> " << not_after << "\\n";
+
+        X509_free(cert);
+    }
+
+    // Cleanup
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+    close(sock);
+    SSL_CTX_free(ctx);
+}
+
+int main() {
+    inspect_tls_connection("example.com");
+}`,
     },
     {
       language: "bash",

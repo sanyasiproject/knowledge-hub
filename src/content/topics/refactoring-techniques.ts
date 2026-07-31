@@ -27,81 +27,100 @@ export const refactoringTechniques: TopicContent = {
 
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Extract Method and Decompose Conditional -- before and after",
-      source: `# BEFORE: Long method with embedded logic and magic numbers
-class OrderProcessor:
-    def process(self, order):
-        total = 0
-        for item in order.items:
-            price = item.price * item.quantity
-            if item.quantity > 10:
-                price *= 0.9   # magic discount
-            total += price
+      source: `// BEFORE: Long method with embedded logic and magic numbers
+struct Item { double price; int quantity; };
+struct Customer { int orders_count; };
+struct Order {
+    std::vector<Item> items;
+    std::string country;
+    Customer customer;
+};
 
-        if order.country != "US":
-            total *= 1.15  # magic tax
-        if total > 500:
-            shipping = 0
-        elif total > 100:
-            shipping = 5.99
-        else:
-            shipping = 12.99
-        total += shipping
+class OrderProcessorBefore {
+public:
+    double process(const Order& order) {
+        double total = 0;
+        for (const auto& item : order.items) {
+            double price = item.price * item.quantity;
+            if (item.quantity > 10)
+                price *= 0.9;   // magic discount
+            total += price;
+        }
+        if (order.country != "US")
+            total *= 1.15;  // magic tax
+        double shipping;
+        if (total > 500)       shipping = 0;
+        else if (total > 100)  shipping = 5.99;
+        else                   shipping = 12.99;
+        total += shipping;
 
-        if order.customer.orders_count > 50:
-            total *= 0.95
-        print(f"Charged {total}")
-        return total
+        if (order.customer.orders_count > 50)
+            total *= 0.95;
+        std::cout << "Charged " << total << std::endl;
+        return total;
+    }
+};
 
-# AFTER: Extracted methods with clear names, no magic numbers
-BULK_DISCOUNT = 0.9
-BULK_THRESHOLD = 10
-INTERNATIONAL_TAX_RATE = 1.15
-LOYALTY_DISCOUNT = 0.95
-LOYALTY_THRESHOLD = 50
-FREE_SHIPPING_MIN = 500
-REDUCED_SHIPPING_MIN = 100
-STANDARD_SHIPPING = 12.99
-REDUCED_SHIPPING = 5.99
+// AFTER: Extracted methods with clear names, no magic numbers
+constexpr double BULK_DISCOUNT         = 0.9;
+constexpr int    BULK_THRESHOLD        = 10;
+constexpr double INTERNATIONAL_TAX_RATE = 1.15;
+constexpr double LOYALTY_DISCOUNT      = 0.95;
+constexpr int    LOYALTY_THRESHOLD     = 50;
+constexpr double FREE_SHIPPING_MIN     = 500.0;
+constexpr double REDUCED_SHIPPING_MIN  = 100.0;
+constexpr double STANDARD_SHIPPING     = 12.99;
+constexpr double REDUCED_SHIPPING      = 5.99;
 
-class OrderProcessor:
-    def process(self, order):
-        subtotal = self._calculate_subtotal(order.items)
-        subtotal = self._apply_international_tax(subtotal, order.country)
-        subtotal += self._calculate_shipping(subtotal)
-        total = self._apply_loyalty_discount(subtotal, order.customer)
-        print(f"Charged {total}")
-        return total
+class OrderProcessor {
+public:
+    double process(const Order& order) {
+        double subtotal = calculate_subtotal(order.items);
+        subtotal = apply_international_tax(subtotal, order.country);
+        subtotal += calculate_shipping(subtotal);
+        double total = apply_loyalty_discount(subtotal, order.customer);
+        std::cout << "Charged " << total << std::endl;
+        return total;
+    }
 
-    def _calculate_subtotal(self, items):
-        return sum(self._line_total(item) for item in items)
+private:
+    double calculate_subtotal(const std::vector<Item>& items) {
+        double sum = 0;
+        for (const auto& item : items) sum += line_total(item);
+        return sum;
+    }
 
-    def _line_total(self, item):
-        price = item.price * item.quantity
-        if self._qualifies_for_bulk_discount(item):
-            price *= BULK_DISCOUNT
-        return price
+    double line_total(const Item& item) {
+        double price = item.price * item.quantity;
+        if (qualifies_for_bulk_discount(item))
+            price *= BULK_DISCOUNT;
+        return price;
+    }
 
-    def _qualifies_for_bulk_discount(self, item):
-        return item.quantity > BULK_THRESHOLD
+    bool qualifies_for_bulk_discount(const Item& item) {
+        return item.quantity > BULK_THRESHOLD;
+    }
 
-    def _apply_international_tax(self, amount, country):
-        if country != "US":
-            return amount * INTERNATIONAL_TAX_RATE
-        return amount
+    double apply_international_tax(double amount, const std::string& country) {
+        if (country != "US")
+            return amount * INTERNATIONAL_TAX_RATE;
+        return amount;
+    }
 
-    def _calculate_shipping(self, subtotal):
-        if subtotal > FREE_SHIPPING_MIN:
-            return 0
-        if subtotal > REDUCED_SHIPPING_MIN:
-            return REDUCED_SHIPPING
-        return STANDARD_SHIPPING
+    double calculate_shipping(double subtotal) {
+        if (subtotal > FREE_SHIPPING_MIN)    return 0;
+        if (subtotal > REDUCED_SHIPPING_MIN) return REDUCED_SHIPPING;
+        return STANDARD_SHIPPING;
+    }
 
-    def _apply_loyalty_discount(self, amount, customer):
-        if customer.orders_count > LOYALTY_THRESHOLD:
-            return amount * LOYALTY_DISCOUNT
-        return amount`,
+    double apply_loyalty_discount(double amount, const Customer& customer) {
+        if (customer.orders_count > LOYALTY_THRESHOLD)
+            return amount * LOYALTY_DISCOUNT;
+        return amount;
+    }
+};`,
     },
     {
       language: "typescript",
@@ -727,5 +746,12 @@ public class ReportGenerator {
       definition:
         "A technique for making large-scale changes incrementally by introducing an abstraction layer that allows old and new implementations to coexist during migration.",
     },
+  ],
+  exercises: [
+    "Find a **long method** (30+ lines) in a codebase you work on or an open-source C++ project. Apply **Extract Method** at least 3 times to break it into well-named helper functions. Before you start, write a test that captures the current behavior. Run the test after *each* extraction to verify behavior preservation. Document the before/after line counts and readability improvement.",
+    "Take a C++ class that uses a `switch` statement or `if/else` chain branching on a *type* or *enum* value. Apply **Replace Conditional with Polymorphism**: create a base class with a virtual method and one subclass per case. Verify that adding a new case now requires only a *new subclass* with no edits to existing code. Does this follow the **Open/Closed Principle**?",
+    "Identify an instance of **Primitive Obsession** in your code -- for example, raw `std::string` used for email addresses, currency amounts, or date ranges. Apply **Introduce Parameter Object** or **Extract Class** to create a small domain type that encapsulates validation and behavior. How many places in the codebase did the duplicated validation logic previously appear?",
+    "Pick a class exhibiting **Feature Envy** -- a method that calls getters on another class more than it uses its own data. Apply **Move Method** to relocate it to the class whose data it envies. Then check: did the move reduce coupling between the two classes? Did it reveal any further refactoring opportunities like **Inline Method** or **Extract Class**?",
+    "Practice the **Red-Green-Refactor** cycle: write a failing test for a small feature (e.g., a `DateRange` class with `overlaps()` and `contains()` methods in C++). Make it pass with the simplest possible code. Then refactor -- extract constants, rename variables, simplify conditionals -- running tests after *each* micro-step. Commit after every green test to build a refactoring history.",
   ],
 };

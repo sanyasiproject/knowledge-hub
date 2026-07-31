@@ -22,88 +22,126 @@ export const stacksQueues: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Monotonic stack: next greater element for each position",
-      source: `def next_greater_elements(nums: list[int]) -> list[int]:
-    """For each element, find the next element to the right that is greater.
-    Returns -1 if no greater element exists. O(n) time and space."""
-    n = len(nums)
-    result = [-1] * n
-    stack = []  # stores indices; values at these indices are monotonically decreasing
+      source: `#include <vector>
+#include <stack>
+#include <iostream>
+#include <algorithm>
 
-    for i in range(n):
-        # Pop all elements smaller than nums[i] — they found their answer
-        while stack and nums[stack[-1]] < nums[i]:
-            idx = stack.pop()
-            result[idx] = nums[i]
-        stack.append(i)
+// For each element, find the next element to the right that is greater.
+// Returns -1 if no greater element exists. O(n) time and space.
+std::vector<int> next_greater_elements(const std::vector<int>& nums) {
+    int n = static_cast<int>(nums.size());
+    std::vector<int> result(n, -1);
+    std::stack<int> stk; // stores indices; values are monotonically decreasing
 
-    return result
+    for (int i = 0; i < n; ++i) {
+        // Pop all elements smaller than nums[i] -- they found their answer
+        while (!stk.empty() && nums[stk.top()] < nums[i]) {
+            result[stk.top()] = nums[i];
+            stk.pop();
+        }
+        stk.push(i);
+    }
+    return result;
+}
 
-# Example
-print(next_greater_elements([2, 1, 2, 4, 3]))
-# Output: [4, 2, 4, -1, -1]
+// Largest rectangle in histogram using monotonic stack. O(n).
+int largest_rectangle_histogram(std::vector<int> heights) {
+    heights.push_back(0); // append 0 to flush remaining bars
+    std::stack<int> stk;  // indices of bars in increasing height order
+    int max_area = 0;
 
+    for (int i = 0; i < static_cast<int>(heights.size()); ++i) {
+        while (!stk.empty() && heights[stk.top()] > heights[i]) {
+            int height = heights[stk.top()];
+            stk.pop();
+            int width = stk.empty() ? i : i - stk.top() - 1;
+            max_area = std::max(max_area, height * width);
+        }
+        stk.push(i);
+    }
+    return max_area;
+}
 
-def largest_rectangle_histogram(heights: list[int]) -> int:
-    """Largest rectangle in histogram using monotonic stack. O(n)."""
-    stack = []  # indices of bars in increasing height order
-    max_area = 0
+int main() {
+    // Example: next greater elements
+    auto result = next_greater_elements({2, 1, 2, 4, 3});
+    for (int x : result) std::cout << x << " ";
+    std::cout << std::endl; // Output: 4 2 4 -1 -1
 
-    for i, h in enumerate(heights + [0]):  # append 0 to flush remaining bars
-        while stack and heights[stack[-1]] > h:
-            height = heights[stack.pop()]
-            width = i if not stack else i - stack[-1] - 1
-            max_area = max(max_area, height * width)
-        stack.append(i)
-
-    return max_area
-
-print(largest_rectangle_histogram([2, 1, 5, 6, 2, 3]))  # 10`,
+    // Example: largest rectangle in histogram
+    std::cout << largest_rectangle_histogram({2, 1, 5, 6, 2, 3})
+              << std::endl; // 10
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Queue from two stacks and Min-stack implementation",
-      source: `class QueueFromStacks:
-    """FIFO queue using two LIFO stacks. Amortized O(1) per operation."""
-    def __init__(self):
-        self.stack_in = []
-        self.stack_out = []
+      source: `#include <stack>
+#include <stdexcept>
 
-    def enqueue(self, val):
-        self.stack_in.append(val)
+// FIFO queue using two LIFO stacks. Amortized O(1) per operation.
+template <typename T>
+class QueueFromStacks {
+    std::stack<T> stack_in_;
+    std::stack<T> stack_out_;
 
-    def dequeue(self):
-        if not self.stack_out:
-            while self.stack_in:
-                self.stack_out.append(self.stack_in.pop())
-        if not self.stack_out:
-            raise IndexError("dequeue from empty queue")
-        return self.stack_out.pop()
+public:
+    void enqueue(const T& val) {
+        stack_in_.push(val);
+    }
+
+    T dequeue() {
+        if (stack_out_.empty()) {
+            while (!stack_in_.empty()) {
+                stack_out_.push(stack_in_.top());
+                stack_in_.pop();
+            }
+        }
+        if (stack_out_.empty())
+            throw std::out_of_range("dequeue from empty queue");
+        T val = stack_out_.top();
+        stack_out_.pop();
+        return val;
+    }
+
+    bool empty() const {
+        return stack_in_.empty() && stack_out_.empty();
+    }
+};
 
 
-class MinStack:
-    """Stack with O(1) push, pop, top, and getMin."""
-    def __init__(self):
-        self.stack = []
-        self.min_stack = []  # tracks current minimums
+// Stack with O(1) push, pop, top, and getMin.
+class MinStack {
+    std::stack<int> stack_;
+    std::stack<int> min_stack_; // tracks current minimums
 
-    def push(self, val: int):
-        self.stack.append(val)
-        if not self.min_stack or val <= self.min_stack[-1]:
-            self.min_stack.append(val)
+public:
+    void push(int val) {
+        stack_.push(val);
+        if (min_stack_.empty() || val <= min_stack_.top())
+            min_stack_.push(val);
+    }
 
-    def pop(self) -> int:
-        val = self.stack.pop()
-        if val == self.min_stack[-1]:
-            self.min_stack.pop()
-        return val
+    int pop() {
+        int val = stack_.top();
+        stack_.pop();
+        if (val == min_stack_.top())
+            min_stack_.pop();
+        return val;
+    }
 
-    def top(self) -> int:
-        return self.stack[-1]
+    int top() const {
+        return stack_.top();
+    }
 
-    def get_min(self) -> int:
-        return self.min_stack[-1]`,
+    int get_min() const {
+        return min_stack_.top();
+    }
+};`,
     },
   ],
   diagrams: [

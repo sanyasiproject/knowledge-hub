@@ -343,6 +343,13 @@ ORDER BY betweenness DESC`
     "CREATE INDEX FOR (n:Label) ON (n.prop) — property index",
     "CALL gds.pageRank.stream('graph') YIELD nodeId, score — run algorithm",
   ],
+  exercises: [
+    "Model a **social network** in Neo4j with `Person`, `Company`, and `City` nodes. Create at least 6 people with `KNOWS`, `WORKS_AT`, and `LIVES_IN` relationships. Then write a Cypher query to find *friends-of-friends* suggestions for a given user -- people who are 2 hops away via `KNOWS` but not directly connected, ranked by number of mutual friends.",
+    "Write a Cypher query for **fraud detection** that finds circular money flows (rings) of 3-6 hops in a transaction graph where each `TRANSFERRED_TO` relationship has an `amount > 10000` within the last 30 days. Use `reduce` to compute the total amount flowing through each ring. Explain why this query is *impractical* in SQL without recursive CTEs.",
+    "Run **PageRank** and **Louvain community detection** on a social graph using Neo4j's Graph Data Science library. First project the graph with `gds.graph.project`, then stream PageRank results to find the top 10 influential people, and stream Louvain results to identify communities. Write all three Cypher/GDS calls and interpret the results.",
+    "Compare modeling a many-to-many **students-to-courses** relationship in *PostgreSQL* (junction table with JOINs) versus *Neo4j* (direct `ENROLLED_IN` relationships). Write the equivalent query in both SQL and Cypher to find all students who share at least 3 courses with a given student. Analyze which approach is more readable and performant as the dataset scales.",
+    "Design a **knowledge graph** for a technical documentation system where `Concept` nodes are connected by `DEPENDS_ON`, `RELATED_TO`, and `PREREQUISITE_OF` relationships. Write a Cypher query using `shortestPath` to find the learning path from a beginner concept to an advanced one, and a `MATCH (c)<-[:PREREQUISITE_OF*]-(prereq)` query to list all transitive prerequisites.",
+  ],
   resources: [
     { label: "Neo4j Documentation", kind: "docs", note: "Official reference for Cypher, administration, clustering, and the Graph Data Science library." },
     { label: "Graph Databases (O'Reilly, by Robinson, Webber, Eifrem)", kind: "book", note: "Foundational book on graph database concepts, data modeling, and Neo4j by its creators." },

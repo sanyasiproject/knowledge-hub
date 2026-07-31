@@ -87,6 +87,238 @@ export const awsCompute: TopicContent = {
     { front: "Graviton", back: "AWS-designed Arm processors offering up to 40% better price-performance. Available across EC2, RDS, ElastiCache, Lambda. Requires arm64-compatible code/containers." }
   ],
 
+  deepDive: [
+    "## EC2 Placement Groups and Advanced Networking\n\n**Cluster placement groups** pack instances physically close within a single AZ for lowest latency (< 25 microseconds). Use for HPC workloads with tightly-coupled node communication. **Spread placement groups** distribute instances across distinct hardware racks (max 7 per AZ) for independent failure domains — ideal for critical replicas. **Partition placement groups** split instances across logical partitions (each on separate racks) for large distributed systems like HDFS or Cassandra where you control partition-aware placement. Enhanced Networking via **Elastic Network Adapter (ENA)** provides up to 100 Gbps bandwidth with SR-IOV, eliminating hypervisor overhead. **Elastic Fabric Adapter (EFA)** extends this with OS-bypass for MPI and NCCL workloads, critical for distributed ML training.",
+    "## Lambda Execution Model Internals\n\nWhen a Lambda function is invoked, the **Lambda Worker Manager** assigns it to a **micro-VM** (Firecracker) running a minimal Linux kernel. The execution environment includes a `/tmp` directory (up to 10 GB), the runtime (Node.js, Python, etc.), and your function code loaded from an internal S3 bucket. **Cold starts** occur when no warm environment exists: the service must allocate a micro-VM, download code, initialize the runtime, and run your init code. Cold start latency ranges from 100ms (Python, small package) to 10+ seconds (Java with large dependencies in a VPC). **Provisioned Concurrency** pre-initializes environments to eliminate cold starts. The **Lambda Extensions API** allows observability agents (Datadog, New Relic) to run as companion processes within the same execution environment. **SnapStart** (Java only) snapshots the initialized environment after init and restores from snapshot on invocation, reducing cold starts from ~6s to ~200ms.",
+    "## Container Orchestration Decision Framework\n\n**ECS on Fargate** is the simplest path for teams without Kubernetes expertise — you define task definitions (CPU, memory, container image, port mappings) and ECS handles scheduling. The **capacity provider** strategy can mix Fargate and Fargate Spot for cost optimization. **ECS on EC2** gives full node control: you manage the AMI, install custom agents, use GPU instances, and access instance metadata. **EKS** is the choice when you need Kubernetes-native tooling (Helm, ArgoCD, Istio, custom operators) or multi-cloud portability. EKS manages the control plane (etcd, API server) across 3 AZs, while you manage worker nodes (managed node groups, self-managed, or Fargate profiles). Key EKS add-ons: **AWS Load Balancer Controller** for ALB/NLB ingress, **EBS CSI Driver** for persistent volumes, **Karpenter** for intelligent node provisioning that replaces Cluster Autoscaler with faster, more efficient scaling."
+  ],
+
+  code: [
+    {
+      language: "hcl",
+      caption: "Terraform: EC2 Auto Scaling Group with mixed instances",
+      source: `resource "aws_launch_template" "app" {
+  name_prefix   = "app-"
+  image_id      = "ami-0c55b159cbfafe1f0"
+  instance_type = "m6i.large"
+
+  network_interfaces {
+    associate_public_ip_address = false
+    security_groups             = [aws_security_group.app.id]
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = { Name = "app-server", Environment = "prod" }
+  }
+}
+
+resource "aws_autoscaling_group" "app" {
+  desired_capacity    = 3
+  max_size            = 10
+  min_size            = 2
+  vpc_zone_identifier = module.vpc.private_subnets
+
+  mixed_instances_policy {
+    instances_distribution {
+      on_demand_base_capacity                  = 2
+      on_demand_percentage_above_base_capacity = 25
+      spot_allocation_strategy                 = "capacity-optimized"
+    }
+    launch_template {
+      launch_template_specification {
+        launch_template_id = aws_launch_template.app.id
+        version            = "$Latest"
+      }
+      override {
+        instance_type = "m6i.large"
+      }
+      override {
+        instance_type = "m6a.large"
+      }
+      override {
+        instance_type = "m5.large"
+      }
+    }
+  }
+
+  target_group_arns = [aws_lb_target_group.app.arn]
+
+  tag {
+    key                 = "Environment"
+    value               = "prod"
+    propagate_at_launch = true
+  }
+}`
+    },
+    {
+      language: "yaml",
+      caption: "CloudFormation: Lambda function with event source mapping",
+      source: `AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+  ProcessOrderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.12
+      Handler: app.handler
+      MemorySize: 512
+      Timeout: 30
+      Architectures: [arm64]
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref OrdersTable
+          QUEUE_URL: !GetAtt DeadLetterQueue.QueueUrl
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OrdersTable
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt OrderQueue.Arn
+            BatchSize: 10
+            MaximumBatchingWindowInSeconds: 5
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+  OrderQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 180
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount: 3
+
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue`
+    },
+    {
+      language: "bash",
+      caption: "AWS CLI: ECS Fargate service deployment",
+      source: `# Register a task definition
+aws ecs register-task-definition \\
+  --family my-api \\
+  --requires-compatibilities FARGATE \\
+  --network-mode awsvpc \\
+  --cpu 512 --memory 1024 \\
+  --execution-role-arn arn:aws:iam::123456789012:role/ecsTaskExecutionRole \\
+  --container-definitions '[{
+    "name": "api",
+    "image": "123456789012.dkr.ecr.us-east-1.amazonaws.com/my-api:latest",
+    "portMappings": [{"containerPort": 8080, "protocol": "tcp"}],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/ecs/my-api",
+        "awslogs-region": "us-east-1",
+        "awslogs-stream-prefix": "ecs"
+      }
+    }
+  }]'
+
+# Create or update the service
+aws ecs create-service \\
+  --cluster prod \\
+  --service-name my-api \\
+  --task-definition my-api \\
+  --desired-count 3 \\
+  --launch-type FARGATE \\
+  --network-configuration '{
+    "awsvpcConfiguration": {
+      "subnets": ["subnet-abc123", "subnet-def456"],
+      "securityGroups": ["sg-abc123"],
+      "assignPublicIp": "DISABLED"
+    }
+  }' \\
+  --load-balancers '[{
+    "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/my-api/abc123",
+    "containerName": "api",
+    "containerPort": 8080
+  }]'`
+    }
+  ],
+
+  comparison: {
+    columns: ["Feature", "EC2", "Lambda", "ECS/Fargate", "EKS"],
+    rows: [
+      ["Billing model", "Per-second (min 60s)", "Per-ms invocation", "Per-second (vCPU + memory)", "Control plane $0.10/hr + worker nodes"],
+      ["Max execution time", "Unlimited", "15 minutes", "Unlimited", "Unlimited"],
+      ["Scaling speed", "Minutes (AMI launch)", "Seconds (concurrent)", "Seconds (Fargate task)", "Minutes (node provision)"],
+      ["Max memory", "24 TB (u-24tb1)", "10 GB", "120 GB (Fargate)", "Node instance limit"],
+      ["Persistent storage", "EBS, instance store", "/tmp (10 GB, ephemeral)", "EBS, EFS via mount", "EBS CSI, EFS CSI"],
+      ["VPC integration", "Full (ENI per instance)", "Optional (adds cold start)", "awsvpc mode (ENI per task)", "Full (pod networking)"],
+      ["GPU support", "P/G instances", "No", "EC2 launch type only", "GPU node groups"],
+      ["Best for", "Stateful, long-running, GPU", "Event-driven, glue logic", "Containerized microservices", "K8s-native, multi-cloud portability"]
+    ]
+  },
+
+  exercises: [
+    "Your e-commerce platform handles 500 req/s normally but spikes to 5,000 req/s during flash sales (2-3 times per month, lasting 2 hours). Design a compute architecture using EC2 Auto Scaling with mixed instances policy. Specify: which instance types to mix, the on-demand base capacity, the spot allocation strategy, the scaling policy type and target metric, and how you would pre-warm before known sale events.",
+    "A data pipeline processes 10,000 files daily (each 50-200 MB) uploaded to S3. Each file requires 2-4 minutes of processing and writes results to DynamoDB. Design a Lambda-based solution addressing: concurrency limits, error handling with DLQ, memory/timeout configuration, and cost comparison vs. a Fargate-based alternative. Calculate the approximate monthly Lambda cost.",
+    "You are migrating a monolithic application (Java, 16 GB heap, persistent WebSocket connections, 200ms p99 latency requirement) to containers on AWS. Evaluate ECS on EC2 vs. ECS on Fargate vs. EKS. Consider: memory requirements, long-lived connections, deployment strategy (blue/green vs. rolling), service mesh needs, and team Kubernetes experience. Justify your choice.",
+    "An ML inference API needs GPU-accelerated compute for real-time predictions (p99 < 100ms). Traffic is unpredictable: 0-1000 req/s. Design a solution considering: EC2 G5 instances with auto scaling vs. SageMaker endpoints vs. EKS with GPU node pools. Address cold start concerns, cost optimization for idle periods, and model artifact deployment.",
+    "Your company runs 50 Lambda functions across 3 environments (dev, staging, prod). Cold starts on 5 Java functions cause p99 latency spikes to 8 seconds in production. Design a strategy combining: SnapStart for Java functions, Provisioned Concurrency scheduling for peak hours, architecture changes (function splitting, language migration candidates), and monitoring with CloudWatch Lambda Insights."
+  ],
+
+  cheatSheet: [
+    "**Instance naming**: `m7g.2xlarge` = family(m) generation(7) attribute(g=Graviton) . size(2xlarge) — decode any instance type in seconds",
+    "**Spot interruption**: always handle via 2-minute warning (instance metadata `spot/instance-action`) or EventBridge. Use `capacity-optimized` allocation for lowest interruption rates",
+    "**Lambda limits**: 15 min timeout, 10 GB memory, 10 GB /tmp, 1000 default concurrent executions (soft limit), 6 MB sync response, 256 KB async payload",
+    "**Fargate sizing**: CPU values 0.25-16 vCPU, memory depends on CPU (e.g., 0.25 vCPU allows 0.5-2 GB). Invalid combos are rejected — check the matrix",
+    "**EKS control plane**: $0.10/hr (~$73/mo) per cluster — always factor this fixed cost. Use Karpenter over Cluster Autoscaler for faster, more efficient node scaling",
+    "**Auto Scaling cooldown**: default 300s. Set target tracking to 60% CPU (not 80%) to absorb spikes before new instances are ready. Warm pools pre-initialize stopped instances",
+    "**Graviton migration**: test with `arm64` architecture flag. Most workloads (Node, Python, Go, .NET 6+) work without code changes. 20-40% cost savings",
+    "**Lambda cold start fixes**: SnapStart (Java), Provisioned Concurrency, smaller deployment packages, avoid VPC unless required, use arm64 for faster init"
+  ],
+
+  revisionNotes: [
+    "EC2 purchasing: On-Demand (baseline) > Reserved/Savings Plans (steady-state, up to 72% off) > Spot (fault-tolerant, up to 90% off). Savings Plans are more flexible than RIs — commit to $/hr, not instance type",
+    "Lambda is priced per 1ms of execution x memory allocated. arm64 (Graviton) Lambda is 20% cheaper. Free tier: 1M requests + 400,000 GB-seconds per month",
+    "ECS Task Definition = blueprint (like a pod spec): defines containers, CPU, memory, networking, volumes, IAM role. Service = running desired count of tasks with load balancing and auto scaling",
+    "EKS manages the Kubernetes control plane across 3 AZs. You manage worker nodes via: Managed Node Groups (easiest), Self-Managed (full control), or Fargate Profiles (serverless pods)",
+    "Fargate eliminates instance management but costs ~30-50% more than well-optimized EC2. Best when operational simplicity outweighs cost, or for spiky/unpredictable workloads",
+    "Auto Scaling types: Target Tracking (maintain metric, e.g., 60% CPU), Step Scaling (tiered thresholds), Scheduled (known patterns), Predictive (ML-based forecasting)",
+    "Lambda concurrency: unreserved (shared pool), reserved (guarantees capacity but limits), provisioned (pre-initialized, eliminates cold starts, costs more). Account default limit: 1,000 concurrent",
+    "Container image choice matters: use multi-stage builds, distroless/Alpine base images, and ECR image scanning. Fargate pulls from ECR fastest (same-region, PrivateLink)"
+  ],
+
+  resources: [
+    { label: "AWS Well-Architected — Performance Efficiency Pillar", kind: "docs", note: "Official guidance on selecting and optimizing compute resources across EC2, Lambda, and containers" },
+    { label: "Amazon Builders' Library: Avoiding insurmountable queue backlogs", kind: "article", note: "Deep dive into Lambda concurrency, queue processing patterns, and backpressure handling" },
+    { label: "AWS re:Invent — Advanced EC2 Networking (NET403)", kind: "video", note: "Covers placement groups, ENA, EFA, and network bandwidth allocation across instance families" },
+    { label: "Firecracker: Lightweight Virtualization for Serverless (NSDI '20)", kind: "paper", note: "The academic paper behind Lambda's micro-VM technology — explains Firecracker's design and security model" },
+    { label: "aws/karpenter GitHub repository", kind: "repo", note: "Kubernetes node provisioner replacing Cluster Autoscaler — essential for EKS cost optimization" }
+  ],
+
+  diagrams: [
+    {
+      title: "AWS Compute Decision Tree",
+      kind: "flow" as const,
+      caption: "Decision flow for choosing between EC2, Lambda, ECS, EKS, and Fargate based on workload characteristics"
+    },
+    {
+      title: "Lambda Execution Lifecycle",
+      kind: "sequence" as const,
+      caption: "Sequence diagram showing cold start vs warm invocation: API Gateway to Lambda Worker Manager to Firecracker micro-VM"
+    }
+  ],
+
+  animations: [
+    {
+      title: "EC2 Auto Scaling in Action",
+      steps: [
+        { label: "Baseline load", detail: "ASG running 3 instances at 40% CPU behind an ALB. Target tracking policy set to maintain 60% average CPU utilization." },
+        { label: "Traffic spike detected", detail: "CloudWatch alarm fires: average CPU exceeds 60% for 3 consecutive minutes. ASG calculates needed capacity: ceil(current_load / target) = 5 instances." },
+        { label: "Scale-out initiated", detail: "ASG launches 2 new instances from launch template. Mixed instances policy selects: 1 on-demand m6i.large, 1 spot m6a.large (capacity-optimized)." },
+        { label: "Health check and registration", detail: "New instances pass EC2 health checks, then ALB health checks (HTTP 200 on /health). ALB begins routing traffic to new targets after the healthy threshold (3 checks)." },
+        { label: "Load stabilizes", detail: "With 5 instances, average CPU drops to 55%. Scaling policy holds steady as metric is within target range. Cooldown period (300s) prevents thrashing." },
+        { label: "Traffic subsides", detail: "Load decreases, CPU drops to 30%. Scale-in policy waits for cooldown, then terminates 2 instances (spot first, then oldest on-demand). ASG returns to 3 instances." }
+      ]
+    }
+  ],
+
   glossary: [
     { term: "EC2", definition: "Elastic Compute Cloud — AWS service providing resizable virtual machines (instances) in the cloud with various instance types optimized for different workloads." },
     { term: "Lambda", definition: "AWS serverless compute service that runs code in response to events, automatically scaling and billing per millisecond of execution time." },

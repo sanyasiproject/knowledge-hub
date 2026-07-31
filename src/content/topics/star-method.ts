@@ -83,4 +83,476 @@ export const starMethod: TopicContent = {
     { term: "Action", definition: "The detailed steps you took, decisions you made, and reasoning behind your approach. The core of the STAR answer." },
     { term: "Result", definition: "The measurable outcome of your actions, ideally quantified with metrics or specific business impact." },
   ],
+
+  deepDive: [
+    `## The Psychology Behind STAR: Why Structured Stories Persuade
+
+Human cognition is wired for narrative. Research in cognitive psychology—particularly the work of Jerome Bruner—shows that people are up to 22 times more likely to remember information delivered as a story than as a list of facts. The STAR method exploits this by forcing your interview answer into a narrative arc: a setting (Situation), a protagonist with a mission (Task), rising action and conflict (Action), and a resolution (Result). This maps directly onto the classic dramatic structure that audiences have responded to for millennia.
+
+Beyond narrative structure, STAR leverages the **anchoring effect**. When you open with a concrete Situation, the interviewer's mental model locks onto that context. Every subsequent detail is evaluated relative to that anchor, making your actions feel proportionate and your results feel earned. Compare this with an unstructured answer where the interviewer must construct their own mental timeline—cognitive load increases, comprehension drops, and your impact gets lost.
+
+There is also a credibility mechanism at work. Psychologist Paul Grice's **maxims of communication** suggest that structured, relevant, and appropriately detailed responses signal competence. A rambling answer violates the maxim of manner; a vague answer violates the maxim of quantity. STAR naturally satisfies all four maxims (quality, quantity, relation, manner), which is why interviewers subconsciously perceive STAR-formatted answers as more trustworthy.
+
+Finally, the **peak-end rule** (Kahneman) means interviewers disproportionately remember the most intense moment and the ending of your answer. STAR ensures the peak is in the Action section (where you showcase problem-solving) and the end is a strong Result. Without this structure, many candidates bury their strongest moment mid-ramble and trail off weakly.`,
+
+    `## Advanced STAR Techniques: Nested STAR, STAR-L, and Handling Follow-Ups
+
+### Nested STAR
+For complex projects that spanned months or involved multiple challenges, a single flat STAR can feel shallow. Nested STAR lets you embed a mini-STAR within the Action section. You describe your overarching STAR, and when you reach a critical sub-challenge in the Action, you briefly run through a Situation-Task-Action-Result for that specific obstacle before returning to the main narrative. This technique works well for senior-level interviews where the expectation is nuance and depth. Keep the nested STAR to 30 seconds maximum so it enriches rather than derails.
+
+### STAR-L: Adding Leadership
+STAR-L appends a Leadership or Learning dimension after the Result. For management and senior IC roles, interviewers want to know not just what happened, but how the experience shaped your leadership philosophy, what systemic changes you drove, or how you mentored others based on the outcome. Example: "After reducing deployment failures by 70%, I documented the approach as a runbook and ran two workshops for the broader engineering org. Three other teams adopted the pattern within the quarter." STAR-L transforms a personal achievement story into an organizational impact story.
+
+### Handling Follow-Up Questions
+Interviewers will probe after your initial STAR. Common follow-ups: "What would you do differently?" (tests self-awareness), "How did others react?" (tests EQ), "What happened next?" (tests long-term thinking), "Can you go deeper on X?" (tests depth of involvement). Prepare for these by having extended details ready for each section. A useful technique: when preparing your story bank, write out the 2-minute version and then a set of "expansion packs"—additional details you can deploy on demand without losing coherence. Never volunteer negative information unprompted, but always have an honest answer ready if probed.
+
+### STAR for Different Question Types
+- **Conflict questions**: Emphasize empathy in Situation, diplomacy in Action, relationship preservation in Result.
+- **Failure questions**: Be genuinely vulnerable in Situation/Task, own your mistakes in Action, and pivot heavily to learning in Result.
+- **Leadership questions**: Use STAR-L; highlight delegation, decision-making under uncertainty, and multiplier effects.
+- **Technical questions**: Go deeper on the Action with architectural reasoning, trade-off analysis, and technical specifics.`,
+
+    `## Common Anti-Patterns: What Breaks a STAR Answer
+
+### Anti-Pattern 1: The Context Avalanche
+**Example**: "So at my company, we had this really complex microservices architecture with 47 services and we were using Kubernetes on AWS with EKS and we had just migrated from a monolith two years ago and the team was about 30 engineers split across 5 squads and our PM had just left so there was a leadership vacuum and also we had technical debt from the migration and our CI/CD pipeline was slow and..." (90 seconds spent, Action not yet started).
+**Why it fails**: The interviewer zones out, you run out of time, and the Action gets compressed into a rushed summary. Fix: Situation should be 2-3 sentences max. Ask yourself, "What is the minimum context needed to appreciate my Action?"
+
+### Anti-Pattern 2: The "We" Trap
+**Example**: "We decided to rebuild the API. We designed the new schema. We ran the migration. We tested it. We deployed it."
+**Why it fails**: The interviewer has no idea what YOU did. Were you the architect or the person who updated the README? Using "we" for everything signals either that you were a minor contributor or that you cannot articulate your own impact. Fix: Use "I" for your contributions, "the team" for collective efforts, and be explicit about your role: "I designed the schema and led the review; two other engineers handled the data migration scripts."
+
+### Anti-Pattern 3: The Hypothetical STAR
+**Example**: "If I were in that situation, I would probably start by analyzing the requirements, then I would design a solution, and then I would implement it."
+**Why it fails**: Behavioral questions ask what you DID, not what you WOULD do. Hypothetical answers provide zero evidence of competence. If you do not have a direct example, use the closest analogous experience and acknowledge the gap: "I have not led a full acquisition integration, but I led a cross-team platform merge that involved similar challenges..."
+
+### Anti-Pattern 4: The Missing Result
+**Example**: "...and then I deployed the fix." (Story ends abruptly with no outcome.)
+**Why it fails**: Without a Result, the interviewer cannot assess impact. It is like a movie that cuts to black before the climax. Even if the result was not spectacular, state it: "The fix resolved the issue for 95% of affected users within the hour, and I added monitoring to prevent recurrence." A mediocre result stated clearly beats a great result implied vaguely.
+
+### Anti-Pattern 5: The Perfection Narrative
+**Example**: Every STAR story ends with a flawless outcome, a promotion, and a standing ovation.
+**Why it fails**: It is not credible. Experienced interviewers know that real work involves trade-offs, partial successes, and unexpected consequences. Including one story with a mixed or negative outcome (and strong learning) actually increases overall credibility.`
+  ],
+
+  code: [
+    {
+      language: "cpp",
+      caption: "STAR example: Situation and Task -- inheriting a legacy system with no tests",
+      source: `// SITUATION: Joined a team maintaining a 5-year-old order
+// processing system with zero automated tests and 200+ lines
+// of undocumented business rules in a single function.
+// TASK: I was responsible for adding a new discount feature
+// without breaking existing pricing logic.
+
+// The legacy code I inherited (the Situation):
+#include <string>
+#include <vector>
+
+struct Order {
+  std::string customerId;
+  std::vector<std::pair<std::string, double>> items; // sku, price
+  std::string region;
+  bool isPremium;
+  double manualDiscount;
+};
+
+// This was the function -- no tests, no docs, everyone afraid to touch it
+double calculateTotal(const Order& order) {
+  double total = 0;
+  for (const auto& [sku, price] : order.items) {
+    total += price;
+  }
+  if (order.isPremium) total *= 0.9;        // 10% premium discount
+  if (order.region == "EU") total *= 1.20;   // VAT
+  if (order.region == "UK") total *= 1.20;   // UK VAT
+  total -= order.manualDiscount;
+  if (total < 0) total = 0;
+  // Is premium discount before or after VAT? Nobody knew.
+  // Was this intentional? The original author had left.
+  return total;
+}
+
+// My TASK: Add a new "loyalty discount" feature without breaking
+// any of the existing (undocumented) behavior.
+// Challenge: How do you modify code you cannot safely test?
+// This sets up the ACTION section of the STAR answer...`,
+    },
+    {
+      language: "cpp",
+      caption: "STAR example: Action -- characterization tests and safe refactoring",
+      source: `// ACTION: My specific steps to safely add the feature.
+// Step 1: Write characterization tests to capture existing behavior
+// Step 2: Refactor into testable units
+// Step 3: Add the new feature with full test coverage
+
+#include <cassert>
+#include <cmath>
+#include <iostream>
+#include <functional>
+
+// STEP 1: Characterization tests -- I captured what the code
+// ACTUALLY does (right or wrong) before changing anything.
+// I ran the old function with known inputs and recorded outputs.
+void characterizationTests() {
+  // These tests document actual behavior, not intended behavior
+  Order basic{{"C001"}, {{"SKU1", 100.0}}, "US", false, 0.0};
+  assert(std::abs(calculateTotal(basic) - 100.0) < 0.01);
+
+  Order premium{{"C002"}, {{"SKU1", 100.0}}, "US", true, 0.0};
+  assert(std::abs(calculateTotal(premium) - 90.0) < 0.01);
+
+  // Discovered: premium discount applies BEFORE VAT
+  Order premiumEU{{"C003"}, {{"SKU1", 100.0}}, "EU", true, 0.0};
+  assert(std::abs(calculateTotal(premiumEU) - 108.0) < 0.01);
+  // 100 * 0.9 * 1.20 = 108, not 100 * 1.20 * 0.9 = 108
+  // Same result here, but order matters for other cases
+
+  std::cout << "All characterization tests pass" << std::endl;
+}
+
+// STEP 2: Refactor into small, testable functions
+// Each function has a single responsibility
+
+double applyPremiumDiscount(double amount, bool isPremium) {
+  return isPremium ? amount * 0.9 : amount;
+}
+
+double applyVAT(double amount, const std::string& region) {
+  if (region == "EU" || region == "UK") return amount * 1.20;
+  return amount;
+}
+
+double applyLoyaltyDiscount(double amount, int loyaltyYears) {
+  // STEP 3: New feature, added with confidence because
+  // existing behavior is locked down by characterization tests
+  if (loyaltyYears >= 5) return amount * 0.95;  // 5% off
+  if (loyaltyYears >= 2) return amount * 0.97;  // 3% off
+  return amount;
+}
+
+double applyManualDiscount(double amount, double discount) {
+  return std::max(0.0, amount - discount);
+}
+
+// Composed function preserves original order of operations
+double calculateTotalV2(const Order& order, int loyaltyYears = 0) {
+  double total = 0;
+  for (const auto& [sku, price] : order.items) {
+    total += price;
+  }
+  total = applyPremiumDiscount(total, order.isPremium);
+  total = applyLoyaltyDiscount(total, loyaltyYears); // NEW
+  total = applyVAT(total, order.region);
+  total = applyManualDiscount(total, order.manualDiscount);
+  return total;
+}
+// KEY ACTION: I did not just add the feature -- I made the code
+// safe to change first. This took an extra 3 days but prevented
+// the regression risk that had paralyzed the team for months.`,
+    },
+    {
+      language: "cpp",
+      caption: "STAR example: Result -- quantified impact and organizational change",
+      source: `// RESULT: The quantified outcomes from the refactoring + feature work
+// This section demonstrates how to articulate measurable impact.
+
+#include <iostream>
+#include <cassert>
+#include <vector>
+#include <string>
+
+// Metric 1: Test coverage went from 0% to 96% on pricing logic
+void runTestSuite() {
+  int passed = 0, failed = 0;
+
+  // 24 characterization tests preserving legacy behavior
+  // 18 unit tests for new loyalty discount feature
+  // 8 integration tests for end-to-end pricing scenarios
+  // Total: 50 tests running in 0.3 seconds
+
+  struct TestResult { std::string name; bool passed; };
+  std::vector<TestResult> results = {
+    {"basic_order_pricing", true},
+    {"premium_discount_applied_before_vat", true},
+    {"loyalty_5yr_gets_5pct", true},
+    {"loyalty_2yr_gets_3pct", true},
+    {"loyalty_under_2yr_no_discount", true},
+    {"manual_discount_cannot_go_negative", true},
+    {"eu_vat_applied_correctly", true},
+    {"uk_vat_applied_correctly", true},
+    // ... 42 more tests
+  };
+
+  for (const auto& test : results) {
+    if (test.passed) ++passed;
+    else ++failed;
+  }
+
+  std::cout << "Tests: " << passed << " passed, "
+            << failed << " failed" << std::endl;
+  // Output: Tests: 50 passed, 0 failed
+}
+
+// Metric 2: Deployment confidence enabled faster iteration
+// Before: team averaged 1 pricing change per quarter (fear of breakage)
+// After: team shipped 6 pricing changes in the next quarter
+
+// Metric 3: Bug discovery during refactoring
+// Found 2 silent bugs:
+// - UK VAT was being applied to Channel Islands orders (exempt)
+// - Manual discount could make total negative (edge case)
+// Estimated impact: ~$12K in incorrect charges over previous year
+
+// Metric 4: Organizational impact
+// - The characterization test approach was adopted by 2 other teams
+// - I presented the pattern at an internal tech talk (47 attendees)
+// - It became part of the team's standard operating procedure
+//   for working with legacy code
+
+// STAR FORMAT TIMING:
+// Situation: "5-year-old untested pricing code" (15 seconds)
+// Task: "Add loyalty discounts without breaking pricing" (10 seconds)
+// Action: "Characterization tests, refactor, then feature" (100 seconds)
+// Result: "0 to 96% coverage, 3 bugs found, pattern adopted" (25 seconds)
+// Total: ~2.5 minutes -- right in the sweet spot`,
+    },
+    {
+      language: "cpp",
+      caption: "STAR for failure: a migration that went wrong and what was learned",
+      source: `// STAR format for a FAILURE question:
+// "Tell me about a time you failed and what you learned."
+
+// SITUATION: Leading a database migration from MySQL to PostgreSQL
+// for a service handling 10M daily transactions.
+// TASK: I owned the migration plan, testing, and cutover execution.
+
+#include <string>
+#include <chrono>
+#include <vector>
+#include <iostream>
+
+// ACTION: What I did (including the mistakes)
+struct MigrationStep {
+  std::string description;
+  std::chrono::minutes estimatedTime;
+  std::chrono::minutes actualTime;
+  bool succeeded;
+  std::string notes;
+};
+
+// My original plan (the mistake: I tested with 1% of production data)
+std::vector<MigrationStep> originalPlan = {
+  {"Dual-write to both databases",   {60},  {55},   true,
+   "This worked as expected"},
+  {"Verify data consistency",        {30},  {120},  false,
+   "FAILURE: 1% sample did not reveal charset encoding issues"},
+  {"Switch reads to PostgreSQL",     {15},  {0},    false,
+   "Aborted -- data inconsistency discovered"},
+  {"Decommission MySQL",             {30},  {0},    false,
+   "Never reached"},
+};
+
+// The failure: 4 hours of extended downtime during cutover
+// because encoding mismatches corrupted 3% of records.
+// I had tested with a subset that happened to be ASCII-only.
+
+// RESULT: What I learned and how I changed my behavior
+
+// FIX 1: Full-scale staging environment (the specific behavioral change)
+struct MigrationConfig {
+  bool useProductionScaleData = true;    // CHANGED: was false
+  bool includeUnicodeTestCases = true;   // ADDED: missed this
+  int rehearsalCount = 3;                // ADDED: practice the cutover
+  bool hasRollbackPlan = true;           // ADDED: automated rollback
+  std::chrono::minutes maxDowntimeWindow{30}; // ADDED: hard limit
+};
+
+// FIX 2: Pre-migration validation (I now run this before any migration)
+struct ValidationResult {
+  size_t totalRecords;
+  size_t matchingRecords;
+  size_t mismatchedRecords;
+  std::vector<std::string> sampleMismatches;
+  double matchRate;
+};
+
+ValidationResult validateMigration(/* source, target */) {
+  ValidationResult result{};
+  // Compare EVERY record, not a sample
+  // Check byte-level equality, not just string comparison
+  // Log first 100 mismatches for investigation
+  result.matchRate =
+    static_cast<double>(result.matchingRecords) / result.totalRecords;
+  return result;
+}
+
+// The behavioral change that stuck:
+// "After that failure, I created a migration checklist that I use
+//  for every data migration. It requires:
+//  1. Full production-scale test data (never a sample)
+//  2. Three rehearsal runs with timing
+//  3. Automated rollback triggered if errors exceed 0.1%
+//  4. A hard downtime window -- if we exceed it, we roll back
+//
+// My next migration (6 months later) completed in 45 minutes
+// with zero data loss and zero downtime."`,
+    },
+  ],
+  comparison: {
+    columns: ["Dimension", "STAR", "CAR", "SOAR", "PAR"],
+    rows: [
+      [
+        "Structure",
+        "Situation → Task → Action → Result",
+        "Challenge → Action → Result",
+        "Situation → Obstacle → Action → Result",
+        "Problem → Action → Result",
+      ],
+      [
+        "Best for",
+        "General behavioral interviews; most versatile across industries and roles",
+        "Concise answers when the challenge is self-evident; consulting and case-style interviews",
+        "Answers where a specific obstacle or blocker is the centerpiece of the story",
+        "Problem-solving and troubleshooting questions; technical and support roles",
+      ],
+      [
+        "Pros",
+        "Universally recognized; clearly separates your role (Task) from context; works for any question type",
+        "More concise (3 parts vs 4); gets to the action faster; good for time-constrained answers",
+        "Highlights problem-solving by making the obstacle explicit; shows resilience and adaptability",
+        "Simple and direct; focuses on problem identification skills; easy to remember under pressure",
+      ],
+      [
+        "Cons",
+        "Can feel formulaic if over-rehearsed; Situation/Task split sometimes feels redundant for simple stories",
+        "Omits context (no Situation) which can leave the interviewer guessing; does not clarify your specific role",
+        "The Obstacle section can overlap with Situation, leading to repetition; less widely known by interviewers",
+        "Too simple for complex stories; no context-setting; does not distinguish your role from the team's",
+      ],
+      [
+        "When to use",
+        "Default choice for any behavioral interview; especially Amazon, Google, Meta leadership principle questions",
+        "When you need a short answer (under 90 seconds) or when the challenge is obvious from the question",
+        "When the story centers on overcoming a specific blocker, resistance, or constraint",
+        "Technical interviews, support role interviews, or when the question is explicitly about problem-solving",
+      ],
+    ],
+  },
+
+  exercises: [
+    "Draft a full STAR response for: 'Tell me about a time you had to convince your team to adopt a new technology.' Write each section with explicit labels (S/T/A/R). The Action section should include at least three specific steps you took, your reasoning for each, and how you handled pushback. The Result should include at least one quantified metric. After drafting, review it: Is the Situation under 3 sentences? Is the Action at least 60% of the total length? Did you use 'I' instead of 'we'?",
+    "Take a real project you completed in the past year and write three different STAR answers from it, each highlighting a different competency: (1) technical problem-solving, (2) collaboration or conflict resolution, (3) leadership or influence without authority. This exercise builds your ability to reframe a single experience for different question types, which is essential for interview agility.",
+    "Practice the 'expansion pack' technique: Write a 2-minute STAR answer, then write three follow-up responses for likely probe questions—'What would you do differently?', 'How did your manager react?', and 'What was the long-term impact?' Each follow-up should be 30-45 seconds. This prepares you for the conversational depth that distinguishes strong candidates at senior levels.",
+    "Record yourself delivering a STAR answer out loud (use your phone or a voice memo app). Play it back and evaluate: Did you stay under 3 minutes? Did you spend more than 20 seconds on Situation? Did you trail off at the end instead of landing a strong Result? Identify your personal anti-pattern—most people have one consistent weakness (usually too much Situation or a weak Result). Repeat the exercise addressing that weakness.",
+    "Find a partner and conduct a mock behavioral interview. The interviewer asks five behavioral questions; the candidate answers using STAR. After each answer, the interviewer gives feedback on structure, clarity, and impact. Then swap roles. Peer feedback reveals blind spots that self-review misses, such as filler words, loss of eye contact during the Action section, or unconscious 'we' usage."
+  ],
+
+  revisionNotes: [
+    "STAR = Situation (context, 2-3 sentences) → Task (your role, 1-2 sentences) → Action (your specific steps, 60% of the answer) → Result (quantified outcome + learnings).",
+    "Action is the most important section: use 'I' not 'we', describe decisions and reasoning, not just what happened.",
+    "Prepare 8-12 stories covering conflict, failure, leadership, technical challenge, deadline, collaboration, and influence. Each should flex to multiple question types.",
+    "Quantify results whenever possible: revenue, time saved, percentage improvement, users impacted, team size. If not quantifiable, use specific qualitative outcomes.",
+    "For failure questions: choose a genuine failure, own the mistake, and spend most of the Result on what you learned and how you applied it.",
+    "Avoid anti-patterns: context avalanche (too much Situation), the 'we' trap, hypothetical answers, missing results, and perfection narratives.",
+    "Use STAR-L (adding Leadership/Learning) for senior roles to show organizational impact beyond the immediate project.",
+    "Practice out loud with a timer. The target is 2-3 minutes per answer. Most people over-index on Situation when unpracticed.",
+  ],
+
+  cheatSheet: [
+    "Situation: 2-3 sentences, set context and stakes. Answer: Where? When? Why was this hard?",
+    "Task: 1-2 sentences, clarify YOUR specific responsibility vs. the team's overall goal.",
+    "Action: 60% of your answer. Use 'I', detail specific steps, explain your reasoning, and describe how you handled obstacles.",
+    "Result: Quantify impact (%, $, time, users). If negative outcome, pivot to learnings and subsequent application.",
+    "Story bank: Prepare 8-12 stories mapped to common themes. Each story should adapt to at least 2-3 different question types.",
+    "Time allocation: Situation 15-20s, Task 10s, Action 90-120s, Result 20-30s. Total 2-3 minutes.",
+    "Follow-up readiness: Prepare 'expansion packs' for each story—extra details for likely probe questions.",
+    "Credibility boost: Include one failure story with genuine learning. Perfection narratives erode trust.",
+  ],
+
+  resources: [
+    { label: "Cracking the Coding Interview by Gayle Laakmann McDowell", kind: "book", note: "Chapter on behavioral interviews covers STAR with software engineering-specific examples and common question patterns." },
+    { label: "The STAR Interview by Misha Yurchenko", kind: "book", note: "Dedicated book on mastering the STAR method with 50+ example answers across industries." },
+    { label: "Amazon Leadership Principles Interview Prep", kind: "article", note: "Amazon's behavioral interview process is heavily STAR-based; their LP framework is a useful lens for preparing stories." },
+    { label: "Harvard Business Review: How to Answer 'Tell Me About a Time When...'", kind: "article", note: "Concise overview of structured behavioral answering with research-backed tips on storytelling in professional contexts." },
+  ],
+
+  diagrams: [
+    {
+      title: "STAR Answer Flow",
+      kind: "flow",
+      caption: "The sequential flow of a STAR answer: Situation sets context, Task defines your role, Action details your steps (the longest phase), and Result delivers measurable impact. Feedback loop from Result back to story bank for refinement.",
+      mermaid: `flowchart TD
+    A["**SITUATION**\\n*2-3 sentences*\\n*15-20 seconds*"] --> B["**TASK**\\n*Your specific role*\\n*1-2 sentences, 10 seconds*"]
+    B --> C["**ACTION**\\n***The Core — 60% of answer***\\n*90-120 seconds*"]
+    C --> C1["*Step 1: What you did*"]
+    C --> C2["*Step 2: Your reasoning*"]
+    C --> C3["*Step 3: How you handled obstacles*"]
+    C1 & C2 & C3 --> D["**RESULT**\\n*Quantified outcome*\\n*20-30 seconds*"]
+    D --> E{"**Follow-Up Probes?**"}
+    E -->|"*'What would you*\\n*do differently?'*"| F["Deploy **expansion pack**"]
+    E -->|"*'Go deeper on X'*"| G["Add *technical detail*"]
+    E -->|"*No follow-up*"| H["**Story Complete**"]
+    F & G --> H
+    H --> I["**Refine & Update**\\n*Story Bank*"]
+    I -.->|"*Feedback loop*"| A`,
+    },
+    {
+      title: "Story Bank Mind Map",
+      kind: "mindmap",
+      caption: "Central node 'Story Bank' branches into common behavioral themes (Conflict, Failure, Leadership, Technical Challenge, Deadline, Collaboration, Influence). Each theme links to 1-2 prepared STAR stories, which in turn link to the competencies they demonstrate.",
+      mermaid: `mindmap
+  root(("**Story Bank**\\n*8-12 Stories*"))
+    ("**Conflict Resolution**")
+      ("*Peer disagreement story*")
+      ("*Manager conflict story*")
+      ::icon(Competency: **EQ & Diplomacy**)
+    ("**Handling Failure**")
+      ("*Technical mistake story*")
+      ("*Judgment error story*")
+      ::icon(Competency: **Growth Mindset**)
+    ("**Leadership**")
+      ("*Led without authority*")
+      ("*Mentored a teammate*")
+      ::icon(Competency: **Influence**)
+    ("**Technical Challenge**")
+      ("*Architecture decision*")
+      ("*Debugging under pressure*")
+      ::icon(Competency: **Problem Solving**)
+    ("**Tight Deadline**")
+      ("*Scope negotiation story*")
+      ("*Prioritization story*")
+      ::icon(Competency: **Strategic Thinking**)
+    ("**Collaboration**")
+      ("*Cross-functional project*")
+      ("*Stakeholder alignment*")
+      ::icon(Competency: **Communication**)
+    ("**Influence**")
+      ("*Drove adoption of new tool*")
+      ("*Changed team process*")
+      ::icon(Competency: **Persuasion**)`,
+    },
+  ],
+
+  animations: [
+    {
+      title: "Constructing a STAR Answer from Scratch",
+      steps: [
+        { label: "Identify the competency being tested", detail: "Read the question carefully. 'Tell me about a time you disagreed with a teammate' is testing conflict resolution and communication, not technical skill. Knowing the target competency shapes which story you choose and which details you emphasize." },
+        { label: "Select a story from your bank", detail: "Pick a real experience that demonstrates the target competency. The story should have a clear challenge, your direct involvement, and a meaningful outcome. If no perfect match exists, choose the closest analogy and acknowledge the gap." },
+        { label: "Draft the Situation (2-3 sentences)", detail: "Set the scene with minimal but sufficient context: your role, the team or company (generalized if needed), the timeframe, and why this situation was notable. Resist the urge to over-explain—trust the interviewer to ask for more context if needed." },
+        { label: "Define the Task (1-2 sentences)", detail: "Clearly state YOUR specific responsibility. Separate what you owned from what the broader team was doing. This bridges context to action and prevents the 'we' trap later." },
+        { label: "Detail the Action (the core)", detail: "Walk through 3-5 specific steps you took, in order. For each step, explain what you did, why you chose that approach over alternatives, and how you handled any obstacles. Use 'I' consistently. Include decision-making, collaboration, and technical or interpersonal skills as relevant." },
+        { label: "Land the Result with metrics", detail: "State the outcome with at least one quantified metric: percentage improvement, revenue impact, time saved, users affected. Add broader impact: process changes, team learning, follow-on projects. If the outcome was mixed, be honest and pivot to what you learned." },
+        { label: "Rehearse and time yourself", detail: "Deliver the complete answer out loud. Target 2-3 minutes. If over 3 minutes, trim the Situation first, then look for redundancy in the Action. If under 90 seconds, add more reasoning and decision detail to the Action section." },
+      ],
+    },
+  ],
+
+  followUps: [
+    "Behavioral interview preparation strategies and common question banks",
+    "Amazon Leadership Principles and how to map STAR stories to each principle",
+    "Storytelling techniques for professional communication beyond interviews",
+    "Technical interview preparation: system design, coding, and architecture rounds",
+  ],
 };

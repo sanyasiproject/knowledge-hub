@@ -97,6 +97,261 @@ export const awsIam: TopicContent = {
     { front: "Least Privilege Principle", back: "Grant only minimum permissions required. Use specific ARNs (not *), conditions (MFA, IP, region), and regular access reviews. Start restrictive and add, never start broad and reduce." }
   ],
 
+  deepDive: [
+    "## IAM Policy Evaluation Logic\n\n**The IAM policy evaluation engine** follows a specific order: first, all applicable policies are gathered (identity-based, resource-based, permission boundaries, SCPs, session policies). Then evaluation proceeds: **Explicit Deny always wins** — if any policy explicitly denies an action, it is denied regardless of any allows. Next, **SCPs are evaluated** — they set the maximum permissions for the account; an allow in IAM is insufficient without an SCP allow. Then **resource-based policies** are checked — uniquely, a resource policy can grant cross-account access even without an identity policy allow (except when a permission boundary is present). **Permission boundaries** cap the maximum permissions an identity can receive — the effective permissions are the intersection of the identity policy and the boundary. Finally, **identity-based policies** (managed and inline) are evaluated. If no explicit allow is found after all evaluations, the default **implicit deny** applies. Understanding this chain is critical for debugging `Access Denied` errors — use **CloudTrail** and **IAM Policy Simulator** to trace which policy caused the denial.",
+    "## Cross-Account Access Patterns\n\n**Cross-account IAM role assumption** is the recommended pattern for multi-account architectures. Account A creates a role with a **trust policy** allowing Account B's principals to assume it, and an **permissions policy** granting the needed access. Account B's principals call `sts:AssumeRole` to get temporary credentials scoped to the role. **External ID** prevents the **confused deputy problem**: Account A's role trust policy requires an external ID that only legitimate callers know, preventing a malicious third party from tricking Account A into assuming the role on their behalf. For **AWS Organizations**, SCPs provide guardrails across all member accounts — common SCPs deny leaving the organization, restrict regions, or require encryption. **Resource-based policies** (S3 buckets, KMS keys, SQS queues) offer an alternative cross-account pattern: they can grant direct access to principals in other accounts without role assumption, but this bypasses permission boundaries.",
+    "## IAM Best Practices and Zero Trust Implementation\n\n**Least privilege** is the foundational principle: start with zero permissions and grant only what is needed. **IAM Access Analyzer** automates this by analyzing CloudTrail logs to generate least-privilege policies based on actual API usage — run it after 90 days of production activity to tighten policies. **Unused access detection** identifies IAM roles, access keys, and passwords not used within a configurable period. **Service-linked roles** are pre-defined by AWS services with exact permissions needed — prefer these over custom roles for services like EC2 Auto Scaling or RDS. For **human access**, use **IAM Identity Center (SSO)** with an external IdP (Okta, Azure AD) — this eliminates long-lived IAM user credentials entirely. Enforce **MFA for all human users** and **SCP-deny actions without MFA**. For **machine access**, use IAM roles everywhere: EC2 instance profiles, ECS task roles, Lambda execution roles — never embed access keys in code or environment variables."
+  ],
+
+  code: [
+    {
+      language: "json",
+      caption: "IAM policy: least-privilege S3 access with conditions",
+      source: `{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowS3ReadSpecificBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::company-data-prod",
+        "arn:aws:s3:::company-data-prod/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1",
+          "s3:ExistingObjectTag/classification": "public"
+        },
+        "Bool": {
+          "aws:SecureTransport": "true"
+        },
+        "IpAddress": {
+          "aws:SourceIp": "10.0.0.0/8"
+        }
+      }
+    },
+    {
+      "Sid": "DenyUnencryptedUploads",
+      "Effect": "Deny",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::company-data-prod/*",
+      "Condition": {
+        "StringNotEquals": {
+          "s3:x-amz-server-side-encryption": "aws:kms"
+        }
+      }
+    }
+  ]
+}`
+    },
+    {
+      language: "hcl",
+      caption: "Terraform: IAM role with trust policy for cross-account access",
+      source: `# Role in Account A (resource account) that Account B can assume
+resource "aws_iam_role" "cross_account_reader" {
+  name = "CrossAccountDataReader"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::987654321098:root"  # Account B
+        }
+        Action = "sts:AssumeRole"
+        Condition = {
+          StringEquals = {
+            "sts:ExternalId" = var.external_id  # Prevents confused deputy
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "reader_permissions" {
+  name = "DataReadPermissions"
+  role = aws_iam_role.cross_account_reader.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::shared-data-bucket",
+          "arn:aws:s3:::shared-data-bucket/*"
+        ]
+      }
+    ]
+  })
+}
+
+# Permission boundary limiting what this role can ever do
+resource "aws_iam_role_policy_attachment" "boundary" {
+  role       = aws_iam_role.cross_account_reader.name
+  policy_arn = aws_iam_policy.permission_boundary.arn
+}
+
+resource "aws_iam_policy" "permission_boundary" {
+  name = "DataReaderBoundary"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:Get*", "s3:List*"]
+        Resource = "*"
+      },
+      {
+        Effect   = "Deny"
+        Action   = ["iam:*", "organizations:*", "sts:*"]
+        Resource = "*"
+      }
+    ]
+  })
+}`
+    },
+    {
+      language: "bash",
+      caption: "AWS CLI: audit IAM credentials and enforce MFA",
+      source: `# Generate a credential report for all IAM users
+aws iam generate-credential-report
+aws iam get-credential-report \\
+  --query 'Content' --output text | base64 -d > credential-report.csv
+
+# Find users with access keys older than 90 days
+aws iam list-users --query 'Users[].UserName' --output text | \\
+  tr '\\t' '\\n' | while read user; do
+    aws iam list-access-keys --user-name "$user" \\
+      --query "AccessKeyMetadata[?CreateDate<='$(date -d '90 days ago' +%Y-%m-%d)'].[UserName,AccessKeyId,CreateDate,Status]" \\
+      --output table
+  done
+
+# Find IAM roles not used in the last 90 days
+aws iam list-roles --query 'Roles[].RoleName' --output text | \\
+  tr '\\t' '\\n' | while read role; do
+    last_used=$(aws iam get-role --role-name "$role" \\
+      --query 'Role.RoleLastUsed.LastUsedDate' --output text)
+    if [ "$last_used" = "None" ] || \\
+       [ "$(date -d "$last_used" +%s)" -lt "$(date -d '90 days ago' +%s)" ]; then
+      echo "UNUSED: $role (last used: $last_used)"
+    fi
+  done
+
+# SCP: deny actions without MFA for IAM users
+cat <<'POLICY'
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "DenyWithoutMFA",
+    "Effect": "Deny",
+    "NotAction": [
+      "iam:CreateVirtualMFADevice",
+      "iam:EnableMFADevice",
+      "iam:ListMFADevices",
+      "iam:ResyncMFADevice",
+      "sts:GetSessionToken"
+    ],
+    "Resource": "*",
+    "Condition": {
+      "BoolIfExists": { "aws:MultiFactorAuthPresent": "false" },
+      "StringNotLike": { "aws:PrincipalArn": "arn:aws:iam::*:role/*" }
+    }
+  }]
+}
+POLICY`
+    }
+  ],
+
+  comparison: {
+    columns: ["Feature", "IAM Users", "IAM Roles", "IAM Identity Center (SSO)", "Service-Linked Roles"],
+    rows: [
+      ["Credential type", "Long-lived access keys + password", "Temporary STS tokens (1-12 hr)", "Federated temporary tokens", "Managed by AWS service"],
+      ["Best for", "Legacy, CI/CD (prefer roles)", "EC2, Lambda, cross-account", "Human users via IdP", "AWS service operations"],
+      ["MFA support", "Virtual, hardware, FIDO2", "Via trust policy condition", "IdP-managed MFA", "N/A (service use only)"],
+      ["Permission boundary", "Yes", "Yes", "Yes (via permission sets)", "No (pre-defined by AWS)"],
+      ["Cross-account", "Not recommended", "AssumeRole with trust policy", "Multi-account permission sets", "Same account only"],
+      ["Rotation", "Manual (90-day best practice)", "Automatic (token expiry)", "Automatic (federation)", "Automatic (AWS-managed)"],
+      ["Auditability", "CloudTrail + credential report", "CloudTrail + Access Analyzer", "CloudTrail + SSO audit logs", "CloudTrail"],
+      ["Recommended usage", "Break-glass admin only", "All machine-to-machine access", "All human access", "AWS-managed service access"]
+    ]
+  },
+
+  exercises: [
+    "Design an IAM strategy for a company with 200 developers across 5 teams, each team needing access to 3 environments (dev, staging, prod). Implement using IAM Identity Center with permission sets, AWS Organizations with OUs per environment, and SCPs restricting production access. Specify: the OU structure, permission sets per team, SCPs for prod guardrails, and MFA enforcement.",
+    "A Lambda function needs to: read from DynamoDB table 'Orders', write to S3 bucket 'reports-bucket', publish to SNS topic 'notifications', and assume a role in another account to read from their S3 bucket. Write the complete IAM execution role with least-privilege permissions for each action. Include the trust policy, permissions policy, and the cross-account role's trust policy.",
+    "Debug this Access Denied scenario: a developer's IAM user has an AdministratorAccess managed policy attached, but they cannot create an EC2 instance in eu-west-1. Investigate and explain all possible causes: SCP restrictions, permission boundaries, resource policies, region restrictions, and session policies. Show the AWS CLI commands to diagnose each.",
+    "Implement a credential rotation strategy for an organization with 50 IAM users (to be migrated to SSO) and 200 IAM roles. Design: automated access key rotation using Lambda and Secrets Manager, unused credential detection with Access Analyzer, MFA enforcement via SCP, and a migration plan to IAM Identity Center. Provide the Lambda code for key rotation.",
+    "Design a break-glass emergency access procedure for when IAM Identity Center is unavailable. Create: a dedicated break-glass IAM user with hardware MFA, a restrictive policy allowing only essential recovery actions, CloudWatch alarms triggering on break-glass usage, and an automated procedure to disable the user after the emergency. Write the IAM policy and CloudWatch alarm configuration."
+  ],
+
+  cheatSheet: [
+    "**Policy evaluation order**: Explicit Deny > SCP > Resource Policy > Permission Boundary > Identity Policy > Implicit Deny. Any explicit deny at any level wins",
+    "**Trust policy vs permissions policy**: trust policy = WHO can assume (Principal + Condition), permissions policy = WHAT they can do (Action + Resource). Both must allow for access to work",
+    "**ARN format**: `arn:aws:service:region:account:resource-type/resource-id`. IAM is global (no region): `arn:aws:iam::123456789012:role/MyRole`",
+    "**STS token duration**: AssumeRole default 1hr (max 12hr), GetSessionToken max 36hr, Federation max 12hr. Shorter tokens = better security posture",
+    "**Condition keys you should know**: `aws:SourceIp`, `aws:SourceVpce`, `aws:PrincipalOrgID`, `aws:RequestedRegion`, `aws:SecureTransport`, `aws:MultiFactorAuthPresent`",
+    "**IAM Access Analyzer**: generates least-privilege policies from CloudTrail logs, identifies external resource sharing, detects unused access. Run after 90 days of production activity",
+    "**Never use root account for daily operations**. Secure it with hardware MFA, no access keys, and CloudWatch alarm on root login. Use it only for account-level tasks (close account, change support plan)",
+    "**Permission boundaries**: set on users/roles to cap their maximum permissions. Effective permissions = intersection of identity policy AND boundary. Use to delegate IAM admin safely"
+  ],
+
+  revisionNotes: [
+    "IAM is a global service — users, roles, and policies are not region-specific. But SCPs can restrict which regions principals can operate in using the aws:RequestedRegion condition key",
+    "An IAM role has two policies: the trust policy (who can assume it) and the permissions policy (what it can do). The trust policy is a resource-based policy on the role itself",
+    "Resource-based policies (S3 bucket policies, KMS key policies, SQS queue policies) can grant cross-account access directly WITHOUT requiring the caller to have an identity-based policy allow",
+    "Permission boundaries do NOT grant permissions — they only limit what identity-based policies can grant. Think of them as a ceiling, not a floor. Set them when delegating IAM creation to developers",
+    "Service Control Policies (SCPs) do NOT grant permissions either — they are guardrails restricting the maximum permissions available to any principal in the account. The root user is also affected by SCPs",
+    "IAM Identity Center (formerly AWS SSO) is the recommended way to manage human access across multiple AWS accounts. It integrates with external IdPs and provides centralized permission sets",
+    "Access keys should be rotated every 90 days. Use IAM credential reports to audit key age. Better yet: eliminate access keys entirely by using IAM roles for machines and Identity Center for humans",
+    "The confused deputy problem occurs when a trusted service is tricked into acting on behalf of an unauthorized party. Prevent it using the sts:ExternalId condition in trust policies for third-party role assumption"
+  ],
+
+  resources: [
+    { label: "AWS IAM documentation — Policy evaluation logic", kind: "docs", note: "Official reference explaining the complete IAM policy evaluation chain with flowcharts and examples" },
+    { label: "AWS re:Invent — Become an IAM Policy Master (SEC305)", kind: "video", note: "Deep dive into policy types, evaluation logic, condition keys, and real-world policy debugging" },
+    { label: "AWS Security Blog — IAM Access Analyzer policy generation", kind: "article", note: "How to use Access Analyzer to generate least-privilege policies from CloudTrail activity logs" },
+    { label: "Cloudonaut — Complete AWS IAM Reference", kind: "docs", note: "Comprehensive reference of all IAM actions, resource types, and condition keys for every AWS service" },
+    { label: "aws-samples/aws-iam-permissions-guardrails GitHub", kind: "repo", note: "Collection of SCP examples for common guardrails: region restriction, service restriction, encryption enforcement" }
+  ],
+
+  diagrams: [
+    {
+      title: "IAM Policy Evaluation Flowchart",
+      kind: "flow" as const,
+      caption: "Complete flowchart showing policy evaluation order: explicit deny check, SCP evaluation, resource policy, permission boundary, identity policy, and implicit deny"
+    },
+    {
+      title: "Cross-Account Role Assumption",
+      kind: "sequence" as const,
+      caption: "Sequence diagram showing the AssumeRole flow between Account A and Account B, including STS token exchange and trust policy evaluation"
+    }
+  ],
+
+  animations: [
+    {
+      title: "IAM Role Assumption Flow",
+      steps: [
+        { label: "Application needs cross-account access", detail: "A Lambda function in Account B (987654321098) needs to read data from an S3 bucket in Account A (123456789012). The Lambda's execution role has permission to call sts:AssumeRole." },
+        { label: "Call STS AssumeRole", detail: "Lambda calls sts:AssumeRole with the ARN of the target role in Account A (arn:aws:iam::123456789012:role/CrossAccountReader) and provides the ExternalId as proof of identity." },
+        { label: "Trust policy evaluation", detail: "STS evaluates the role's trust policy: Is Account B's principal listed? Does the ExternalId match? Are all conditions (MFA, source IP, etc.) satisfied? If any check fails, the request is denied." },
+        { label: "Temporary credentials issued", detail: "STS returns temporary credentials: AccessKeyId, SecretAccessKey, and SessionToken. These expire after the specified duration (default 1 hour). The credentials are scoped to the role's permissions." },
+        { label: "Access resources with assumed role", detail: "Lambda uses the temporary credentials to call s3:GetObject on Account A's bucket. IAM evaluates the role's permissions policy and any resource policies on the S3 bucket. If both allow, access is granted." },
+        { label: "Credentials expire", detail: "After the duration period, the temporary credentials expire automatically. No cleanup needed. CloudTrail logs in both accounts record the AssumeRole call and all subsequent API calls made with the temporary credentials." }
+      ]
+    }
+  ],
+
   glossary: [
     { term: "IAM", definition: "Identity and Access Management — AWS service for controlling authentication (who) and authorization (what they can do) for AWS resources." },
     { term: "IAM Role", definition: "An assumable identity with temporary credentials provided by STS. Used by services, cross-account access, and federated users instead of long-lived access keys." },

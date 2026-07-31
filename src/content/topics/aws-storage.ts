@@ -93,6 +93,216 @@ export const awsStorage: TopicContent = {
     { front: "Snow Family", back: "Physical devices for offline data transfer. Snowcone (8-14 TB), Snowball Edge (80 TB + optional compute), Snowmobile (100 PB shipping container)." }
   ],
 
+  deepDive: [
+    "## S3 Consistency Model and Internal Architecture\n\n**Strong read-after-write consistency** was delivered in December 2020 for all S3 operations — PUTs, DELETEs, and list operations. Internally, S3 uses a distributed metadata subsystem backed by a **persistent, replicated key-value store** that replaced the eventual-consistency index. Objects are stored across a minimum of **3 Availability Zones** (except One Zone-IA). Each object is split into chunks, erasure-coded, and distributed across multiple devices and facilities. The **S3 Intelligent-Tiering** storage class uses per-object access monitoring to automatically move data between frequent, infrequent, archive instant, archive, and deep archive tiers — with no retrieval fees. For buckets with millions of objects, **S3 Inventory** and **S3 Storage Lens** provide visibility into usage patterns, while **S3 Batch Operations** enable bulk actions (copy, tag, restore) across billions of objects.",
+    "## EBS Volume Types and Performance Characteristics\n\nEBS volumes attach to EC2 instances via the **Nitro** hypervisor's NVMe interface. **gp3** is the default general-purpose SSD: 3,000 baseline IOPS and 125 MB/s throughput (independently scalable to 16,000 IOPS and 1,000 MB/s) without capacity dependency. **io2 Block Express** delivers up to 256,000 IOPS and 4,000 MB/s with 99.999% durability — designed for SAP HANA, Oracle, and mission-critical databases. **st1** (throughput-optimized HDD) supports up to 500 MB/s for sequential workloads like Kafka logs. Key consideration: **EBS-optimized instances** have dedicated bandwidth to EBS (separate from network), and the instance type sets the ceiling — a `t3.micro` maxes out at 2,085 Mbps regardless of volume capabilities. **Multi-Attach** for io2 volumes enables up to 16 instances to share a single volume (requires cluster-aware filesystem like GFS2).",
+    "## EFS vs FSx: Choosing the Right File System\n\n**EFS** provides managed NFS v4.1 with automatic scaling from 0 to petabytes. Performance modes: **General Purpose** (lowest latency, 35,000 IOPS) and **Max I/O** (higher throughput, slightly higher latency). Throughput modes: **Bursting** (scales with size), **Provisioned** (fixed throughput), and **Elastic** (auto-scales throughput, pay per use). EFS is ideal for CMS, ML training data, container shared storage. **FSx for Lustre** is a high-performance parallel file system integrating with S3 — use for HPC, video processing, and ML training (hundreds of GB/s throughput). **FSx for Windows File Server** provides fully managed SMB shares with Active Directory integration, DFS namespaces, and shadow copies — required for Windows workloads. **FSx for NetApp ONTAP** supports multi-protocol (NFS, SMB, iSCSI) with data deduplication and compression, ideal for hybrid cloud and lift-and-shift."
+  ],
+
+  code: [
+    {
+      language: "hcl",
+      caption: "Terraform: S3 bucket with versioning, encryption, and lifecycle rules",
+      source: `resource "aws_s3_bucket" "data_lake" {
+  bucket = "company-data-lake-prod"
+}
+
+resource "aws_s3_bucket_versioning" "data_lake" {
+  bucket = aws_s3_bucket.data_lake.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "data_lake" {
+  bucket = aws_s3_bucket.data_lake.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.s3.arn
+    }
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "data_lake" {
+  bucket = aws_s3_bucket.data_lake.id
+
+  rule {
+    id     = "transition-to-ia"
+    status = "Enabled"
+    filter { prefix = "raw/" }
+
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+    transition {
+      days          = 90
+      storage_class = "GLACIER_INSTANT_RETRIEVAL"
+    }
+    transition {
+      days          = 365
+      storage_class = "DEEP_ARCHIVE"
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 90
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "data_lake" {
+  bucket                  = aws_s3_bucket.data_lake.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}`
+    },
+    {
+      language: "bash",
+      caption: "AWS CLI: EBS snapshot management and cross-region copy",
+      source: `# Create a snapshot of a production EBS volume
+aws ec2 create-snapshot \\
+  --volume-id vol-0abc123def456 \\
+  --description "prod-db-daily-$(date +%Y%m%d)" \\
+  --tag-specifications 'ResourceType=snapshot,Tags=[{Key=Environment,Value=prod},{Key=Backup,Value=daily}]'
+
+# Copy snapshot to DR region
+aws ec2 copy-snapshot \\
+  --source-region us-east-1 \\
+  --source-snapshot-id snap-0abc123def456 \\
+  --destination-region us-west-2 \\
+  --encrypted \\
+  --kms-key-id alias/ebs-dr-key \\
+  --description "DR copy of prod-db snapshot"
+
+# List and clean up old snapshots (older than 30 days)
+aws ec2 describe-snapshots \\
+  --owner-ids self \\
+  --filters "Name=tag:Backup,Values=daily" \\
+  --query "Snapshots[?StartTime<='$(date -d '30 days ago' +%Y-%m-%d)'].SnapshotId" \\
+  --output text | tr '\\t' '\\n' | while read snap; do
+    echo "Deleting old snapshot: $snap"
+    aws ec2 delete-snapshot --snapshot-id "$snap"
+  done`
+    },
+    {
+      language: "json",
+      caption: "S3 bucket policy: enforce encryption and restrict VPC access",
+      source: `{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyUnencryptedUploads",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::company-data-lake-prod/*",
+      "Condition": {
+        "StringNotEquals": {
+          "s3:x-amz-server-side-encryption": "aws:kms"
+        }
+      }
+    },
+    {
+      "Sid": "RestrictToVPC",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::company-data-lake-prod",
+        "arn:aws:s3:::company-data-lake-prod/*"
+      ],
+      "Condition": {
+        "StringNotEquals": {
+          "aws:sourceVpce": "vpce-abc123"
+        }
+      }
+    }
+  ]
+}`
+    }
+  ],
+
+  comparison: {
+    columns: ["Feature", "S3", "EBS (gp3)", "EBS (io2)", "EFS", "FSx for Lustre"],
+    rows: [
+      ["Storage type", "Object", "Block (SSD)", "Block (SSD)", "File (NFS)", "File (Lustre)"],
+      ["Max size", "Unlimited", "16 TB/volume", "64 TB/volume", "Petabytes (auto)", "Petabytes"],
+      ["Max IOPS", "5,500 GET/s/prefix", "16,000", "256,000", "35,000 (GP mode)", "Millions"],
+      ["Max throughput", "Varies by prefix", "1,000 MB/s", "4,000 MB/s", "Elastic: auto", "Hundreds GB/s"],
+      ["Durability", "99.999999999% (11 nines)", "99.8-99.9%", "99.999%", "99.999999999%", "Depends on type"],
+      ["Access pattern", "Any (via API)", "Single EC2 (or Multi-Attach io2)", "Single/Multi-Attach", "Multi-AZ concurrent", "Multi-instance parallel"],
+      ["Pricing model", "Per GB stored + requests", "Per GB provisioned", "Per GB + IOPS provisioned", "Per GB used", "Per GB provisioned"],
+      ["Best for", "Data lakes, backups, static assets", "Boot volumes, general workloads", "Mission-critical databases", "Shared app storage, CMS", "HPC, ML training, video"]
+    ]
+  },
+
+  exercises: [
+    "Design an S3 data lake architecture for a company ingesting 500 GB/day of log data. Specify: bucket structure (prefix strategy), lifecycle rules (transition schedule to IA, Glacier, Deep Archive), access patterns (Athena queries on recent data, occasional historical analysis), encryption strategy (SSE-KMS vs SSE-S3), and cross-region replication for DR. Calculate the monthly storage cost after 1 year of data accumulation.",
+    "A PostgreSQL database on EC2 requires consistent 20,000 IOPS with sub-millisecond latency. The database is 2 TB and growing 50 GB/month. Choose the right EBS volume type, configure the volume and instance type for the required performance, set up automated snapshots with cross-region copy for DR, and design a monitoring strategy using CloudWatch metrics (VolumeQueueLength, VolumeThroughput).",
+    "Your team needs a shared file system for 20 ECS Fargate tasks processing video files. Each task reads input (1-5 GB files) and writes output (200 MB files). Total dataset is 10 TB. Compare EFS (with throughput mode selection) vs FSx for Lustre (with S3 integration). Consider: cost, throughput requirements, burst behavior, and deployment complexity.",
+    "Design an S3 security architecture for a healthcare company (HIPAA-compliant). Address: bucket policies enforcing encryption, VPC endpoint access restrictions, S3 Access Points for different teams, Object Lock for compliance retention (WORM), CloudTrail data events for audit logging, and Macie for PII detection. Specify the exact IAM and bucket policies.",
+    "A media company stores 500 TB of video assets in S3 Standard. Analytics show 80% of files haven't been accessed in 90 days, and 50% haven't been accessed in a year. Design an S3 Intelligent-Tiering vs manual lifecycle optimization strategy. Calculate the cost savings for each approach and recommend which to use."
+  ],
+
+  cheatSheet: [
+    "**S3 storage class costs (us-east-1)**: Standard $0.023/GB → IA $0.0125/GB → Glacier Instant $0.004/GB → Glacier Flexible $0.0036/GB → Deep Archive $0.00099/GB",
+    "**S3 performance**: 5,500 GETs + 3,500 PUTs per second per prefix. Parallelize across prefixes for higher throughput. Multipart upload required > 5 GB, recommended > 100 MB",
+    "**EBS gp3 baseline**: 3,000 IOPS + 125 MB/s included free. Scale independently up to 16,000 IOPS ($0.005/IOPS) and 1,000 MB/s ($0.04/MB/s)",
+    "**EBS snapshot pricing**: you pay only for changed blocks (incremental). First snapshot = full copy, subsequent = deltas. Cross-region copy incurs data transfer charges",
+    "**EFS Elastic throughput**: automatically scales to match workload — you pay per GB transferred rather than provisioning throughput. Best for spiky or unpredictable workloads",
+    "**S3 Object Lock modes**: Governance (root can override), Compliance (nobody can delete, even root, until retention expires). Legal Hold blocks deletion independently of retention",
+    "**S3 Transfer Acceleration**: uses CloudFront edge locations for faster uploads. Enable per-bucket. Charges only when acceleration is faster than normal transfer",
+    "**EBS Multi-Attach**: only for io2/io2 Block Express, max 16 Nitro instances, requires cluster-aware filesystem (not ext4/xfs). Use for HA active-active databases"
+  ],
+
+  revisionNotes: [
+    "S3 provides strong read-after-write consistency for all operations since December 2020 — no more eventual consistency caveats. This applies to PUTs of new objects, overwrites, DELETEs, and LIST operations",
+    "EBS volume performance is capped by the instance type's EBS bandwidth. Always check instance limits — a powerful io2 volume on a small instance wastes provisioned IOPS and money",
+    "S3 Intelligent-Tiering has no retrieval fees (unlike Standard-IA which charges $0.01/GB retrieved). It charges a small monitoring fee ($0.0025 per 1,000 objects) for automatic tier transitions",
+    "EFS pricing: Standard storage $0.30/GB-month, IA $0.016/GB-month + $0.01/GB access. Enable lifecycle policy to move files to IA after 14/30/60/90 days for significant savings",
+    "S3 versioning cannot be disabled once enabled — only suspended. Suspended versioning stops creating new versions but preserves existing ones. Delete markers are lightweight version entries",
+    "FSx for Lustre deployment types: Scratch (temporary, no replication, highest throughput) for short-term processing; Persistent (replicated within AZ, auto-heals) for longer-term storage",
+    "S3 Glacier retrieval times: Instant (milliseconds), Flexible Expedited (1-5 min), Standard (3-5 hr), Bulk (5-12 hr). Deep Archive: Standard (12 hr), Bulk (48 hr)",
+    "EBS snapshots are stored in S3 (managed by AWS, not in your bucket). They are incremental — deleting a snapshot removes only blocks not referenced by other snapshots"
+  ],
+
+  resources: [
+    { label: "AWS Storage Blog: S3 strong consistency deep dive", kind: "article", note: "Technical explanation of how AWS achieved strong consistency for S3 without performance compromise" },
+    { label: "AWS Well-Architected — Storage Lens and optimization", kind: "docs", note: "Official guidance on storage right-sizing, tiering strategies, and cost optimization across S3, EBS, and EFS" },
+    { label: "AWS re:Invent — Deep dive on Amazon S3 (STG204)", kind: "video", note: "Covers S3 internals, performance optimization, security features, and access patterns at scale" },
+    { label: "Amazon Builders' Library: Using S3 as a data lake foundation", kind: "article", note: "Architectural patterns for S3-based data lakes including partitioning, formats (Parquet, ORC), and query engines" },
+    { label: "AWS EBS CSI Driver GitHub repository", kind: "repo", note: "Kubernetes CSI driver for EBS — essential for persistent volumes in EKS clusters" }
+  ],
+
+  diagrams: [
+    {
+      title: "S3 Storage Class Lifecycle Transitions",
+      kind: "flow" as const,
+      caption: "Flow diagram showing allowed lifecycle transitions between S3 storage classes and their minimum duration requirements"
+    },
+    {
+      title: "EBS Architecture with EC2",
+      kind: "architecture" as const,
+      caption: "Architecture diagram showing EBS volumes attached to EC2 instances across AZs, with snapshot replication to S3"
+    }
+  ],
+
+  animations: [
+    {
+      title: "S3 Multipart Upload Process",
+      steps: [
+        { label: "Initiate multipart upload", detail: "Client calls CreateMultipartUpload API. S3 returns an UploadId that identifies this upload session. The object key is reserved but not yet visible." },
+        { label: "Upload parts in parallel", detail: "Client splits the file into parts (minimum 5 MB each, except last part). Each part is uploaded with UploadPart API using the UploadId and a part number (1-10,000). Multiple parts upload concurrently for maximum throughput." },
+        { label: "Track ETags for each part", detail: "S3 returns an ETag for each successfully uploaded part. Client must store the part number and ETag pairs. Failed parts can be retried independently without re-uploading successful parts." },
+        { label: "Complete multipart upload", detail: "Client calls CompleteMultipartUpload with the ordered list of part numbers and ETags. S3 assembles the parts into the final object. The object becomes visible and any previous version is superseded." },
+        { label: "Cleanup incomplete uploads", detail: "If the upload is abandoned, parts consume storage but are invisible. S3 Lifecycle rules with AbortIncompleteMultipartUpload action automatically clean up incomplete uploads after a configured number of days." }
+      ]
+    }
+  ],
+
   glossary: [
     { term: "S3", definition: "Simple Storage Service — AWS object storage with virtually unlimited capacity, 11-nines durability, and multiple storage classes for different access patterns." },
     { term: "EBS", definition: "Elastic Block Store — persistent block-level storage volumes for EC2 instances, offering SSD and HDD options with snapshot and encryption capabilities." },

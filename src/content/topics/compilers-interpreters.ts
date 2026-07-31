@@ -22,99 +22,137 @@ export const compilersInterpreters: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "A minimal recursive-descent parser for arithmetic expressions",
-      source: `import re
-from dataclasses import dataclass
-from typing import Union
+      source: `#include <string>
+#include <vector>
+#include <variant>
+#include <memory>
+#include <stdexcept>
+#include <cctype>
+#include <iostream>
 
-# --- Lexer ---
-TOKEN_SPEC = [
-    ("NUM",   r"\\d+(\\.\\d*)?"),
-    ("PLUS",  r"\\+"),
-    ("MINUS", r"-"),
-    ("MUL",   r"\\*"),
-    ("DIV",   r"/"),
-    ("LPAREN", r"\\("),
-    ("RPAREN", r"\\)"),
-    ("SKIP",  r"[ \\t]+"),
-]
-TOKEN_RE = re.compile("|".join(f"(?P<{name}>{pat})" for name, pat in TOKEN_SPEC))
+// --- Lexer ---
+enum class TokenKind { NUM, PLUS, MINUS, MUL, DIV, LPAREN, RPAREN, END };
 
-def tokenize(text):
-    tokens = []
-    for m in TOKEN_RE.finditer(text):
-        kind = m.lastgroup
-        if kind != "SKIP":
-            tokens.append((kind, m.group()))
-    return tokens
+struct Token {
+    TokenKind kind;
+    std::string text;
+};
 
-# --- AST Nodes ---
-@dataclass
-class Num:
-    value: float
+std::vector<Token> tokenize(const std::string& input) {
+    std::vector<Token> tokens;
+    size_t i = 0;
+    while (i < input.size()) {
+        if (std::isspace(input[i])) { ++i; continue; }
+        if (std::isdigit(input[i]) || input[i] == '.') {
+            size_t start = i;
+            while (i < input.size() && (std::isdigit(input[i]) || input[i] == '.')) ++i;
+            tokens.push_back({TokenKind::NUM, input.substr(start, i - start)});
+        } else {
+            switch (input[i]) {
+                case '+': tokens.push_back({TokenKind::PLUS, "+"}); break;
+                case '-': tokens.push_back({TokenKind::MINUS, "-"}); break;
+                case '*': tokens.push_back({TokenKind::MUL, "*"}); break;
+                case '/': tokens.push_back({TokenKind::DIV, "/"}); break;
+                case '(': tokens.push_back({TokenKind::LPAREN, "("}); break;
+                case ')': tokens.push_back({TokenKind::RPAREN, ")"}); break;
+                default: throw std::runtime_error("Unknown character");
+            }
+            ++i;
+        }
+    }
+    tokens.push_back({TokenKind::END, ""});
+    return tokens;
+}
 
-@dataclass
-class BinOp:
-    op: str
-    left: "Expr"
-    right: "Expr"
+// --- AST Nodes ---
+struct Num;
+struct BinOp;
+using Expr = std::variant<std::unique_ptr<Num>, std::unique_ptr<BinOp>>;
 
-Expr = Union[Num, BinOp]
+struct Num { double value; };
+struct BinOp {
+    char op;
+    Expr left;
+    Expr right;
+};
 
-# --- Recursive-Descent Parser (handles precedence) ---
-class Parser:
-    def __init__(self, tokens):
-        self.tokens = tokens
-        self.pos = 0
+// --- Recursive-Descent Parser (handles precedence) ---
+class Parser {
+    std::vector<Token> tokens_;
+    size_t pos_ = 0;
 
-    def peek(self):
-        return self.tokens[self.pos] if self.pos < len(self.tokens) else None
+    const Token& peek() const { return tokens_[pos_]; }
+    Token consume(TokenKind expected = TokenKind::END) {
+        auto& tok = tokens_[pos_];
+        if (expected != TokenKind::END && tok.kind != expected)
+            throw std::runtime_error("Unexpected token: " + tok.text);
+        return tokens_[pos_++];
+    }
 
-    def consume(self, expected=None):
-        tok = self.tokens[self.pos]
-        if expected and tok[0] != expected:
-            raise SyntaxError(f"Expected {expected}, got {tok}")
-        self.pos += 1
-        return tok
+public:
+    explicit Parser(std::vector<Token> tokens) : tokens_(std::move(tokens)) {}
 
-    def parse_expr(self) -> Expr:          # + and - (lowest precedence)
-        left = self.parse_term()
-        while self.peek() and self.peek()[0] in ("PLUS", "MINUS"):
-            op = self.consume()[1]
-            left = BinOp(op, left, self.parse_term())
-        return left
+    Expr parseExpr() {                      // + and - (lowest precedence)
+        auto left = parseTerm();
+        while (peek().kind == TokenKind::PLUS || peek().kind == TokenKind::MINUS) {
+            char op = consume().text[0];
+            left = std::make_unique<BinOp>(BinOp{op, std::move(left), parseTerm()});
+        }
+        return left;
+    }
 
-    def parse_term(self) -> Expr:          # * and /
-        left = self.parse_factor()
-        while self.peek() and self.peek()[0] in ("MUL", "DIV"):
-            op = self.consume()[1]
-            left = BinOp(op, left, self.parse_factor())
-        return left
+    Expr parseTerm() {                      // * and /
+        auto left = parseFactor();
+        while (peek().kind == TokenKind::MUL || peek().kind == TokenKind::DIV) {
+            char op = consume().text[0];
+            left = std::make_unique<BinOp>(BinOp{op, std::move(left), parseFactor()});
+        }
+        return left;
+    }
 
-    def parse_factor(self) -> Expr:        # numbers and parenthesised exprs
-        tok = self.peek()
-        if tok[0] == "NUM":
-            self.consume()
-            return Num(float(tok[1]))
-        elif tok[0] == "LPAREN":
-            self.consume("LPAREN")
-            node = self.parse_expr()
-            self.consume("RPAREN")
-            return node
-        raise SyntaxError(f"Unexpected token: {tok}")
+    Expr parseFactor() {                    // numbers and parenthesised exprs
+        if (peek().kind == TokenKind::NUM) {
+            double val = std::stod(consume().text);
+            return std::make_unique<Num>(Num{val});
+        }
+        if (peek().kind == TokenKind::LPAREN) {
+            consume(TokenKind::LPAREN);
+            auto node = parseExpr();
+            consume(TokenKind::RPAREN);
+            return node;
+        }
+        throw std::runtime_error("Unexpected token: " + peek().text);
+    }
+};
 
-# --- Tree-walking interpreter ---
-def evaluate(node: Expr) -> float:
-    if isinstance(node, Num):
-        return node.value
-    l, r = evaluate(node.left), evaluate(node.right)
-    return {"+": l + r, "-": l - r, "*": l * r, "/": l / r}[node.op]
+// --- Tree-walking interpreter ---
+double evaluate(const Expr& node) {
+    return std::visit([](const auto& ptr) -> double {
+        using T = std::decay_t<decltype(*ptr)>;
+        if constexpr (std::is_same_v<T, Num>) {
+            return ptr->value;
+        } else {
+            double l = evaluate(ptr->left), r = evaluate(ptr->right);
+            switch (ptr->op) {
+                case '+': return l + r;
+                case '-': return l - r;
+                case '*': return l * r;
+                case '/': return l / r;
+                default: throw std::runtime_error("Unknown operator");
+            }
+        }
+    }, node);
+}
 
-# Usage
-tokens = tokenize("3 + 4 * (2 - 1)")
-tree = Parser(tokens).parse_expr()
-print(evaluate(tree))  # 7.0`,
+int main() {
+    auto tokens = tokenize("3 + 4 * (2 - 1)");
+    Parser parser(std::move(tokens));
+    auto tree = parser.parseExpr();
+    std::cout << evaluate(tree) << "\\n"; // 7
+    return 0;
+}`,
     },
     {
       language: "c",

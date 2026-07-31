@@ -90,46 +90,66 @@ function canUserEditDocument(user: User, doc: Document): boolean {
 }`
     },
     {
-      language: "python",
-      caption: "Python naming conventions following PEP 8",
-      source: `# Classes: PascalCase
-class InvoiceLineItem:
-    """Represents a single line on an invoice."""
+      language: "cpp",
+      caption: "C++ naming conventions",
+      source: `#include <iostream>
+#include <vector>
+#include <string>
+#include <numeric>
+#include <stdexcept>
+#include <sstream>
 
-    # Constants: UPPER_SNAKE_CASE
-    MAX_DESCRIPTION_LENGTH = 500
-    DEFAULT_TAX_RATE = 0.18
+// Classes: PascalCase
+class InvoiceLineItem {
+public:
+    // Constants: UPPER_SNAKE_CASE (or constexpr)
+    static constexpr int MAX_DESCRIPTION_LENGTH = 500;
+    static constexpr double DEFAULT_TAX_RATE = 0.18;
 
-    # Instance variables and methods: snake_case
-    def __init__(self, description: str, unit_price: float, quantity: int):
-        self._description = description  # Leading underscore = "private by convention"
-        self.unit_price = unit_price
-        self.quantity = quantity
+    // Constructor
+    InvoiceLineItem(const std::string& description, double unitPrice, int quantity)
+        : description_(description)    // Trailing underscore = private member convention
+        , unitPrice_(unitPrice)
+        , quantity_(quantity) {}
 
-    # Properties for computed values: noun-like names, not verb-like
-    @property
-    def total_before_tax(self) -> float:
-        return self.unit_price * self.quantity
+    // Getters for computed values: noun-like names
+    double totalBeforeTax() const {
+        return unitPrice_ * quantity_;
+    }
 
-    @property
-    def tax_amount(self) -> float:
-        return self.total_before_tax * self.DEFAULT_TAX_RATE
+    double taxAmount() const {
+        return totalBeforeTax() * DEFAULT_TAX_RATE;
+    }
 
-    # Methods: verb phrases
-    def apply_discount(self, discount_percentage: float) -> None:
-        if not 0 <= discount_percentage <= 100:
-            raise ValueError(f"Discount must be 0-100, got {discount_percentage}")
-        multiplier = 1 - (discount_percentage / 100)
-        self.unit_price *= multiplier
+    // Methods: camelCase verb phrases
+    void applyDiscount(double discountPercentage) {
+        if (discountPercentage < 0 || discountPercentage > 100) {
+            throw std::invalid_argument(
+                "Discount must be 0-100, got " + std::to_string(discountPercentage));
+        }
+        double multiplier = 1.0 - (discountPercentage / 100.0);
+        unitPrice_ *= multiplier;
+    }
 
-    # Dunder methods: reserved for Python protocols
-    def __repr__(self) -> str:
-        return f"InvoiceLineItem({self._description!r}, {self.unit_price}, {self.quantity})"
+    // Operator overload for stream output
+    friend std::ostream& operator<<(std::ostream& os, const InvoiceLineItem& item) {
+        return os << "InvoiceLineItem(\\"" << item.description_ << "\\", "
+                  << item.unitPrice_ << ", " << item.quantity_ << ")";
+    }
 
+private:
+    std::string description_;
+    double unitPrice_;
+    int quantity_;
+};
 
-# Module-level functions: snake_case, verb phrases
-def calculate_invoice_total(line_items: list[InvoiceLineItem]) -> float:
-    return sum(item.total_before_tax + item.tax_amount for item in line_items)`
+// Free functions: camelCase or snake_case (team convention)
+double calculateInvoiceTotal(const std::vector<InvoiceLineItem>& lineItems) {
+    return std::accumulate(lineItems.begin(), lineItems.end(), 0.0,
+        [](double sum, const InvoiceLineItem& item) {
+            return sum + item.totalBeforeTax() + item.taxAmount();
+        });
+}`
     }
   ],
 

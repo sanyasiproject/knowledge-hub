@@ -307,4 +307,340 @@ Daily data transfer:
         "The ratio of peak traffic to average traffic. Typically 2-3x for normal applications, but can be 10x+ for event-driven systems. Systems must be sized for peak capacity.",
     },
   ],
+  deepDive: [
+    `**The Philosophy of Estimation: Why Order-of-Magnitude Thinking Matters**
+
+Back-of-the-envelope estimation is not about arriving at a precise number -- it is about developing *intuition* for scale. In system design, the difference between **10 QPS** and **10,000 QPS** is not just arithmetic; it dictates whether you need a single PostgreSQL instance or a distributed cluster with read replicas, caches, and load balancers. Order-of-magnitude thinking forces you to confront the *shape* of the problem before committing to a solution. When an interviewer asks you to estimate, they are testing whether you can translate **vague product requirements** into **concrete infrastructure constraints**. The goal is a rough compass bearing, not GPS coordinates. A 2x error is perfectly acceptable; a 100x error means you chose the wrong architecture entirely. This is why estimation is the *first* step in any system design discussion -- it tells you which problems are worth solving and which are negligible. Memorizing reference numbers (latencies, throughput limits, storage conversions) serves as your **calibration toolkit**, anchoring calculations to reality rather than guesswork.`,
+
+    `**Common Pitfalls and Anti-Patterns in Estimation**
+
+The most frequent mistake is **forgetting replication**. Raw storage estimates must be multiplied by the replication factor (typically *3x* for distributed systems), and many candidates present numbers that are a third of what is actually needed. The second major pitfall is **confusing peak and average traffic**. Systems must be provisioned for *peak* load, not average -- a service that handles 10K QPS on average but spikes to 50K during rush hour will collapse if sized for the average. Candidates also commonly **confuse throughput and latency**: high QPS (throughput) does not imply low latency, and vice versa. A batch processing system may have enormous throughput but multi-second latency per request. Other anti-patterns include: *ignoring the read/write ratio* (which determines whether to optimize for reads or writes), *neglecting data growth over time* (a 5-year projection can be 5-10x the year-one estimate), and *failing to account for metadata and indexes* (which can add 20-50% overhead on top of raw data). Finally, **not sanity-checking results** is a critical error -- always compare your answer to known reference points. If your estimate says a chat app needs 1 PB/day of bandwidth for text messages, something is wrong.`,
+
+    `**Connecting Estimation to Capacity Planning and Real-World Infrastructure**
+
+Estimation is the bridge between *system design* and *capacity planning*. Once you have approximate QPS, storage, and bandwidth numbers, you can map them to real infrastructure decisions. For compute, divide your peak QPS by the throughput of a single server (typically **1K-10K QPS** for a web server, depending on complexity) to determine the number of application servers needed. For storage, your total data estimate determines whether you need a single database, a sharded cluster, or an object storage service like **S3**. For bandwidth, your egress estimate determines CDN requirements and network costs -- at scale, bandwidth is often the *dominant* operational expense. In practice, capacity planning adds additional factors: **headroom** (typically 30-50% above peak for safety), **failover capacity** (if one availability zone goes down, can the remaining zones absorb the load?), and **auto-scaling lead time** (how quickly can new instances spin up?). Real-world infrastructure teams use estimation as a starting point, then refine with *load testing* and *production metrics*. The estimation skill you build in interviews translates directly to the capacity planning reviews that engineering teams conduct quarterly at companies like Google, Meta, and Amazon.`,
+  ],
+  code: [
+    {
+      language: "cpp",
+      caption: "QPS Estimation Utility",
+      source: `#include <iostream>
+#include <string>
+#include <sstream>
+#include <iomanip>
+
+class QPSEstimator {
+    // Utility for estimating Queries Per Second from user-level metrics.
+    static constexpr long long SECONDS_PER_DAY = 100'000; // ~86,400 rounded
+
+    long long dau_;
+    double actions_per_user_;
+    double peak_factor_;
+
+public:
+    QPSEstimator(long long dau, double actions_per_user, double peak_factor = 3.0)
+        : dau_(dau), actions_per_user_(actions_per_user), peak_factor_(peak_factor) {}
+
+    // Average QPS: DAU * actions_per_user / seconds_per_day
+    double average_qps() const {
+        return static_cast<double>(dau_) * actions_per_user_ / SECONDS_PER_DAY;
+    }
+
+    // Peak QPS = average QPS * peak_factor
+    double peak_qps() const {
+        return average_qps() * peak_factor_;
+    }
+
+    void report() const {
+        std::cout << std::fixed << std::setprecision(0);
+        std::cout << "DAU:              " << dau_ << "\\n"
+                  << "Actions/user/day: " << actions_per_user_ << "\\n"
+                  << "Average QPS:      " << average_qps() << "\\n"
+                  << "Peak QPS (" << peak_factor_ << "x): "
+                  << peak_qps() << "\\n";
+    }
+};
+
+int main() {
+    // Example: Twitter-like feed reads
+    QPSEstimator estimator(300'000'000LL, 100.0, 3.0);
+    estimator.report();
+    // Average QPS: 300,000
+    // Peak QPS (3.0x): 900,000
+    return 0;
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "Storage Estimation Calculator",
+      source: `#include <cmath>
+#include <iostream>
+#include <string>
+#include <sstream>
+#include <iomanip>
+
+struct StorageEstimate {
+    std::string daily_raw;
+    std::string yearly_raw;
+    std::string total_raw;
+    std::string total_replicated;
+    int replication_factor;
+};
+
+std::string human_readable(double size_bytes) {
+    const char* units[] = {"B", "KB", "MB", "GB", "TB", "PB", "EB"};
+    int i = 0;
+    while (std::abs(size_bytes) >= 1024.0 && i < 6) {
+        size_bytes /= 1024.0;
+        ++i;
+    }
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(1) << size_bytes << " " << units[i];
+    return oss.str();
+}
+
+StorageEstimate estimate_storage(
+    long long dau,
+    double active_fraction,
+    double items_per_user_per_day,
+    long long item_size_bytes,
+    long long metadata_size_bytes = 0,
+    int replication_factor = 3,
+    int retention_years = 5)
+{
+    double active_users     = dau * active_fraction;
+    double items_per_day    = active_users * items_per_user_per_day;
+    double size_per_item    = item_size_bytes + metadata_size_bytes;
+    double daily_bytes      = items_per_day * size_per_item;
+    double yearly_bytes     = daily_bytes * 365;
+    double total_bytes      = yearly_bytes * retention_years;
+    double replicated_bytes = total_bytes * replication_factor;
+
+    return {
+        human_readable(daily_bytes),
+        human_readable(yearly_bytes),
+        human_readable(total_bytes),
+        human_readable(replicated_bytes),
+        replication_factor,
+    };
+}
+
+int main() {
+    // Example: Photo sharing service
+    auto result = estimate_storage(
+        500'000'000LL,   // dau
+        0.1,             // active_fraction
+        2.0,             // items_per_user_per_day
+        2'150'000LL,     // item_size_bytes (2.15 MB photo + thumbnails)
+        1'000LL,         // metadata_size_bytes (1 KB)
+        3,               // replication_factor
+        5                // retention_years
+    );
+    std::cout << "daily_raw:        " << result.daily_raw        << "\\n"
+              << "yearly_raw:       " << result.yearly_raw       << "\\n"
+              << "total_raw:        " << result.total_raw        << "\\n"
+              << "total_replicated: " << result.total_replicated << "\\n"
+              << "replication:      " << result.replication_factor << "x\\n";
+    return 0;
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "Bandwidth Estimation Helper",
+      source: `#include <cmath>
+#include <iostream>
+#include <string>
+#include <sstream>
+#include <iomanip>
+
+struct BandwidthEstimate {
+    std::string avg_bandwidth;
+    std::string peak_bandwidth;
+    std::string daily_transfer;
+    std::string avg_qps_str;
+    std::string peak_qps_str;
+};
+
+std::string to_bitrate(double bytes_per_sec) {
+    double bits = bytes_per_sec * 8.0;
+    const char* units[] = {"bps", "Kbps", "Mbps", "Gbps", "Tbps"};
+    int i = 0;
+    while (std::abs(bits) >= 1000.0 && i < 4) {
+        bits /= 1000.0;
+        ++i;
+    }
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(1) << bits << " " << units[i];
+    return oss.str();
+}
+
+std::string to_volume(double total_bytes) {
+    const char* units[] = {"B", "KB", "MB", "GB", "TB", "PB"};
+    int i = 0;
+    while (std::abs(total_bytes) >= 1024.0 && i < 5) {
+        total_bytes /= 1024.0;
+        ++i;
+    }
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(1) << total_bytes << " " << units[i];
+    return oss.str();
+}
+
+BandwidthEstimate estimate_bandwidth(
+    long long dau,
+    double requests_per_user_per_day,
+    long long avg_response_size_bytes,
+    double peak_factor = 3.0)
+{
+    constexpr long long SECONDS_PER_DAY = 100'000;
+
+    double total_requests = static_cast<double>(dau) * requests_per_user_per_day;
+    double avg_qps  = total_requests / SECONDS_PER_DAY;
+    double peak_qps = avg_qps * peak_factor;
+
+    double avg_bw   = avg_qps  * avg_response_size_bytes;
+    double peak_bw  = peak_qps * avg_response_size_bytes;
+    double daily_tx = total_requests * avg_response_size_bytes;
+
+    std::ostringstream avg_s, peak_s;
+    avg_s  << std::fixed << std::setprecision(0) << avg_qps;
+    peak_s << std::fixed << std::setprecision(0) << peak_qps;
+
+    return {
+        to_bitrate(avg_bw),
+        to_bitrate(peak_bw),
+        to_volume(daily_tx),
+        avg_s.str(),
+        peak_s.str(),
+    };
+}
+
+int main() {
+    // Example: Video streaming service
+    auto r = estimate_bandwidth(
+        200'000'000LL,   // dau
+        10.0,            // requests_per_user_per_day
+        5'000'000LL,     // avg_response_size_bytes (5 MB per segment)
+        3.0              // peak_factor
+    );
+    std::cout << "avg_bandwidth:  " << r.avg_bandwidth  << "\\n"
+              << "peak_bandwidth: " << r.peak_bandwidth << "\\n"
+              << "daily_transfer: " << r.daily_transfer << "\\n"
+              << "avg_qps:        " << r.avg_qps_str    << "\\n"
+              << "peak_qps:       " << r.peak_qps_str   << "\\n";
+    return 0;
+}`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Estimation Framework Flow",
+      kind: "flow",
+      caption:
+        "The step-by-step process for performing back-of-the-envelope estimation in system design interviews.",
+      mermaid: `flowchart TD
+    A["1. Clarify Requirements"] --> B["2. State Assumptions"]
+    B --> C["3. Identify Key Metrics"]
+    C --> D{"Which metrics?"}
+    D --> E["QPS Estimation"]
+    D --> F["Storage Estimation"]
+    D --> G["Bandwidth Estimation"]
+    E --> H["DAU x actions / 86400"]
+    F --> I["items x size x retention"]
+    G --> J["QPS x response size"]
+    H --> K["Apply peak factor 2-3x"]
+    I --> L["Apply replication 3x"]
+    J --> M["Apply peak factor 2-3x"]
+    K --> N["4. Sanity Check Results"]
+    L --> N
+    M --> N
+    N --> O["5. Derive Infrastructure Needs"]
+    O --> P["Servers / Shards / CDN"]`,
+    },
+    {
+      title: "Estimation Categories Mindmap",
+      kind: "mindmap",
+      caption:
+        "A comprehensive map of the key categories and sub-metrics involved in system design estimation.",
+      mermaid: `mindmap
+  root((Estimation))
+    QPS
+      Read QPS
+      Write QPS
+      Peak vs Average
+      Read/Write Ratio
+    Storage
+      Raw Data Size
+      Metadata Overhead
+      Replication Factor
+      Retention Period
+      Compression
+    Bandwidth
+      Ingress
+      Egress
+      CDN Offload
+      Media vs Text
+    Infrastructure
+      Number of Servers
+      Database Shards
+      Cache Nodes
+      Load Balancers
+    Reference Numbers
+      Powers of 2
+      Latency Hierarchy
+      Seconds per Day
+      Requests to QPS`,
+    },
+  ],
+  comparison: {
+    columns: ["Metric", "Formula", "Typical Range", "Key Consideration"],
+    rows: [
+      [
+        "**QPS** (Queries/sec)",
+        "`DAU x actions_per_user / 86,400`",
+        "100 - 1,000,000 QPS",
+        "*Peak is 2-3x average*; separate **read** and **write** QPS",
+      ],
+      [
+        "**Storage** (total)",
+        "`items/day x size x 365 x years x replication`",
+        "GB to PB range",
+        "Always multiply by **replication factor** (typically *3x*); include metadata",
+      ],
+      [
+        "**Bandwidth** (egress)",
+        "`QPS x avg_response_size`",
+        "Mbps to Tbps",
+        "*Media dominates* text by 100-1000x; CDN offloads 90%+ of egress",
+      ],
+      [
+        "**Number of Servers**",
+        "`peak_QPS / QPS_per_server`",
+        "10 - 10,000 servers",
+        "Add **30-50% headroom**; account for *failover* across availability zones",
+      ],
+    ],
+  },
+  exercises: [
+    "**Estimate storage for a messaging app**: Assume 500M DAU, 40 messages/user/day, average message size 200 bytes, 5% of messages include a 200KB image. Calculate daily and yearly storage with *3x replication*. How does media vs. text storage compare?",
+    "**Calculate QPS for a ride-sharing service**: Assume 20M DAU, each user opens the app 3 times/day, each session generates 50 location update pings and 2 API calls (search, book). What is the total *read* and *write* QPS? What is the peak QPS during rush hour (*5x average*)?",
+    "**Estimate bandwidth for a music streaming platform**: Assume 100M DAU, average user streams 1 hour/day at 256 Kbps. What is the average and peak egress bandwidth? How much daily data transfer occurs? What percentage can a CDN offload?",
+    "**Design the storage tier for a URL shortener**: Assume 500M new URLs/month, each record is 500 bytes, 10-year retention, 3x replication. What is the total storage? Would you use an RDBMS or NoSQL? Justify with your numbers.",
+    "**Estimate server count for a social media feed service**: Given 200M DAU, 20 feed loads/user/day, and a single server handling 5,000 QPS, how many servers are needed for average load? For peak (*3x*)? Include *50% headroom* for failover.",
+  ],
+  cheatSheet: [
+    "**Seconds per day**: 86,400 ~ *10^5* (use 100K for quick division)",
+    "**QPS shortcut**: 1M requests/day ~ *12 QPS*; 1B requests/day ~ *12K QPS*",
+    "**Storage units**: each step is ~**1000x** -- KB -> MB -> GB -> TB -> PB (i.e., *2^10* per step)",
+    "**Replication rule**: always multiply raw storage by the **replication factor** (default *3x*) -- forgetting this is a common interview mistake",
+    "**Peak traffic**: design for **2-3x average** for normal apps; *10x+* for event-driven spikes (sports finals, flash sales)",
+    "**Server capacity rule of thumb**: a typical web server handles **1K-10K QPS** depending on request complexity; divide peak QPS by this to get server count, then add *30-50% headroom*",
+  ],
+  revisionNotes: [
+    "**Estimation is about order of magnitude**, not precision. A *2-5x* error is acceptable; a *100x* error means you chose the wrong architecture. Always round aggressively -- use **10^5** for seconds/day, powers of 10 for user counts.",
+    "**Always separate reads from writes**. The *read/write ratio* determines your architecture: read-heavy systems (100:1) need `caches` and `read replicas`; write-heavy systems need `sharding`, `LSM-tree stores`, and *async processing*.",
+    "**Three things candidates forget**: (1) *replication factor* -- multiply storage by 3x, (2) *peak vs. average* -- provision for peak (2-3x), not average, (3) *metadata and indexes* -- add 20-50% overhead on top of raw data.",
+    "**The estimation-to-design pipeline**: QPS tells you how many **servers** and whether to **cache**. Storage tells you whether to use a **single DB**, **sharded cluster**, or **object store**. Bandwidth tells you whether you need a **CDN**. Always connect your numbers to *architectural decisions*.",
+    "**Sanity-check every result** against known reference points. If a text-only chat app seems to need petabytes of bandwidth, recheck your math. Compare to public numbers: Twitter serves ~300K QPS for timelines, Instagram stores ~100M photos/day, Netflix peaks at ~100 Tbps egress.",
+  ],
 };

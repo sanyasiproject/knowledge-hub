@@ -75,26 +75,75 @@ function authMiddleware(req, res, next) {
 }`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "JWT structure decoded — what's actually inside",
-      source: `import base64, json
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <sstream>
 
-token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJuYW1lIjoiQWxpY2UiLCJpYXQiOjE3MTYwMDAwMDB9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+// Base64url decode (simplified for JWT use)
+std::string base64url_decode(const std::string& input) {
+    // Replace URL-safe characters and add padding
+    std::string b64 = input;
+    for (char& c : b64) {
+        if (c == '-') c = '+';
+        else if (c == '_') c = '/';
+    }
+    while (b64.size() % 4 != 0) b64 += '=';
 
-header_b64, payload_b64, signature = token.split(".")
+    static const std::string chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string result;
+    int val = 0, bits = -8;
+    for (unsigned char c : b64) {
+        if (c == '=') break;
+        size_t pos = chars.find(c);
+        if (pos == std::string::npos) continue;
+        val = (val << 6) + static_cast<int>(pos);
+        bits += 6;
+        if (bits >= 0) {
+            result += static_cast<char>((val >> bits) & 0xFF);
+            bits -= 8;
+        }
+    }
+    return result;
+}
 
-# Decode header (add padding)
-header = json.loads(base64.urlsafe_b64decode(header_b64 + "=="))
-print("Header:", header)
-# {'alg': 'HS256', 'typ': 'JWT'}
+// Split a string by a delimiter character
+std::vector<std::string> split(const std::string& s, char delim) {
+    std::vector<std::string> parts;
+    std::istringstream stream(s);
+    std::string token;
+    while (std::getline(stream, token, delim)) {
+        parts.push_back(token);
+    }
+    return parts;
+}
 
-# Decode payload
-payload = json.loads(base64.urlsafe_b64decode(payload_b64 + "=="))
-print("Payload:", payload)
-# {'sub': '123', 'name': 'Alice', 'iat': 1716000000}
+int main() {
+    std::string token =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+        "eyJzdWIiOiIxMjMiLCJuYW1lIjoiQWxpY2UiLCJpYXQiOjE3MTYwMDAwMDB9."
+        "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
 
-# The signature is NOT decodable — it's the HMAC of header.payload
-# Only the server with the secret can verify it`,
+    auto parts = split(token, '.');
+
+    // Decode header
+    std::string header = base64url_decode(parts[0]);
+    std::cout << "Header:  " << header << "\\n";
+    // {"alg":"HS256","typ":"JWT"}
+
+    // Decode payload
+    std::string payload = base64url_decode(parts[1]);
+    std::cout << "Payload: " << payload << "\\n";
+    // {"sub":"123","name":"Alice","iat":1716000000}
+
+    // The signature (parts[2]) is NOT decodable as JSON --
+    // it's the HMAC of header.payload.
+    // Only the server with the secret can verify it.
+    return 0;
+}`,
     },
   ],
   diagrams: [

@@ -213,113 +213,114 @@ searchSubject.next({ query: "react", timestamp: Date.now() }); // Passes all fil
 subscription.unsubscribe();`,
     },
     {
-      language: "python",
-      caption: "Python Observer with weak references to prevent memory leaks",
-      source: `import weakref
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Any, Callable
+      language: "cpp",
+      caption: "C++ Observer with weak references to prevent memory leaks",
+      source: `#include <iostream>
+#include <vector>
+#include <memory>
+#include <algorithm>
+#include <iomanip>
+#include <string>
 
+// --- Classic Observer with weak references ---
 
-# --- Classic Observer with weak references ---
+struct WeatherData {
+    double temperature;
+    double humidity;
+    double pressure;
+};
 
-class WeakObserverList:
-    """Maintains weak references to observers, auto-cleaning dead refs."""
-    def __init__(self) -> None:
-        self._refs: list[weakref.ref] = []
+// Abstract observer base class
+class WeatherObserver {
+public:
+    virtual ~WeatherObserver() = default;
+    virtual void onWeatherUpdate(const WeatherData& data) = 0;
+};
 
-    def add(self, observer: Any) -> None:
-        self._refs.append(weakref.ref(observer, self._cleanup))
+class WeatherStation {
+    // weak_ptr list: auto-detects when observers are destroyed
+    std::vector<std::weak_ptr<WeatherObserver>> observers_;
+    WeatherData data_{0.0, 0.0, 0.0};
 
-    def remove(self, observer: Any) -> None:
-        self._refs = [r for r in self._refs if r() is not None and r() is not observer]
+    void cleanupExpired() {
+        observers_.erase(
+            std::remove_if(observers_.begin(), observers_.end(),
+                [](const std::weak_ptr<WeatherObserver>& wp) { return wp.expired(); }),
+            observers_.end());
+    }
 
-    def _cleanup(self, ref: weakref.ref) -> None:
-        self._refs = [r for r in self._refs if r is not ref]
+public:
+    void registerObserver(std::shared_ptr<WeatherObserver> observer) {
+        observers_.push_back(observer);
+    }
 
-    def __iter__(self):
-        # Yield only live references
-        for ref in list(self._refs):
-            obj = ref()
-            if obj is not None:
-                yield obj
+    void setMeasurements(double temp, double humidity, double pressure) {
+        data_ = {temp, humidity, pressure};
+        notify();
+    }
 
+    void notify() {
+        cleanupExpired();
+        for (auto& wp : observers_) {
+            if (auto sp = wp.lock()) {
+                sp->onWeatherUpdate(data_);
+            }
+        }
+    }
+};
 
-@dataclass
-class WeatherData:
-    temperature: float
-    humidity: float
-    pressure: float
+class TemperatureDisplay : public WeatherObserver {
+public:
+    void onWeatherUpdate(const WeatherData& data) override {
+        std::cout << std::fixed << std::setprecision(1)
+                  << "Temperature: " << data.temperature << " C" << std::endl;
+    }
+};
 
+class HumidityDisplay : public WeatherObserver {
+public:
+    void onWeatherUpdate(const WeatherData& data) override {
+        std::cout << std::fixed << std::setprecision(1)
+                  << "Humidity: " << data.humidity << "%" << std::endl;
+    }
+};
 
-class WeatherStation:
-    """Subject: notifies observers of weather changes."""
-    def __init__(self) -> None:
-        self._observers = WeakObserverList()
-        self._data = WeatherData(0.0, 0.0, 0.0)
+class ForecastDisplay : public WeatherObserver {
+    double lastPressure_ = 0.0;
+public:
+    void onWeatherUpdate(const WeatherData& data) override {
+        std::string trend = (data.pressure > lastPressure_) ? "rising" : "falling";
+        std::cout << std::fixed << std::setprecision(1)
+                  << "Forecast: Pressure " << trend
+                  << " (" << data.pressure << " hPa)" << std::endl;
+        lastPressure_ = data.pressure;
+    }
+};
 
-    def register(self, observer: "WeatherObserver") -> None:
-        self._observers.add(observer)
+int main() {
+    WeatherStation station;
+    auto tempDisplay = std::make_shared<TemperatureDisplay>();
+    auto humidityDisplay = std::make_shared<HumidityDisplay>();
+    auto forecast = std::make_shared<ForecastDisplay>();
 
-    def remove(self, observer: "WeatherObserver") -> None:
-        self._observers.remove(observer)
+    station.registerObserver(tempDisplay);
+    station.registerObserver(humidityDisplay);
+    station.registerObserver(forecast);
 
-    def set_measurements(self, temp: float, humidity: float, pressure: float) -> None:
-        self._data = WeatherData(temp, humidity, pressure)
-        self._notify()
+    station.setMeasurements(25.5, 65.0, 1013.0);
+    // Output:
+    // Temperature: 25.5 C
+    // Humidity: 65.0%
+    // Forecast: Pressure rising (1013.0 hPa)
 
-    def _notify(self) -> None:
-        for observer in self._observers:
-            observer.on_weather_update(self._data)
-
-
-class WeatherObserver(ABC):
-    @abstractmethod
-    def on_weather_update(self, data: WeatherData) -> None: ...
-
-
-class TemperatureDisplay(WeatherObserver):
-    def on_weather_update(self, data: WeatherData) -> None:
-        print(f"Temperature: {data.temperature:.1f} C")
-
-
-class HumidityDisplay(WeatherObserver):
-    def on_weather_update(self, data: WeatherData) -> None:
-        print(f"Humidity: {data.humidity:.1f}%")
-
-
-class ForecastDisplay(WeatherObserver):
-    def __init__(self) -> None:
-        self._last_pressure = 0.0
-
-    def on_weather_update(self, data: WeatherData) -> None:
-        trend = "rising" if data.pressure > self._last_pressure else "falling"
-        print(f"Forecast: Pressure {trend} ({data.pressure:.1f} hPa)")
-        self._last_pressure = data.pressure
-
-
-# Usage
-station = WeatherStation()
-temp_display = TemperatureDisplay()
-humidity_display = HumidityDisplay()
-forecast = ForecastDisplay()
-
-station.register(temp_display)
-station.register(humidity_display)
-station.register(forecast)
-
-station.set_measurements(25.5, 65.0, 1013.0)
-# Output:
-# Temperature: 25.5 C
-# Humidity: 65.0%
-# Forecast: Pressure rising (1013.0 hPa)
-
-# When display is garbage collected, it is auto-removed from observers
-del humidity_display
-station.set_measurements(26.0, 70.0, 1012.5)
-# Output (no humidity line):
-# Temperature: 26.0 C
-# Forecast: Pressure falling (1012.5 hPa)`,
+    // When display is destroyed, weak_ptr expires automatically
+    humidityDisplay.reset();
+    station.setMeasurements(26.0, 70.0, 1012.5);
+    // Output (no humidity line):
+    // Temperature: 26.0 C
+    // Forecast: Pressure falling (1012.5 hPa)
+    return 0;
+}`,
     },
   ],
   diagrams: [

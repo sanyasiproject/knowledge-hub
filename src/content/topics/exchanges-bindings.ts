@@ -169,4 +169,310 @@ A **headers exchange** routes based on message header attributes instead of the 
         "An exchange that routes based on message header attributes rather than routing keys, using x-match=all or x-match=any to control matching logic.",
     },
   ],
+  deepDive: [
+    `**RabbitMQ exchanges** are the *heart of the routing layer* — they sit between **producers** and **queues**, making all routing decisions based on three factors: the **exchange type**, the message's \`routing_key\`, and the **binding rules** configured by consumers. Understanding exchanges deeply means understanding that *producers never send directly to queues*; they always publish to an exchange, even if it is the **default exchange** (an unnamed \`direct\` exchange that RabbitMQ pre-declares). Each exchange type implements the \`route()\` method differently: a **direct exchange** performs an O(1) hash lookup on the routing key against its binding table, a **topic exchange** walks a *trie data structure* to evaluate wildcard patterns (\`*\` and \`#\`), a **fanout exchange** simply iterates its binding list ignoring keys entirely, and a **headers exchange** inspects the \`headers\` property of the AMQP message and evaluates \`x-match\` logic. Exchanges can be declared with several important flags: \`durable\` (persisted to disk and survives broker restarts), \`autoDelete\` (removed when the last binding is removed), and \`internal\` (cannot receive publishes directly from clients — only from other exchanges via **exchange-to-exchange bindings**). The \`arguments\` table on declaration can set an \`alternate-exchange\`, which acts as a *fallback route* for messages that do not match any binding — this is a critical pattern for **dead-letter handling** and **auditing** unroutable messages rather than silently dropping them.`,
+
+    `**Bindings** are the *glue* between exchanges and queues (or between exchanges and other exchanges). A binding is declared with \`channel.bindQueue(queue, exchange, pattern)\` or \`channel.bindExchange(destination, source, pattern)\`, where the \`pattern\` string is interpreted differently depending on the exchange type. For a **direct exchange**, the pattern is a *literal string* that must exactly match the \`routing_key\` of published messages. For a **topic exchange**, the pattern supports two wildcards: \`*\` matches *exactly one* dot-delimited word, and \`#\` matches *zero or more* words — so \`order.*.created\` matches \`order.us.created\` but not \`order.us.west.created\`, while \`order.#\` matches all three of \`order\`, \`order.created\`, and \`order.us.west.created\`. For a **fanout exchange**, the binding pattern is *ignored entirely* — every bound queue receives every message. For a **headers exchange**, the binding \`arguments\` contain key-value pairs that must match the message's headers, controlled by the \`x-match\` argument: \`all\` means every specified header must match (*logical AND*), and \`any\` means at least one must match (*logical OR*). Bindings can also carry an \`arguments\` table for advanced features like **priority bindings** or custom plugin logic. It is important to remember that bindings are *not automatically removed* when you delete and re-create a queue with the same name — you must explicitly unbind or the old bindings may linger as stale references.`,
+
+    `**Exchange-to-exchange (E2E) bindings** are a powerful *RabbitMQ extension* beyond the AMQP 0-9-1 specification, enabling you to build **complex routing topologies** without modifying producer code. For example, you can set up a **fanout exchange** as the entry point, broadcasting to multiple **topic exchanges** that each route to different consumer groups based on different criteria — one topic exchange routes by *geographic region* (\`order.us.*\`, \`order.eu.*\`), another routes by *event type* (\`*.*.created\`, \`*.*.cancelled\`). This creates a **routing mesh** that is entirely transparent to producers. E2E bindings follow the same matching rules as queue bindings: if the source is a \`topic\` exchange, the E2E binding pattern supports \`*\` and \`#\` wildcards. Combined with the \`internal\` flag (marking an exchange as *not directly publishable*), you can create sophisticated **multi-tier routing architectures** where the first tier is a public-facing exchange and subsequent tiers are internal exchanges that refine routing further. Performance considerations are important: each additional exchange hop adds *latency* and *memory overhead* because messages are copied at each stage. For high-throughput systems (>50,000 msg/s), benchmark your E2E topology against a single topic exchange with more complex bindings — often a flat topology with well-designed routing keys is faster than a deep exchange chain. Use the **RabbitMQ Management UI** or the \`rabbitmqctl list_bindings\` command to visualize your binding graph and detect routing anomalies or orphaned bindings.`,
+  ],
+  code: [
+    {
+      language: "javascript",
+      caption: "Declaring exchanges and bindings with different exchange types",
+      source: `const amqplib = require("amqplib");
+
+async function setupExchangesAndBindings() {
+  const conn = await amqplib.connect("amqp://localhost");
+  const ch = await conn.createChannel();
+
+  // Declare a durable direct exchange
+  await ch.assertExchange("orders.direct", "direct", { durable: true });
+
+  // Declare a durable topic exchange
+  await ch.assertExchange("orders.topic", "topic", { durable: true });
+
+  // Declare a fanout exchange for broadcasting
+  await ch.assertExchange("orders.fanout", "fanout", { durable: true });
+
+  // Declare a headers exchange
+  await ch.assertExchange("orders.headers", "headers", { durable: true });
+
+  // Declare a durable queue and bind to direct exchange
+  await ch.assertQueue("order-processing", { durable: true });
+  await ch.bindQueue("order-processing", "orders.direct", "order.created");
+
+  // Bind to topic exchange with wildcard pattern
+  await ch.assertQueue("us-orders", { durable: true });
+  await ch.bindQueue("us-orders", "orders.topic", "order.us.*");
+
+  // Bind to fanout exchange (routing key is ignored)
+  await ch.assertQueue("audit-log", { durable: true });
+  await ch.bindQueue("audit-log", "orders.fanout", "");
+
+  // Bind to headers exchange with x-match=all
+  await ch.assertQueue("priority-orders", { durable: true });
+  await ch.bindQueue("priority-orders", "orders.headers", "", {
+    "x-match": "all",
+    region: "us",
+    priority: "high",
+  });
+
+  console.log("Exchanges and bindings configured successfully");
+  await conn.close();
+}
+
+setupExchangesAndBindings().catch(console.error);`,
+    },
+    {
+      language: "javascript",
+      caption: "Publishing to different exchange types and handling unroutable messages",
+      source: `const amqplib = require("amqplib");
+
+async function publishToExchanges() {
+  const conn = await amqplib.connect("amqp://localhost");
+  const ch = await conn.createChannel();
+
+  // Handle unroutable messages (returned when mandatory=true and no binding matches)
+  ch.on("return", (msg) => {
+    console.error("Message returned:", {
+      exchange: msg.fields.exchange,
+      routingKey: msg.fields.routingKey,
+      replyText: msg.fields.replyText,
+      content: msg.content.toString(),
+    });
+  });
+
+  // Publish to direct exchange — exact routing key match
+  ch.publish("orders.direct", "order.created", Buffer.from(
+    JSON.stringify({ orderId: "ORD-001", amount: 99.99 })
+  ), { persistent: true });
+
+  // Publish to topic exchange — matches bindings like "order.us.*"
+  ch.publish("orders.topic", "order.us.created", Buffer.from(
+    JSON.stringify({ orderId: "ORD-002", region: "us" })
+  ), { persistent: true });
+
+  // Publish to fanout exchange — routing key ignored, all bound queues receive it
+  ch.publish("orders.fanout", "", Buffer.from(
+    JSON.stringify({ event: "order.created", orderId: "ORD-003" })
+  ), { persistent: true });
+
+  // Publish to headers exchange — routing based on headers, not routing key
+  ch.publish("orders.headers", "", Buffer.from(
+    JSON.stringify({ orderId: "ORD-004", amount: 500 })
+  ), {
+    persistent: true,
+    headers: { region: "us", priority: "high" },
+  });
+
+  // Publish with mandatory flag — returns message if no binding matches
+  ch.publish("orders.direct", "order.unknown", Buffer.from(
+    JSON.stringify({ orderId: "ORD-005" })
+  ), { persistent: true, mandatory: true });
+
+  console.log("Messages published to all exchange types");
+  setTimeout(() => conn.close(), 1000); // wait for return callbacks
+}
+
+publishToExchanges().catch(console.error);`,
+    },
+    {
+      language: "javascript",
+      caption: "Exchange-to-exchange bindings and alternate exchange pattern",
+      source: `const amqplib = require("amqplib");
+
+async function setupAdvancedTopology() {
+  const conn = await amqplib.connect("amqp://localhost");
+  const ch = await conn.createChannel();
+
+  // Create an alternate exchange to capture unroutable messages
+  await ch.assertExchange("orders.unroutable", "fanout", { durable: true });
+  await ch.assertQueue("dead-letters", { durable: true });
+  await ch.bindQueue("dead-letters", "orders.unroutable", "");
+
+  // Declare main exchange with alternate-exchange argument
+  await ch.assertExchange("orders.main", "topic", {
+    durable: true,
+    arguments: { "alternate-exchange": "orders.unroutable" },
+  });
+
+  // Declare internal sub-exchanges for exchange-to-exchange bindings
+  await ch.assertExchange("orders.region.us", "direct", {
+    durable: true,
+    internal: true, // cannot be published to directly by clients
+  });
+  await ch.assertExchange("orders.region.eu", "direct", {
+    durable: true,
+    internal: true,
+  });
+
+  // Bind sub-exchanges to the main exchange (exchange-to-exchange binding)
+  await ch.bindExchange("orders.region.us", "orders.main", "order.us.#");
+  await ch.bindExchange("orders.region.eu", "orders.main", "order.eu.#");
+
+  // Bind queues to the regional sub-exchanges
+  await ch.assertQueue("us-fulfillment", { durable: true });
+  await ch.bindQueue("us-fulfillment", "orders.region.us", "order.us.created");
+
+  await ch.assertQueue("eu-fulfillment", { durable: true });
+  await ch.bindQueue("eu-fulfillment", "orders.region.eu", "order.eu.created");
+
+  // Publish a message — routes through main -> regional -> queue
+  ch.publish("orders.main", "order.us.created", Buffer.from(
+    JSON.stringify({ orderId: "ORD-100", region: "us" })
+  ), { persistent: true });
+
+  // This message has no matching binding — goes to alternate exchange
+  ch.publish("orders.main", "order.jp.created", Buffer.from(
+    JSON.stringify({ orderId: "ORD-101", region: "jp" })
+  ), { persistent: true });
+
+  console.log("Advanced topology with E2E bindings configured");
+  await conn.close();
+}
+
+setupAdvancedTopology().catch(console.error);`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Exchange Types and Routing Flow",
+      kind: "flow",
+      caption: "How messages flow from producers through different exchange types to queues",
+      mermaid: `flowchart LR
+  P[Producer] -->|publish| DE[Direct Exchange]
+  P -->|publish| TE[Topic Exchange]
+  P -->|publish| FE[Fanout Exchange]
+  P -->|publish| HE[Headers Exchange]
+
+  DE -->|"key = order.created"| Q1[order-processing queue]
+  DE -->|"key = order.shipped"| Q2[shipping queue]
+
+  TE -->|"order.us.*"| Q3[us-orders queue]
+  TE -->|"order.eu.*"| Q4[eu-orders queue]
+  TE -->|"order.#"| Q5[all-orders queue]
+
+  FE -->|broadcast| Q6[audit-log queue]
+  FE -->|broadcast| Q7[analytics queue]
+  FE -->|broadcast| Q8[notification queue]
+
+  HE -->|"region=us, priority=high"| Q9[priority-orders queue]`,
+    },
+    {
+      title: "Exchange-to-Exchange Binding Topology",
+      kind: "architecture",
+      caption: "Multi-tier routing architecture using exchange-to-exchange bindings with alternate exchange fallback",
+      mermaid: `flowchart TD
+  P[Producer] -->|publish| MAIN["orders.main\n(topic exchange)"]
+
+  MAIN -->|"order.us.#"| US["orders.region.us\n(internal direct)"]
+  MAIN -->|"order.eu.#"| EU["orders.region.eu\n(internal direct)"]
+  MAIN -.->|unroutable| ALT["orders.unroutable\n(alternate exchange - fanout)"]
+
+  US -->|"order.us.created"| Q1[us-fulfillment]
+  US -->|"order.us.cancelled"| Q2[us-cancellations]
+
+  EU -->|"order.eu.created"| Q3[eu-fulfillment]
+  EU -->|"order.eu.cancelled"| Q4[eu-cancellations]
+
+  ALT -->|broadcast| DL[dead-letters queue]`,
+    },
+    {
+      title: "Topic Exchange Pattern Matching",
+      kind: "flow",
+      caption: "Illustrating how wildcard patterns match against routing keys in topic exchanges",
+      mermaid: `flowchart LR
+  PUB[Publisher] -->|"order.us.created"| TX[Topic Exchange]
+  PUB -->|"order.eu.cancelled"| TX
+  PUB -->|"order.us.west.created"| TX
+
+  TX -->|"order.*.created\n matches order.us.created\n matches order.eu.created"| Q1["created-orders queue"]
+  TX -->|"order.us.*\n matches order.us.created\n matches order.us.cancelled"| Q2["us-orders queue"]
+  TX -->|"order.#\n matches ALL order keys"| Q3["all-orders queue"]
+  TX -->|"*.*.cancelled\n matches order.eu.cancelled"| Q4["cancellations queue"]`,
+    },
+  ],
+  comparison: {
+    columns: [
+      "Feature",
+      "Direct Exchange",
+      "Topic Exchange",
+      "Fanout Exchange",
+      "Headers Exchange",
+    ],
+    rows: [
+      [
+        "**Routing basis**",
+        "Exact `routing_key` match",
+        "Wildcard pattern on `routing_key`",
+        "Ignores `routing_key`",
+        "Message `headers` attributes",
+      ],
+      [
+        "**Wildcards**",
+        "None",
+        "`*` (one word), `#` (zero or more)",
+        "N/A",
+        "N/A (uses `x-match`)",
+      ],
+      [
+        "**Performance**",
+        "O(1) hash lookup",
+        "Trie traversal, slower",
+        "Fastest (no evaluation)",
+        "Header comparison per binding",
+      ],
+      [
+        "**Use case**",
+        "Task routing, RPC",
+        "Log routing, event hierarchies",
+        "Broadcast, notifications",
+        "Multi-attribute routing",
+      ],
+      [
+        "**Binding key**",
+        "Literal string",
+        "Dot-delimited with wildcards",
+        "Ignored (empty string)",
+        "Header key-value pairs",
+      ],
+      [
+        "**Multiple queues**",
+        "Yes, same key = fan-out",
+        "Yes, overlapping patterns",
+        "Yes, all bound queues",
+        "Yes, matching headers",
+      ],
+      [
+        "**Default exchange**",
+        "Yes (unnamed direct)",
+        "No",
+        "No",
+        "No",
+      ],
+    ],
+  },
+  exercises: [
+    "Set up a **topic exchange** called `logs` with three queues: `all-logs` (binding `#`), `error-logs` (binding `*.error`), and `auth-logs` (binding `auth.*`). Publish messages with routing keys like `auth.error`, `auth.info`, `payment.error`, and `payment.info`. Verify that each queue receives *only the expected messages* by consuming from all three queues.",
+    "Implement an **alternate exchange** pattern: declare a main `direct` exchange with an alternate `fanout` exchange. Bind a `dead-letters` queue to the alternate exchange. Publish messages with routing keys that *do not match* any binding on the main exchange and confirm they appear in the `dead-letters` queue. Then add the `mandatory` flag and observe the difference in behavior.",
+    "Build an **exchange-to-exchange topology** where a `fanout` exchange broadcasts to two `topic` sub-exchanges. Each topic exchange routes to different queues based on different routing key patterns. Publish a single message and trace its path through the exchange chain, verifying it arrives at the correct final queues.",
+    "Create a **headers exchange** with two bindings: one with `x-match=all` requiring `{ region: 'us', priority: 'high' }`, and another with `x-match=any` requiring `{ region: 'eu', priority: 'low' }`. Publish messages with various header combinations and document which messages match which binding. Pay attention to edge cases like *missing headers* and *extra headers*.",
+    "Write a Node.js script that dynamically creates **temporary exclusive queues** (with `{ exclusive: true }`), binds them to a `fanout` exchange, consumes messages, and observe what happens when the consumer disconnects. Then modify the script to use a `topic` exchange with changing subscription patterns — add and remove bindings at runtime and verify the consumer receives only the currently subscribed message patterns.",
+  ],
+  cheatSheet: [
+    "**Declare exchange**: `ch.assertExchange(name, type, { durable: true })` — types are `direct`, `topic`, `fanout`, `headers`.",
+    "**Bind queue to exchange**: `ch.bindQueue(queue, exchange, routingKey)` — for headers exchanges, pass match criteria as the 4th argument: `{ 'x-match': 'all', key: 'value' }`.",
+    "**Publish to exchange**: `ch.publish(exchange, routingKey, Buffer.from(msg), { persistent: true })` — set `mandatory: true` to get returns for unroutable messages.",
+    "**Topic wildcards**: `*` matches *exactly one* dot-delimited word, `#` matches *zero or more* words. Pattern `order.*.created` matches `order.us.created` but not `order.us.west.created`.",
+    "**Alternate exchange**: Declare with `{ arguments: { 'alternate-exchange': 'my-alt-exchange' } }` — unroutable messages forwarded to the alternate exchange instead of being dropped.",
+    "**Exchange-to-exchange bind**: `ch.bindExchange(destination, source, pattern)` — source exchange routes matching messages to destination exchange. Mark destination as `internal: true` to prevent direct publishing.",
+  ],
+  revisionNotes: [
+    "**Exchanges route, queues store**: producers publish to exchanges, never directly to queues. The *exchange type* determines the routing algorithm: `direct` = exact match, `topic` = wildcard match, `fanout` = broadcast, `headers` = header attribute match.",
+    "**Bindings are the wiring**: a queue receives messages only if it has a binding to the exchange. The binding key is interpreted by the exchange type — literal for `direct`, pattern with `*`/`#` for `topic`, ignored for `fanout`, and header key-value pairs for `headers`.",
+    "**Default exchange shortcut**: the unnamed `direct` exchange auto-binds every queue by its name. Publishing with `ch.sendToQueue(queueName, msg)` is equivalent to `ch.publish('', queueName, msg)` — both use the default exchange.",
+    "**Unroutable message handling**: by default, messages with no matching binding are *silently dropped*. Use the `mandatory` flag for `basic.return` callbacks, or configure an **alternate exchange** for automatic fallback routing to a dead-letter queue.",
+    "**Exchange-to-exchange bindings** enable multi-tier routing topologies without changing producer code. Combine with the `internal` flag to create exchanges that only receive messages from other exchanges, building layered routing architectures.",
+  ],
 };

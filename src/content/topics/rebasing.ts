@@ -172,4 +172,162 @@ export const rebasing: TopicContent = {
         "A rebase variant that replays a range of commits onto an arbitrary new base, useful for transplanting branches.",
     },
   ],
+  deepDive: [
+    "**Rebase internals** work by first identifying the *merge base* between your current branch and the target, then computing a list of patches (one per commit) for every commit reachable from HEAD but not from the target. Git then **detaches HEAD** at the target tip, applies each patch in order using `git apply` (or, for newer versions, the *merge machinery*), and finally moves the branch pointer to the newly created chain. Because each replayed commit has a **different parent SHA**, the resulting commit hashes are entirely new even though the *diffs* are identical. Understanding this mechanism explains why rebase is inherently a *history-rewriting* operation and why `git reflog` is the safety net: the original commits still exist in the object store until garbage-collected, and `git reflog` records where your branch pointed before the rebase began.",
+    "**`git rebase --onto`** is the most powerful and least understood rebase form. Its syntax is `git rebase --onto <newbase> <oldbase> <branch>`, which replays only the commits in the range `(oldbase, branch]` onto `<newbase>`. This is invaluable for *transplanting* a sub-branch: imagine a feature branch `feature-b` that was accidentally started from `feature-a` instead of `main`. Running `git rebase --onto main feature-a feature-b` replays only `feature-b`'s unique commits onto `main`, cleanly detaching it from `feature-a`. Another use case is **removing a range of commits** from a branch's history: `git rebase --onto HEAD~5 HEAD~3` drops the commits at positions 4 and 5 from the tip. Mastering `--onto` turns rebase from a simple linear-replay tool into a precise *history surgery* instrument.",
+    "**Rebase strategies and `git pull --rebase`** deserve special attention in team workflows. Setting `git config pull.rebase true` (or `git config --global pull.rebase merges` to preserve local merge commits) makes every `git pull` perform a rebase instead of a merge, keeping the mainline history linear without requiring developers to remember the flag. For **monorepo** or **trunk-based development** teams, `git pull --rebase=interactive` can even let developers squash fixup commits during the pull itself. The *autostash* feature (`rebase.autoStash = true`) automatically stashes uncommitted changes before rebase and pops them afterward, removing a common friction point. Combined with `rerere.enabled = true` for **automatic conflict re-resolution**, these settings make rebasing nearly frictionless in daily workflows.",
+  ],
+  code: [
+    {
+      language: "bash",
+      caption: "Interactive rebase with autosquash workflow",
+      source: `# Create a feature commit
+git commit -m "Add user authentication endpoint"
+
+# Later, fix a bug in that commit — use --fixup to link them
+git commit --fixup=HEAD~2
+
+# When ready to clean up, rebase with --autosquash
+# This automatically reorders fixup! commits and marks them as 'fixup'
+git rebase -i --autosquash main
+
+# Equivalent pull-based workflow with rebase
+git pull --rebase=interactive origin main`,
+    },
+    {
+      language: "bash",
+      caption: "Rebase --onto to transplant a branch",
+      source: `# Situation: feature-b was branched from feature-a by mistake
+# We want feature-b's unique commits rebased onto main instead
+
+# Step 1: Identify the fork point
+git log --oneline --graph feature-a feature-b
+
+# Step 2: Transplant feature-b onto main
+git rebase --onto main feature-a feature-b
+
+# Step 3: Verify the result
+git log --oneline --graph main feature-b
+
+# Another use: remove commits 3 and 4 from a 5-commit branch
+git rebase --onto HEAD~5 HEAD~3`,
+    },
+    {
+      language: "bash",
+      caption: "Safe force-push and conflict recovery",
+      source: `# After rebasing, force-push safely
+git push --force-with-lease origin feature-branch
+
+# If force-with-lease is rejected (someone else pushed):
+git fetch origin
+git rebase origin/feature-branch
+# Resolve any conflicts, then retry
+git push --force-with-lease origin feature-branch
+
+# Enable rerere to auto-resolve repeated conflicts
+git config --global rerere.enabled true
+
+# If rebase goes wrong, recover using reflog
+git reflog
+# Find the pre-rebase commit and reset
+git reset --hard HEAD@{3}`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Rebase vs Merge Workflow",
+      kind: "flow",
+      caption: "Visual comparison of how rebase and merge integrate changes differently",
+      mermaid: `flowchart TD
+    A["**main**: A - B - C"] --> M["**Merge**: creates merge commit M"]
+    A --> R["**Rebase**: replays D, E onto C"]
+    subgraph Merge Result
+        M --> MR["A - B - C - M\\n         \\\\     /\\n          D - E"]
+    end
+    subgraph Rebase Result
+        R --> RR["A - B - C - D' - E'\\n*linear history*"]
+    end
+    style M fill:#f9d77e,stroke:#d4a017
+    style R fill:#81c784,stroke:#388e3c`,
+    },
+    {
+      title: "Interactive Rebase Actions",
+      kind: "flow",
+      caption: "Decision flow for choosing the right interactive rebase action",
+      mermaid: `flowchart TD
+    Start["Start: \`git rebase -i\`"] --> Q1{"What do you want\\nto do with this commit?"}
+    Q1 -->|Keep as-is| Pick["**pick** — use commit unchanged"]
+    Q1 -->|Change message| Reword["**reword** — edit commit message"]
+    Q1 -->|Combine with previous| Q2{"Keep this commit's message?"}
+    Q2 -->|Yes, merge messages| Squash["**squash** — combine + edit message"]
+    Q2 -->|No, discard message| Fixup["**fixup** — combine + keep prev message"]
+    Q1 -->|Modify content| Edit["**edit** — pause for amending"]
+    Q1 -->|Remove entirely| Drop["**drop** — delete commit"]
+    style Start fill:#bbdefb,stroke:#1565c0
+    style Pick fill:#c8e6c9,stroke:#2e7d32
+    style Reword fill:#fff9c4,stroke:#f9a825
+    style Squash fill:#ffe0b2,stroke:#ef6c00
+    style Fixup fill:#ffccbc,stroke:#d84315
+    style Edit fill:#e1bee7,stroke:#7b1fa2
+    style Drop fill:#ffcdd2,stroke:#c62828`,
+    },
+    {
+      title: "Rebase Conflict Resolution Flow",
+      kind: "sequence",
+      caption: "Step-by-step sequence for resolving conflicts during a rebase",
+      mermaid: `sequenceDiagram
+    participant Dev as Developer
+    participant Git as Git Engine
+    participant Editor as Editor/IDE
+    Dev->>Git: git rebase main
+    Git->>Git: Detach HEAD at main tip
+    loop For each commit to replay
+        Git->>Git: Apply patch
+        alt No conflict
+            Git->>Git: Create new commit
+        else Conflict detected
+            Git->>Dev: Show conflict markers
+            Dev->>Editor: Open conflicted files
+            Editor->>Dev: Resolve conflicts
+            Dev->>Git: git add resolved_files
+            Dev->>Git: git rebase --continue
+        end
+    end
+    Git->>Dev: Rebase complete!`,
+    },
+  ],
+  comparison: {
+    columns: ["Feature", "**git rebase**", "**git merge**", "**git rebase --onto**"],
+    rows: [
+      ["History shape", "*Linear*", "*Branched with merge commits*", "*Linear (selective)*"],
+      ["Commit SHAs", "**New** (rewritten)", "**Preserved** (original)", "**New** (rewritten)"],
+      ["Safe for shared branches", "No", "**Yes**", "No"],
+      ["Conflict resolution", "Per-commit during replay", "Once at merge point", "Per-commit during replay"],
+      ["Use case", "Clean up *before* sharing", "Integrate *shared* branches", "Transplant or remove commits"],
+      ["Undo mechanism", "`git reflog` + `git reset`", "`git revert` the merge commit", "`git reflog` + `git reset`"],
+      ["Preserves fork topology", "No", "**Yes**", "No"],
+    ],
+  },
+  exercises: [
+    "**Squash workflow**: Create a branch with 5 commits (including two \"fix typo\" commits). Use `git rebase -i` to squash the typo fixes into their parent commits. Verify the result with `git log --oneline`.",
+    "**Rebase --onto transplant**: Create three branches: `main`, `feature-a` (branched from main), and `feature-b` (branched from feature-a). Use `git rebase --onto main feature-a feature-b` to transplant feature-b onto main. Draw the commit graph before and after.",
+    "**Force-push safety**: Push a branch to a remote, then rebase it locally. Try `git push` (expect rejection). Use `git push --force-with-lease`. Simulate a teammate's push to the same branch and observe `--force-with-lease` refusing the push.",
+    "**Conflict resolution with rerere**: Enable `git rerere`, create a rebase conflict, resolve it, then abort and redo the rebase. Observe `rerere` automatically applying the recorded resolution the second time.",
+    "**Reflog recovery**: Perform a rebase, then use `git reflog` to find the pre-rebase state and recover the original branch using `git reset --hard`. Practice this until comfortable with reflog as a safety net.",
+  ],
+  cheatSheet: [
+    "`git rebase main` — replay current branch commits onto **main** tip, creating a *linear history*",
+    "`git rebase -i HEAD~N` — **interactive rebase** last N commits: *pick*, *reword*, *squash*, *fixup*, *edit*, *drop*",
+    "`git rebase --onto <newbase> <oldbase> <branch>` — **transplant** commits in range `(oldbase, branch]` onto `<newbase>`",
+    "`git commit --fixup=<sha>` + `git rebase -i --autosquash` — create and auto-apply **fixup** commits",
+    "`git push --force-with-lease` — **safe force-push** that refuses if remote has unseen commits",
+    "`git rebase --abort` / `--continue` / `--skip` — **conflict control**: cancel, proceed, or drop current commit",
+  ],
+  revisionNotes: [
+    "**Core concept**: Rebase *replays* commits onto a new base, producing **new SHAs** with identical diffs. It creates a clean *linear* history but **rewrites history** — never use on shared branches.",
+    "**Interactive rebase** (`-i`) is the primary tool for *polishing* commit history before sharing. Key actions: `pick` (keep), `reword` (edit message), `squash`/`fixup` (combine), `edit` (pause to amend), `drop` (remove).",
+    "**Golden rule**: Never rebase commits that exist on a branch others are working on. Doing so forces collaborators to reconcile *diverged refs* and can cause duplicate commits or lost work.",
+    "**Safety tools**: `--force-with-lease` prevents overwriting others' work when force-pushing. `git reflog` records pre-rebase state for recovery. `git rerere` automates repeated conflict resolution.",
+    "**`--onto`** is the advanced form for transplanting branches or removing commit ranges. Syntax: `git rebase --onto <newbase> <oldbase> <branch>` replays only the commits in `(oldbase, branch]`.",
+  ],
 };

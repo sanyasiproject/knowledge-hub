@@ -250,4 +250,281 @@ Each layer assumes the previous one might fail. This is the core mindset of secu
         "The practice of securely storing, accessing, and rotating sensitive credentials (API keys, passwords, certificates) using dedicated systems like HashiCorp Vault or cloud secret managers.",
     },
   ],
+  deepDive: [
+    `**Secure coding** is not merely a checklist of *techniques* — it is a **mindset** that must permeate every phase of the software development lifecycle. From the moment a developer writes \`if (user.isAdmin)\` without verifying the **authentication context**, a vulnerability is born. The *attack surface* of modern applications spans **APIs**, **WebSocket connections**, \`localStorage\`, **service workers**, and even \`postMessage\` channels between iframes. Understanding that **every boundary** between *trusted* and *untrusted* code is a potential exploit vector is the foundation of the **secure coding discipline**. Developers must adopt *threat modeling* early — asking "**what could go wrong?**" at the *design phase*, not after deployment.`,
+
+    `The most **critical** secure coding practices revolve around *data handling*. **Parameterized queries** (using \`PreparedStatement\` in Java or \`$1, $2\` placeholders in PostgreSQL) are the *gold standard* for **SQL injection prevention** — never build queries with **string concatenation**. For **cross-site scripting (XSS)**, output encoding must be *context-aware*: \`&lt;\` escaping works in **HTML body** context but is *useless* inside a \`<script>\` tag, where **JavaScript-specific escaping** is required. *Memory-safe languages* like **Rust** and **Go** eliminate entire categories of vulnerabilities (\`buffer overflows\`, \`use-after-free\`, \`double-free\`), but even in **C/C++**, disciplined use of \`std::string\`, \`std::vector\`, and *smart pointers* like \`std::unique_ptr\` dramatically reduces risk.`,
+
+    `**Cryptography** in secure coding demands *extreme care* — the mantra is "**never roll your own crypto**." Use established libraries like \`libsodium\`, **OpenSSL**, or the *Web Crypto API* and rely on **well-vetted algorithms**: \`AES-256-GCM\` for *symmetric encryption*, \`RSA-OAEP\` or **X25519** for *key exchange*, and \`bcrypt\` or \`argon2id\` for **password hashing**. A common *anti-pattern* is using \`MD5\` or \`SHA-1\` for password storage — these are **fast hashes** designed for *integrity checks*, not password protection, and can be brute-forced at billions of attempts per second on modern **GPUs**. Additionally, **secrets rotation**, *certificate pinning*, and proper \`TLS\` configuration (disabling **TLS 1.0/1.1**, using *strong cipher suites*) are essential components of a **defense-in-depth** cryptographic posture.`,
+  ],
+  code: [
+    {
+      language: "C++",
+      caption: "Safe string handling with std::string and input bounds checking",
+      source: `#include <iostream>
+#include <string>
+#include <stdexcept>
+#include <algorithm>
+
+// Secure input validation: allow-list approach
+bool isValidUsername(const std::string& username) {
+    if (username.empty() || username.size() > 32) {
+        return false; // Enforce length limits
+    }
+    // Allow only alphanumeric characters and underscores
+    return std::all_of(username.begin(), username.end(), [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+    });
+}
+
+// Secure error handling: fail securely, never expose internals
+std::string authenticateUser(const std::string& username, const std::string& password) {
+    if (!isValidUsername(username)) {
+        throw std::invalid_argument("Invalid input"); // Generic message
+    }
+    // Use parameterized query via prepared statement (pseudo-code)
+    // NEVER: "SELECT * FROM users WHERE name='" + username + "'"
+    // ALWAYS: PreparedStatement with bound parameters
+    return "authenticated_token";
+}
+
+int main() {
+    try {
+        std::string user;
+        std::getline(std::cin, user);
+        auto token = authenticateUser(user, "secret");
+        std::cout << "Login successful" << std::endl;
+    } catch (const std::exception&) {
+        // Log internally, show generic message to user
+        std::cerr << "Authentication failed" << std::endl;
+    }
+    return 0;
+}`,
+    },
+    {
+      language: "Node.js",
+      caption: "Express middleware for input validation, rate limiting, and secure headers",
+      source: `const express = require('express');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const { body, validationResult } = require('express-validator');
+
+const app = express();
+app.use(express.json({ limit: '10kb' })); // Limit body size
+app.use(helmet()); // Set secure HTTP headers (CSP, HSTS, etc.)
+
+// Rate limiting to prevent brute-force attacks
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // 5 attempts per window
+  message: { error: 'Too many login attempts, try again later' },
+  standardHeaders: true,
+});
+
+// Input validation middleware using allow-list approach
+const validateLogin = [
+  body('username')
+    .isAlphanumeric().withMessage('Invalid characters')
+    .isLength({ min: 3, max: 32 }).withMessage('Invalid length')
+    .trim()
+    .escape(),
+  body('password')
+    .isLength({ min: 8, max: 128 }),
+];
+
+app.post('/api/login', loginLimiter, validateLogin, async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    // Log detailed errors internally, return generic message
+    console.error('Validation failed:', errors.array());
+    return res.status(400).json({ error: 'Invalid input' });
+  }
+
+  try {
+    // Use parameterized query — NEVER string concatenation
+    // db.query('SELECT * FROM users WHERE name = $1', [req.body.username]);
+    res.json({ message: 'Login successful' });
+  } catch (err) {
+    // Never expose stack traces or DB errors to the client
+    console.error('Login error:', err.message);
+    res.status(500).json({ error: 'Something went wrong' });
+  }
+});
+
+app.listen(3000);`,
+    },
+    {
+      language: "C++",
+      caption: "RAII-based resource management and memory-safe patterns to prevent leaks and overflows",
+      source: `#include <memory>
+#include <vector>
+#include <fstream>
+#include <string>
+#include <stdexcept>
+
+// RAII wrapper for secure file handling — auto-closes on scope exit
+class SecureFileReader {
+    std::ifstream file_;
+public:
+    explicit SecureFileReader(const std::string& path) : file_(path) {
+        if (!file_.is_open()) {
+            throw std::runtime_error("Cannot open file");
+        }
+    }
+    ~SecureFileReader() { if (file_.is_open()) file_.close(); }
+
+    // Prevent copying to avoid double-close
+    SecureFileReader(const SecureFileReader&) = delete;
+    SecureFileReader& operator=(const SecureFileReader&) = delete;
+
+    std::string readLine() {
+        std::string line;
+        if (!std::getline(file_, line)) {
+            throw std::runtime_error("Read failed");
+        }
+        if (line.size() > 4096) { // Enforce max line length
+            throw std::runtime_error("Line exceeds safe limit");
+        }
+        return line;
+    }
+};
+
+// Use smart pointers instead of raw new/delete
+void processData() {
+    // unique_ptr: automatic cleanup, no memory leaks
+    auto buffer = std::make_unique<std::vector<uint8_t>>(1024);
+
+    // Bounds-checked access with .at() instead of []
+    try {
+        buffer->at(0) = 0xFF;  // Throws if out of range
+    } catch (const std::out_of_range& e) {
+        // Handle bounds violation securely
+    }
+
+    // SecureFileReader auto-closes even if exception is thrown
+    SecureFileReader reader("/etc/config.dat");
+    auto line = reader.readLine();
+}`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Defense in Depth — Layered Security Architecture",
+      kind: "architecture",
+      caption: "Multiple security layers protect the application so that no single point of failure leads to compromise.",
+      mermaid: `graph TB
+    subgraph Network["Network Layer"]
+        FW[Firewall / WAF]
+        TLS[TLS Termination]
+        DDOS[DDoS Protection]
+    end
+    subgraph Application["Application Layer"]
+        AUTH[Authentication]
+        AUTHZ[Authorization]
+        IV[Input Validation]
+        OE[Output Encoding]
+    end
+    subgraph Data["Data Layer"]
+        PQ[Parameterized Queries]
+        ENC[Encryption at Rest]
+        AC[DB Access Controls]
+    end
+    subgraph Monitoring["Monitoring Layer"]
+        LOG[Audit Logging]
+        IDS[Intrusion Detection]
+        ALERT[Alerting]
+    end
+    FW --> TLS --> DDOS
+    DDOS --> AUTH --> AUTHZ --> IV --> OE
+    OE --> PQ --> ENC --> AC
+    AC --> LOG --> IDS --> ALERT`,
+    },
+    {
+      title: "Secure Request Processing Flow",
+      kind: "flow",
+      caption: "How an incoming request passes through security controls before reaching business logic.",
+      mermaid: `flowchart LR
+    A[Client Request] --> B{Rate Limit OK?}
+    B -- No --> C[429 Too Many Requests]
+    B -- Yes --> D{TLS Valid?}
+    D -- No --> E[Connection Rejected]
+    D -- Yes --> F{Authenticated?}
+    F -- No --> G[401 Unauthorized]
+    F -- Yes --> H{Authorized?}
+    H -- No --> I[403 Forbidden]
+    H -- Yes --> J{Input Valid?}
+    J -- No --> K[400 Bad Request]
+    J -- Yes --> L[Business Logic]
+    L --> M[Output Encoding]
+    M --> N[Secure Response + Headers]`,
+    },
+  ],
+  comparison: {
+    columns: [
+      "Aspect",
+      "Insecure Practice",
+      "Secure Practice",
+      "Risk if Insecure",
+    ],
+    rows: [
+      [
+        "**SQL Queries**",
+        "String concatenation: `\"SELECT * FROM users WHERE id=\" + id`",
+        "Parameterized queries: `db.query('SELECT * FROM users WHERE id=$1', [id])`",
+        "*SQL injection* — full database compromise",
+      ],
+      [
+        "**Password Storage**",
+        "Plain text or `MD5`/`SHA-1` hashing",
+        "`bcrypt` or `argon2id` with unique salt per password",
+        "*Credential theft* — mass account takeover",
+      ],
+      [
+        "**Error Messages**",
+        "Expose stack traces and DB errors to users",
+        "Generic user-facing messages; detailed internal logging",
+        "*Information disclosure* — reveals architecture to attackers",
+      ],
+      [
+        "**Input Validation**",
+        "Client-side only or deny-list approach",
+        "Server-side allow-list validation with canonicalization",
+        "*Injection attacks* — XSS, command injection, path traversal",
+      ],
+      [
+        "**Secrets Management**",
+        "Hardcoded in source code or config files",
+        "Environment variables or vault systems (`HashiCorp Vault`, `AWS Secrets Manager`)",
+        "*Credential exposure* — keys leaked via source control",
+      ],
+      [
+        "**HTTP Headers**",
+        "No security headers set",
+        "`Content-Security-Policy`, `Strict-Transport-Security`, `X-Content-Type-Options`",
+        "*XSS, clickjacking, MIME sniffing* attacks",
+      ],
+    ],
+  },
+  exercises: [
+    "**Vulnerability Audit**: Take an existing small web application (or use OWASP *Juice Shop*) and identify at least **5 security vulnerabilities**. For each, document the *vulnerability type* (e.g., `SQLi`, `XSS`, `IDOR`), the **affected code**, and write a *secure fix* with proper input validation and output encoding.",
+    "**Parameterized Query Refactor**: Find a codebase that uses **string concatenation** for `SQL` queries. Refactor *all* queries to use **parameterized statements**. Test with inputs containing `'; DROP TABLE users; --` to confirm the *injection is neutralized*.",
+    "**Secure Authentication System**: Build a **login system** in *Node.js* or *Python* that implements: `bcrypt` password hashing with **unique salts**, *rate limiting* (max 5 attempts per 15 minutes), **secure session management** with `HttpOnly`/`Secure`/`SameSite` cookies, and *CSRF protection*. Write tests proving each control works.",
+    "**Threat Modeling Exercise**: Choose a feature you are currently developing and create a **STRIDE threat model**. Identify *Spoofing*, *Tampering*, *Repudiation*, *Information Disclosure*, *Denial of Service*, and *Elevation of Privilege* threats. Propose **mitigations** for each using `secure coding` techniques covered in this topic.",
+    "**Security Header Configuration**: Configure a web server (e.g., *Express* with `helmet`, or **Nginx**) to return all recommended security headers: `Content-Security-Policy`, `Strict-Transport-Security`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and `Permissions-Policy`. Use a tool like \`securityheaders.com\` to **verify** your configuration scores an *A+*.",
+  ],
+  cheatSheet: [
+    "**Input Validation**: Always use *allow-list* (whitelist) validation on the **server side**. Validate `type`, *length*, **range**, and *format*. Canonicalize before validating. Never rely on **client-side** validation alone.",
+    "**SQL Injection Prevention**: Use `parameterized queries` or **prepared statements** — *never* concatenate user input into SQL strings. Apply **least privilege** to database accounts (e.g., `SELECT`-only for read operations).",
+    "**XSS Prevention**: Apply *context-aware* **output encoding** — `HTML entities` for HTML body, *JavaScript escaping* for `<script>` contexts, **percent-encoding** for URLs. Use `Content-Security-Policy` headers to block inline scripts.",
+    "**Password Storage**: Hash with `bcrypt` (cost factor **12+**) or `argon2id`. Always use a *unique salt* per password. **Never** use `MD5`, `SHA-1`, or *unsalted hashes*.",
+    "**Secrets Management**: Store secrets in *environment variables* or a **vault** (`HashiCorp Vault`, `AWS Secrets Manager`). **Never** hardcode in source code. *Rotate* on schedule and on suspected compromise.",
+    "**Error Handling**: *Fail securely* — deny access on exceptions. Return **generic messages** to users; log *detailed errors* internally. Never expose `stack traces`, **database errors**, or *internal paths* to end users.",
+  ],
+  revisionNotes: [
+    "The **three pillars** of secure coding are *input validation* (never trust user input), **output encoding** (context-aware escaping for HTML, JS, URL, SQL), and `least privilege` (minimum permissions at every layer — code, database, infrastructure).",
+    "**Defense in depth** layers *independent* security controls: `WAF` at the network layer, *authentication/authorization* at the application layer, **parameterized queries** at the data layer, and `audit logging` at the monitoring layer. Each layer assumes the *previous one might fail*.",
+    "**Fail securely** means defaulting to a *denied/closed state* on errors. If an `authorization check` throws an exception, **deny access**. If `TLS validation` fails, *reject the connection*. If the `rate limiter` is unavailable, **throttle requests**. Never let errors create security bypasses.",
+    "**Cryptographic best practices**: use `AES-256-GCM` for *symmetric encryption*, `bcrypt`/`argon2id` for **password hashing** (never `MD5`/`SHA-1`), and *established libraries* (`libsodium`, **OpenSSL**, `Web Crypto API`). **Never** implement custom cryptographic algorithms.",
+    "**Security logging** must capture *authentication events* (successes and failures), **authorization failures**, and `input validation` rejections — but **never** log *passwords*, `tokens`, *credit card numbers*, or **PII**. Use *structured logging* and store logs in **append-only**, access-controlled storage.",
+  ],
 };

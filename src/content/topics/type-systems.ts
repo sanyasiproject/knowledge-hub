@@ -73,29 +73,68 @@ main = do
   putStrLn (describe True)          -- "Yes"`,
     },
     {
-      language: "python",
-      caption: "Dynamic + strong typing, and gradual typing with type hints",
-      source: `# Python is dynamically typed: types checked at runtime
-x = 42          # x is an int
-x = "hello"     # now x is a str — no error, types are not fixed
+      language: "cpp",
+      caption: "Static + strong typing with templates and type safety",
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <type_traits>
 
-# Python is strongly typed: no implicit coercions
-try:
-    result = 1 + "2"  # TypeError: unsupported operand type(s)
-except TypeError as e:
-    print(e)
+// C++ is statically typed: types checked at compile time
+// int x = 42;
+// x = "hello";  // Compile error: cannot assign const char* to int
 
-# Gradual typing with type hints (checked by mypy, not at runtime)
-def greet(name: str) -> str:
-    return f"Hello, {name}"
+// C++ is strongly typed: no implicit narrowing (with braces)
+// int y{3.14};  // Compile error with brace initialization
 
-# Type aliases and generics (Python 3.12+)
-type Matrix[T] = list[list[T]]
+// Templates provide parametric polymorphism (like generics)
+std::string greet(const std::string& name) {
+    return "Hello, " + name;
+}
 
-def transpose(matrix: Matrix[int]) -> Matrix[int]:
-    return [list(row) for row in zip(*matrix)]
+// Type aliases and templates
+template<typename T>
+using Matrix = std::vector<std::vector<T>>;
 
-print(transpose([[1, 2], [3, 4]]))  # [[1, 3], [2, 4]]`,
+template<typename T>
+Matrix<T> transpose(const Matrix<T>& matrix) {
+    if (matrix.empty()) return {};
+    size_t rows = matrix.size(), cols = matrix[0].size();
+    Matrix<T> result(cols, std::vector<T>(rows));
+    for (size_t i = 0; i < rows; ++i)
+        for (size_t j = 0; j < cols; ++j)
+            result[j][i] = matrix[i][j];
+    return result;
+}
+
+// Compile-time type constraints with concepts (C++20)
+template<typename T>
+concept Numeric = std::is_arithmetic_v<T>;
+
+template<Numeric T>
+T safe_add(T a, T b) {
+    return a + b;
+}
+
+// static_assert for compile-time type checks
+static_assert(std::is_same_v<decltype(safe_add(1, 2)), int>);
+static_assert(std::is_same_v<decltype(safe_add(1.0, 2.0)), double>);
+// safe_add("a", "b");  // Compile error: const char* does not satisfy Numeric
+
+int main() {
+    // Strong typing: mixing types is a compile error
+    // auto bad = 1 + std::string("2");  // Error: no operator+ for int and string
+
+    std::cout << greet("World") << "\\n";
+
+    Matrix<int> m = {{1, 2}, {3, 4}};
+    Matrix<int> t = transpose(m);
+    // t == {{1, 3}, {2, 4}}
+    for (const auto& row : t) {
+        for (int val : row) std::cout << val << " ";
+        std::cout << "\\n";
+    }
+}`,
     },
     {
       language: "c",

@@ -112,6 +112,379 @@ export const designUrlShortener: TopicContent = {
       back: "Check if the alias already exists in the database. If available, store it like any other short key with a custom flag. If taken, return an error. Custom aliases should be validated: allowed characters, length limits, not on a blocked list. They are stored in the same table as generated keys.",
     },
   ],
+  deepDive: [
+    "**Understanding Base62 Encoding and Key Space Trade-offs**\n\nAt the heart of every URL shortener lies the *key generation mechanism*, and **base62 encoding** is the most widely adopted approach. Base62 maps integers to a compact alphanumeric representation using the character set `a-z`, `A-Z`, `0-9`. The encoding works by repeatedly dividing the number by 62 and mapping each remainder to a character. A **7-character key** yields `62^7 ≈ 3.5 trillion` unique combinations, while a **6-character key** gives `62^6 ≈ 56.8 billion`. The choice of key length is a *capacity planning decision*: shorter keys are more user-friendly but exhaust sooner. In practice, systems like **bit.ly** use 7 characters, providing decades of runway at high throughput. An important subtlety is **key predictability** — if you use a sequential counter fed into base62, an attacker can enumerate all URLs by incrementing the counter. Mitigations include *salting the counter*, using a **bijective shuffle** (e.g., Knuth multiplicative hashing), or switching to a **pre-generated key service (KGS)** that emits random keys.",
+    "**Database Design and Caching Strategy**\n\nThe URL mapping store must handle two distinct workloads: *low-latency reads* (redirects) and *moderate-throughput writes* (URL creation). A **NoSQL key-value store** like DynamoDB or MongoDB is a natural fit because the access pattern is a simple `GET(shortKey) → longURL` lookup with no complex joins. The schema is straightforward: `{ shortKey: string, longURL: string, createdAt: Date, expiresAt?: Date, userId?: string, clickCount?: number }`. For the **caching layer**, Redis sits in front of the database using an **LRU eviction policy**. The *cache-aside* pattern is standard: on a read miss, fetch from the database, populate the cache, then redirect. A critical concern is **cache stampede** on popular URLs — when a hot key expires, thousands of concurrent requests hit the database simultaneously. Solutions include *probabilistic early expiration* (refresh the cache slightly before TTL), **request coalescing** (only one request fetches from DB while others wait), or using a *lock-based approach* with `SETNX` in Redis. Cache sizing follows the **80/20 rule**: caching 20% of daily traffic typically covers 80% of requests.",
+    "**Distributed Key Generation and Consistency**\n\nIn a *multi-datacenter deployment*, key uniqueness becomes a distributed systems problem. The **KGS approach** handles this elegantly: a central service pre-generates millions of random keys and stores them in an `unused_keys` table. Each application server requests a **batch** (e.g., 10,000 keys) via an atomic `SELECT ... FOR UPDATE` followed by a `DELETE`, moving those keys to a `used_keys` table. Servers hand out keys from their in-memory batch with *zero database calls per URL creation*. If a server crashes, those in-memory keys are lost — an acceptable trade-off given the enormous key space. An alternative is **range-based allocation**: assign each server a non-overlapping ID range (server 1 gets 1-1M, server 2 gets 1M-2M, etc.) managed by a **ZooKeeper** or **etcd** coordinator. Each server independently converts its allocated IDs to base62 without any cross-server coordination. For **global consistency**, the redirect path only requires *read-after-write consistency* within the same datacenter where the URL was created. Cross-datacenter replication can be **asynchronous** with a small window where a newly created URL is not yet available in other regions — mitigated by routing the first redirect to the creation datacenter using a hint in the short key prefix.",
+  ],
+  code: [
+    {
+      language: "javascript",
+      caption: "Node.js/Express URL Shortener with MongoDB — complete API with create and redirect endpoints",
+      source: `const express = require("express");
+const mongoose = require("mongoose");
+const crypto = require("crypto");
+
+// --- MongoDB Schema ---
+const urlSchema = new mongoose.Schema({
+  shortKey: { type: String, required: true, unique: true, index: true },
+  longURL: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+  expiresAt: { type: Date, default: null },
+  clickCount: { type: Number, default: 0 },
+});
+
+const URLModel = mongoose.model("URL", urlSchema);
+
+// --- Base62 Encoding ---
+const BASE62_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+function toBase62(num) {
+  if (num === 0) return BASE62_CHARS[0];
+  let result = "";
+  while (num > 0) {
+    result = BASE62_CHARS[num % 62] + result;
+    num = Math.floor(num / 62);
+  }
+  return result;
+}
+
+// --- Generate a unique 7-character short key ---
+async function generateShortKey() {
+  // Use a random 48-bit integer and encode to base62
+  const randomBytes = crypto.randomBytes(6);
+  const num = randomBytes.readUIntBE(0, 6);
+  const key = toBase62(num).padStart(7, "a").slice(0, 7);
+
+  // Check for collision
+  const existing = await URLModel.findOne({ shortKey: key });
+  if (existing) return generateShortKey(); // retry on collision
+  return key;
+}
+
+// --- Express App ---
+const app = express();
+app.use(express.json());
+
+// POST /api/shorten — Create a short URL
+app.post("/api/shorten", async (req, res) => {
+  try {
+    const { longURL, expiresAt } = req.body;
+    if (!longURL) return res.status(400).json({ error: "longURL is required" });
+
+    const shortKey = await generateShortKey();
+    const doc = await URLModel.create({ shortKey, longURL, expiresAt });
+
+    res.status(201).json({
+      shortURL: \`https://short.url/\${doc.shortKey}\`,
+      shortKey: doc.shortKey,
+      longURL: doc.longURL,
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /:shortKey — Redirect to the original URL
+app.get("/:shortKey", async (req, res) => {
+  try {
+    const doc = await URLModel.findOneAndUpdate(
+      { shortKey: req.params.shortKey },
+      { $inc: { clickCount: 1 } }  // increment analytics counter
+    );
+    if (!doc) return res.status(404).json({ error: "Short URL not found" });
+    if (doc.expiresAt && doc.expiresAt < new Date()) {
+      return res.status(410).json({ error: "Short URL has expired" });
+    }
+    // 302 redirect to enable click tracking
+    res.redirect(302, doc.longURL);
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// --- Start ---
+mongoose.connect("mongodb://localhost:27017/urlshortener").then(() => {
+  app.listen(3000, () => console.log("URL shortener running on port 3000"));
+});`,
+    },
+    {
+      language: "cpp",
+      caption: "C++ Base62 Encoding and Decoding — efficient conversion between numeric IDs and short keys",
+      source: `#include <string>
+#include <algorithm>
+#include <stdexcept>
+#include <cstdint>
+
+// Base62 character set: a-z, A-Z, 0-9
+static const std::string BASE62_CHARS =
+    "abcdefghijklmnopqrstuvwxyz"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "0123456789";
+
+// Encode a 64-bit unsigned integer to a base62 string
+std::string toBase62(uint64_t num) {
+    if (num == 0) return std::string(1, BASE62_CHARS[0]);
+
+    std::string result;
+    result.reserve(11);  // max 11 chars for uint64_t in base62
+
+    while (num > 0) {
+        result += BASE62_CHARS[num % 62];
+        num /= 62;
+    }
+
+    // Digits are produced in reverse order
+    std::reverse(result.begin(), result.end());
+    return result;
+}
+
+// Decode a base62 string back to a 64-bit unsigned integer
+uint64_t fromBase62(const std::string& encoded) {
+    uint64_t result = 0;
+
+    for (char c : encoded) {
+        size_t pos = BASE62_CHARS.find(c);
+        if (pos == std::string::npos) {
+            throw std::invalid_argument("Invalid base62 character: " + std::string(1, c));
+        }
+        // Check for overflow before multiplication
+        if (result > (UINT64_MAX - pos) / 62) {
+            throw std::overflow_error("Base62 value exceeds uint64_t range");
+        }
+        result = result * 62 + pos;
+    }
+
+    return result;
+}
+
+// Pad the base62 string to a fixed length (e.g., 7 characters)
+std::string toBase62Padded(uint64_t num, size_t width = 7) {
+    std::string encoded = toBase62(num);
+    if (encoded.size() < width) {
+        // Pad with 'a' (represents 0) on the left
+        encoded.insert(0, width - encoded.size(), BASE62_CHARS[0]);
+    }
+    return encoded.substr(0, width);
+}
+
+// Example usage:
+// toBase62(123456789)       -> "8m0Kx"
+// fromBase62("8m0Kx")       -> 123456789
+// toBase62Padded(123456789) -> "aa8m0Kx"`,
+    },
+    {
+      language: "javascript",
+      caption: "Redis Cache Layer for URL Shortener — cache-aside pattern with stampede protection",
+      source: `const Redis = require("ioredis");
+const redis = new Redis({ host: "localhost", port: 6379 });
+
+const CACHE_TTL = 3600; // 1 hour in seconds
+const LOCK_TTL = 5;     // lock expiry for stampede protection
+
+/**
+ * Resolve a short key to a long URL with Redis cache-aside pattern.
+ * Includes cache stampede protection using SETNX-based locking.
+ */
+async function resolveURL(shortKey, dbLookup) {
+  // Step 1: Check the cache
+  const cached = await redis.get(\`url:\${shortKey}\`);
+  if (cached) {
+    return cached;  // Cache hit — fast path
+  }
+
+  // Step 2: Cache miss — acquire a lock to prevent stampede
+  const lockKey = \`lock:url:\${shortKey}\`;
+  const acquired = await redis.set(lockKey, "1", "EX", LOCK_TTL, "NX");
+
+  if (!acquired) {
+    // Another request is fetching — wait briefly and retry
+    await new Promise((r) => setTimeout(r, 50));
+    return resolveURL(shortKey, dbLookup);
+  }
+
+  try {
+    // Step 3: Fetch from database
+    const longURL = await dbLookup(shortKey);
+    if (!longURL) return null;
+
+    // Step 4: Populate cache with TTL
+    await redis.setex(\`url:\${shortKey}\`, CACHE_TTL, longURL);
+    return longURL;
+  } finally {
+    // Release the lock
+    await redis.del(lockKey);
+  }
+}
+
+// Usage in Express route:
+// app.get("/:shortKey", async (req, res) => {
+//   const longURL = await resolveURL(req.params.shortKey, (key) =>
+//     URLModel.findOne({ shortKey: key }).then((doc) => doc?.longURL)
+//   );
+//   if (!longURL) return res.status(404).send("Not found");
+//   res.redirect(302, longURL);
+// });`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "URL Shortener System Architecture",
+      kind: "architecture",
+      caption: "High-level architecture showing the write path (URL creation), read path (redirect), and analytics pipeline",
+      mermaid: `graph TB
+    Client["Client / Browser"]
+    LB["Load Balancer"]
+    API1["API Server 1"]
+    API2["API Server 2"]
+    KGS["Key Generation<br/>Service (KGS)"]
+    Redis["Redis Cache<br/>(LRU, 35GB)"]
+    DB[("MongoDB / DynamoDB<br/>URL Mappings")]
+    Kafka["Kafka<br/>Click Events"]
+    Analytics["Analytics<br/>Consumer"]
+    DW[("Data Warehouse<br/>Click Aggregates")]
+
+    Client -->|"POST /api/shorten"| LB
+    Client -->|"GET /:shortKey"| LB
+    LB --> API1
+    LB --> API2
+    API1 -->|"get unique key"| KGS
+    API2 -->|"get unique key"| KGS
+    KGS -->|"batch allocate keys"| DB
+    API1 -->|"store mapping"| DB
+    API2 -->|"store mapping"| DB
+    API1 -->|"cache lookup"| Redis
+    API2 -->|"cache lookup"| Redis
+    Redis -.->|"cache miss"| DB
+    API1 -->|"publish click event"| Kafka
+    API2 -->|"publish click event"| Kafka
+    Kafka --> Analytics
+    Analytics --> DW`,
+    },
+    {
+      title: "URL Redirect Flow",
+      kind: "sequence",
+      caption: "Sequence diagram showing the read path: cache hit vs. cache miss, with async analytics",
+      mermaid: `sequenceDiagram
+    participant User
+    participant LB as Load Balancer
+    participant API as API Server
+    participant Cache as Redis Cache
+    participant DB as Database
+    participant MQ as Kafka
+
+    User->>LB: GET /abc123
+    LB->>API: Forward request
+    API->>Cache: GET url:abc123
+    alt Cache Hit
+        Cache-->>API: longURL
+    else Cache Miss
+        Cache-->>API: null
+        API->>DB: find({ shortKey: "abc123" })
+        DB-->>API: { longURL, ... }
+        API->>Cache: SETEX url:abc123 longURL 3600
+    end
+    API-->>User: 302 Redirect to longURL
+    API->>MQ: publish clickEvent (async)
+    Note over MQ: {shortKey, timestamp,<br/>IP, userAgent, referrer}`,
+    },
+    {
+      title: "Key Generation Strategies",
+      kind: "flow",
+      caption: "Decision flow for choosing a key generation strategy based on system requirements",
+      mermaid: `flowchart TD
+    Start["Need to generate<br/>a short key"] --> Q1{"Need guaranteed<br/>uniqueness?"}
+    Q1 -->|Yes| Q2{"Multi-server<br/>environment?"}
+    Q1 -->|No| Hash["Hash-Based<br/>MD5/SHA256 truncation<br/>+ collision check"]
+    Q2 -->|Yes| KGS["Pre-generated Key<br/>Service (KGS)<br/>Best for distributed"]
+    Q2 -->|No| Q3{"Predictability<br/>acceptable?"}
+    Q3 -->|Yes| AutoInc["Auto-Increment ID<br/>+ Base62<br/>Simple, sequential"]
+    Q3 -->|No| Random["Random Base62<br/>+ DB uniqueness check"]
+
+    KGS --> Batch["Batch allocate keys<br/>to each server"]
+    Hash --> Retry["On collision:<br/>rehash or append counter"]
+
+    style KGS fill:#2d5016,color:#fff
+    style Hash fill:#7a4f1a,color:#fff
+    style AutoInc fill:#1a3a5c,color:#fff
+    style Random fill:#5c1a3a,color:#fff`,
+    },
+  ],
+  comparison: {
+    columns: [
+      "Aspect",
+      "Auto-Increment + Base62",
+      "Pre-Generated KGS",
+      "Hash-Based (MD5/SHA256)",
+      "Random + Collision Check",
+    ],
+    rows: [
+      [
+        "**Uniqueness**",
+        "Guaranteed (sequential IDs)",
+        "Guaranteed (pre-allocated)",
+        "Not guaranteed (collisions possible)",
+        "Not guaranteed (collisions possible)",
+      ],
+      [
+        "**Predictability**",
+        "*High* — keys are sequential",
+        "*Low* — keys are random",
+        "*Low* — hash output is random",
+        "*Low* — fully random",
+      ],
+      [
+        "**Write Latency**",
+        "Low (counter increment)",
+        "Very low (in-memory batch)",
+        "Medium (hash + collision check)",
+        "Medium (generate + collision check)",
+      ],
+      [
+        "**Distributed Scalability**",
+        "Hard — counter is a bottleneck",
+        "Excellent — batch allocation",
+        "Good — stateless computation",
+        "Good — stateless generation",
+      ],
+      [
+        "**Complexity**",
+        "Simple",
+        "Moderate (KGS infrastructure)",
+        "Simple",
+        "Simple",
+      ],
+      [
+        "**Failure Mode**",
+        "Counter server crash = no writes",
+        "Server crash = lost batch (acceptable)",
+        "Collision storm under high load",
+        "Collision probability grows over time",
+      ],
+    ],
+  },
+  exercises: [
+    "**Design a Rate Limiter for URL Creation**: Implement a *token bucket* or *sliding window* rate limiter that restricts each user to **100 URL creations per hour**. Consider how to handle unauthenticated users (rate limit by IP) vs. authenticated users (rate limit by `userId`). Store rate limit counters in **Redis** using `INCR` and `EXPIRE`.",
+    "**Implement URL Expiration with Lazy + Active Deletion**: Design a system where URLs can have an optional `expiresAt` field. Implement *lazy deletion* (check expiry on read and return 410 Gone) combined with *active deletion* (a background cron job that scans for expired URLs every hour and reclaims their keys back to the KGS `unused_keys` pool). Estimate the throughput of the cleanup job.",
+    "**Build a Custom Alias Feature with Validation**: Extend the URL shortener to support **custom aliases** (e.g., `short.url/my-brand`). Implement validation rules: minimum 3 characters, maximum 30 characters, only `a-z`, `0-9`, and hyphens allowed, must not start/end with a hyphen, must not collide with reserved words (`api`, `admin`, `health`, `static`). Handle the race condition where two users request the same alias simultaneously.",
+    "**Design the Analytics Dashboard Backend**: Build the backend for a URL analytics dashboard that shows: *total clicks*, *unique visitors* (by IP), *clicks over time* (hourly/daily/weekly), *top referrers*, *geographic distribution* (from IP geolocation), and *device breakdown* (from User-Agent parsing). Use **Kafka** for event ingestion and a **time-series database** (e.g., TimescaleDB) for storage. Design the API endpoints and consider query performance at scale.",
+    "**Multi-Region Deployment Strategy**: Design a URL shortener that operates across **3 geographic regions** (US, EU, Asia). Address: (1) How to partition the key space so no two regions generate the same key, (2) How to replicate URL mappings so a URL created in the US can be resolved in Asia with *<50ms added latency*, (3) How to handle the *consistency window* during replication, and (4) How to route users to the nearest region using **GeoDNS**.",
+  ],
+  cheatSheet: [
+    "**Key space**: `62^7 ≈ 3.5 trillion` unique keys with 7-character base62 encoding. At 100M URLs/month, this lasts **~2,900 years** — key exhaustion is *never* the bottleneck.",
+    "**Storage estimate**: `100M URLs/month × 12 × 5 years × 500 bytes ≈ 3TB`. Use **range-based sharding** on the short key's first character for ~62 even partitions.",
+    "**Cache sizing**: Apply the **80/20 rule** — cache 20% of daily URLs. At 4,000 QPS redirects, that is `4000 × 86400 × 0.2 × 500B ≈ 35GB`, fitting in a single **Redis** node.",
+    "**Redirect choice**: Use `302 Found` for **analytics** (browser hits server every time). Use `301 Moved Permanently` to **reduce load** (browser caches redirect). Most shorteners use *302*.",
+    "**KGS batch size**: Each app server pre-loads **10,000 keys** into memory. At 40 writes/sec per server, a batch lasts ~4 minutes. Lost keys on crash are negligible vs. 3.5T total key space.",
+    "**Read-to-write ratio**: Typically **100:1** or higher. The system is *read-heavy*, so optimize the redirect path first: Redis cache → DB fallback → 302 redirect. Writes can tolerate higher latency.",
+  ],
+  revisionNotes: [
+    "A URL shortener is fundamentally a **key-value mapping service** with a *write-light, read-heavy* workload. The three core decisions are: **key generation strategy** (KGS recommended for distributed systems), **storage engine** (NoSQL for simple lookups), and **caching layer** (Redis with LRU eviction). Always clarify the **redirect type** (301 vs. 302) based on analytics requirements.",
+    "**Capacity estimation** is a critical part of the interview answer. Memorize the key numbers: `62^7 = 3.5T keys`, `100M URLs/month` as a reasonable scale, `100:1 read-to-write ratio = 4,000 QPS redirects`, `~3TB storage for 5 years`, `~35GB cache for 20% of daily traffic`. These demonstrate quantitative thinking.",
+    "The **KGS pattern** is the preferred key generation approach in interviews. It *eliminates collision checking at write time*, works seamlessly in distributed environments via batch allocation, and tolerates server failures gracefully. Mention the `unused_keys` / `used_keys` table split and the atomic batch claim operation.",
+    "For the **analytics pipeline**, always describe an *asynchronous design*: redirect returns immediately, click event is published to **Kafka**, consumed by a separate service, and aggregated into a **data warehouse**. This *decouples latency-critical redirects from data-intensive analytics*. Never block the redirect on analytics writes.",
+    "**Common follow-up topics** to prepare: custom aliases (uniqueness check + reserved word blocklist), URL expiration (lazy + active deletion), rate limiting (token bucket per user/IP in Redis), abuse prevention (blocklist of malicious destinations, link preview/scanning), and **multi-region deployment** (key partitioning by region prefix, GeoDNS routing, async cross-region replication).",
+  ],
   glossary: [
     {
       term: "Base62 Encoding",

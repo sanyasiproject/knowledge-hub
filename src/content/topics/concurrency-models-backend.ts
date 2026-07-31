@@ -157,6 +157,97 @@ get(Pid) ->
 %% counter:get(Pid).  %% => 1`,
     },
   ],
+  diagrams: [
+    {
+      title: "Concurrency Models Overview",
+      kind: "mindmap",
+      caption: "A mindmap of the major **backend concurrency models** with their *key characteristics*, representative runtimes, and trade-offs.",
+      mermaid: `mindmap
+  root(("**Backend Concurrency**"))
+    Thread-per-Request
+      ~1MB stack per thread
+      Simple sequential code
+      Java Servlets, PHP-FPM
+      Poor at 10K+ connections
+    Thread Pool
+      Fixed thread count
+      Reuse threads across requests
+      Java ExecutorService, Tomcat NIO
+      Pool exhaustion risk
+    Event Loop
+      Single-threaded
+      Non-blocking I/O callbacks
+      Node.js, Nginx, Redis
+      Blocks on CPU work
+    Reactor Pattern
+      Event demultiplexer + handlers
+      Multi-reactor for multi-core
+      Netty, Twisted, Vert.x
+    Actor Model
+      Isolated processes
+      Message passing only
+      Erlang BEAM, Akka
+      Let it crash philosophy
+    Coroutines / Green Threads
+      User-space scheduling
+      Tiny stacks 2-8KB
+      Go goroutines, Java Loom
+      M:N threading`
+    },
+    {
+      title: "Go GMP Scheduler Architecture",
+      kind: "architecture",
+      caption: "Diagram of Go's **M:N scheduler** showing the relationship between *Goroutines (G)*, *OS Threads (M)*, and *Processors (P)* with work-stealing behavior.",
+      mermaid: `graph TD
+    subgraph P1 ["**Processor P1**"]
+        LRQ1["Local Run Queue<br/>*G1, G2, G3*"]
+    end
+    subgraph P2 ["**Processor P2**"]
+        LRQ2["Local Run Queue<br/>*G4, G5*"]
+    end
+    subgraph P3 ["**Processor P3**"]
+        LRQ3["Local Run Queue<br/>*(empty)*"]
+    end
+
+    GRQ["**Global Run Queue**<br/>*overflow goroutines*"]
+    M1["**OS Thread M1**<br/>*executing G1*"]
+    M2["**OS Thread M2**<br/>*executing G4*"]
+    M3["**OS Thread M3**<br/>*idle — looking for work*"]
+    NetPoll["**Network Poller**<br/>*parked goroutines<br/>waiting on I/O*"]
+
+    P1 --> M1
+    P2 --> M2
+    P3 --> M3
+    M3 -.->|"**work stealing**<br/>steal half of P1's queue"| LRQ1
+    GRQ -.->|"schedule to<br/>idle processor"| P3
+    NetPoll -.->|"I/O ready:<br/>reschedule goroutine"| GRQ`
+    },
+    {
+      title: "Event Loop Phases (Node.js / libuv)",
+      kind: "flow",
+      caption: "The phases of the **Node.js event loop** showing how *timers*, *I/O callbacks*, *idle/prepare*, *poll*, *check*, and *close* phases execute in order each tick.",
+      mermaid: `graph TD
+    Start["**Event Loop Start**"] --> Timers["**Timers Phase**<br/>*setTimeout, setInterval callbacks*"]
+    Timers --> Pending["**Pending Callbacks**<br/>*deferred I/O callbacks*"]
+    Pending --> Idle["**Idle / Prepare**<br/>*internal use only*"]
+    Idle --> Poll["**Poll Phase**<br/>*retrieve new I/O events*<br/>*execute I/O callbacks*"]
+    Poll --> Check["**Check Phase**<br/>*setImmediate callbacks*"]
+    Check --> Close["**Close Callbacks**<br/>*socket.on('close')*"]
+    Close --> MicroCheck{"**Microtask Queue?**<br/>*Promise.then,<br/>process.nextTick*"}
+    MicroCheck -->|"Yes"| Micro["**Run Microtasks**"]
+    Micro --> Timers
+    MicroCheck -->|"No — empty"| ExitCheck{"**More work?**"}
+    ExitCheck -->|"Yes"| Timers
+    ExitCheck -->|"No"| Exit["**Exit Process**"]`
+    },
+  ],
+  exercises: [
+    "**Benchmark event loop vs thread pool:** Write a Node.js HTTP server that computes Fibonacci(40) on each request. Measure throughput with `autocannon`. Then refactor to offload the computation to a `worker_threads` pool. Compare **requests per second** and *p99 latency* between the single-threaded and worker-threaded versions. Document the event loop blocking behavior observed.",
+    "**Build a goroutine fan-out/fan-in pipeline:** In Go, implement a pipeline that reads URLs from a channel, fans out to *N worker goroutines* that fetch each URL concurrently, and fans results back into a single collector channel. Use `sync.WaitGroup` to coordinate shutdown. Measure how throughput scales as you increase N from 1 to 100. Add a `context.WithTimeout` to cancel all workers if the pipeline takes too long.",
+    "**Simulate the actor model in Node.js:** Build a simple **actor system** in TypeScript where each actor is an object with a *mailbox* (async queue). Implement `send(actorId, message)` and a message processing loop. Create a `CounterActor` that responds to `increment` and `get` messages. Demonstrate that actors process messages sequentially (no race conditions) even when multiple callers send messages concurrently.",
+    "**Compare Java virtual threads vs platform threads:** Write a Java 21 program that creates 100,000 tasks each performing a `Thread.sleep(1000)` (simulating I/O). Run once with `Executors.newFixedThreadPool(200)` (platform threads) and once with `Executors.newVirtualThreadPerTaskExecutor()` (virtual threads). Compare *memory usage*, total completion time, and *thread count* (via `ManagementFactory.getThreadMXBean()`).",
+    "**Implement cooperative scheduling visualization:** Build a Node.js program that simulates three tasks running on a single-threaded event loop. Each task logs when it starts, yields (via `setImmediate`), and resumes. Visualize the interleaving in the console output. Then add a CPU-bound task that does NOT yield and observe how it **starves** the other tasks. Document the impact and the fix using `worker_threads`.",
+  ],
   comparison: {
     columns: ["Aspect", "Node.js", "Java (Loom)", "Go", "Erlang/BEAM"],
     rows: [

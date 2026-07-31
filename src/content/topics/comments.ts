@@ -167,75 +167,86 @@ function sumAmounts(total: number, amount: number): number {
 }`
     },
     {
-      language: "python",
-      caption: "Python docstrings: when they add value vs. when they are noise",
-      source: `# GOOD: Docstring for a public API function with non-obvious behavior
-def retry_with_backoff(
-    func: Callable[[], T],
-    max_attempts: int = 3,
-    base_delay_seconds: float = 1.0,
-    backoff_factor: float = 2.0,
-) -> T:
-    """Execute a function with exponential backoff retry on failure.
+      language: "cpp",
+      caption: "C++ Doxygen comments: when they add value vs. when they are noise",
+      source: `#include <functional>
+#include <thread>
+#include <random>
+#include <stdexcept>
+#include <chrono>
 
-    Retries the given function up to max_attempts times. Each retry waits
-    base_delay_seconds * (backoff_factor ** attempt_number) before trying
-    again. Adds up to 25% random jitter to prevent thundering herd.
+// GOOD: Doxygen for a public API function with non-obvious behavior
 
-    Args:
-        func: A zero-argument callable to execute. Must be idempotent
-              since it may be called multiple times.
-        max_attempts: Total attempts including the first call.
-        base_delay_seconds: Initial delay before the first retry.
-        backoff_factor: Multiplier applied to the delay after each failure.
+/// @brief Execute a function with exponential backoff retry on failure.
+///
+/// Retries the given function up to @p max_attempts times. Each retry waits
+/// base_delay_seconds * (backoff_factor ^ attempt_number) before trying
+/// again. Adds up to 25% random jitter to prevent thundering herd.
+///
+/// @tparam T         The return type of the callable.
+/// @param func       A zero-argument callable to execute. Must be idempotent
+///                   since it may be called multiple times.
+/// @param max_attempts Total attempts including the first call.
+/// @param base_delay_seconds Initial delay before the first retry.
+/// @param backoff_factor Multiplier applied to the delay after each failure.
+/// @return The return value of func on success.
+/// @throws The last exception thrown by func if all attempts fail.
+///
+/// @code
+///   auto result = retry_with_backoff<std::string>(
+///       [&]() { return http_client.get(url); }, 5);
+/// @endcode
+template <typename T>
+T retry_with_backoff(
+    std::function<T()> func,
+    int max_attempts = 3,
+    double base_delay_seconds = 1.0,
+    double backoff_factor = 2.0)
+{
+    std::exception_ptr last_exception;
+    std::mt19937 rng(std::random_device{}());
 
-    Returns:
-        The return value of func on success.
-
-    Raises:
-        The last exception raised by func if all attempts fail.
-
-    Example:
-        result = retry_with_backoff(lambda: http_client.get(url), max_attempts=5)
-    """
-    last_exception = None
-    for attempt in range(max_attempts):
-        try:
-            return func()
-        except Exception as e:
-            last_exception = e
-            if attempt < max_attempts - 1:
-                delay = base_delay_seconds * (backoff_factor ** attempt)
-                jitter = delay * random.uniform(0, 0.25)
-                time.sleep(delay + jitter)
-    raise last_exception
-
-
-# BAD: Docstring that restates the obvious
-def add(a: int, b: int) -> int:
-    """Add two integers.
-
-    Args:
-        a: The first integer.
-        b: The second integer.
-
-    Returns:
-        The sum of a and b.
-    """
-    return a + b
-# The function signature already tells you everything. No docstring needed.
+    for (int attempt = 0; attempt < max_attempts; ++attempt) {
+        try {
+            return func();
+        } catch (...) {
+            last_exception = std::current_exception();
+            if (attempt < max_attempts - 1) {
+                double delay = base_delay_seconds * std::pow(backoff_factor, attempt);
+                std::uniform_real_distribution<double> jitter_dist(0.0, 0.25 * delay);
+                std::this_thread::sleep_for(
+                    std::chrono::duration<double>(delay + jitter_dist(rng)));
+            }
+        }
+    }
+    std::rethrow_exception(last_exception);
+}
 
 
-# GOOD: Brief docstring explaining non-obvious business logic
-def calculate_loyalty_tier(customer: Customer) -> LoyaltyTier:
-    """Determine loyalty tier based on 12-month rolling spend.
+// BAD: Doxygen that restates the obvious
 
-    Business rule (Product Decision #147): Tiers reset on the customer's
-    anniversary date, not the calendar year. Spend from refunded orders
-    is excluded per Finance policy updated 2024-03.
-    """
-    rolling_spend = _get_rolling_spend_excluding_refunds(customer)
-    return _tier_from_spend(rolling_spend)`
+/** @brief Add two integers.
+ *  @param a The first integer.
+ *  @param b The second integer.
+ *  @return The sum of a and b.
+ */
+int add(int a, int b) {
+    return a + b;
+}
+// The function signature already tells you everything. No doc comment needed.
+
+
+// GOOD: Brief doc comment explaining non-obvious business logic
+
+/// @brief Determine loyalty tier based on 12-month rolling spend.
+///
+/// Business rule (Product Decision #147): Tiers reset on the customer's
+/// anniversary date, not the calendar year. Spend from refunded orders
+/// is excluded per Finance policy updated 2024-03.
+LoyaltyTier calculate_loyalty_tier(const Customer& customer) {
+    auto rolling_spend = get_rolling_spend_excluding_refunds(customer);
+    return tier_from_spend(rolling_spend);
+}`
     }
   ],
 

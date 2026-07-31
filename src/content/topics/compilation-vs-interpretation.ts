@@ -24,30 +24,46 @@ export const compilationVsInterpretation: TopicContent = {
   ],
   code: [
     {
-      language: "python",
-      caption: "Inspecting Python bytecode: CPython compiles to .pyc bytecode",
-      source: `import dis
+      language: "cpp",
+      caption: "Inspecting compiled output: examining compiler-generated assembly from C++",
+      source: `// file: fibonacci.cpp
+#include <cstdint>
 
-def fibonacci(n):
-    a, b = 0, 1
-    for _ in range(n):
-        a, b = b, a + b
-    return a
+// A simple function whose compiled output we want to inspect
+int64_t fibonacci(int n) {
+    int64_t a = 0, b = 1;
+    for (int i = 0; i < n; ++i) {
+        int64_t temp = a + b;
+        a = b;
+        b = temp;
+    }
+    return a;
+}
 
-# Disassemble to see CPython bytecode instructions
-dis.dis(fibonacci)
-# Output (abbreviated):
-#   LOAD_CONST   (0, 1)
-#   UNPACK_SEQUENCE  2
-#   STORE_FAST   a
-#   STORE_FAST   b
-#   ...
-#   BINARY_ADD
-#   ...
-#   RETURN_VALUE
-
-# The .pyc file in __pycache__ contains marshalled bytecode
-# CPython's VM executes these instructions in a big switch loop`,
+// Compile with -S to emit assembly instead of an object file:
+//   g++ -O2 -S -masm=intel fibonacci.cpp -o fibonacci.s
+//
+// Key output (x86-64, abbreviated):
+//   fibonacci:
+//     xor     rax, rax          ; a = 0
+//     mov     rdx, 1            ; b = 1
+//   .loop:
+//     test    edi, edi          ; if (n <= 0) done
+//     jle     .done
+//     lea     rcx, [rax + rdx]  ; temp = a + b
+//     mov     rax, rdx          ; a = b
+//     mov     rdx, rcx          ; b = temp
+//     dec     edi               ; --n
+//     jmp     .loop
+//   .done:
+//     ret
+//
+// Use objdump to inspect an already-compiled object file:
+//   g++ -O2 -c fibonacci.cpp -o fibonacci.o
+//   objdump -d -M intel fibonacci.o
+//
+// Use -fdump-tree-optimized to see the compiler's internal IR:
+//   g++ -O2 -fdump-tree-optimized fibonacci.cpp`,
     },
     {
       language: "c",

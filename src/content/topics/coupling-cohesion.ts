@@ -99,104 +99,144 @@ class OrderService {
 }`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption:
         "Before: low cohesion 'god class' mixing unrelated responsibilities. After: high cohesion with single-responsibility classes.",
-      source: `# BEFORE: Low cohesion — UserManager handles authentication, profile
-# management, email sending, report generation, and CSV export.
-# LCOM4 would show 4+ connected components.
+      source: `// BEFORE: Low cohesion -- UserManager handles authentication, profile
+// management, email sending, report generation, and CSV export.
+// LCOM4 would show 4+ connected components.
 
-class UserManager:
-    def __init__(self, db_connection, smtp_server):
-        self.db = db_connection
-        self.smtp = smtp_server
-        self.failed_logins = {}  # used only by auth methods
+class UserManager {
+public:
+    UserManager(DbConnection& db, SmtpServer& smtp)
+        : db_(db), smtp_(smtp) {}
 
-    # ---- Authentication concern ----
-    def authenticate(self, username: str, password: str) -> bool:
-        user = self.db.query("SELECT * FROM users WHERE username = %s", username)
-        if not user or not bcrypt.checkpw(password, user.password_hash):
-            self.failed_logins[username] = self.failed_logins.get(username, 0) + 1
-            return False
-        self.failed_logins.pop(username, None)
-        return True
+    // ---- Authentication concern ----
+    bool authenticate(const std::string& username, const std::string& password) {
+        auto user = db_.query("SELECT * FROM users WHERE username = ?", username);
+        if (!user || !bcryptCheckpw(password, user->passwordHash)) {
+            failedLogins_[username]++;
+            return false;
+        }
+        failedLogins_.erase(username);
+        return true;
+    }
 
-    def is_locked_out(self, username: str) -> bool:
-        return self.failed_logins.get(username, 0) >= 5
+    bool isLockedOut(const std::string& username) const {
+        auto it = failedLogins_.find(username);
+        return it != failedLogins_.end() && it->second >= 5;
+    }
 
-    # ---- Profile concern ----
-    def update_profile(self, user_id: int, display_name: str, bio: str):
-        self.db.execute(
-            "UPDATE users SET display_name=%s, bio=%s WHERE id=%s",
-            display_name, bio, user_id
-        )
+    // ---- Profile concern ----
+    void updateProfile(int userId, const std::string& displayName, const std::string& bio) {
+        db_.execute("UPDATE users SET display_name=?, bio=? WHERE id=?",
+                    displayName, bio, userId);
+    }
 
-    # ---- Notification concern ----
-    def send_welcome_email(self, email: str, name: str):
-        self.smtp.send(to=email, subject="Welcome!", body=f"Hello {name}")
+    // ---- Notification concern ----
+    void sendWelcomeEmail(const std::string& email, const std::string& name) {
+        smtp_.send(email, "Welcome!", "Hello " + name);
+    }
 
-    # ---- Reporting concern ----
-    def generate_user_activity_report(self, start_date, end_date) -> str:
-        rows = self.db.query("SELECT ... FROM activity WHERE ...", start_date, end_date)
-        return self._format_as_csv(rows)
+    // ---- Reporting concern ----
+    std::string generateUserActivityReport(Date startDate, Date endDate) {
+        auto rows = db_.query("SELECT ... FROM activity WHERE ...", startDate, endDate);
+        return formatAsCsv(rows);
+    }
 
-    def _format_as_csv(self, rows) -> str:
-        return "\\n".join(",".join(str(c) for c in row) for row in rows)
+private:
+    DbConnection& db_;
+    SmtpServer& smtp_;
+    std::unordered_map<std::string, int> failedLogins_;
 
-
-# ─────────────────────────────────────────────────────
-
-# AFTER: Each class has functional cohesion — every method contributes
-# to a single well-defined responsibility.
-
-class AuthenticationService:
-    """Handles login attempts and lockout policy."""
-    def __init__(self, user_repository: UserRepository):
-        self._repo = user_repository
-        self._failed_attempts: dict[str, int] = {}
-
-    def authenticate(self, username: str, password: str) -> bool:
-        user = self._repo.find_by_username(username)
-        if not user or not bcrypt.checkpw(password, user.password_hash):
-            self._failed_attempts[username] = self._failed_attempts.get(username, 0) + 1
-            return False
-        self._failed_attempts.pop(username, None)
-        return True
-
-    def is_locked_out(self, username: str) -> bool:
-        return self._failed_attempts.get(username, 0) >= 5
+    std::string formatAsCsv(const std::vector<Row>& rows);
+};
 
 
-class UserProfileService:
-    """Manages user profile data."""
-    def __init__(self, user_repository: UserRepository):
-        self._repo = user_repository
+// -------------------------------------------------------
 
-    def update_profile(self, user_id: int, display_name: str, bio: str) -> None:
-        self._repo.update(user_id, display_name=display_name, bio=bio)
+// AFTER: Each class has functional cohesion -- every method contributes
+// to a single well-defined responsibility.
 
-    def get_profile(self, user_id: int) -> UserProfile:
-        return self._repo.find_by_id(user_id)
+#include <string>
+#include <unordered_map>
+#include <memory>
+#include <chrono>
+
+// Handles login attempts and lockout policy.
+class AuthenticationService {
+public:
+    explicit AuthenticationService(UserRepository& repo) : repo_(repo) {}
+
+    bool authenticate(const std::string& username, const std::string& password) {
+        auto user = repo_.findByUsername(username);
+        if (!user || !bcryptCheckpw(password, user->passwordHash)) {
+            failedAttempts_[username]++;
+            return false;
+        }
+        failedAttempts_.erase(username);
+        return true;
+    }
+
+    bool isLockedOut(const std::string& username) const {
+        auto it = failedAttempts_.find(username);
+        return it != failedAttempts_.end() && it->second >= 5;
+    }
+
+private:
+    UserRepository& repo_;
+    std::unordered_map<std::string, int> failedAttempts_;
+};
 
 
-class UserNotificationService:
-    """Sends user-related notifications."""
-    def __init__(self, email_sender: EmailSender):
-        self._email = email_sender
+// Manages user profile data.
+class UserProfileService {
+public:
+    explicit UserProfileService(UserRepository& repo) : repo_(repo) {}
 
-    def send_welcome_email(self, email: str, name: str) -> None:
-        self._email.send(to=email, subject="Welcome!", body=f"Hello {name}")
+    void updateProfile(int userId, const std::string& displayName,
+                       const std::string& bio) {
+        repo_.update(userId, displayName, bio);
+    }
+
+    UserProfile getProfile(int userId) {
+        return repo_.findById(userId);
+    }
+
+private:
+    UserRepository& repo_;
+};
 
 
-class ActivityReportService:
-    """Generates user activity reports."""
-    def __init__(self, activity_repository: ActivityRepository, formatter: ReportFormatter):
-        self._repo = activity_repository
-        self._formatter = formatter
+// Sends user-related notifications.
+class UserNotificationService {
+public:
+    explicit UserNotificationService(EmailSender& email) : email_(email) {}
 
-    def generate_report(self, start_date: date, end_date: date) -> str:
-        activities = self._repo.find_between(start_date, end_date)
-        return self._formatter.format(activities)`,
+    void sendWelcomeEmail(const std::string& email, const std::string& name) {
+        email_.send(email, "Welcome!", "Hello " + name);
+    }
+
+private:
+    EmailSender& email_;
+};
+
+
+// Generates user activity reports.
+class ActivityReportService {
+public:
+    ActivityReportService(ActivityRepository& repo, ReportFormatter& formatter)
+        : repo_(repo), formatter_(formatter) {}
+
+    std::string generateReport(Date startDate, Date endDate) {
+        auto activities = repo_.findBetween(startDate, endDate);
+        return formatter_.format(activities);
+    }
+
+private:
+    ActivityRepository& repo_;
+    ReportFormatter& formatter_;
+};`,
     },
     {
       language: "typescript",
@@ -703,5 +743,13 @@ class InventoryService {
       definition:
         "The single location in an application where the entire object graph is assembled and concrete implementations are bound to their abstractions. The one place allowed to know about all implementations.",
     },
+  ],
+
+  exercises: [
+    "Take a C++ class `ReportGenerator` that reads data from a database, filters it, formats it as CSV, and emails it to a manager. Identify the **cohesion type** (coincidental, functional, etc.) and calculate its hypothetical **LCOM4** value by listing the methods and instance variables. Refactor it into *four separate classes*, each with **functional cohesion**, and show how **dependency injection** via constructor parameters reduces coupling from *content coupling* to *data coupling*.",
+    "Analyze the following C++ function signature: `void processOrder(Order& order, bool isExpress, bool sendEmail, int retryCount)`. Identify *two types* of coupling present (hint: **control coupling** and **stamp coupling**). Refactor the function to eliminate both: replace boolean flags with the **Strategy pattern** and pass only the data each collaborator actually needs. Write the refactored version with interfaces.",
+    "You have a C++ codebase with 5 modules. Calculate the **instability metric** `I = Ce / (Ca + Ce)` for each module given: Module A (Ca=10, Ce=1), Module B (Ca=2, Ce=8), Module C (Ca=5, Ce=5), Module D (Ca=0, Ce=6), Module E (Ca=7, Ce=0). Which module is in the *zone of pain* (stable but concrete)? Which is in the *zone of uselessness* (unstable but abstract)? How would you apply the **Stable Dependencies Principle** to fix a dependency from Module E to Module D?",
+    "A `UserController` class in your web application has 15 methods: 4 for authentication, 3 for profile management, 4 for admin operations, and 4 for reporting. Draw the **method-variable graph** (which methods share which instance variables) and count the connected components to compute **LCOM4**. Propose a refactoring plan that splits the class so each resulting class has LCOM4 = 1.",
+    "Your team is debating whether to use **event-driven architecture** (publish/subscribe) or **direct method calls** between an `OrderService` and an `InventoryService`. List the *coupling type* for each approach (message coupling vs. data/stamp coupling). For the event-driven approach, identify the *new forms of coupling* introduced (schema coupling, temporal coupling). When does the added complexity of events *not* pay off? Design a decision framework with concrete criteria."
   ],
 };

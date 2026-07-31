@@ -128,6 +128,309 @@ export const gitInternals: TopicContent = {
       back: "git fsck --unreachable lists objects not reachable from any ref. git fsck --dangling (default) shows only objects not reachable from any other unreachable object.",
     },
   ],
+  deepDive: [
+    `## How Git Constructs a Commit Under the Hood
+
+When you run \`git commit\`, Git performs a precise sequence of plumbing operations. First, it calls \`write-tree\` to serialize the current index (staging area) into a tree object hierarchy. Each directory becomes a tree object whose entries point to blobs (files) or subtrees (subdirectories). If an identical tree or blob already exists in the object store, Git reuses it — this is the deduplication benefit of content-addressing. Next, Git creates a commit object via \`commit-tree\`, embedding the root tree SHA, the current HEAD as the parent, timestamps, author/committer identity (from config), and your message. Finally, \`update-ref\` advances the branch pointer to the new commit SHA. The entire operation is atomic from the ref's perspective: either the ref is updated or it is not.
+
+Understanding this pipeline explains many Git behaviors. For instance, \`git commit --amend\` does not modify the existing commit (objects are immutable) — it creates a **new** commit with the same parent as the old one, then moves the branch pointer. The old commit still exists as a dangling object until garbage collection prunes it. Similarly, \`git rebase\` replays commits by creating new commit objects with different parents; the original commits remain reachable via the reflog.`,
+
+    `## The Index (Staging Area) in Depth
+
+The index, stored in \`.git/index\`, is a critical but often misunderstood data structure. It is a **flat, sorted list** of all tracked file paths with their blob SHAs, file modes, and filesystem stat data (mtime, ctime, inode, size). The index serves three distinct purposes:
+
+1. **Staging area**: \`git add\` writes blob objects and updates the index entry for that path. \`git commit\` reads the index to build the tree.
+2. **Cache for status**: \`git status\` compares filesystem stat data against index entries. If stat data matches, Git skips the expensive hash computation — this is the **stat cache optimization** that makes status fast on large repos.
+3. **Merge conflict resolution**: during a merge, the index expands to hold up to three entries per path (base, ours, theirs) at stages 1, 2, and 3. Stage 0 is the normal resolved entry. \`git ls-files --stage\` reveals these entries.
+
+The index also supports features like **assume-unchanged** and **skip-worktree** flags that tell Git to ignore certain files during status checks, useful for large generated files or local config overrides.`,
+
+    `## SHA-1, SHA-256, and Collision Resistance
+
+Git originally chose SHA-1 for content addressing because it provides a good balance of speed and collision resistance for a version control system. The hash input is \`"<type> <size>\\0<content>"\` — prepending the object type and size prevents cross-type collisions (a blob and a tree with the same raw bytes produce different hashes). However, SHA-1 is no longer considered cryptographically secure after the SHAnocked attack (2017) demonstrated practical collisions.
+
+Git has been transitioning to SHA-256 via the \`extensions.objectFormat\` config. The SHA-256 support is built into Git as an alternative object format, allowing repositories to use 64-character hex hashes instead of 40-character ones. In practice, SHA-1 collisions remain extremely unlikely for naturally-occurring content (the attack requires specially crafted binary payloads), and Git includes additional hardening (\`transfer.fsckObjects\`) that detects known collision patterns during fetch/push. For new repositories with high security requirements, SHA-256 format can be selected at \`git init\` time.`,
+
+    `## Merge Strategies and the Three-Way Merge Algorithm
+
+Git's default merge strategy (\`ort\`, replacing the older \`recursive\`) performs a **three-way merge** using the merge base (common ancestor), the current branch tip, and the branch being merged. The algorithm works at the tree level: it walks the three trees in parallel, comparing entry-by-entry. If a file changed in only one branch, the change is accepted automatically. If a file changed in both branches, Git attempts a content-level three-way merge using the Myers diff algorithm on the blob contents.
+
+The **ort** (Ostensibly Recursive's Twin) strategy improves on \`recursive\` by handling rename detection more efficiently, using a virtual merge base when multiple common ancestors exist (criss-cross merges), and producing fewer spurious conflicts. When Git cannot resolve a conflict automatically, it writes conflict markers into the working tree and records all three versions in the index at stages 1-3. Understanding that merges operate on trees and blobs — not "files" in the filesystem sense — clarifies why Git can cleanly merge file renames, permission changes, and directory restructuring.`,
+  ],
+
+  code: [
+    {
+      language: "bash",
+      caption: "Manually creating a commit using plumbing commands",
+      source: `# Step 1: Create a blob from file content
+echo "Hello, Git internals!" | git hash-object -w --stdin
+# Output: a5c19667710254f835085b99726e523457150e03
+
+# Step 2: Build a tree that references the blob
+git update-index --add --cacheinfo 100644 \\
+  a5c19667710254f835085b99726e523457150e03 hello.txt
+TREE_SHA=$(git write-tree)
+echo "Tree SHA: $TREE_SHA"
+
+# Step 3: Create a commit pointing to the tree
+COMMIT_SHA=$(echo "Manual commit via plumbing" | \\
+  git commit-tree $TREE_SHA)
+echo "Commit SHA: $COMMIT_SHA"
+
+# Step 4: Update the branch ref to point to the new commit
+git update-ref refs/heads/manual-branch $COMMIT_SHA
+
+# Verify the chain
+git log --oneline manual-branch
+git cat-file -p $COMMIT_SHA   # shows tree, author, message
+git cat-file -p $TREE_SHA     # shows blob entry
+git cat-file -p a5c19667       # shows file content`,
+    },
+    {
+      language: "bash",
+      caption: "Inspecting Git objects and understanding the object graph",
+      source: `# Show the type of any object
+git cat-file -t HEAD           # commit
+git cat-file -t HEAD^{tree}    # tree
+
+# Pretty-print a commit object
+git cat-file -p HEAD
+# tree 4b825dc642cb6eb9a060e54bf899d31e2b6f37a2
+# parent 7a1f3e...
+# author Sanyasi Raja <...> 1700000000 +0530
+# committer Sanyasi Raja <...> 1700000000 +0530
+#
+# commit message here
+
+# List entries in a tree
+git ls-tree HEAD
+# 100644 blob abc123... README.md
+# 040000 tree def456... src
+
+# Recursively list all blobs in a tree
+git ls-tree -r HEAD --name-only
+
+# Count loose vs packed objects
+git count-objects -vH
+
+# Verify repository integrity
+git fsck --full --strict
+
+# Show packfile contents
+git verify-pack -v .git/objects/pack/*.idx | head -20`,
+    },
+    {
+      language: "bash",
+      caption: "Reflog recovery techniques",
+      source: `# View HEAD's reflog (every checkout, commit, reset, rebase)
+git reflog show HEAD --date=iso
+
+# View a specific branch's reflog
+git reflog show main
+
+# Recover after accidental reset --hard
+git reflog
+# abc1234 HEAD@{0}: reset: moving to HEAD~3
+# def5678 HEAD@{1}: commit: important feature
+git branch recovery def5678
+# or: git reset --hard def5678
+
+# Find a commit by its message when you know part of it
+git reflog --grep-reflog="feature" --all
+
+# Show diff between current HEAD and a reflog entry
+git diff HEAD@{3}
+
+# Recover a deleted branch
+git reflog | grep "checkout: moving from deleted-branch"
+git branch restored-branch <sha-from-reflog>
+
+# Expire reflog entries (careful!)
+git reflog expire --expire=now --all
+git gc --prune=now  # actually removes unreachable objects`,
+    },
+    {
+      language: "bash",
+      caption: "Exploring packfiles and delta compression",
+      source: `# Force packing of all loose objects
+git gc
+
+# List all objects in a packfile with their sizes
+git verify-pack -v .git/objects/pack/*.idx | \\
+  sort -k 3 -n -r | head -10
+# SHA  type  size  size-in-pack  offset  depth  base-SHA
+
+# Find the largest objects in history (useful for repo bloat)
+git rev-list --objects --all | \\
+  git cat-file --batch-check='%(objecttype) %(objectname) %(objectsize) %(rest)' | \\
+  grep '^blob' | sort -k3 -n -r | head -10
+
+# Repack with aggressive delta compression
+git repack -a -d -f --depth=250 --window=250
+
+# Show object statistics
+git count-objects -vH
+# count: 0           (loose objects)
+# packs: 1           (packfiles)
+# size-pack: 12.5 MiB`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "Git Object Model Relationships",
+      kind: "architecture",
+      caption: "How commits, trees, and blobs form a directed acyclic graph (DAG)",
+      mermaid: `graph TD
+    C1[Commit c1a2b3] -->|tree| T1[Tree root]
+    C1 -->|parent| C0[Commit f4e5d6]
+    C0 -->|tree| T0[Tree root v0]
+
+    T1 -->|blob README.md| B1[Blob abc123]
+    T1 -->|tree src/| T2[Tree src]
+    T2 -->|blob main.cpp| B2[Blob def456]
+    T2 -->|blob utils.h| B3[Blob 789abc]
+
+    T0 -->|blob README.md| B0[Blob old111]
+    T0 -->|tree src/| T3[Tree src v0]
+    T3 -->|blob main.cpp| B4[Blob old222]
+    T3 -->|blob utils.h| B3
+
+    style C1 fill:#4a90d9,color:#fff
+    style C0 fill:#4a90d9,color:#fff
+    style T1 fill:#50b748,color:#fff
+    style T2 fill:#50b748,color:#fff
+    style T0 fill:#50b748,color:#fff
+    style T3 fill:#50b748,color:#fff
+    style B1 fill:#e8a838,color:#fff
+    style B2 fill:#e8a838,color:#fff
+    style B3 fill:#e8a838,color:#fff
+    style B0 fill:#e8a838,color:#fff
+    style B4 fill:#e8a838,color:#fff`,
+    },
+    {
+      title: "Git Commit Workflow (Plumbing Level)",
+      kind: "flow",
+      caption: "The sequence of internal operations when git commit runs",
+      mermaid: `flowchart LR
+    A[Working Directory] -->|git add| B[Index / Staging Area]
+    B -->|write-tree| C[Tree Object]
+    C -->|commit-tree| D[Commit Object]
+    D -->|update-ref| E[Branch Ref Updated]
+
+    subgraph ".git/objects/"
+      C
+      D
+      F[Blob Objects]
+    end
+
+    A -->|hash-object -w| F
+    F -.->|referenced by| C`,
+    },
+    {
+      title: "Ref Resolution Chain",
+      kind: "flow",
+      caption: "How Git resolves HEAD to an actual commit SHA",
+      mermaid: `flowchart TD
+    HEAD[".git/HEAD\nref: refs/heads/main"] -->|symbolic ref| MAIN[".git/refs/heads/main\nabc123def456..."]
+    MAIN -->|SHA-1| COMMIT["Commit Object\nabc123def456..."]
+    COMMIT -->|tree| TREE["Root Tree Object"]
+    COMMIT -->|parent| PARENT["Parent Commit"]
+
+    DETACHED["Detached HEAD\n.git/HEAD\nabc123def456..."] -->|direct SHA| COMMIT2["Commit Object"]
+
+    style HEAD fill:#9b59b6,color:#fff
+    style MAIN fill:#3498db,color:#fff
+    style DETACHED fill:#e74c3c,color:#fff`,
+    },
+    {
+      title: "Packfile Delta Compression",
+      kind: "architecture",
+      caption: "How Git stores objects efficiently using delta chains in packfiles",
+      mermaid: `graph LR
+    subgraph Packfile[".git/objects/pack/pack-xyz.pack"]
+      BASE["Base Object\n(full content)\nmain.cpp v3"]
+      D1["Delta 1\n(diff from base)\nmain.cpp v2"]
+      D2["Delta 2\n(diff from delta 1)\nmain.cpp v1"]
+    end
+
+    subgraph IDX[".git/objects/pack/pack-xyz.idx"]
+      I1["SHA -> offset mapping\nO(log n) lookup"]
+    end
+
+    IDX -.->|"offset lookup"| Packfile
+    BASE -->|"delta chain"| D1
+    D1 -->|"delta chain"| D2`,
+    },
+    {
+      title: "Three-Way Merge Process",
+      kind: "sequence",
+      caption: "How Git performs a three-way merge between two branches",
+      mermaid: `sequenceDiagram
+    participant U as User
+    participant G as Git
+    participant ODB as Object Database
+
+    U->>G: git merge feature
+    G->>ODB: Find merge base (LCA of HEAD and feature)
+    ODB-->>G: Base commit SHA
+    G->>ODB: Load trees: base, ours (HEAD), theirs (feature)
+    G->>G: Walk trees entry-by-entry
+    alt File changed only in one side
+        G->>G: Accept change automatically
+    else File changed in both sides
+        G->>G: Three-way content merge (Myers diff)
+        alt Clean merge
+            G->>ODB: Write merged blob
+        else Conflict
+            G->>G: Write conflict markers to worktree
+            G->>G: Record stages 1,2,3 in index
+        end
+    end
+    G->>ODB: write-tree (if no conflicts)
+    G->>ODB: commit-tree with two parents
+    G->>G: update-ref HEAD`,
+    },
+  ],
+
+  exercises: [
+    "**Reconstruct a commit from scratch using plumbing commands.** Create a new empty repository with `git init`. Write a file, use `git hash-object -w` to store it as a blob, `git update-index` to add it to the staging area, `git write-tree` to create a tree, and `git commit-tree` to create a commit. Finally, use `git update-ref` to point a branch at your commit. Verify with `git log` and `git cat-file -p` on each object.",
+    "**Investigate object deduplication.** In a repository, create two files with identical content in different directories. Run `git add` on both and use `git ls-files --stage` to examine the index. Confirm that both entries point to the same blob SHA. Then modify one file slightly, re-add, and verify that a new blob was created while the other still references the original.",
+    "**Reflog disaster recovery drill.** Create a branch with 5 commits. Then run `git reset --hard HEAD~3` to lose 3 commits. Using only `git reflog` and `git branch`, recover the lost commits onto a new branch. Verify the recovery with `git log`. Then delete the recovery branch and use `git fsck --unreachable` to find the dangling commits.",
+    "**Analyze packfile efficiency.** Clone a medium-sized open source repository. Run `git count-objects -vH` to see current stats. Then run `git gc` and compare the before/after numbers. Use `git verify-pack -v .git/objects/pack/*.idx | sort -k 3 -n -r | head -5` to find the 5 largest objects and identify what files they correspond to using `git rev-list --objects --all`.",
+    "**Explore merge internals.** Create a repository with a base commit, then create two branches that modify the same file in different (non-overlapping) sections. Merge them and observe the automatic resolution. Then create a conflict scenario where both branches modify the same lines. Use `git ls-files --stage` during the conflict to inspect the three index stages (base, ours, theirs). Resolve manually and complete the merge.",
+  ],
+
+  cheatSheet: [
+    "`git cat-file -t <sha>` — Show the type of a Git object (blob, tree, commit, tag)",
+    "`git cat-file -p <sha>` — Pretty-print the content of any Git object",
+    "`git ls-tree [-r] <tree-ish>` — List entries in a tree object; -r for recursive",
+    "`git hash-object -w <file>` — Compute SHA-1 and store the file as a blob object",
+    "`git update-index --add --cacheinfo <mode> <sha> <path>` — Add an entry to the index manually",
+    "`git write-tree` — Create a tree object from the current index state",
+    "`git commit-tree <tree> -p <parent> -m 'msg'` — Create a commit object manually",
+    "`git update-ref refs/heads/<branch> <sha>` — Update a branch ref to point to a specific commit",
+    "`git rev-parse <ref>` — Resolve any ref (HEAD, branch, tag, HEAD~3) to its full SHA",
+    "`git reflog [show <ref>]` — Show the reflog for HEAD or a specific ref",
+    "`git fsck [--unreachable]` — Verify object database integrity; find dangling objects",
+    "`git count-objects -vH` — Show counts and sizes of loose and packed objects",
+    "`git verify-pack -v <idx-file>` — Show detailed contents of a packfile",
+    "`git gc [--aggressive]` — Run garbage collection: pack objects, prune unreachable, consolidate refs",
+    "`git ls-files --stage` — Show index entries with their stage numbers (useful during merges)",
+    "`git symbolic-ref HEAD` — Show what HEAD points to (e.g., refs/heads/main)",
+  ],
+
+  revisionNotes: [
+    "Git has four object types: **blob** (file content), **tree** (directory listing), **commit** (snapshot + metadata + parent), and **annotated tag** (named reference with metadata). All are immutable and content-addressed by SHA-1.",
+    "Every object is stored as `SHA-1(\"<type> <size>\\0<content>\")` — the type prefix prevents cross-type hash collisions. Objects are zlib-compressed in `.git/objects/`.",
+    "The **index** (`.git/index`) serves triple duty: staging area for the next commit, stat cache for fast `git status`, and conflict resolution workspace (stages 0-3) during merges.",
+    "**Refs** are human-readable pointers to commit SHAs stored in `.git/refs/`. HEAD is a symbolic ref pointing to the current branch. Detached HEAD contains a raw SHA instead.",
+    "The **reflog** records every change to every ref locally. It is your safety net: `git reflog` + `git branch recovery <sha>` recovers from almost any mistake within 30-90 days.",
+    "**Packfiles** use delta compression to store similar objects efficiently. Git prefers recent versions as base objects, so the latest file content is stored fully while older versions are deltas. Triggered by `git gc`.",
+    "The **three-way merge** algorithm compares base (common ancestor), ours, and theirs trees entry-by-entry. Content conflicts only arise when both sides modify the same region of the same file.",
+    "**Plumbing commands** (`hash-object`, `cat-file`, `write-tree`, `commit-tree`, `update-ref`) are the building blocks that porcelain commands (`add`, `commit`, `merge`) are built upon.",
+  ],
+
   glossary: [
     {
       term: "Blob",

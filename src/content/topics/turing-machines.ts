@@ -22,80 +22,113 @@ export const turingMachines: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Simple Turing machine simulator",
-      source: `class TuringMachine:
-    def __init__(self, transitions, start, accept, reject, blank="_"):
-        self.transitions = transitions  # {(state, symbol): (new_state, write, direction)}
-        self.start = start
-        self.accept = accept
-        self.reject = reject
-        self.blank = blank
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <map>
+#include <tuple>
+#include <stdexcept>
 
-    def run(self, input_str, max_steps=10000):
-        tape = list(input_str) if input_str else [self.blank]
-        head = 0
-        state = self.start
-        for _ in range(max_steps):
-            if state == self.accept:
-                return True
-            if state == self.reject:
-                return False
-            sym = tape[head] if 0 <= head < len(tape) else self.blank
-            if (state, sym) not in self.transitions:
-                return False  # implicit reject
-            new_state, write, direction = self.transitions[(state, sym)]
-            # Expand tape if needed
-            while head >= len(tape):
-                tape.append(self.blank)
-            while head < 0:
-                tape.insert(0, self.blank)
-                head += 1
-            tape[head] = write
-            head += 1 if direction == "R" else -1
-            state = new_state
-        raise RuntimeError("Exceeded max steps (possible infinite loop)")
+struct Transition {
+    std::string new_state;
+    char write;
+    char direction;  // 'L' or 'R'
+};
 
-# Example: TM that accepts strings of the form 0^n 1^n
-transitions = {
-    ("q0", "0"): ("q1", "X", "R"),   # mark a 0
-    ("q1", "0"): ("q1", "0", "R"),   # skip remaining 0s
-    ("q1", "Y"): ("q1", "Y", "R"),   # skip marked 1s
-    ("q1", "1"): ("q2", "Y", "L"),   # mark a matching 1
-    ("q2", "Y"): ("q2", "Y", "L"),   # move left past Ys
-    ("q2", "0"): ("q2", "0", "L"),   # move left past 0s
-    ("q2", "X"): ("q0", "X", "R"),   # back to start, find next 0
-    ("q0", "Y"): ("q3", "Y", "R"),   # no more 0s — check all 1s matched
-    ("q3", "Y"): ("q3", "Y", "R"),
-    ("q3", "_"): ("qA", "_", "R"),   # all matched -> accept
-}
-tm = TuringMachine(transitions, "q0", "qA", "qR")
-print(tm.run("000111"))  # True
-print(tm.run("0011"))    # True
-print(tm.run("00111"))   # False`,
+class TuringMachine {
+    std::map<std::pair<std::string, char>, Transition> transitions;
+    std::string start, accept, reject;
+    char blank;
+
+public:
+    TuringMachine(
+        const std::map<std::pair<std::string, char>, Transition>& trans,
+        const std::string& start, const std::string& accept,
+        const std::string& reject, char blank = '_')
+        : transitions(trans), start(start), accept(accept),
+          reject(reject), blank(blank) {}
+
+    bool run(const std::string& input_str, int max_steps = 10000) {
+        std::vector<char> tape(input_str.begin(), input_str.end());
+        if (tape.empty()) tape.push_back(blank);
+        int head = 0;
+        std::string state = start;
+
+        for (int step = 0; step < max_steps; ++step) {
+            if (state == accept) return true;
+            if (state == reject) return false;
+
+            // Expand tape if needed
+            while (head >= static_cast<int>(tape.size())) tape.push_back(blank);
+            while (head < 0) { tape.insert(tape.begin(), blank); ++head; }
+
+            char sym = tape[head];
+            auto key = std::make_pair(state, sym);
+            if (transitions.find(key) == transitions.end())
+                return false;  // implicit reject
+
+            const auto& t = transitions[key];
+            tape[head] = t.write;
+            head += (t.direction == 'R') ? 1 : -1;
+            state = t.new_state;
+        }
+        throw std::runtime_error("Exceeded max steps (possible infinite loop)");
+    }
+};
+
+int main() {
+    // TM that accepts strings of the form 0^n 1^n
+    std::map<std::pair<std::string, char>, Transition> transitions = {
+        {{"q0", '0'}, {"q1", 'X', 'R'}},   // mark a 0
+        {{"q1", '0'}, {"q1", '0', 'R'}},   // skip remaining 0s
+        {{"q1", 'Y'}, {"q1", 'Y', 'R'}},   // skip marked 1s
+        {{"q1", '1'}, {"q2", 'Y', 'L'}},   // mark a matching 1
+        {{"q2", 'Y'}, {"q2", 'Y', 'L'}},   // move left past Ys
+        {{"q2", '0'}, {"q2", '0', 'L'}},   // move left past 0s
+        {{"q2", 'X'}, {"q0", 'X', 'R'}},   // back to start
+        {{"q0", 'Y'}, {"q3", 'Y', 'R'}},   // no more 0s
+        {{"q3", 'Y'}, {"q3", 'Y', 'R'}},
+        {{"q3", '_'}, {"qA", '_', 'R'}},   // all matched -> accept
+    };
+
+    TuringMachine tm(transitions, "q0", "qA", "qR");
+    std::cout << std::boolalpha;
+    std::cout << tm.run("000111") << "\\n";  // true
+    std::cout << tm.run("0011") << "\\n";    // true
+    std::cout << tm.run("00111") << "\\n";   // false
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Demonstrating the halting problem via diagonalisation",
-      source: `# This illustrates WHY a universal halting decider cannot exist.
-# Suppose halts(program, input) -> bool existed. Then:
+      source: `#include <stdexcept>
+#include <string>
 
-def halts(program, input_data):
-    """Hypothetical oracle — cannot actually exist."""
-    raise NotImplementedError("Undecidable!")
+// This illustrates WHY a universal halting decider cannot exist.
+// Suppose halts(program, input) -> bool existed. Then:
 
-def diagonal(program):
-    """If we could decide halting, this creates a contradiction."""
-    if halts(program, program):
-        while True:  # loop forever if program halts on itself
-            pass
-    else:
-        return  # halt if program doesn't halt on itself
+using Program = std::string;
 
-# diagonal(diagonal) => contradiction:
-#   If diagonal halts on itself, halts returns True, so it loops — contradiction.
-#   If diagonal loops on itself, halts returns False, so it halts — contradiction.
-# Therefore halts() cannot exist.`,
+bool halts(const Program& program, const Program& input_data) {
+    // Hypothetical oracle -- cannot actually exist
+    throw std::logic_error("Undecidable!");
+}
+
+void diagonal(const Program& program) {
+    // If we could decide halting, this creates a contradiction
+    if (halts(program, program)) {
+        while (true) {}  // loop forever if program halts on itself
+    } else {
+        return;  // halt if program doesn't halt on itself
+    }
+}
+
+// diagonal(diagonal) => contradiction:
+//   If diagonal halts on itself, halts returns true, so it loops -- contradiction.
+//   If diagonal loops on itself, halts returns false, so it halts -- contradiction.
+// Therefore halts() cannot exist.`,
     },
   ],
   diagrams: [

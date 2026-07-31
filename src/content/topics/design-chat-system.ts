@@ -112,6 +112,612 @@ export const designChatSystem: TopicContent = {
       back: "Chat servers are stateful (hold WebSocket connections). A connection registry (Redis) maps userId to serverId. When server A receives a message for user B on server C, it routes via a pub/sub layer (Redis Pub/Sub or Kafka). Server C pushes to B's WebSocket.",
     },
   ],
+  deepDive: [
+    "## Real-Time Message Delivery Pipeline\n\nThe **core challenge** in designing a chat system is achieving *sub-100ms message delivery* at scale while maintaining **strict ordering guarantees**. The pipeline begins when a client sends a message over its **WebSocket connection** to a *connection server*. This server is **stateful** — it holds the TCP socket for that user. The message is first validated (auth token, rate limiting, content policy), then assigned a **monotonically increasing sequence number** from a per-chat counter (typically backed by `Redis INCR` or a dedicated sequencer). The message is persisted to the **write-ahead log** (e.g., Kafka topic partitioned by `chatId`) *before* acknowledgment is sent back to the sender. This ensures **at-least-once delivery** even if the connection server crashes mid-flight. From the WAL, a *message router* consumes events and resolves the recipient's connection server via a **connection registry** (a Redis hash mapping `userId -> serverId`). The message is then forwarded to the target server and pushed down the recipient's WebSocket. If the recipient is **offline**, the message is stored with `delivered: false` and a **push notification** is triggered via APNs/FCM. This entire pipeline — validate, sequence, persist, route, deliver — must complete in under 100ms for the *p99* case, which requires careful **connection pooling**, **batch writes**, and **locality-aware routing**.",
+    "## Scaling WebSocket Connections\n\nA single server can hold roughly **500K–1M concurrent WebSocket connections** depending on memory and file descriptor limits. For a system serving *100M+ concurrent users*, you need a fleet of connection servers behind a **Layer 4 load balancer** (not L7, since WebSocket is a long-lived connection). Key challenges include:\n\n- **Connection draining**: when a server needs to be restarted, connections must be *gracefully migrated*. The server sends a `RECONNECT` frame, and clients reconnect to a new server via the load balancer.\n- **Hot-spot mitigation**: celebrity users or viral group chats can overload a single server. Use **consistent hashing** with *virtual nodes* to distribute load, and implement **backpressure** on high-fanout groups.\n- **Cross-server routing**: since user A and user B may be on different servers, a **pub/sub backbone** (Redis Pub/Sub, Kafka, or NATS) is essential. Each connection server subscribes to channels for all users it hosts. When a message arrives for user B, the routing layer publishes to B's channel, and B's connection server picks it up.\n- **Connection state**: maintain a `heartbeat` timestamp per connection. A background **reaper process** scans for stale connections (no heartbeat for 30s) and cleans up the registry. This prevents *ghost connections* from consuming resources.",
+    "## End-to-End Encryption and Security\n\nModern chat systems implement **end-to-end encryption (E2EE)** using the *Signal Protocol* (Double Ratchet Algorithm). Each user generates an **identity key pair**, a set of **pre-keys**, and a **signed pre-key**. When user A wants to message user B for the first time, A fetches B's *pre-key bundle* from the server and performs an **X3DH key agreement** to establish a shared secret. Subsequent messages use the **Double Ratchet** — combining a *Diffie-Hellman ratchet* (new DH keys per message exchange) with a *symmetric-key ratchet* (KDF chain). This provides **forward secrecy** (compromising a key doesn't expose past messages) and **break-in recovery** (future messages are secure even if a key is compromised). The server **never sees plaintext** — it stores only *ciphertext blobs*. For **group chats**, the *Sender Keys* protocol is used: the sender encrypts once with a symmetric *sender key*, and each group member has the sender key encrypted to their public key. Key rotation happens when members join or leave. Additional security measures include **message authentication codes** (HMAC) to prevent tampering, **replay protection** via sequence numbers, and **metadata minimization** — the server should know *who* is talking to *whom* as little as possible (sealed sender in Signal).",
+  ],
+  code: [
+    {
+      language: "javascript",
+      caption: "Express.js WebSocket Chat Server with Redis Pub/Sub",
+      source: `const express = require("express");
+const http = require("http");
+const { WebSocketServer } = require("ws");
+const Redis = require("ioredis");
+const mongoose = require("mongoose");
+
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+
+// Redis pub/sub for cross-server message routing
+const redisSub = new Redis();
+const redisPub = new Redis();
+const redisStore = new Redis();
+
+// In-memory connection registry: userId -> WebSocket
+const connections = new Map();
+
+// MongoDB Message schema
+const MessageSchema = new mongoose.Schema({
+  chatId:     { type: String, required: true, index: true },
+  senderId:   { type: String, required: true },
+  content:    { type: String, required: true },
+  seqNumber:  { type: Number, required: true },
+  delivered:  { type: Boolean, default: false },
+  readBy:     [{ userId: String, readAt: Date }],
+  createdAt:  { type: Date, default: Date.now },
+});
+MessageSchema.index({ chatId: 1, seqNumber: 1 }, { unique: true });
+const Message = mongoose.model("Message", MessageSchema);
+
+// Handle new WebSocket connections
+wss.on("connection", async (ws, req) => {
+  const userId = authenticateFromRequest(req); // Extract & verify JWT
+  if (!userId) return ws.close(4001, "Unauthorized");
+
+  connections.set(userId, ws);
+  // Register in Redis so other servers can route to us
+  await redisStore.hset("user:connections", userId, process.env.SERVER_ID);
+  // Subscribe to this user's channel for cross-server messages
+  redisSub.subscribe(\`user:\${userId}\`);
+
+  // Mark user online with heartbeat
+  await redisStore.hset("user:presence", userId, JSON.stringify({
+    status: "online", lastSeen: Date.now(), serverId: process.env.SERVER_ID,
+  }));
+
+  ws.on("message", async (raw) => {
+    const data = JSON.parse(raw);
+    switch (data.type) {
+      case "chat_message":
+        await handleChatMessage(userId, data);
+        break;
+      case "typing":
+        await handleTypingIndicator(userId, data);
+        break;
+      case "heartbeat":
+        await redisStore.hset("user:presence", userId,
+          JSON.stringify({ status: "online", lastSeen: Date.now() }));
+        break;
+    }
+  });
+
+  ws.on("close", async () => {
+    connections.delete(userId);
+    await redisStore.hdel("user:connections", userId);
+    await redisStore.hset("user:presence", userId,
+      JSON.stringify({ status: "offline", lastSeen: Date.now() }));
+  });
+});
+
+async function handleChatMessage(senderId, data) {
+  const { chatId, content } = data;
+  // Atomically increment sequence number for this chat
+  const seqNumber = await redisStore.incr(\`chat:seq:\${chatId}\`);
+
+  // Persist message to MongoDB
+  const message = await Message.create({
+    chatId, senderId, content, seqNumber, delivered: false,
+  });
+
+  // Resolve recipient(s) and deliver
+  const recipients = await getChatMembers(chatId, senderId);
+  for (const recipientId of recipients) {
+    const recipientWs = connections.get(recipientId);
+    if (recipientWs && recipientWs.readyState === 1) {
+      // Same server — deliver directly
+      recipientWs.send(JSON.stringify({
+        type: "new_message", chatId, message: message.toObject(),
+      }));
+      await Message.updateOne({ _id: message._id }, { delivered: true });
+    } else {
+      // Different server — publish via Redis
+      redisPub.publish(\`user:\${recipientId}\`, JSON.stringify({
+        type: "new_message", chatId, message: message.toObject(),
+      }));
+    }
+  }
+}
+
+// Listen for cross-server messages
+redisSub.on("message", (channel, payload) => {
+  const userId = channel.replace("user:", "");
+  const ws = connections.get(userId);
+  if (ws && ws.readyState === 1) {
+    ws.send(payload);
+  }
+});
+
+server.listen(3000, () => console.log("Chat server running on :3000"));`,
+    },
+    {
+      language: "typescript",
+      caption: "React Chat Component with WebSocket Hook",
+      source: `import React, { useEffect, useRef, useState, useCallback } from "react";
+
+interface ChatMessage {
+  _id: string;
+  chatId: string;
+  senderId: string;
+  content: string;
+  seqNumber: number;
+  createdAt: string;
+}
+
+// Custom hook for WebSocket connection management
+function useChatSocket(chatId: string, token: string) {
+  const wsRef = useRef<WebSocket | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const typingTimeoutRef = useRef<NodeJS.Timeout>();
+  const reconnectRef = useRef<NodeJS.Timeout>();
+
+  const connect = useCallback(() => {
+    const ws = new WebSocket(\`wss://chat.example.com?token=\${token}\`);
+
+    ws.onopen = () => {
+      setIsConnected(true);
+      // Send sync request with last known sequence number
+      const lastSeq = getLastSeqNumber(chatId);
+      ws.send(JSON.stringify({ type: "sync", chatId, lastSeq }));
+      // Start heartbeat interval
+      const heartbeat = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "heartbeat" }));
+        }
+      }, 5000);
+      ws.addEventListener("close", () => clearInterval(heartbeat));
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      switch (data.type) {
+        case "new_message":
+          setMessages((prev) => {
+            const updated = [...prev, data.message];
+            // Sort by sequence number to maintain order
+            updated.sort((a, b) => a.seqNumber - b.seqNumber);
+            return updated;
+          });
+          break;
+        case "sync_response":
+          setMessages((prev) => {
+            const merged = [...prev, ...data.messages];
+            const unique = merged.filter(
+              (m, i, arr) => arr.findIndex((x) => x._id === m._id) === i
+            );
+            unique.sort((a, b) => a.seqNumber - b.seqNumber);
+            return unique;
+          });
+          break;
+        case "typing":
+          setIsTyping(true);
+          clearTimeout(typingTimeoutRef.current);
+          typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
+          break;
+      }
+    };
+
+    ws.onclose = () => {
+      setIsConnected(false);
+      // Exponential backoff reconnect
+      reconnectRef.current = setTimeout(connect, 2000);
+    };
+
+    wsRef.current = ws;
+  }, [chatId, token]);
+
+  useEffect(() => {
+    connect();
+    return () => {
+      wsRef.current?.close();
+      clearTimeout(reconnectRef.current);
+    };
+  }, [connect]);
+
+  const sendMessage = useCallback((content: string) => {
+    wsRef.current?.send(
+      JSON.stringify({ type: "chat_message", chatId, content })
+    );
+  }, [chatId]);
+
+  const sendTyping = useCallback(() => {
+    wsRef.current?.send(JSON.stringify({ type: "typing", chatId }));
+  }, [chatId]);
+
+  return { messages, isConnected, isTyping, sendMessage, sendTyping };
+}
+
+// Chat UI Component
+export default function ChatRoom({ chatId, userId, token }: {
+  chatId: string; userId: string; token: string;
+}) {
+  const { messages, isConnected, isTyping, sendMessage, sendTyping } =
+    useChatSocket(chatId, token);
+  const [input, setInput] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleSend = () => {
+    if (!input.trim()) return;
+    sendMessage(input.trim());
+    setInput("");
+  };
+
+  return (
+    <div className="chat-container">
+      <div className="chat-header">
+        <span className={\`status-dot \${isConnected ? "online" : "offline"}\`} />
+        {isConnected ? "Connected" : "Reconnecting..."}
+      </div>
+      <div className="messages-panel">
+        {messages.map((msg) => (
+          <div
+            key={msg._id}
+            className={\`message \${msg.senderId === userId ? "sent" : "received"}\`}
+          >
+            <p>{msg.content}</p>
+            <span className="timestamp">
+              {new Date(msg.createdAt).toLocaleTimeString()}
+            </span>
+          </div>
+        ))}
+        {isTyping && <div className="typing-indicator">typing...</div>}
+        <div ref={messagesEndRef} />
+      </div>
+      <div className="input-bar">
+        <input
+          value={input}
+          onChange={(e) => { setInput(e.target.value); sendTyping(); }}
+          onKeyDown={(e) => e.key === "Enter" && handleSend()}
+          placeholder="Type a message..."
+        />
+        <button onClick={handleSend} disabled={!isConnected}>Send</button>
+      </div>
+    </div>
+  );
+}
+
+function getLastSeqNumber(chatId: string): number {
+  const stored = localStorage.getItem(\`chat:seq:\${chatId}\`);
+  return stored ? parseInt(stored, 10) : 0;
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "Lock-Free Message Queue (C++ with atomics)",
+      source: `#include <atomic>
+#include <memory>
+#include <optional>
+#include <string>
+#include <chrono>
+
+/**
+ * Lock-free MPSC (Multi-Producer, Single-Consumer) message queue
+ * for high-throughput chat message routing.
+ *
+ * Uses a linked list with atomic compare-and-swap for producers
+ * and a single consumer that drains the queue in batch.
+ */
+
+struct ChatMessage {
+    std::string chatId;
+    std::string senderId;
+    std::string content;
+    uint64_t    sequenceNumber;
+    std::chrono::steady_clock::time_point timestamp;
+};
+
+template <typename T>
+class LockFreeQueue {
+private:
+    struct Node {
+        T data;
+        Node* next;
+        explicit Node(T value) : data(std::move(value)), next(nullptr) {}
+    };
+
+    // Sentinel node keeps the queue structure simple
+    std::atomic<Node*> head_;  // producers push here (LIFO stack)
+    std::atomic<Node*> tail_;  // consumer reads from here
+
+    // Padding to avoid false sharing between producer and consumer
+    alignas(64) std::atomic<size_t> size_{0};
+
+public:
+    LockFreeQueue() {
+        auto* sentinel = new Node(T{});
+        head_.store(sentinel, std::memory_order_relaxed);
+        tail_.store(sentinel, std::memory_order_relaxed);
+    }
+
+    ~LockFreeQueue() {
+        // Drain remaining nodes
+        while (dequeue().has_value()) {}
+        delete tail_.load(std::memory_order_relaxed);
+    }
+
+    // Thread-safe: multiple producers can call concurrently
+    void enqueue(T value) {
+        auto* newNode = new Node(std::move(value));
+
+        // CAS loop to atomically link the new node
+        Node* oldHead = head_.load(std::memory_order_relaxed);
+        do {
+            newNode->next = nullptr;
+        } while (!head_.compare_exchange_weak(
+            oldHead, newNode,
+            std::memory_order_release,
+            std::memory_order_relaxed));
+
+        // Link previous head to point to new node
+        oldHead->next = newNode;
+        size_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // Single consumer only: not safe for multiple concurrent consumers
+    std::optional<T> dequeue() {
+        Node* oldTail = tail_.load(std::memory_order_relaxed);
+        Node* next = oldTail->next;
+
+        if (next == nullptr) {
+            return std::nullopt;  // Queue is empty
+        }
+
+        T value = std::move(next->data);
+        tail_.store(next, std::memory_order_release);
+        delete oldTail;
+        size_.fetch_sub(1, std::memory_order_relaxed);
+        return value;
+    }
+
+    size_t size() const {
+        return size_.load(std::memory_order_relaxed);
+    }
+
+    bool empty() const { return size() == 0; }
+};
+
+// Usage: message routing between connection servers
+class MessageRouter {
+    LockFreeQueue<ChatMessage> inboundQueue_;
+    std::atomic<bool> running_{true};
+
+public:
+    // Called by connection server threads (producers)
+    void routeMessage(ChatMessage msg) {
+        inboundQueue_.enqueue(std::move(msg));
+    }
+
+    // Single router thread (consumer) — drains and dispatches
+    void processLoop() {
+        while (running_.load(std::memory_order_relaxed)) {
+            auto msg = inboundQueue_.dequeue();
+            if (msg.has_value()) {
+                dispatchToTargetServer(std::move(msg.value()));
+            } else {
+                // Yield CPU when queue is empty — avoids busy-spin
+                std::this_thread::yield();
+            }
+        }
+    }
+
+    void shutdown() { running_.store(false, std::memory_order_relaxed); }
+
+private:
+    void dispatchToTargetServer(ChatMessage msg) {
+        // Look up recipient's connection server from registry
+        // and forward the message via TCP/IPC
+    }
+};`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Chat System Architecture",
+      kind: "architecture",
+      caption: "High-level architecture showing clients, connection servers, message routing, storage, and supporting services.",
+      mermaid: `graph TB
+    subgraph Clients
+        C1[Mobile App]
+        C2[Web Browser]
+        C3[Desktop App]
+    end
+
+    subgraph Load_Balancer["Load Balancer (L4)"]
+        LB[TCP Load Balancer]
+    end
+
+    subgraph Connection_Servers["Connection Servers (Stateful)"]
+        CS1[Chat Server 1<br/>WebSocket Handler]
+        CS2[Chat Server 2<br/>WebSocket Handler]
+        CS3[Chat Server N<br/>WebSocket Handler]
+    end
+
+    subgraph Message_Layer["Message Routing Layer"]
+        MQ[Kafka / Redis Pub-Sub<br/>Message Broker]
+        SEQ[Sequence Service<br/>Redis INCR per chatId]
+    end
+
+    subgraph Storage["Storage Layer"]
+        MONGO[(MongoDB / Cassandra<br/>Message Store)]
+        REDIS[(Redis Cache<br/>Recent Messages +<br/>Connection Registry)]
+        S3[(Object Storage<br/>Media Files)]
+    end
+
+    subgraph Services["Supporting Services"]
+        PRESENCE[Presence Service<br/>Heartbeat Tracker]
+        PUSH[Push Notification<br/>APNs / FCM]
+        SEARCH[Search Service<br/>Elasticsearch]
+        AUTH[Auth Service<br/>JWT Validation]
+    end
+
+    C1 -->|WebSocket| LB
+    C2 -->|WebSocket| LB
+    C3 -->|WebSocket| LB
+    LB --> CS1
+    LB --> CS2
+    LB --> CS3
+
+    CS1 --> SEQ
+    CS2 --> SEQ
+    CS3 --> SEQ
+
+    CS1 <--> MQ
+    CS2 <--> MQ
+    CS3 <--> MQ
+
+    CS1 --> MONGO
+    CS2 --> MONGO
+    CS3 --> MONGO
+
+    CS1 --> REDIS
+    CS2 --> REDIS
+    CS3 --> REDIS
+
+    MQ --> PUSH
+    CS1 --> S3
+    MONGO --> SEARCH
+
+    CS1 --> PRESENCE
+    CS2 --> PRESENCE
+    CS3 --> PRESENCE
+
+    CS1 --> AUTH`,
+    },
+    {
+      title: "Message Delivery Sequence",
+      kind: "sequence",
+      caption: "End-to-end message flow from sender to receiver, including sequencing, persistence, and offline handling.",
+      mermaid: `sequenceDiagram
+    participant A as User A (Sender)
+    participant CS1 as Chat Server 1
+    participant SEQ as Sequence Service
+    participant DB as MongoDB
+    participant MQ as Kafka / Redis PubSub
+    participant REG as Connection Registry
+    participant CS2 as Chat Server 2
+    participant B as User B (Receiver)
+    participant PUSH as Push Service
+
+    A->>CS1: Send message via WebSocket
+    CS1->>SEQ: INCR chat:seq:{chatId}
+    SEQ-->>CS1: seqNumber = 42
+
+    CS1->>DB: Persist message (chatId, seq=42)
+    DB-->>CS1: Ack write
+
+    CS1-->>A: Delivery ack (seq=42, single tick)
+
+    CS1->>REG: Lookup user B's server
+    REG-->>CS1: serverId = CS2
+
+    alt User B is Online
+        CS1->>MQ: Publish to user:B channel
+        MQ->>CS2: Deliver message
+        CS2->>B: Push via WebSocket
+        B-->>CS2: Received ack
+        CS2->>DB: Mark delivered = true
+        CS2-->>CS1: Delivery confirmed
+        CS1-->>A: Double tick (delivered)
+    else User B is Offline
+        CS1->>DB: Store with delivered = false
+        CS1->>PUSH: Send push notification
+        PUSH->>B: FCM / APNs notification
+        Note over B: User opens app later
+        B->>CS2: Reconnect + sync (lastSeq=40)
+        CS2->>DB: Fetch messages where seq > 40
+        DB-->>CS2: Messages [41, 42]
+        CS2->>B: Deliver missed messages
+    end`,
+    },
+  ],
+  comparison: {
+    columns: [
+      "Aspect",
+      "WhatsApp",
+      "Slack",
+      "Discord",
+    ],
+    rows: [
+      [
+        "**Primary Protocol**",
+        "*XMPP-based* custom protocol (Noise Protocol for E2EE)",
+        "*WebSocket* with HTTP API fallback",
+        "*WebSocket* with ETF (Erlang Term Format) encoding",
+      ],
+      [
+        "**Message Storage**",
+        "Messages stored **on-device only** (E2EE); server holds ciphertext temporarily until delivered",
+        "Messages stored **server-side** in a searchable database; full history available to workspace",
+        "Messages stored **server-side** with full history; uses *Cassandra* for message storage at scale",
+      ],
+      [
+        "**Encryption**",
+        "**End-to-end encryption** by default using the *Signal Protocol* (Double Ratchet + X3DH)",
+        "**Encryption in transit** (TLS) and at rest; *no E2EE* — server can read messages for search/compliance",
+        "**Encryption in transit** (TLS); *no E2EE* — server decrypts for moderation, search, and content delivery",
+      ],
+      [
+        "**Max Group Size**",
+        "1,024 members per group; uses *Sender Keys* protocol for group E2EE",
+        "No hard limit on channels; designed for **large organizations** with thousands of members per channel",
+        "Server limit of **500K members**; channels within servers can have millions of concurrent viewers",
+      ],
+      [
+        "**Presence System**",
+        "Simple *last seen* timestamp; no real-time presence for groups; **privacy-focused** approach",
+        "Rich presence: *online, away, DND, offline* with custom status text; updates via WebSocket heartbeat",
+        "Rich presence with **activity detection** (currently playing, streaming, listening); custom status support",
+      ],
+      [
+        "**Media Handling**",
+        "Media **encrypted on client**, uploaded to servers, URL sent in message; auto-deleted after delivery",
+        "Files uploaded to **S3-compatible storage**; thumbnails generated server-side; searchable and persistent",
+        "CDN-backed media delivery; images proxied through `media.discordapp.net`; **lazy loading** with progressive JPEG",
+      ],
+      [
+        "**Scalability Architecture**",
+        "**Erlang/FreeBSD** stack; single server handles ~2M connections; *stateful connection servers* with XMPP routing",
+        "**PHP (Hack) + Java** microservices; *MySQL* primary DB with *Vitess* sharding; message search via *Elasticsearch*",
+        "**Elixir/Erlang** for real-time gateway; *Rust* for performance-critical paths; *Cassandra + ScyllaDB* for storage",
+      ],
+      [
+        "**Offline Delivery**",
+        "Server **queues messages** for up to 30 days; delivered on reconnect in sequence order",
+        "No offline queue needed — all messages are **server-persisted**; client syncs via API on reconnect",
+        "No offline queue — messages **always server-stored**; client fetches missed messages via REST API with `?after=` cursor",
+      ],
+    ],
+  },
+  exercises: [
+    "**Design a read-receipt system**: Implement a `read watermark` mechanism where each user's read position per chat is tracked. Define the MongoDB schema, the WebSocket event flow, and how the sender sees *single tick* (sent), *double tick* (delivered), and *blue tick* (read). Consider the multi-device case where user B has 3 devices — when should the read receipt fire?",
+    "**Build a typing indicator with debouncing**: Write a client-side `useTypingIndicator` React hook that sends `typing_start` on the first keystroke, suppresses further events for 3 seconds, and sends `typing_stop` after 3 seconds of inactivity. On the server side, implement the fan-out logic that forwards typing events *only* to users who have the chat window open. Measure the bandwidth savings compared to naive per-keystroke broadcasting.",
+    "**Implement message search with Elasticsearch**: Design the indexing pipeline where new messages are published to a Kafka topic, consumed by an indexer service, and written to an Elasticsearch index partitioned by `chatId`. Implement a search API endpoint that accepts a query string and returns matching messages with **highlighted snippets**, respecting access control (users can only search chats they belong to). Handle the consistency lag between write and index availability.",
+    "**Design a group chat fan-out strategy**: For a group with *10,000 members*, compare **fan-out on write** (push message to each member's inbox) vs. **fan-out on read** (members pull from the group timeline). Calculate the storage and write amplification for each approach. Implement a hybrid: fan-out on write for active users (online in the last 5 minutes) and fan-out on read for inactive users. Use Redis sorted sets to track active group members.",
+    "**Build a connection migration system**: When a chat server needs to restart for deployment, implement a *graceful drain* protocol. The server sends a `RECONNECT` control frame to all connected clients with a `target_server` hint. Clients disconnect and reconnect to the suggested server. Implement a 30-second drain window, track migration progress, and handle clients that fail to reconnect within the window. Ensure **zero message loss** during the migration.",
+  ],
+  cheatSheet: [
+    "**WebSocket lifecycle**: `HTTP GET /chat (Upgrade: websocket)` -> server responds `101 Switching Protocols` -> persistent full-duplex TCP connection. Close with status codes: `1000` (normal), `1001` (going away), `1008` (policy violation), `1011` (server error).",
+    "**Sequence number assignment**: always server-side via `Redis INCR chat:seq:{chatId}`. Never trust client timestamps for ordering. Per-chat counter ensures *total order within a conversation*. Use `MULTI/EXEC` for atomic seq + write if needed.",
+    "**Presence detection pattern**: client heartbeat every **5s**, server timeout at **30s**. Store in `Redis HSET user:presence {userId} {status, lastSeen, serverId}`. Immediate offline on WebSocket `close` event. Fan-out presence changes only to users with the contact's chat *currently open*.",
+    "**Offline sync protocol**: client stores `lastSeqNumber` per chat in `localStorage`. On reconnect, sends `{type: 'sync', chatId, lastSeq}`. Server responds with `SELECT * FROM messages WHERE chatId = ? AND seqNumber > ? ORDER BY seqNumber ASC`. Batch in pages of 50 for large deltas.",
+    "**Message delivery guarantees**: *at-least-once* via WAL (Kafka) before ack. Deduplicate on client using `messageId` or `(chatId, seqNumber)` pair. Idempotent processing on server side — `upsert` with unique index on `(chatId, seqNumber)` prevents duplicates.",
+    "**Group chat fan-out rule of thumb**: groups < 100 members use *fan-out on write* (push to each inbox). Groups > 100 use *fan-out on read* (members pull from group timeline). Hybrid: fan-out on write to *online* members, fan-out on read for *offline* members. Track active members in `Redis ZSET` with heartbeat timestamp as score.",
+  ],
+  revisionNotes: [
+    "The **three pillars** of a chat system are: (1) *real-time delivery* via WebSocket with pub/sub routing, (2) *message ordering* via server-assigned per-chat sequence numbers, and (3) *offline reliability* via persistent storage with delta sync on reconnect. Every design decision flows from these three requirements.",
+    "**Connection servers are stateful** — each holds live WebSocket connections. This means horizontal scaling requires a *connection registry* (Redis hash: `userId -> serverId`) and a *message routing layer* (Kafka/Redis Pub/Sub) so Server A can deliver a message to a user on Server B. Consistent hashing with virtual nodes distributes users across servers.",
+    "**Storage layer trade-offs**: use a *write-optimized store* (Cassandra, HBase) with partition key = `chatId` and clustering key = `seqNumber` for the message table. Cache the latest N messages per chat in **Redis** for sub-millisecond reads. Index in **Elasticsearch** for full-text search. Archive messages older than the retention period to **cold storage** (S3 + Parquet).",
+    "**Presence is an eventually consistent system** — there is no need for strong consistency. A user appearing online for a few extra seconds after disconnecting is acceptable. Use *heartbeat + timeout* (not WebSocket close alone, since connections can drop silently). Debounce presence fan-out to avoid thundering-herd updates when many users connect/disconnect simultaneously.",
+    "**End-to-end encryption** fundamentally changes the architecture: the server **cannot read, search, or moderate** message content. All indexing and search must happen *client-side*. Group key management adds complexity — key rotation on member join/leave, *Sender Keys* for efficient group encryption. E2EE trades server-side features for **privacy guarantees**.",
+  ],
   glossary: [
     {
       term: "WebSocket",

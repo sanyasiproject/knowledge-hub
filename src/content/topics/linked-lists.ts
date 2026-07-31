@@ -22,110 +22,152 @@ export const linkedLists: TopicContent = {
   ],
   code: [
     {
-      language: "python",
-      caption: "Singly linked list with insert, delete, reverse, and cycle detection",
-      source: `class ListNode:
-    def __init__(self, val=0, next=None):
-        self.val = val
-        self.next = next
+      language: "cpp",
+      caption: "Singly linked list with reverse, cycle detection, and merge sorted",
+      source: `#include <iostream>
 
-def reverse_list(head: ListNode) -> ListNode:
-    """Reverse a singly linked list in O(n) time, O(1) space."""
-    prev, curr = None, head
-    while curr:
-        nxt = curr.next
-        curr.next = prev
-        prev = curr
-        curr = nxt
-    return prev  # new head
+struct ListNode {
+    int val;
+    ListNode* next;
+    ListNode(int v = 0, ListNode* n = nullptr) : val(v), next(n) {}
+};
 
-def has_cycle(head: ListNode) -> bool:
-    """Floyd's cycle detection: O(n) time, O(1) space."""
-    slow = fast = head
-    while fast and fast.next:
-        slow = slow.next
-        fast = fast.next.next
-        if slow is fast:
-            return True
-    return False
+// Reverse a singly linked list in O(n) time, O(1) space
+ListNode* reverse_list(ListNode* head) {
+    ListNode* prev = nullptr;
+    ListNode* curr = head;
+    while (curr) {
+        ListNode* nxt = curr->next;
+        curr->next = prev;
+        prev = curr;
+        curr = nxt;
+    }
+    return prev;  // new head
+}
 
-def find_cycle_start(head: ListNode) -> ListNode | None:
-    """Return the node where the cycle begins, or None."""
-    slow = fast = head
-    while fast and fast.next:
-        slow = slow.next
-        fast = fast.next.next
-        if slow is fast:
-            # Phase 2: find entry point
-            slow = head
-            while slow is not fast:
-                slow = slow.next
-                fast = fast.next
-            return slow
-    return None
+// Floyd's cycle detection: O(n) time, O(1) space
+bool has_cycle(ListNode* head) {
+    ListNode* slow = head;
+    ListNode* fast = head;
+    while (fast && fast->next) {
+        slow = slow->next;
+        fast = fast->next->next;
+        if (slow == fast) return true;
+    }
+    return false;
+}
 
-def merge_sorted(l1: ListNode, l2: ListNode) -> ListNode:
-    """Merge two sorted linked lists. O(n+m) time, O(1) space."""
-    dummy = ListNode(0)
-    tail = dummy
-    while l1 and l2:
-        if l1.val <= l2.val:
-            tail.next = l1
-            l1 = l1.next
-        else:
-            tail.next = l2
-            l2 = l2.next
-        tail = tail.next
-    tail.next = l1 or l2
-    return dummy.next`,
+// Return the node where the cycle begins, or nullptr
+ListNode* find_cycle_start(ListNode* head) {
+    ListNode* slow = head;
+    ListNode* fast = head;
+    while (fast && fast->next) {
+        slow = slow->next;
+        fast = fast->next->next;
+        if (slow == fast) {
+            // Phase 2: find entry point
+            slow = head;
+            while (slow != fast) {
+                slow = slow->next;
+                fast = fast->next;
+            }
+            return slow;
+        }
+    }
+    return nullptr;
+}
+
+// Merge two sorted linked lists. O(n+m) time, O(1) space
+ListNode* merge_sorted(ListNode* l1, ListNode* l2) {
+    ListNode dummy(0);
+    ListNode* tail = &dummy;
+    while (l1 && l2) {
+        if (l1->val <= l2->val) {
+            tail->next = l1;
+            l1 = l1->next;
+        } else {
+            tail->next = l2;
+            l2 = l2->next;
+        }
+        tail = tail->next;
+    }
+    tail->next = l1 ? l1 : l2;
+    return dummy.next;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "LRU Cache using doubly linked list and hash map",
-      source: `class DLLNode:
-    def __init__(self, key=0, val=0):
-        self.key = key
-        self.val = val
-        self.prev = None
-        self.next = None
+      source: `#include <iostream>
+#include <unordered_map>
 
-class LRUCache:
-    def __init__(self, capacity: int):
-        self.cap = capacity
-        self.cache = {}           # key -> DLLNode
-        self.head = DLLNode()     # sentinel head (MRU end)
-        self.tail = DLLNode()     # sentinel tail (LRU end)
-        self.head.next = self.tail
-        self.tail.prev = self.head
+struct DLLNode {
+    int key, val;
+    DLLNode* prev;
+    DLLNode* next;
+    DLLNode(int k = 0, int v = 0)
+        : key(k), val(v), prev(nullptr), next(nullptr) {}
+};
 
-    def _remove(self, node: DLLNode):
-        node.prev.next = node.next
-        node.next.prev = node.prev
+class LRUCache {
+    int capacity_;
+    std::unordered_map<int, DLLNode*> cache_;  // key -> node
+    DLLNode head_, tail_;  // sentinels
 
-    def _add_front(self, node: DLLNode):
-        node.next = self.head.next
-        node.prev = self.head
-        self.head.next.prev = node
-        self.head.next = node
+    void remove(DLLNode* node) {
+        node->prev->next = node->next;
+        node->next->prev = node->prev;
+    }
 
-    def get(self, key: int) -> int:
-        if key not in self.cache:
-            return -1
-        node = self.cache[key]
-        self._remove(node)
-        self._add_front(node)    # mark as most recently used
-        return node.val
+    void add_front(DLLNode* node) {
+        node->next = head_.next;
+        node->prev = &head_;
+        head_.next->prev = node;
+        head_.next = node;
+    }
 
-    def put(self, key: int, value: int):
-        if key in self.cache:
-            self._remove(self.cache[key])
-        node = DLLNode(key, value)
-        self.cache[key] = node
-        self._add_front(node)
-        if len(self.cache) > self.cap:
-            lru = self.tail.prev
-            self._remove(lru)
-            del self.cache[lru.key]`,
+public:
+    LRUCache(int capacity) : capacity_(capacity) {
+        head_.next = &tail_;
+        tail_.prev = &head_;
+    }
+
+    ~LRUCache() {
+        DLLNode* curr = head_.next;
+        while (curr != &tail_) {
+            DLLNode* next = curr->next;
+            delete curr;
+            curr = next;
+        }
+    }
+
+    int get(int key) {
+        auto it = cache_.find(key);
+        if (it == cache_.end()) return -1;
+        DLLNode* node = it->second;
+        remove(node);
+        add_front(node);  // mark as most recently used
+        return node->val;
+    }
+
+    void put(int key, int value) {
+        auto it = cache_.find(key);
+        if (it != cache_.end()) {
+            remove(it->second);
+            delete it->second;
+            cache_.erase(it);
+        }
+        DLLNode* node = new DLLNode(key, value);
+        cache_[key] = node;
+        add_front(node);
+        if (static_cast<int>(cache_.size()) > capacity_) {
+            DLLNode* lru = tail_.prev;
+            remove(lru);
+            cache_.erase(lru->key);
+            delete lru;
+        }
+    }
+};`,
     },
   ],
   diagrams: [

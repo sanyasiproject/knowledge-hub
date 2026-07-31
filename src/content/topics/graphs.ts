@@ -23,91 +23,145 @@ export const graphs: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Adjacency list representation with BFS and DFS",
-      source: `from collections import defaultdict, deque
-from typing import List, Dict, Set
+      source: `#include <iostream>
+#include <queue>
+#include <stack>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+#include <algorithm>
 
-class GraphAdjList:
-    """Directed graph using adjacency list (dict of lists)."""
+class GraphAdjList {
+    // Directed graph using adjacency list (map of vectors).
+    std::unordered_map<int, std::vector<int>> adj;
 
-    def __init__(self):
-        self.adj: Dict[int, List[int]] = defaultdict(list)
+public:
+    void add_edge(int u, int v) {
+        adj[u].push_back(v);
+        // For undirected: adj[v].push_back(u);
+    }
 
-    def add_edge(self, u: int, v: int) -> None:
-        self.adj[u].append(v)
-        # For undirected: self.adj[v].append(u)
+    // Breadth-first traversal from start. O(V + E).
+    std::vector<int> bfs(int start) const {
+        std::unordered_set<int> visited = {start};
+        std::queue<int> q;
+        q.push(start);
+        std::vector<int> order;
 
-    def bfs(self, start: int) -> List[int]:
-        """Breadth-first traversal from start. O(V + E)."""
-        visited: Set[int] = {start}
-        queue = deque([start])
-        order: List[int] = []
-        while queue:
-            node = queue.popleft()
-            order.append(node)
-            for neighbor in self.adj[node]:
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    queue.append(neighbor)
-        return order
+        while (!q.empty()) {
+            int node = q.front(); q.pop();
+            order.push_back(node);
+            auto it = adj.find(node);
+            if (it == adj.end()) continue;
+            for (int neighbor : it->second) {
+                if (!visited.count(neighbor)) {
+                    visited.insert(neighbor);
+                    q.push(neighbor);
+                }
+            }
+        }
+        return order;
+    }
 
-    def dfs(self, start: int) -> List[int]:
-        """Iterative depth-first traversal from start. O(V + E)."""
-        visited: Set[int] = set()
-        stack = [start]
-        order: List[int] = []
-        while stack:
-            node = stack.pop()
-            if node in visited:
-                continue
-            visited.add(node)
-            order.append(node)
-            # Reverse to visit neighbors in natural order
-            for neighbor in reversed(self.adj[node]):
-                if neighbor not in visited:
-                    stack.append(neighbor)
-        return order
+    // Iterative depth-first traversal from start. O(V + E).
+    std::vector<int> dfs(int start) const {
+        std::unordered_set<int> visited;
+        std::stack<int> stk;
+        stk.push(start);
+        std::vector<int> order;
 
-# Example usage
-g = GraphAdjList()
-for u, v in [(0,1),(0,2),(1,3),(2,3),(3,4)]:
-    g.add_edge(u, v)
-print("BFS:", g.bfs(0))   # [0, 1, 2, 3, 4]
-print("DFS:", g.dfs(0))   # [0, 1, 3, 4, 2]`,
+        while (!stk.empty()) {
+            int node = stk.top(); stk.pop();
+            if (visited.count(node)) continue;
+            visited.insert(node);
+            order.push_back(node);
+            // Reverse to visit neighbors in natural order
+            auto it = adj.find(node);
+            if (it == adj.end()) continue;
+            auto& neighbors = it->second;
+            for (auto rit = neighbors.rbegin(); rit != neighbors.rend(); ++rit) {
+                if (!visited.count(*rit))
+                    stk.push(*rit);
+            }
+        }
+        return order;
+    }
+};
+
+int main() {
+    GraphAdjList g;
+    int edges[][2] = {{0,1},{0,2},{1,3},{2,3},{3,4}};
+    for (auto& e : edges)
+        g.add_edge(e[0], e[1]);
+
+    std::cout << "BFS:";
+    for (int v : g.bfs(0)) std::cout << " " << v;
+    std::cout << "\\n"; // 0 1 2 3 4
+
+    std::cout << "DFS:";
+    for (int v : g.dfs(0)) std::cout << " " << v;
+    std::cout << "\\n"; // 0 1 3 4 2
+
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Adjacency matrix representation with edge lookup and neighbor iteration",
-      source: `class GraphAdjMatrix:
-    """Undirected, unweighted graph using an adjacency matrix."""
+      source: `#include <iostream>
+#include <numeric>
+#include <vector>
 
-    def __init__(self, n: int):
-        self.n = n
-        self.matrix = [[0] * n for _ in range(n)]
+class GraphAdjMatrix {
+    // Undirected, unweighted graph using an adjacency matrix.
+    int n;
+    std::vector<std::vector<int>> matrix;
 
-    def add_edge(self, u: int, v: int) -> None:
-        self.matrix[u][v] = 1
-        self.matrix[v][u] = 1  # symmetric for undirected
+public:
+    explicit GraphAdjMatrix(int n)
+        : n(n), matrix(n, std::vector<int>(n, 0)) {}
 
-    def has_edge(self, u: int, v: int) -> bool:
-        """O(1) edge existence check."""
-        return self.matrix[u][v] == 1
+    void add_edge(int u, int v) {
+        matrix[u][v] = 1;
+        matrix[v][u] = 1; // symmetric for undirected
+    }
 
-    def neighbors(self, u: int) -> list:
-        """O(V) neighbor scan -- expensive for sparse graphs."""
-        return [v for v in range(self.n) if self.matrix[u][v]]
+    // O(1) edge existence check.
+    bool has_edge(int u, int v) const {
+        return matrix[u][v] == 1;
+    }
 
-    def degree(self, u: int) -> int:
-        return sum(self.matrix[u])
+    // O(V) neighbor scan -- expensive for sparse graphs.
+    std::vector<int> neighbors(int u) const {
+        std::vector<int> result;
+        for (int v = 0; v < n; ++v)
+            if (matrix[u][v])
+                result.push_back(v);
+        return result;
+    }
 
-# Example
-g = GraphAdjMatrix(5)
-for u, v in [(0,1),(0,2),(1,3),(2,3),(3,4)]:
-    g.add_edge(u, v)
-print("Edge 0-1?", g.has_edge(0, 1))   # True
-print("Edge 0-4?", g.has_edge(0, 4))   # False
-print("Neighbors of 3:", g.neighbors(3))  # [1, 2, 4]`,
+    int degree(int u) const {
+        return std::accumulate(matrix[u].begin(), matrix[u].end(), 0);
+    }
+};
+
+int main() {
+    GraphAdjMatrix g(5);
+    int edges[][2] = {{0,1},{0,2},{1,3},{2,3},{3,4}};
+    for (auto& e : edges)
+        g.add_edge(e[0], e[1]);
+
+    std::cout << "Edge 0-1? " << (g.has_edge(0, 1) ? "true" : "false") << "\\n";
+    std::cout << "Edge 0-4? " << (g.has_edge(0, 4) ? "true" : "false") << "\\n";
+
+    std::cout << "Neighbors of 3:";
+    for (int v : g.neighbors(3)) std::cout << " " << v;
+    std::cout << "\\n"; // 1 2 4
+
+    return 0;
+}`,
     },
     {
       language: "cpp",

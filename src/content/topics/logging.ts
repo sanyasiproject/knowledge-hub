@@ -179,4 +179,494 @@ Alternatives include **Grafana Loki** (stores labels, not full text — cheaper 
         "A log aggregation system that indexes only metadata labels rather than full log text, optimized for cost-efficient storage with Grafana integration.",
     },
   ],
+  deepDive: [
+    `**Structured logging** is not just a best practice — it is a *fundamental architectural decision* that determines how effectively your team can **debug**, **monitor**, and **audit** production systems. When you emit logs as \`JSON\` objects with explicit fields like \`timestamp\`, \`level\`, \`service\`, \`traceId\`, and \`message\`, you transform raw text into *queryable data*. This enables **log-based metrics** (e.g., counting \`level: "error"\` events per minute), **automated alerting** (triggering PagerDuty when error rate exceeds a threshold), and **compliance auditing** (proving that a specific action occurred at a specific time). The shift from \`console.log("something happened")\` to \`logger.info({ event: "order.created", orderId, userId })\` is the difference between *guessing* and *knowing* what your system is doing.`,
+
+    `The **log pipeline architecture** deserves as much design attention as your application architecture. A production-grade pipeline typically follows the pattern: *application* → **shipper** → **buffer** → **processor** → **storage** → **visualization**. The **shipper** (e.g., \`Filebeat\`, \`Fluent Bit\`) runs as a *sidecar* or *DaemonSet* on each node, tailing log files or capturing \`stdout\`. The **buffer** (e.g., \`Kafka\`, \`Redis Streams\`) decouples producers from consumers, absorbing traffic spikes without backpressure on applications. The **processor** (\`Logstash\`, \`Vector\`, \`Fluentd\`) parses, enriches, and routes events. Finally, **storage** (\`Elasticsearch\`, \`Loki\`, \`ClickHouse\`) indexes and retains data according to *retention policies*. Each component must be **horizontally scalable** and **fault-tolerant** — a logging pipeline that loses data during an incident is worse than useless, because it creates *false confidence*.`,
+
+    `**Observability correlation** ties logging to the broader telemetry stack of *metrics* and *traces*. By embedding \`traceId\` and \`spanId\` in every log entry — typically injected via **middleware** or an \`AsyncLocalStorage\` context in Node.js, or \`MDC\` (Mapped Diagnostic Context) in Java — you create a *unified view* of each request's journey. When an alert fires on a **metric** (e.g., \`p99 latency > 500ms\`), an engineer can pivot to the corresponding **traces** to identify the slow span, then drill into the **logs** for that span to find the root cause (e.g., \`"DNS resolution timeout for payments.internal"\`). This *three-pillar correlation* — **metrics → traces → logs** — is the foundation of modern **observability**. Tools like \`OpenTelemetry\` provide a *vendor-neutral SDK* that instruments all three signals with shared context, eliminating the need to manually propagate correlation IDs.`,
+  ],
+  code: [
+    {
+      language: "typescript",
+      caption:
+        "Node.js/Express structured logging middleware with request correlation using Winston and OpenTelemetry trace context",
+      source: `import express, { Request, Response, NextFunction } from "express";
+import winston from "winston";
+import { randomUUID } from "crypto";
+import { trace, context } from "@opentelemetry/api";
+
+// Configure structured JSON logger
+const logger = winston.createLogger({
+  level: process.env.LOG_LEVEL || "info",
+  format: winston.format.combine(
+    winston.format.timestamp({ format: "ISO" }),
+    winston.format.json()
+  ),
+  defaultMeta: {
+    service: "order-service",
+    version: process.env.APP_VERSION || "unknown",
+    environment: process.env.NODE_ENV || "development",
+  },
+  transports: [
+    new winston.transports.Console(),
+    new winston.transports.File({
+      filename: "logs/app.log",
+      maxsize: 50 * 1024 * 1024, // 50MB rotation
+      maxFiles: 5,
+    }),
+  ],
+});
+
+// Logging middleware — attaches correlation IDs and logs request lifecycle
+function loggingMiddleware(req: Request, res: Response, next: NextFunction) {
+  const requestId = (req.headers["x-request-id"] as string) || randomUUID();
+  const startTime = process.hrtime.bigint();
+
+  // Extract OpenTelemetry trace context if available
+  const activeSpan = trace.getActiveSpan();
+  const traceId = activeSpan?.spanContext().traceId || "no-trace";
+  const spanId = activeSpan?.spanContext().spanId || "no-span";
+
+  // Attach correlation IDs to request for downstream use
+  req.headers["x-request-id"] = requestId;
+
+  // Log incoming request
+  logger.info({
+    event: "http.request.start",
+    requestId,
+    traceId,
+    spanId,
+    method: req.method,
+    path: req.path,
+    query: req.query,
+    userAgent: req.get("user-agent"),
+    ip: req.ip,
+  });
+
+  // Capture response details on finish
+  res.on("finish", () => {
+    const durationMs =
+      Number(process.hrtime.bigint() - startTime) / 1_000_000;
+
+    const logData = {
+      event: "http.request.end",
+      requestId,
+      traceId,
+      spanId,
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      durationMs: Math.round(durationMs * 100) / 100,
+      contentLength: res.get("content-length"),
+    };
+
+    if (res.statusCode >= 500) {
+      logger.error(logData);
+    } else if (res.statusCode >= 400) {
+      logger.warn(logData);
+    } else {
+      logger.info(logData);
+    }
+  });
+
+  next();
+}
+
+const app = express();
+app.use(loggingMiddleware);
+
+app.get("/api/orders/:id", (req, res) => {
+  logger.info({
+    event: "order.fetch",
+    orderId: req.params.id,
+    requestId: req.headers["x-request-id"],
+  });
+  res.json({ id: req.params.id, status: "shipped" });
+});
+
+app.listen(3000, () => {
+  logger.info({ event: "server.start", port: 3000 });
+});`,
+    },
+    {
+      language: "cpp",
+      caption:
+        "C++ structured logging with spdlog featuring custom JSON formatting and log rotation",
+      source: `#include <spdlog/spdlog.h>
+#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <nlohmann/json.hpp>
+#include <chrono>
+#include <string>
+#include <memory>
+
+using json = nlohmann::json;
+
+// Structured log entry builder
+class LogEntry {
+public:
+    LogEntry(const std::string& event) {
+        data_["timestamp"] = getCurrentTimestamp();
+        data_["event"] = event;
+        data_["service"] = "payment-gateway";
+        data_["version"] = "2.4.1";
+    }
+
+    LogEntry& field(const std::string& key, const std::string& value) {
+        data_[key] = value;
+        return *this;
+    }
+
+    LogEntry& field(const std::string& key, int value) {
+        data_[key] = value;
+        return *this;
+    }
+
+    LogEntry& field(const std::string& key, double value) {
+        data_[key] = value;
+        return *this;
+    }
+
+    std::string build() const {
+        return data_.dump();
+    }
+
+private:
+    json data_;
+
+    static std::string getCurrentTimestamp() {
+        auto now = std::chrono::system_clock::now();
+        auto time_t = std::chrono::system_clock::to_time_t(now);
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now.time_since_epoch()) % 1000;
+        char buf[64];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", std::gmtime(&time_t));
+        return std::string(buf) + "." + std::to_string(ms.count()) + "Z";
+    }
+};
+
+// Initialize logger with console + rotating file sinks
+std::shared_ptr<spdlog::logger> initLogger() {
+    auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    console_sink->set_level(spdlog::level::info);
+
+    auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+        "logs/payment-gateway.log",
+        50 * 1024 * 1024,  // 50 MB max file size
+        5                   // Keep 5 rotated files
+    );
+    file_sink->set_level(spdlog::level::debug);
+
+    auto logger = std::make_shared<spdlog::logger>(
+        "structured",
+        spdlog::sinks_init_list{console_sink, file_sink}
+    );
+    logger->set_level(spdlog::level::debug);
+    logger->set_pattern("%v");  // Raw message — we handle formatting
+    return logger;
+}
+
+// Usage example
+int main() {
+    auto logger = initLogger();
+
+    // Log a payment processing event
+    logger->info(
+        LogEntry("payment.process.start")
+            .field("transactionId", "txn_a1b2c3d4")
+            .field("amount", 149.99)
+            .field("currency", "USD")
+            .field("merchantId", "merchant_xyz")
+            .field("traceId", "abc123def456")
+            .build()
+    );
+
+    // Simulate processing...
+    auto start = std::chrono::steady_clock::now();
+    // ... payment logic here ...
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count();
+
+    logger->info(
+        LogEntry("payment.process.complete")
+            .field("transactionId", "txn_a1b2c3d4")
+            .field("status", "approved")
+            .field("durationMs", static_cast<int>(elapsed))
+            .field("traceId", "abc123def456")
+            .build()
+    );
+
+    // Log an error scenario
+    logger->error(
+        LogEntry("payment.process.failed")
+            .field("transactionId", "txn_e5f6g7h8")
+            .field("error", "gateway_timeout")
+            .field("retryCount", 3)
+            .field("targetHost", "payments.provider.com")
+            .field("traceId", "xyz789abc012")
+            .build()
+    );
+
+    return 0;
+}`,
+    },
+    {
+      language: "yaml",
+      caption:
+        "Fluent Bit configuration for shipping structured logs to Elasticsearch with parsing and enrichment",
+      source: `# fluent-bit.conf — production log shipping pipeline
+[SERVICE]
+    Flush         5
+    Daemon        Off
+    Log_Level     info
+    Parsers_File  parsers.conf
+    HTTP_Server   On
+    HTTP_Listen   0.0.0.0
+    HTTP_Port     2020       # Health check endpoint
+
+# Tail application JSON logs
+[INPUT]
+    Name          tail
+    Path          /var/log/containers/*.log
+    Parser        docker
+    Tag           kube.*
+    Mem_Buf_Limit 10MB
+    Skip_Long_Lines On
+    Refresh_Interval 5
+
+# Parse nested JSON from container log messages
+[FILTER]
+    Name          parser
+    Match         kube.*
+    Key_Name      log
+    Parser        json_parser
+    Reserve_Data  On
+
+# Add Kubernetes metadata (pod, namespace, labels)
+[FILTER]
+    Name          kubernetes
+    Match         kube.*
+    Kube_URL      https://kubernetes.default.svc:443
+    Kube_CA_File  /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    Kube_Token_File /var/run/secrets/kubernetes.io/serviceaccount/token
+    Merge_Log     On
+    K8S-Logging.Parser On
+
+# Redact sensitive fields before shipping
+[FILTER]
+    Name          modify
+    Match         *
+    Remove        password
+    Remove        authorization
+    Remove        cookie
+    Remove        x-api-key
+
+# Output to Elasticsearch
+[OUTPUT]
+    Name          es
+    Match         *
+    Host          elasticsearch.logging.svc.cluster.local
+    Port          9200
+    Index         app-logs
+    Type          _doc
+    Logstash_Format On
+    Logstash_Prefix app-logs
+    Retry_Limit   5
+    tls           On
+    tls.verify    On
+    Suppress_Type_Name On`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "ELK Log Pipeline Architecture",
+      kind: "architecture",
+      caption:
+        "End-to-end flow of log data from application containers through the ELK pipeline to dashboards and alerts",
+      mermaid: `flowchart LR
+    subgraph Sources["Application Sources"]
+        A1["Service A<br/>stdout/JSON"]
+        A2["Service B<br/>stdout/JSON"]
+        A3["Service C<br/>stdout/JSON"]
+    end
+
+    subgraph Shippers["Log Shippers"]
+        F1["Fluent Bit<br/>DaemonSet"]
+        F2["Filebeat<br/>Sidecar"]
+    end
+
+    subgraph Buffer["Message Buffer"]
+        K["Kafka<br/>logs topic<br/>3 partitions"]
+    end
+
+    subgraph Processing["Log Processing"]
+        L1["Logstash<br/>Node 1"]
+        L2["Logstash<br/>Node 2"]
+    end
+
+    subgraph Storage["Elasticsearch Cluster"]
+        ES1["Hot Nodes<br/>7-day retention<br/>SSD"]
+        ES2["Warm Nodes<br/>30-day retention<br/>HDD"]
+        ES3["Cold / S3<br/>Archive<br/>1-year"]
+    end
+
+    subgraph Visualization["Dashboards & Alerts"]
+        KB["Kibana<br/>Dashboards"]
+        AL["ElastAlert<br/>Alerting"]
+    end
+
+    A1 --> F1
+    A2 --> F1
+    A3 --> F2
+    F1 --> K
+    F2 --> K
+    K --> L1
+    K --> L2
+    L1 --> ES1
+    L2 --> ES1
+    ES1 -->|ILM rollover| ES2
+    ES2 -->|ILM rollover| ES3
+    ES1 --> KB
+    ES1 --> AL`,
+    },
+    {
+      title: "Log Level Decision Flow",
+      kind: "flow",
+      caption:
+        "Decision tree for choosing the appropriate log level for an event in production systems",
+      mermaid: `flowchart TD
+    Start["Event Occurs"] --> Q1{"Can the process<br/>continue?"}
+    Q1 -->|No| FATAL["FATAL<br/>Process must exit<br/>e.g. missing config,<br/>OOM"]
+    Q1 -->|Yes| Q2{"Did an error<br/>occur?"}
+    Q2 -->|Yes| Q3{"Was it<br/>recovered?"}
+    Q3 -->|No| ERROR["ERROR<br/>Requires attention<br/>e.g. unhandled exception,<br/>downstream timeout"]
+    Q3 -->|Yes| WARN["WARN<br/>Recovered but notable<br/>e.g. retry succeeded,<br/>fallback used"]
+    Q2 -->|No| Q4{"Is it a normal<br/>operational event?"}
+    Q4 -->|Yes| INFO["INFO<br/>Business events<br/>e.g. order created,<br/>user login"]
+    Q4 -->|No| Q5{"Is it useful for<br/>debugging?"}
+    Q5 -->|Yes| DEBUG["DEBUG<br/>Diagnostic detail<br/>e.g. variable values,<br/>cache hit/miss"]
+    Q5 -->|No| SKIP["Do not log<br/>Avoid noise"]
+
+    style FATAL fill:#d32f2f,color:#fff
+    style ERROR fill:#f57c00,color:#fff
+    style WARN fill:#fbc02d,color:#000
+    style INFO fill:#388e3c,color:#fff
+    style DEBUG fill:#1976d2,color:#fff
+    style SKIP fill:#757575,color:#fff`,
+    },
+    {
+      title: "Log Lifecycle State Machine",
+      kind: "state",
+      caption:
+        "States of a log event from emission through pipeline processing to storage tier transitions",
+      mermaid: `stateDiagram-v2
+    [*] --> Emitted: Application logs event
+    Emitted --> Buffered: Async appender queues
+    Buffered --> Shipped: Shipper reads from buffer
+    Shipped --> Queued: Arrives in Kafka/Redis
+    Queued --> Parsed: Logstash/Vector processes
+    Parsed --> Enriched: Add metadata, redact PII
+    Enriched --> HotStorage: Index in Elasticsearch
+    HotStorage --> WarmStorage: ILM policy (7 days)
+    WarmStorage --> ColdStorage: ILM policy (30 days)
+    ColdStorage --> Archived: Move to S3/GCS
+    Archived --> Deleted: Retention expired
+    Deleted --> [*]
+
+    Buffered --> Dropped: Buffer overflow
+    Shipped --> Failed: Network error
+    Failed --> Shipped: Retry with backoff
+    Dropped --> [*]`,
+    },
+  ],
+  comparison: {
+    columns: [
+      "Feature",
+      "ELK Stack",
+      "Grafana Loki",
+      "Datadog Logs",
+      "Fluentd / Fluent Bit",
+    ],
+    rows: [
+      [
+        "Architecture",
+        "Full-text indexing with inverted indices",
+        "Label-based indexing, compressed log chunks",
+        "SaaS with proprietary indexing",
+        "Log shipper and processor (not storage)",
+      ],
+      [
+        "Query Language",
+        "KQL (Kibana Query Language) and Lucene",
+        "LogQL (Prometheus-inspired)",
+        "Proprietary query syntax with natural language",
+        "N/A — routes to downstream storage",
+      ],
+      [
+        "Storage Cost",
+        "High — indexes every word in every log line",
+        "Low — indexes only labels, stores chunks",
+        "Usage-based SaaS pricing, can be expensive at scale",
+        "N/A — depends on destination",
+      ],
+      [
+        "Query Flexibility",
+        "Excellent — arbitrary full-text and structured queries",
+        "Good for label filtering, limited for ad-hoc text search",
+        "Excellent — full-text plus APM correlation",
+        "N/A — processing only",
+      ],
+      [
+        "Operational Overhead",
+        "High — must manage Elasticsearch cluster, tune JVM, handle sharding",
+        "Medium — simpler architecture, integrates with existing Prometheus/Grafana",
+        "Low — fully managed SaaS",
+        "Low — lightweight agent, minimal resource usage",
+      ],
+      [
+        "Best For",
+        "Teams needing powerful ad-hoc search across large log volumes",
+        "Cost-conscious teams already using Grafana and Prometheus",
+        "Teams wanting unified logs, metrics, traces, and APM in one SaaS platform",
+        "Log routing, parsing, and enrichment before sending to any backend",
+      ],
+      [
+        "Scaling Model",
+        "Horizontal — add data/master/ingest nodes",
+        "Horizontal — stateless queriers, scalable ingesters",
+        "Automatic — SaaS scales transparently",
+        "Horizontal — deploy more shipper instances",
+      ],
+      [
+        "APM Integration",
+        "Via Elastic APM (separate setup)",
+        "Via Tempo (Grafana tracing) — requires separate config",
+        "Built-in — traces, logs, metrics unified natively",
+        "Ships trace-correlated logs to any backend",
+      ],
+    ],
+  },
+  exercises: [
+    "**Set up a local ELK stack** using `docker-compose` with Elasticsearch, Logstash, and Kibana. Write a Node.js application that emits *structured JSON logs* to stdout, configure Filebeat to ship them to Logstash, and build a Kibana dashboard showing **request rate**, **error rate**, and **p95 latency** over time.",
+    "**Implement a logging middleware** for an Express.js API that automatically attaches `requestId`, `traceId`, `userId`, and `durationMs` to every log entry. Use `AsyncLocalStorage` to propagate context without passing logger instances through every function call. Verify that logs from *nested async operations* carry the correct correlation IDs.",
+    "**Build a log-based alerting pipeline**: configure ElastAlert (or Grafana alerting with Loki) to trigger a *Slack notification* when the error rate for any single service exceeds **5 errors per minute**. Test by intentionally causing errors and verifying the alert fires within the expected window. Document the *false-positive tuning* process.",
+    "**Perform a PII redaction audit** on an existing application's logs. Write a script that scans log output for patterns matching email addresses, credit card numbers, JWTs, and API keys. Implement a `Logstash filter` (or Fluent Bit Lua script) that **masks** detected patterns before indexing. Verify by querying Elasticsearch for any remaining PII patterns.",
+    "**Compare Elasticsearch vs. Loki query performance**: ingest the same 1 million log events into both systems. Write equivalent queries (filter by service + time range, count errors by endpoint, search for a specific `traceId`) and measure *query latency* and *resource consumption*. Document the trade-offs you observe in a comparison table.",
+  ],
+  cheatSheet: [
+    "**Log levels in order of severity**: `DEBUG` < `INFO` < `WARN` < `ERROR` < `FATAL` — set production default to `INFO` and enable `DEBUG` *per-service* during incidents.",
+    "**Always include these fields** in structured logs: `timestamp`, `level`, `service`, `traceId`, `spanId`, `event`, `message` — use `logger.defaultMeta` in Winston or `MDC` in Logback to auto-attach them.",
+    "**Use `async appenders`** to prevent logging from blocking the hot path — in Node.js, Winston writes async by default; in Java, use Logback's `AsyncAppender` with `queueSize: 512` and `discardingThreshold: 0`.",
+    "**Retention tiers**: `Hot` (7 days, SSD, full indexing) → `Warm` (30 days, HDD, reduced replicas) → `Cold` (S3/GCS archive, query-on-demand) — configure via **ILM policies** in Elasticsearch.",
+    "**Redact PII before indexing**: use an `allowlist` approach — explicitly define safe fields rather than trying to block known sensitive patterns. Apply redaction at the **shipper or processor level**, not in application code.",
+    "**Query cheat sheet**: ELK uses `level:error AND service:payments AND @timestamp>[now-1h]`; Loki uses `{service=\"payments\", level=\"error\"} |= \"timeout\"` — always **filter by labels first** in Loki to avoid full scans.",
+  ],
+  revisionNotes: [
+    "**Structured logging** emits events as `JSON` key-value pairs instead of free-form text. This enables *machine parsing*, **filtering** (e.g., `statusCode >= 500`), **aggregation** (errors per service per minute), and **cross-service correlation** via shared `traceId` fields.",
+    "The **ELK pipeline** flows: *Application* → `Beats/Fluent Bit` (shipper) → `Kafka` (buffer) → `Logstash` (parse + enrich) → `Elasticsearch` (index + store) → `Kibana` (visualize + alert). Each component must be **horizontally scalable** and **fault-tolerant**.",
+    "**Log levels** serve as a *severity filter*: `FATAL` = process must exit, `ERROR` = failure needing attention, `WARN` = recovered but notable, `INFO` = normal business events, `DEBUG` = diagnostic detail. The *golden rule*: if the message does not help an on-call engineer decide what to do, it belongs at `DEBUG`.",
+    "**ELK vs. Loki**: Elasticsearch indexes *full text* (powerful queries, high cost); Loki indexes only *labels* (cheaper, but requires label-first filtering). **Datadog** offers *SaaS convenience* with built-in APM correlation. Choose based on your **query needs**, **budget**, and **operational capacity**.",
+    "**Observability correlation** connects the three pillars: *metrics* (detect anomalies) → *traces* (identify slow spans) → *logs* (find root cause). Embed `traceId` and `spanId` in every log entry using **OpenTelemetry** or framework-specific MDC to enable seamless cross-pillar navigation.",
+  ],
 };

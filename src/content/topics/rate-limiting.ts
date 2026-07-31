@@ -308,4 +308,11 @@ function rateLimitMiddleware(
     { term: "Retry-After", definition: "HTTP response header indicating how many seconds the client should wait before retrying a rate-limited request." },
     { term: "GCRA", definition: "Generic Cell Rate Algorithm — a leaky bucket variant that tracks theoretical arrival time rather than maintaining a queue." },
   ],
+  exercises: [
+    "Implement a **fixed window** rate limiter using Redis `INCR` and `EXPIRE`. Then demonstrate the **boundary burst problem**: with a limit of 100 req/min, show how a client can send 200 requests in a 2-second window spanning the boundary. Fix it by switching to a **sliding window counter** approach.",
+    "Write a **token bucket** rate limiter as a Redis Lua script that atomically reads the current token count, calculates refill based on elapsed time, and deducts a token. Test it with `capacity=10` and `refillRate=2/sec`. Verify that (a) a burst of 10 requests succeeds immediately, (b) the 11th request is rejected, and (c) after 5 seconds, 10 more tokens are available.",
+    "Design a **tiered rate limiting** system for an API with three client tiers: *free* (10 req/min), *pro* (100 req/min), and *enterprise* (1000 req/min). Additionally, the `/search` endpoint has a separate limit of 5 req/min for free users. Show the Redis key structure and explain how you would look up the correct limit for each request.",
+    "A distributed API with 8 server instances uses local in-memory rate limiting (no shared store). Explain why a client can effectively get **8x the intended rate**. Propose two solutions: (a) a centralized Redis-based approach, and (b) a *local counter with periodic sync* approach. Compare the tradeoffs in accuracy, latency, and failure modes.",
+    "Your rate limiter returns `429 Too Many Requests`, but clients are **retrying immediately** in a tight loop, making the overload worse. Design a client-side **exponential backoff with jitter** strategy that respects the `Retry-After` header. Write the retry logic in TypeScript and explain why *jitter* is essential to prevent a **thundering herd**.",
+  ],
 };

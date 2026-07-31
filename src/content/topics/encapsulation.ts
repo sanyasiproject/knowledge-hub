@@ -85,55 +85,64 @@ export const encapsulation: TopicContent = {
 }`
     },
     {
-      language: "python",
-      caption: "Python encapsulation with properties, name mangling, and slots",
-      source: `class Temperature:
-    """Encapsulated temperature with validation via properties."""
-    __slots__ = ('_celsius',)  # Prevents arbitrary attribute creation
+      language: "cpp",
+      caption: "C++ encapsulation with getters/setters, validation, and private members",
+      source: `#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <map>
 
-    def __init__(self, celsius: float):
-        self.celsius = celsius  # Uses the property setter for validation
+class Temperature {
+    // Encapsulated temperature with validation via accessors.
+public:
+    explicit Temperature(double celsius) { set_celsius(celsius); }
 
-    @property
-    def celsius(self) -> float:
-        return self._celsius
+    double celsius() const { return celsius_; }
 
-    @celsius.setter
-    def celsius(self, value: float):
-        if value < -273.15:
-            raise ValueError(f"Temperature {value}C is below absolute zero")
-        self._celsius = value
+    void set_celsius(double value) {
+        if (value < -273.15)
+            throw std::invalid_argument("Temperature below absolute zero");
+        celsius_ = value;
+    }
 
-    @property
-    def fahrenheit(self) -> float:
-        return self._celsius * 9 / 5 + 32
+    double fahrenheit() const { return celsius_ * 9.0 / 5.0 + 32.0; }
 
-    @fahrenheit.setter
-    def fahrenheit(self, value: float):
-        self.celsius = (value - 32) * 5 / 9  # Delegates to celsius setter
+    void set_fahrenheit(double value) {
+        set_celsius((value - 32.0) * 5.0 / 9.0);  // delegates to set_celsius
+    }
+
+private:
+    double celsius_;
+};
 
 
-class SecureConfig:
-    """Demonstrates name mangling for attribute hiding."""
+class SecureConfig {
+    // Private members are inaccessible from outside -- enforced at compile time.
+public:
+    explicit SecureConfig(std::string api_key, int timeout = 30)
+        : api_key_(std::move(api_key)), timeout_(timeout) {}
 
-    def __init__(self, api_key: str):
-        self.__api_key = api_key  # Mangled to _SecureConfig__api_key
-        self._timeout = 30       # Convention: protected
+    std::map<std::string, std::string> make_request_headers() const {
+        // Internal use of private attribute
+        return {{"Authorization", "Bearer " + api_key_}};
+    }
 
-    def make_request(self, url: str):
-        # Internal use of hidden attribute
-        headers = {"Authorization": f"Bearer {self.__api_key}"}
-        return headers
+    int timeout() const { return timeout_; }
 
-# Usage:
-t = Temperature(100)
-print(t.fahrenheit)     # 212.0
-t.fahrenheit = 32
-print(t.celsius)        # 0.0
+private:
+    std::string api_key_;   // truly private -- compiler-enforced
+    int timeout_;           // also private
+};
 
-cfg = SecureConfig("secret-key")
-# cfg.__api_key         # AttributeError
-# cfg._SecureConfig__api_key  # Works but violates convention`
+// Usage:
+// Temperature t(100);
+// std::cout << t.fahrenheit();   // 212.0
+// t.set_fahrenheit(32);
+// std::cout << t.celsius();      // 0.0
+//
+// SecureConfig cfg("secret-key");
+// auto headers = cfg.make_request_headers();
+// cfg.api_key_;  // compile error: private member`
     },
     {
       language: "cpp",

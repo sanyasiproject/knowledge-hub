@@ -23,31 +23,80 @@ export const dns: TopicContent = {
   ],
   code: [
     {
-      language: "python",
-      caption: "DNS lookup using Python's dnspython library",
-      source: `import dns.resolver
+      language: "cpp",
+      caption: "DNS lookup using POSIX getaddrinfo and res_query",
+      source: `#include <iostream>
+#include <cstring>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <arpa/nameser.h>
+#include <resolv.h>
 
-# Resolve A records
-answers = dns.resolver.resolve("example.com", "A")
-for rdata in answers:
-    print(f"A record: {rdata.address}")
+// Resolve A records using getaddrinfo
+void resolve_a_records(const char* hostname) {
+    struct addrinfo hints{}, *result;
+    hints.ai_family = AF_INET;  // IPv4
+    hints.ai_socktype = SOCK_STREAM;
 
-# Resolve MX records with priority
-mx_answers = dns.resolver.resolve("example.com", "MX")
-for rdata in mx_answers:
-    print(f"MX: priority={rdata.preference}, server={rdata.exchange}")
+    int status = getaddrinfo(hostname, nullptr, &hints, &result);
+    if (status != 0) {
+        std::cerr << "getaddrinfo error: " << gai_strerror(status) << "\\n";
+        return;
+    }
+    for (auto* p = result; p != nullptr; p = p->ai_next) {
+        char ip[INET_ADDRSTRLEN];
+        auto* addr = reinterpret_cast<struct sockaddr_in*>(p->ai_addr);
+        inet_ntop(AF_INET, &addr->sin_addr, ip, sizeof(ip));
+        std::cout << "A record: " << ip << "\\n";
+    }
+    freeaddrinfo(result);
+}
 
-# Resolve TXT records (e.g., SPF)
-txt_answers = dns.resolver.resolve("example.com", "TXT")
-for rdata in txt_answers:
-    print(f"TXT: {rdata.to_text()}")
+// Resolve MX records using res_query
+void resolve_mx_records(const char* domain) {
+    unsigned char answer[4096];
+    int len = res_query(domain, ns_c_in, ns_t_mx, answer, sizeof(answer));
+    if (len < 0) { std::cerr << "MX query failed\\n"; return; }
 
-# Reverse DNS lookup
-from dns.reversename import from_address
-rev_name = from_address("93.184.216.34")
-ptr_answers = dns.resolver.resolve(rev_name, "PTR")
-for rdata in ptr_answers:
-    print(f"PTR: {rdata.target}")`,
+    ns_msg msg;
+    ns_initparse(answer, len, &msg);
+    int count = ns_msg_count(msg, ns_s_an);
+
+    for (int i = 0; i < count; ++i) {
+        ns_rr rr;
+        if (ns_parserr(&msg, ns_s_an, i, &rr) == 0) {
+            uint16_t priority = ns_get16(ns_rr_rdata(rr));
+            char exchange[NS_MAXDNAME];
+            dn_expand(answer, answer + len,
+                      ns_rr_rdata(rr) + 2, exchange, sizeof(exchange));
+            std::cout << "MX: priority=" << priority
+                      << ", server=" << exchange << "\\n";
+        }
+    }
+}
+
+// Reverse DNS lookup using getnameinfo
+void reverse_lookup(const char* ip_str) {
+    struct sockaddr_in sa{};
+    sa.sin_family = AF_INET;
+    inet_pton(AF_INET, ip_str, &sa.sin_addr);
+
+    char host[NI_MAXHOST];
+    int status = getnameinfo(reinterpret_cast<struct sockaddr*>(&sa),
+                             sizeof(sa), host, sizeof(host),
+                             nullptr, 0, NI_NAMEREQD);
+    if (status == 0)
+        std::cout << "PTR: " << host << "\\n";
+    else
+        std::cerr << "Reverse lookup failed: " << gai_strerror(status) << "\\n";
+}
+
+int main() {
+    resolve_a_records("example.com");
+    resolve_mx_records("example.com");
+    reverse_lookup("93.184.216.34");
+    return 0;
+}`,
     },
     {
       language: "bash",
@@ -83,66 +132,112 @@ dig example.com SOA +short
 dig example.com NS +noall +authority`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Minimal iterative DNS resolver demonstrating the resolution chain",
-      source: `import socket
-import struct
+      source: `#include <iostream>
+#include <cstring>
+#include <string>
+#include <sstream>
+#include <vector>
+#include <random>
+#include <stdexcept>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
-def build_query(domain: str, qtype: int = 1) -> bytes:
-    """Build a minimal DNS query packet."""
-    import os
-    txn_id = os.urandom(2)
-    flags = (0).to_bytes(2, "big")         # standard query, recursion NOT desired
-    counts = struct.pack("!HHHH", 1, 0, 0, 0)  # 1 question
-    # Encode domain name as length-prefixed labels
-    qname = b""
-    for label in domain.split("."):
-        qname += bytes([len(label)]) + label.encode()
-    qname += b"\\x00"  # root label
-    question = qname + struct.pack("!HH", qtype, 1)  # type A, class IN
-    return txn_id + flags + counts + question
+// Build a minimal DNS query packet
+std::vector<uint8_t> build_query(const std::string& domain, uint16_t qtype = 1) {
+    std::vector<uint8_t> pkt;
+    // Transaction ID (random)
+    std::random_device rd;
+    pkt.push_back(rd() & 0xFF);
+    pkt.push_back(rd() & 0xFF);
+    // Flags: standard query, recursion NOT desired
+    pkt.push_back(0); pkt.push_back(0);
+    // Counts: 1 question, 0 answer, 0 authority, 0 additional
+    pkt.push_back(0); pkt.push_back(1);
+    pkt.push_back(0); pkt.push_back(0);
+    pkt.push_back(0); pkt.push_back(0);
+    pkt.push_back(0); pkt.push_back(0);
+    // Encode domain as length-prefixed labels
+    std::istringstream stream(domain);
+    std::string label;
+    while (std::getline(stream, label, '.')) {
+        pkt.push_back(static_cast<uint8_t>(label.size()));
+        pkt.insert(pkt.end(), label.begin(), label.end());
+    }
+    pkt.push_back(0);  // root label
+    // QTYPE and QCLASS (IN = 1)
+    pkt.push_back(qtype >> 8); pkt.push_back(qtype & 0xFF);
+    pkt.push_back(0); pkt.push_back(1);
+    return pkt;
+}
 
-def parse_response(data: bytes):
-    """Extract the first A record or NS referral from a DNS response."""
-    flags = struct.unpack("!H", data[2:4])[0]
-    ancount = struct.unpack("!H", data[6:8])[0]
-    nscount = struct.unpack("!H", data[8:10])[0]
-    arcount = struct.unpack("!H", data[10:12])[0]
-    # Skip question section
-    offset = 12
-    while data[offset] != 0:
-        offset += data[offset] + 1
-    offset += 5  # null byte + QTYPE + QCLASS
-    # Parse answer records
-    for _ in range(ancount):
-        offset += 2 if data[offset] & 0xC0 else (data[offset] + 1)
-        rtype = struct.unpack("!H", data[offset:offset+2])[0]
-        rdlen = struct.unpack("!H", data[offset+8:offset+10])[0]
-        if rtype == 1 and rdlen == 4:
-            ip = ".".join(str(b) for b in data[offset+10:offset+14])
-            return ("answer", ip)
-        offset += 10 + rdlen
-    return ("referral", None)  # simplified — follow NS in Additional
+struct DnsResult {
+    bool is_answer;
+    std::string ip;  // populated only if is_answer == true
+};
 
-def resolve(domain: str):
-    """Walk the DNS tree from a root server (simplified)."""
-    server = "198.41.0.4"  # a.root-servers.net
-    print(f"Resolving {domain} starting from root {server}")
-    for step in range(10):
-        query = build_query(domain)
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(3)
-        sock.sendto(query, (server, 53))
-        data, _ = sock.recvfrom(512)
-        sock.close()
-        kind, value = parse_response(data)
-        if kind == "answer":
-            print(f"Resolved: {domain} -> {value}")
-            return value
-        print(f"Step {step}: referred, next server needed")
-    raise Exception("Resolution failed")
+// Extract the first A record from a DNS response (simplified)
+DnsResult parse_response(const uint8_t* data, int len) {
+    uint16_t ancount = (data[6] << 8) | data[7];
+    // Skip question section
+    int offset = 12;
+    while (data[offset] != 0) offset += data[offset] + 1;
+    offset += 5;  // null byte + QTYPE + QCLASS
+    // Parse answer records
+    for (int i = 0; i < ancount; ++i) {
+        if (data[offset] & 0xC0) offset += 2;  // compressed name
+        else { while (data[offset] != 0) offset += data[offset] + 1; ++offset; }
+        uint16_t rtype = (data[offset] << 8) | data[offset + 1];
+        uint16_t rdlen = (data[offset + 8] << 8) | data[offset + 9];
+        if (rtype == 1 && rdlen == 4) {
+            char ip[INET_ADDRSTRLEN];
+            snprintf(ip, sizeof(ip), "%d.%d.%d.%d",
+                     data[offset+10], data[offset+11],
+                     data[offset+12], data[offset+13]);
+            return {true, ip};
+        }
+        offset += 10 + rdlen;
+    }
+    return {false, ""};  // referral -- follow NS in Additional
+}
 
-# resolve("example.com")  # uncomment to run`,
+// Walk the DNS tree from a root server (simplified)
+std::string resolve(const std::string& domain) {
+    std::string server = "198.41.0.4";  // a.root-servers.net
+    std::cout << "Resolving " << domain << " from root " << server << "\\n";
+
+    for (int step = 0; step < 10; ++step) {
+        auto query = build_query(domain);
+        int sock = socket(AF_INET, SOCK_DGRAM, 0);
+        struct timeval tv{3, 0};
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+        struct sockaddr_in dest{};
+        dest.sin_family = AF_INET;
+        dest.sin_port = htons(53);
+        inet_pton(AF_INET, server.c_str(), &dest.sin_addr);
+
+        sendto(sock, query.data(), query.size(), 0,
+               reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+
+        uint8_t buf[512];
+        int n = recv(sock, buf, sizeof(buf), 0);
+        close(sock);
+        if (n < 0) throw std::runtime_error("recv failed");
+
+        auto result = parse_response(buf, n);
+        if (result.is_answer) {
+            std::cout << "Resolved: " << domain << " -> " << result.ip << "\\n";
+            return result.ip;
+        }
+        std::cout << "Step " << step << ": referred, next server needed\\n";
+    }
+    throw std::runtime_error("Resolution failed");
+}
+
+// int main() { resolve("example.com"); }  // uncomment to run`,
     },
   ],
   diagrams: [

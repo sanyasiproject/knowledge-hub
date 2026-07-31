@@ -89,92 +89,158 @@ IF NOT EXISTS;
 -- Uses SERIAL consistency (linearizable) internally`
     },
     {
-      language: "python",
-      caption: "DynamoDB: strongly consistent vs. eventually consistent reads",
-      source: `import boto3
+      language: "cpp",
+      caption: "DynamoDB: strongly consistent vs. eventually consistent reads (AWS SDK for C++)",
+      source: `#include <aws/core/Aws.h>
+#include <aws/dynamodb/DynamoDBClient.h>
+#include <aws/dynamodb/model/GetItemRequest.h>
+#include <aws/dynamodb/model/UpdateItemRequest.h>
+#include <iostream>
 
-dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table('Orders')
+int main() {
+    Aws::SDKOptions options;
+    Aws::InitAPI(options);
+    {
+        Aws::DynamoDB::DynamoDBClient client;
 
-# Eventually consistent read (default) — may return stale data
-# Lower latency, half the read capacity cost
-response = table.get_item(
-    Key={'orderId': 'ORD-12345'},
-    ConsistentRead=False  # default
-)
+        Aws::DynamoDB::Model::AttributeValue keyVal;
+        keyVal.SetS("ORD-12345");
 
-# Strongly consistent read — guaranteed latest data
-# Higher latency, full read capacity cost
-response = table.get_item(
-    Key={'orderId': 'ORD-12345'},
-    ConsistentRead=True
-)
+        // Eventually consistent read (default) -- may return stale data
+        // Lower latency, half the read capacity cost
+        Aws::DynamoDB::Model::GetItemRequest ecRead;
+        ecRead.SetTableName("Orders");
+        ecRead.AddKey("orderId", keyVal);
+        ecRead.SetConsistentRead(false);  // default
+        auto ecResult = client.GetItem(ecRead);
 
-# Conditional write for optimistic concurrency
-# Succeeds only if the version matches (compare-and-swap)
-try:
-    table.update_item(
-        Key={'orderId': 'ORD-12345'},
-        UpdateExpression='SET #s = :new_status, version = version + :one',
-        ConditionExpression='version = :expected_version',
-        ExpressionAttributeNames={'#s': 'status'},
-        ExpressionAttributeValues={
-            ':new_status': 'shipped',
-            ':expected_version': 3,
-            ':one': 1
+        // Strongly consistent read -- guaranteed latest data
+        // Higher latency, full read capacity cost
+        Aws::DynamoDB::Model::GetItemRequest scRead;
+        scRead.SetTableName("Orders");
+        scRead.AddKey("orderId", keyVal);
+        scRead.SetConsistentRead(true);
+        auto scResult = client.GetItem(scRead);
+
+        // Conditional write for optimistic concurrency
+        // Succeeds only if the version matches (compare-and-swap)
+        Aws::DynamoDB::Model::UpdateItemRequest updateReq;
+        updateReq.SetTableName("Orders");
+        updateReq.AddKey("orderId", keyVal);
+        updateReq.SetUpdateExpression(
+            "SET #s = :new_status, version = version + :one");
+        updateReq.SetConditionExpression("version = :expected_version");
+        updateReq.AddExpressionAttributeNames("#s", "status");
+
+        Aws::DynamoDB::Model::AttributeValue statusVal;
+        statusVal.SetS("shipped");
+        updateReq.AddExpressionAttributeValues(":new_status", statusVal);
+
+        Aws::DynamoDB::Model::AttributeValue versionVal;
+        versionVal.SetN("3");
+        updateReq.AddExpressionAttributeValues(":expected_version", versionVal);
+
+        Aws::DynamoDB::Model::AttributeValue oneVal;
+        oneVal.SetN("1");
+        updateReq.AddExpressionAttributeValues(":one", oneVal);
+
+        auto updateResult = client.UpdateItem(updateReq);
+        if (!updateResult.IsSuccess()) {
+            auto& error = updateResult.GetError();
+            if (error.GetErrorType() ==
+                Aws::DynamoDB::DynamoDBErrors::CONDITIONAL_CHECK_FAILED) {
+                std::cout << "Conflict: order was modified by another process"
+                          << std::endl;
+            }
         }
-    )
-except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
-    print("Conflict: order was modified by another process")`
+    }
+    Aws::ShutdownAPI(options);
+    return 0;
+}`
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Simulating eventual consistency convergence",
-      source: `import time
-import threading
-from collections import defaultdict
+      source: `#include <iostream>
+#include <string>
+#include <unordered_map>
+#include <vector>
+#include <thread>
+#include <mutex>
+#include <chrono>
+#include <optional>
+#include <algorithm>
 
-class EventuallyConsistentStore:
-    """Simulates an AP system with eventual consistency."""
+// Simulates an AP system with eventual consistency.
+class EventuallyConsistentStore {
+public:
+    using Clock = std::chrono::steady_clock;
+    using TimePoint = Clock::time_point;
+    using Entry = std::pair<std::string, TimePoint>;  // {value, timestamp}
+    using Replica = std::unordered_map<std::string, Entry>;
 
-    def __init__(self, num_replicas=3, replication_delay=0.1):
-        self.replicas = [dict() for _ in range(num_replicas)]
-        self.delay = replication_delay
-        self.lock = threading.Lock()
+    EventuallyConsistentStore(int numReplicas = 3,
+                              int replicationDelayMs = 100)
+        : replicas_(numReplicas), delayMs_(replicationDelayMs) {}
 
-    def write(self, key, value, replica_id=0):
-        """Write to one replica; propagate asynchronously."""
-        self.replicas[replica_id][key] = (value, time.time())
-        # Asynchronous replication to other replicas
-        for i in range(len(self.replicas)):
-            if i != replica_id:
-                threading.Timer(
-                    self.delay,
-                    self._replicate,
-                    args=(key, value, time.time(), i)
-                ).start()
+    // Write to one replica; propagate asynchronously.
+    void write(const std::string& key, const std::string& value,
+               int replicaId = 0) {
+        auto now = Clock::now();
+        replicas_[replicaId][key] = {value, now};
 
-    def _replicate(self, key, value, timestamp, target):
-        """Last-writer-wins replication."""
-        with self.lock:
-            existing = self.replicas[target].get(key)
-            if existing is None or existing[1] < timestamp:
-                self.replicas[target][key] = (value, timestamp)
+        // Asynchronous replication to other replicas
+        for (int i = 0; i < static_cast<int>(replicas_.size()); ++i) {
+            if (i != replicaId) {
+                std::thread([this, key, value, now, i]() {
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(delayMs_));
+                    replicate(key, value, now, i);
+                }).detach();
+            }
+        }
+    }
 
-    def read(self, key, replica_id=0):
-        """Read from a specific replica (may be stale)."""
-        entry = self.replicas[replica_id].get(key)
-        return entry[0] if entry else None
+    // Read from a specific replica (may be stale).
+    std::optional<std::string> read(const std::string& key,
+                                     int replicaId = 0) const {
+        auto it = replicas_[replicaId].find(key);
+        if (it == replicas_[replicaId].end()) return std::nullopt;
+        return it->second.first;
+    }
 
-    def read_quorum(self, key):
-        """Read from majority — returns most recent value."""
-        entries = []
-        for r in self.replicas:
-            if key in r:
-                entries.append(r[key])
-        if not entries:
-            return None
-        return max(entries, key=lambda e: e[1])[0]`
+    // Read from majority -- returns most recent value.
+    std::optional<std::string> readQuorum(const std::string& key) const {
+        std::vector<Entry> entries;
+        for (const auto& replica : replicas_) {
+            auto it = replica.find(key);
+            if (it != replica.end()) {
+                entries.push_back(it->second);
+            }
+        }
+        if (entries.empty()) return std::nullopt;
+        auto best = std::max_element(entries.begin(), entries.end(),
+            [](const Entry& a, const Entry& b) {
+                return a.second < b.second;
+            });
+        return best->first;
+    }
+
+private:
+    // Last-writer-wins replication.
+    void replicate(const std::string& key, const std::string& value,
+                   TimePoint timestamp, int target) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = replicas_[target].find(key);
+        if (it == replicas_[target].end() || it->second.second < timestamp) {
+            replicas_[target][key] = {value, timestamp};
+        }
+    }
+
+    std::vector<Replica> replicas_;
+    int delayMs_;
+    mutable std::mutex mutex_;
+};`
     },
   ],
   diagrams: [
@@ -384,5 +450,13 @@ class EventuallyConsistentStore:
     { term: "Vector clock", definition: "A mechanism for tracking causality in distributed systems. Each node maintains a vector of logical timestamps, enabling detection of concurrent (conflicting) updates." },
     { term: "Split brain", definition: "A failure mode where a network partition causes two subsets of a cluster to independently believe they are the active cluster, potentially leading to data divergence." },
     { term: "Hinted handoff", definition: "A technique where writes destined for an unavailable replica are temporarily stored on another node and delivered when the target recovers." },
+  ],
+
+  exercises: [
+    "You are designing a **global e-commerce platform** with users in the US, Europe, and Asia. For the *shopping cart* (must not lose items) and the *product recommendation feed* (can tolerate stale data), choose between a **CP** and **AP** system for each. Justify your choices using the CAP theorem, and explain what happens to each system during a *network partition* between the US and Europe data centers.",
+    "Set up a **Cassandra** cluster (or simulate one) with `replication_factor = 3`. Execute the same write and read with consistency levels `ONE`, `QUORUM`, and `ALL`. For each combination, determine: Does `R + W > N` hold? Is the read *guaranteed* to return the latest write? Measure the *latency difference* between `ONE` and `QUORUM`. When would you accept the staleness risk of `CONSISTENCY ONE`?",
+    "Implement a simple **eventually consistent key-value store** in C++ with 3 replicas (simulated as `std::unordered_map` instances). Writes go to one replica and propagate asynchronously using `std::thread`. Use **last-writer-wins** with `std::chrono` timestamps for conflict resolution. Demonstrate a scenario where two concurrent writes to the same key produce *different values* on different replicas, then show convergence after replication completes.",
+    "A startup asks you to choose a database for their **ride-sharing app**. They need: real-time driver location updates (*high write throughput*), passenger ride history (*read-heavy, eventual consistency OK*), and payment processing (*strong consistency required*). Would you use one database or multiple? Map each requirement to a **NoSQL category** (key-value, document, wide-column, graph) and a specific system. How does the **PACELC theorem** influence your choices?",
+    "Explain why a **CRDT-based counter** (G-Counter) converges without coordination, while a naive `counter++` operation on a replicated integer does not. Implement a `GCounter` in C++ where each of 3 nodes maintains a `std::map<nodeId, int>`. Define `increment(nodeId)`, `merge(otherCounter)`, and `value()` methods. Show that *any order* of merge operations produces the same final count."
   ],
 };

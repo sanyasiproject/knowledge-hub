@@ -308,4 +308,12 @@ async function loginWithMFA(email: string, password: string, totpCode?: string) 
     { term: "Argon2id", definition: "Recommended password hashing algorithm that is both CPU-hard and memory-hard, resistant to GPU and side-channel attacks." },
     { term: "Step-up authentication", definition: "Requiring additional authentication proof for sensitive operations within an already-authenticated session." },
   ],
+
+  exercises: [
+    "Design an **authentication flow** for a banking application that supports *three login methods*: password + TOTP, passwordless via WebAuthn, and magic link via email. For each method, identify which **authentication factors** are involved and classify them. Which method is most *phishing-resistant* and why?",
+    "You are building a **microservices architecture** with an API gateway, a user service, an order service, and a payment service. Draw out where *authentication* and *authorization* happen. The payment service requires **step-up authentication** for transfers over $1,000. How do you propagate the user's identity and permission context across service boundaries using `JWTs`?",
+    "Implement a simple **RBAC (Role-Based Access Control)** system in C++ that supports *users*, *roles*, and *permissions*. Define a `class AuthorizationEngine` with methods `bool hasPermission(userId, resource, action)` and `void assignRole(userId, role)`. How would you extend this to **ABAC** (Attribute-Based Access Control) to support rules like *\"managers can approve expenses under $5,000 during business hours\"*?",
+    "A penetration tester discovers that your login endpoint returns *\"Invalid password\"* for existing users and *\"User not found\"* for non-existent users. Explain the **security vulnerability** this creates (user enumeration), then fix the login flow. Additionally, explain why you should use a **timing-safe comparison** (e.g., `crypto.timingSafeEqual`) when verifying password hashes.",
+    "Compare **SAML 2.0** and **OpenID Connect (OIDC)** for implementing SSO in an enterprise with 50 internal applications. Consider: token format (`XML` vs `JWT`), flow complexity, mobile support, and ease of implementation. When would you choose one over the other? How does each handle *single logout* (SLO)?"
+  ],
 };

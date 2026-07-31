@@ -84,4 +84,404 @@ export const mcpServersTools: TopicContent = {
     { term: "inputSchema", definition: "A JSON Schema object defining a tool's parameter types, constraints, and required fields." },
     { term: "Capability", definition: "A feature (tools, resources, prompts, sampling) that a server or client declares support for during initialization." },
   ],
+  deepDive: [
+    "## How MCP Primitives Compose Into Real Server Architectures\n\nThe three primitives -- tools, resources, and prompts -- are not isolated features; they compose into cohesive server architectures that serve different layers of an AI application. A database MCP server, for instance, might expose resources for reading table schemas (`db://schemas/users`), tools for executing parameterized queries (`run_query`), and prompts for common analytical workflows (`analyze-table`). The resource gives the LLM context about what data is available, the tool lets it act on that data, and the prompt packages expert SQL knowledge. This layering means the LLM can discover what exists (resources), understand how to interact (prompts), and execute actions (tools) -- all through a single server connection. The capability declaration at initialization ensures clients only see what the server actually supports, preventing runtime errors from calling unsupported primitives.",
+    "## The Control Model Spectrum and Its Security Implications\n\nMCP's control model -- model-controlled tools, application-controlled resources, user-controlled prompts -- is a deliberate security architecture, not just an API design choice. Tools are the most powerful and most dangerous primitive: they let the LLM execute arbitrary server-side functions. This is why tool descriptions must be carefully crafted and why hosts typically implement confirmation dialogs before tool execution. Resources are safer because the host application decides when to read them; the LLM can suggest reading a resource, but the application mediates. Prompts are safest because the user explicitly selects them. Sampling adds a fourth dimension: the server requests LLM completions, but the client mediates every request through the host application. This human-in-the-loop design for sampling prevents a malicious server from using the client's model access for unauthorized purposes. Understanding this control spectrum is essential for building secure MCP integrations.",
+    "## Pagination, Change Notifications, and Dynamic Discovery\n\nProduction MCP servers often manage hundreds of tools and resources. MCP addresses this with pagination (`cursor`-based) on list operations (`tools/list`, `resources/list`, `prompts/list`) so clients can incrementally discover available primitives without overwhelming memory. Beyond static listing, servers can send change notifications (`notifications/tools/list_changed`, `notifications/resources/list_changed`) to inform clients that the available set has changed -- for example, when a new database table is created or a plugin is installed. Resources also support subscriptions (`resources/subscribe`) for content-level change tracking: a client can subscribe to `file:///config.yaml` and receive `notifications/resources/updated` whenever the file changes. This dynamic discovery model means MCP servers can adapt to their environment in real time rather than requiring restarts when the underlying system changes."
+  ],
+  code: [
+    {
+      language: "typescript",
+      caption: "Defining an MCP tool with inputSchema in the MCP SDK",
+      source: `import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+
+const server = new McpServer({
+  name: "weather-server",
+  version: "1.0.0",
+});
+
+// Define a tool with typed parameters using Zod schemas
+server.tool(
+  "get_weather",
+  "Get the current weather for a given city. Returns temperature, conditions, and humidity.",
+  {
+    city: z.string().describe("City name, e.g. 'San Francisco'"),
+    units: z.enum(["celsius", "fahrenheit"]).default("celsius")
+      .describe("Temperature unit preference"),
+  },
+  async ({ city, units }) => {
+    // In production, call a real weather API here
+    const temp = units === "celsius" ? 22 : 72;
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            city,
+            temperature: temp,
+            units,
+            conditions: "partly cloudy",
+            humidity: 65,
+          }, null, 2),
+        },
+      ],
+    };
+  }
+);`
+    },
+    {
+      language: "typescript",
+      caption: "Defining a resource and resource template for data access",
+      source: `import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+const server = new McpServer({
+  name: "docs-server",
+  version: "1.0.0",
+});
+
+// Static resource: listed upfront via resources/list
+server.resource(
+  "project-readme",
+  "file:///project/README.md",
+  { mimeType: "text/markdown" },
+  async (uri) => ({
+    contents: [
+      {
+        uri: uri.href,
+        mimeType: "text/markdown",
+        text: "# My Project\\nThis is the project readme content...",
+      },
+    ],
+  })
+);
+
+// Dynamic resource template: resolved on demand via URI pattern
+server.resource(
+  "user-profile",
+  new ResourceTemplate("db://users/{userId}", { list: undefined }),
+  { mimeType: "application/json" },
+  async (uri, { userId }) => {
+    // Look up user from database
+    const user = { id: userId, name: "Alice", role: "admin" };
+    return {
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "application/json",
+          text: JSON.stringify(user, null, 2),
+        },
+      ],
+    };
+  }
+);`
+    },
+    {
+      language: "typescript",
+      caption: "Server-side sampling: requesting an LLM completion from the client",
+      source: `import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+
+const server = new McpServer({
+  name: "summarizer-server",
+  version: "1.0.0",
+});
+
+// A tool that uses sampling to get an LLM completion
+server.tool(
+  "summarize_document",
+  "Summarize a document using the client's LLM via sampling",
+  { documentUri: z.string().describe("URI of the document to summarize") },
+  async ({ documentUri }, { sendRequest }) => {
+    // Read the document content (from a resource or filesystem)
+    const docContent = await fetchDocument(documentUri);
+
+    // Request an LLM completion from the client via sampling
+    const result = await sendRequest({
+      method: "sampling/createMessage",
+      params: {
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: \`Summarize the following document in 3 bullet points:\\n\\n\${docContent}\`,
+            },
+          },
+        ],
+        maxTokens: 500,
+        modelPreferences: {
+          hints: [{ name: "claude-sonnet-4-20250514" }],
+          intelligencePriority: 0.7,
+          speedPriority: 0.3,
+        },
+      },
+    });
+
+    return {
+      content: [{ type: "text", text: result.content.text }],
+    };
+  }
+);
+
+async function fetchDocument(uri: string): Promise<string> {
+  // Implementation: read from filesystem, database, or API
+  return "Document content here...";
+}`
+    },
+    {
+      language: "cpp",
+      caption: "Defining tools and resources for an MCP server in C++",
+      source: `// MCP server implementation in C++ using JSON-RPC message handling.
+// Demonstrates tool registration, input validation, and resource serving.
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <map>
+#include <functional>
+#include <nlohmann/json.hpp>  // JSON library
+
+using json = nlohmann::json;
+
+// Tool definition with JSON Schema for input validation
+struct ToolDef {
+    std::string name;
+    std::string description;
+    json input_schema;
+    std::function<json(const json&)> handler;
+};
+
+// Resource definition
+struct ResourceDef {
+    std::string uri;
+    std::string name;
+    std::string description;
+    std::string mime_type;
+    std::function<json(const std::string&)> handler;
+};
+
+class McpServer {
+public:
+    explicit McpServer(const std::string& server_name)
+        : name_(server_name) {}
+
+    void register_tool(ToolDef tool) {
+        tools_[tool.name] = std::move(tool);
+    }
+
+    void register_resource(ResourceDef resource) {
+        resources_[resource.uri] = std::move(resource);
+    }
+
+    // Handle JSON-RPC "tools/list" request
+    json handle_list_tools() const {
+        json tool_list = json::array();
+        for (const auto& [name, tool] : tools_) {
+            tool_list.push_back({
+                {"name", tool.name},
+                {"description", tool.description},
+                {"inputSchema", tool.input_schema}
+            });
+        }
+        return tool_list;
+    }
+
+    // Handle JSON-RPC "tools/call" request
+    json handle_call_tool(const std::string& name, const json& arguments) const {
+        auto it = tools_.find(name);
+        if (it == tools_.end()) {
+            throw std::runtime_error("Unknown tool: " + name);
+        }
+        return it->second.handler(arguments);
+    }
+
+    // Handle JSON-RPC "resources/list" request
+    json handle_list_resources() const {
+        json resource_list = json::array();
+        for (const auto& [uri, res] : resources_) {
+            resource_list.push_back({
+                {"uri", res.uri}, {"name", res.name},
+                {"description", res.description}, {"mimeType", res.mime_type}
+            });
+        }
+        return resource_list;
+    }
+
+    // Handle JSON-RPC "resources/read" request
+    json handle_read_resource(const std::string& uri) const {
+        auto it = resources_.find(uri);
+        if (it == resources_.end()) {
+            throw std::runtime_error("Unknown resource: " + uri);
+        }
+        return it->second.handler(uri);
+    }
+
+private:
+    std::string name_;
+    std::map<std::string, ToolDef> tools_;
+    std::map<std::string, ResourceDef> resources_;
+};
+
+int main() {
+    McpServer server("analytics-server");
+
+    // Register a "run_query" tool
+    server.register_tool({
+        "run_query",
+        "Execute a read-only SQL query against the analytics database",
+        {{"type", "object"},
+         {"properties", {
+             {"query", {{"type", "string"},
+                        {"description", "SQL SELECT query to execute"}}},
+             {"limit", {{"type", "integer"},
+                        {"description", "Max rows to return"},
+                        {"default", 100}}}
+         }},
+         {"required", {"query"}}},
+        [](const json& args) -> json {
+            std::string query = args.at("query").get<std::string>();
+            int limit = args.value("limit", 100);
+            // In production: execute query against database
+            json rows = json::array();
+            rows.push_back({{"id", 1}, {"name", "example"}, {"value", 42}});
+            return {{"content", {{{"type", "text"},
+                                  {"text", rows.dump(2)}}}}};
+        }
+    });
+
+    // Register a resource for database schemas
+    server.register_resource({
+        "db://schemas/tables",
+        "Database Tables",
+        "List of all tables and their schemas",
+        "application/json",
+        [](const std::string& uri) -> json {
+            json schemas = {{"users", {"id", "name", "email"}},
+                            {"orders", {"id", "user_id", "total"}}};
+            return {{"contents", {{{"uri", uri},
+                                   {"mimeType", "application/json"},
+                                   {"text", schemas.dump(2)}}}}};
+        }
+    });
+
+    // Demonstrate listing and calling
+    std::cout << "Tools: " << server.handle_list_tools().dump(2) << std::endl;
+    std::cout << "Resources: " << server.handle_list_resources().dump(2) << std::endl;
+
+    json result = server.handle_call_tool("run_query",
+        {{"query", "SELECT * FROM users"}, {"limit", 10}});
+    std::cout << "Query result: " << result.dump(2) << std::endl;
+
+    return 0;
+}`
+    }
+  ],
+  diagrams: [
+    {
+      title: "Tool Call Flow",
+      kind: "flow",
+      caption: "Complete lifecycle of an MCP tool invocation from user request to result display"
+    },
+    {
+      title: "Sampling Sequence Diagram",
+      kind: "sequence",
+      caption: "Server-initiated sampling request showing client mediation and host approval"
+    },
+    {
+      title: "MCP Primitives Architecture",
+      kind: "architecture",
+      caption: "How tools, resources, prompts, and sampling relate within the MCP server-client architecture"
+    },
+    {
+      title: "Resource Discovery and Subscription",
+      kind: "flow",
+      caption: "Flow of static listing, dynamic URI template resolution, and change subscriptions for resources"
+    }
+  ],
+  animations: [
+    {
+      title: "Tool Invocation Lifecycle",
+      steps: [
+        { label: "Client connects", detail: "The MCP client establishes a connection to the server via stdio or SSE transport and performs the initialize handshake, exchanging capability declarations." },
+        { label: "Tool discovery", detail: "The client sends tools/list to enumerate available tools. The server responds with an array of tool definitions, each containing name, description, and inputSchema (JSON Schema)." },
+        { label: "LLM selects tool", detail: "The user sends a message. The LLM reads the tool descriptions and decides which tool to call and what arguments to pass, based on the conversation context and the tool's description." },
+        { label: "Client sends tools/call", detail: "The client sends a tools/call JSON-RPC request to the server with the tool name and validated arguments. The client may show a confirmation dialog to the user before sending." },
+        { label: "Server executes", detail: "The server receives the request, validates the input against the schema, executes the tool logic (API call, database query, file operation, etc.), and constructs the result." },
+        { label: "Result returned", detail: "The server returns a result object containing content items (text, images, or embedded resources) and an optional isError flag. The client feeds this back into the LLM context." },
+        { label: "LLM incorporates result", detail: "The LLM receives the tool result, interprets it, and either responds to the user with a synthesized answer or decides to call another tool for further information." }
+      ]
+    },
+    {
+      title: "Sampling Request Flow",
+      steps: [
+        { label: "Server needs LLM", detail: "During tool execution or background processing, the server determines it needs an LLM completion -- for example, to summarize fetched data or classify an input." },
+        { label: "Server sends sampling/createMessage", detail: "The server sends a sampling/createMessage request to the client, including the messages array, maxTokens, and optional modelPreferences with hints and priority weights." },
+        { label: "Host mediates", detail: "The host application intercepts the sampling request. It may display the request to the user for approval, modify the messages, or reject the request entirely for security reasons." },
+        { label: "Client fulfills completion", detail: "After approval, the client sends the messages to its LLM (e.g., Claude) and receives the completion. The client returns the result to the server with the model name and stop reason." },
+        { label: "Server uses result", detail: "The server receives the LLM completion and incorporates it into its processing -- perhaps returning it as part of a tool result or using it to make a decision in a workflow." }
+      ]
+    }
+  ],
+  comparison: {
+    columns: ["Aspect", "Tools", "Resources", "Prompts"],
+    rows: [
+      ["Control model", "Model-controlled (LLM decides)", "Application-controlled (host decides)", "User-controlled (user selects)"],
+      ["Primary purpose", "Execute actions and computations", "Provide read access to data", "Package reusable prompt templates"],
+      ["Invocation method", "tools/call with name + arguments", "resources/read with URI", "prompts/get with name + arguments"],
+      ["Discovery method", "tools/list (paginated)", "resources/list + URI templates", "prompts/list (paginated)"],
+      ["Input definition", "inputSchema (JSON Schema)", "URI or URI template parameters", "arguments array with name and description"],
+      ["Return type", "Content array (text, image, resource)", "Content array with URI and MIME type", "Structured messages with roles"],
+      ["Side effects", "Yes -- can modify state", "No -- read-only by convention", "No -- returns template only"],
+      ["Change notification", "notifications/tools/list_changed", "notifications/resources/list_changed + subscribe", "notifications/prompts/list_changed"],
+      ["Typical use case", "API calls, DB queries, file writes", "Config files, schemas, documents", "Code review workflows, analysis templates"],
+      ["Security concern", "Highest -- executes arbitrary logic", "Low -- read-only data access", "Low -- user explicitly selects"]
+    ]
+  },
+  exercises: [
+    "Build an MCP server that exposes a `search_files` tool accepting a query string and directory path, and returns matching filenames with line numbers. Include proper inputSchema with required/optional fields and descriptions.",
+    "Create a resource provider that serves database table schemas via URIs like `db://schemas/{tableName}`. Implement both `resources/list` to enumerate available tables and the URI template handler for dynamic resolution.",
+    "Implement a prompt template called `code-review` that takes a `language` argument and a `diff` argument, and returns structured messages guiding the LLM through a systematic code review with specific checkpoints.",
+    "Design an MCP server that combines all three primitives: resources for reading log files, tools for searching and filtering logs, and a prompt template for incident investigation workflows. Consider how the primitives reference each other.",
+    "Extend an existing tool definition to use sampling: build a `classify_ticket` tool that reads a support ticket (via resource), then uses sampling to ask the client's LLM to classify its priority and category before returning the result."
+  ],
+  cheatSheet: [
+    "**Tool definition**: `server.tool(name, description, zodSchema, handler)` -- description drives LLM selection, keep it specific and action-oriented",
+    "**Resource definition**: `server.resource(name, uri | ResourceTemplate, options, handler)` -- use static URIs for fixed data, URI templates for parameterized access",
+    "**Prompt definition**: `server.prompt(name, description, argsSchema, handler)` -- return `{ messages: [{ role, content }] }` with role-tagged structured messages",
+    "**Sampling request**: `sendRequest({ method: 'sampling/createMessage', params: { messages, maxTokens, modelPreferences } })` -- always set maxTokens to prevent runaway completions",
+    "**Control spectrum**: Tools = model-controlled, Resources = application-controlled, Prompts = user-controlled -- this determines who initiates the action",
+    "**List operations** support cursor-based pagination: pass `cursor` from previous response to get the next page of results",
+    "**Change notifications**: servers emit `notifications/tools/list_changed`, `notifications/resources/list_changed`, `notifications/prompts/list_changed` when primitives are added or removed",
+    "**Tool results** can contain mixed content types: `{ type: 'text', text }`, `{ type: 'image', data, mimeType }`, or `{ type: 'resource', resource: { uri, text } }`"
+  ],
+  revisionNotes: [
+    "MCP servers expose three core primitives: **tools** (executable functions), **resources** (readable data), and **prompts** (reusable templates), plus **sampling** (server-requested LLM completions).",
+    "Each primitive has a distinct control model: tools are model-controlled (LLM decides), resources are application-controlled (host decides), prompts are user-controlled (user selects).",
+    "Tools require a `name`, `description`, and `inputSchema` (JSON Schema). The description is critical because the LLM uses it to decide when and how to call the tool.",
+    "Resources are identified by URIs and can be static (listed via `resources/list`) or dynamic (resolved via URI templates like `db://users/{id}`).",
+    "Sampling inverts the flow: the server requests an LLM completion from the client via `sampling/createMessage`. The host application mediates every request for security.",
+    "All list operations (`tools/list`, `resources/list`, `prompts/list`) support cursor-based pagination for servers with many primitives.",
+    "Servers declare supported capabilities during initialization; clients also declare theirs. The intersection determines what is available in the session.",
+    "Change notifications (`notifications/tools/list_changed`, etc.) allow servers to dynamically add or remove primitives without requiring reconnection."
+  ],
+  resources: [
+    { label: "MCP Specification", kind: "docs", note: "The official Model Context Protocol specification covering all primitives, transport, and lifecycle" },
+    { label: "MCP TypeScript SDK", kind: "repo", note: "Official TypeScript SDK with McpServer class, Zod schema integration, and transport implementations" },
+    { label: "MCP Python SDK", kind: "repo", note: "Official Python SDK with decorator-based tool/resource/prompt registration" },
+    { label: "Building MCP Servers (Anthropic Docs)", kind: "docs", note: "Step-by-step guide to building MCP servers with tool, resource, and prompt examples" },
+    { label: "MCP Tools Documentation", kind: "docs", note: "Detailed reference for tool definitions, inputSchema, and tool call lifecycle" },
+    { label: "MCP Resources Documentation", kind: "docs", note: "Reference for resource URIs, templates, subscriptions, and change notifications" },
+    { label: "Model Context Protocol GitHub", kind: "repo", note: "Main MCP organization with specification, SDKs, and reference server implementations" },
+    { label: "Introduction to MCP (Anthropic Blog)", kind: "article", note: "High-level overview of MCP architecture, primitives, and the problems it solves" }
+  ],
+  followUps: [
+    "How does MCP transport (stdio vs SSE vs Streamable HTTP) affect which primitives are available?",
+    "What are best practices for writing tool descriptions that help the LLM make accurate invocation decisions?",
+    "How do you implement authorization and access control for sensitive MCP tools?",
+    "What is the relationship between MCP sampling and prompt injection risks?",
+    "How do you test MCP servers -- unit testing tools, integration testing with a client, and end-to-end testing?",
+    "How do resource subscriptions work under the hood, and when should you use them versus polling?",
+    "What patterns exist for composing multiple MCP servers in a single client session?"
+  ],
 };

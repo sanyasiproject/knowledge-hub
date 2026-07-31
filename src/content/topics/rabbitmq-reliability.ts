@@ -163,4 +163,335 @@ DLX is configured on the queue via the \`x-dead-letter-exchange\` argument (and 
         "A delivery guarantee ensuring messages are never lost but may be delivered multiple times. Achieved with publisher confirms, persistent messages, and manual consumer acks.",
     },
   ],
+  deepDive: [
+    `**Publisher confirms** are the cornerstone of reliable message publishing in RabbitMQ, and understanding their *internal mechanics* is essential for production systems. When a channel enters confirm mode via \`confirm.select\`, the broker assigns a **monotonically increasing delivery tag** (starting at 1) to each published message. After the broker has *handled* the message — meaning it has been either **routed to at least one queue** (for transient messages) or **fsynced to disk** (for persistent messages on durable queues) — it sends a \`basic.ack\` back to the publisher with that delivery tag. If the broker encounters an *internal error* and cannot handle the message, it sends a \`basic.nack\`. The \`multiple\` flag on acks is critical for throughput: when \`multiple=true\`, a single ack with tag N confirms *all messages up to and including N*. There are three implementation patterns: **synchronous** (call \`waitForConfirms()\` after each publish — simple but limits throughput to one round-trip per message), **batch** (publish N messages, then call \`waitForConfirms()\` — better throughput but if any message nacks, you must republish the entire batch), and **asynchronous** (register callbacks via \`channel.on('ack')\` and \`channel.on('nack')\` — highest throughput, as publishing never blocks). In amqplib, the \`createConfirmChannel()\` method returns a channel that automatically tracks delivery tags and provides a callback on each \`publish()\` call, making async confirms straightforward.`,
+
+    `**Consumer acknowledgments** control the *lifecycle of a message in the queue* and directly determine the delivery guarantee semantics. When a message is delivered to a consumer, it enters an **unacknowledged** state — the broker holds it in memory, tracked by the channel-scoped \`deliveryTag\`. Three operations resolve this state: \`basic.ack\` (positive acknowledgment — the message is *permanently removed* from the queue), \`basic.nack\` (negative acknowledgment — with \`requeue=true\`, the message goes back to the queue *head* for redelivery; with \`requeue=false\`, it is either discarded or routed to the **dead letter exchange** if configured), and \`basic.reject\` (identical to nack but without the \`multiple\` flag — it operates on a single message only). The **prefetch count** (\`basic.qos\`) is inseparable from acknowledgment strategy: it limits the number of unacknowledged messages the broker will deliver to a consumer. Setting prefetch to \`1\` ensures *fair dispatch* among competing consumers (slow consumers get fewer messages) but reduces throughput due to the per-message round-trip. Setting it to \`10-50\` improves throughput by allowing the broker to pipeline deliveries. Setting it to \`0\` (unlimited) is **dangerous** in production — a slow consumer will accumulate unbounded unacked messages in memory, potentially triggering the broker's memory alarm. The \`redelivered\` flag on delivered messages indicates a message has been delivered before, which is essential for consumers implementing *idempotency checks*.`,
+
+    `**Dead letter exchanges (DLX)** and **retry patterns** form the backbone of *fault-tolerant message processing*. A DLX is simply a regular exchange designated to receive messages that could not be processed normally. Three events trigger dead-lettering: a consumer **rejects or nacks** a message with \`requeue=false\`, a message's **TTL expires** (either per-message via the \`expiration\` property or per-queue via the \`x-message-ttl\` argument), or a queue **overflows** its \`x-max-length\` or \`x-max-length-bytes\` limit (the oldest messages are dead-lettered to make room). The most powerful pattern built on DLX is the **retry with exponential backoff** architecture. The setup uses multiple "wait" queues with increasing TTLs: \`retry.1s\` (1-second TTL), \`retry.5s\` (5-second TTL), \`retry.30s\` (30-second TTL). Each wait queue has its \`x-dead-letter-exchange\` pointing back to the *original exchange*. When a consumer fails to process a message, it reads the \`x-retry-count\` header, increments it, and publishes the message to the appropriate wait queue based on the count. After the TTL expires, the message dead-letters back to the original exchange for reprocessing. After a maximum number of retries (e.g., 5), the message is routed to a **parking lot queue** for manual inspection. This pattern requires consumers to be **idempotent** — since messages may be processed multiple times, each processing must produce the same result. Common idempotency strategies include storing processed \`messageId\` values in a database and using *conditional writes* (e.g., \`UPDATE ... WHERE status = 'pending'\`).`,
+  ],
+  code: [
+    {
+      language: "typescript",
+      caption: "Publisher confirms with async callback pattern for maximum throughput",
+      source: `const amqp = require('amqplib');
+
+async function reliablePublisher() {
+  const connection = await amqp.connect('amqp://localhost');
+
+  // createConfirmChannel enables publisher confirms automatically
+  const channel = await connection.createConfirmChannel();
+
+  const exchange = 'orders.direct';
+  await channel.assertExchange(exchange, 'direct', { durable: true });
+
+  // Track outstanding confirms
+  let confirmed = 0;
+  let nacked = 0;
+
+  const messages = Array.from({ length: 100 }, (_, i) => ({
+    orderId: \`ORD-\${i + 1}\`,
+    amount: Math.random() * 100,
+  }));
+
+  // Publish all messages with per-message callbacks
+  const publishPromises = messages.map((msg, i) => {
+    return new Promise<void>((resolve, reject) => {
+      channel.publish(
+        exchange,
+        'order.new',
+        Buffer.from(JSON.stringify(msg)),
+        {
+          persistent: true,       // delivery-mode = 2
+          messageId: \`msg-\${i}\`,
+          contentType: 'application/json',
+          timestamp: Math.floor(Date.now() / 1000),
+        },
+        (err) => {
+          if (err) {
+            nacked++;
+            console.error(\`NACK for message \${i}:\`, err.message);
+            reject(err);
+          } else {
+            confirmed++;
+            resolve();
+          }
+        }
+      );
+    });
+  });
+
+  await Promise.allSettled(publishPromises);
+  console.log(\`Results: \${confirmed} confirmed, \${nacked} nacked\`);
+
+  await channel.close();
+  await connection.close();
+}
+
+reliablePublisher().catch(console.error);`,
+    },
+    {
+      language: "typescript",
+      caption: "Consumer with manual ack, nack, and DLX-based retry pattern",
+      source: `const amqp = require('amqplib');
+
+const MAX_RETRIES = 5;
+
+async function resilientConsumer() {
+  const connection = await amqp.connect('amqp://localhost');
+  const channel = await connection.createChannel();
+
+  // Declare the DLX and parking lot queue
+  const dlxExchange = 'dlx.orders';
+  await channel.assertExchange(dlxExchange, 'direct', { durable: true });
+  await channel.assertQueue('orders.parking-lot', { durable: true });
+  await channel.bindQueue('orders.parking-lot', dlxExchange, 'parking-lot');
+
+  // Declare retry queue with TTL — messages dead-letter back to main exchange
+  await channel.assertQueue('orders.retry', {
+    durable: true,
+    arguments: {
+      'x-message-ttl': 5000,                    // Wait 5 seconds
+      'x-dead-letter-exchange': 'orders.direct', // Then retry
+      'x-dead-letter-routing-key': 'order.new',
+    },
+  });
+  await channel.bindQueue('orders.retry', dlxExchange, 'retry');
+
+  // Main queue with DLX configured
+  const mainQueue = 'orders.processing';
+  await channel.assertExchange('orders.direct', 'direct', { durable: true });
+  await channel.assertQueue(mainQueue, {
+    durable: true,
+    arguments: {
+      'x-dead-letter-exchange': dlxExchange,
+      'x-dead-letter-routing-key': 'retry',
+    },
+  });
+  await channel.bindQueue(mainQueue, 'orders.direct', 'order.new');
+
+  await channel.prefetch(10);
+
+  channel.consume(mainQueue, async (msg) => {
+    if (!msg) return;
+
+    const retryCount = (msg.properties.headers['x-retry-count'] || 0);
+    const order = JSON.parse(msg.content.toString());
+
+    try {
+      console.log(\`Processing order \${order.orderId} (attempt \${retryCount + 1})\`);
+
+      // Simulate processing that might fail
+      if (Math.random() < 0.3) throw new Error('Transient failure');
+
+      channel.ack(msg);
+      console.log(\`Order \${order.orderId} processed successfully\`);
+    } catch (err) {
+      if (retryCount >= MAX_RETRIES) {
+        console.error(\`Order \${order.orderId} exceeded max retries — parking\`);
+        // Send to parking lot directly
+        channel.publish(dlxExchange, 'parking-lot',
+          msg.content,
+          { persistent: true, headers: { ...msg.properties.headers, 'x-final-error': err.message } }
+        );
+        channel.ack(msg); // Ack the original to remove from main queue
+      } else {
+        console.warn(\`Order \${order.orderId} failed (attempt \${retryCount + 1}), retrying...
+\`);
+        // Republish to retry queue with incremented count
+        channel.publish(dlxExchange, 'retry',
+          msg.content,
+          { persistent: true, headers: { ...msg.properties.headers, 'x-retry-count': retryCount + 1 } }
+        );
+        channel.ack(msg);
+      }
+    }
+  }, { noAck: false });
+
+  console.log('Resilient consumer started with retry logic');
+}
+
+resilientConsumer().catch(console.error);`,
+    },
+    {
+      language: "typescript",
+      caption: "Persistent messages with durable queues — full reliability setup",
+      source: `const amqp = require('amqplib');
+
+async function fullReliabilitySetup() {
+  const connection = await amqp.connect('amqp://localhost');
+  const channel = await connection.createConfirmChannel();
+
+  // 1. Durable exchange (survives restart)
+  await channel.assertExchange('payments.topic', 'topic', { durable: true });
+
+  // 2. Durable queue (survives restart)
+  await channel.assertQueue('payments.process', {
+    durable: true,
+    arguments: {
+      'x-queue-type': 'quorum',             // Raft replication for HA
+      'x-quorum-initial-group-size': 3,      // 3-node replication
+      'x-dead-letter-exchange': 'dlx.payments',
+      'x-delivery-limit': 5,                 // Auto dead-letter after 5 attempts
+    },
+  });
+
+  await channel.bindQueue('payments.process', 'payments.topic', 'payment.*');
+
+  // 3. Publish persistent message with confirm
+  const payment = {
+    paymentId: 'PAY-001',
+    amount: 150.00,
+    currency: 'USD',
+    idempotencyKey: 'idem-abc-123',  // For consumer-side deduplication
+  };
+
+  await new Promise<void>((resolve, reject) => {
+    channel.publish(
+      'payments.topic',
+      'payment.received',
+      Buffer.from(JSON.stringify(payment)),
+      {
+        persistent: true,          // delivery-mode = 2 (written to disk)
+        mandatory: true,           // Return if unroutable
+        contentType: 'application/json',
+        messageId: payment.idempotencyKey,
+        timestamp: Math.floor(Date.now() / 1000),
+      },
+      (err) => err ? reject(err) : resolve()
+    );
+  });
+
+  // Handle mandatory returns (unroutable messages)
+  channel.on('return', (msg) => {
+    console.error('Message returned (unroutable):', msg.fields.routingKey);
+  });
+
+  console.log('Payment published with full reliability guarantees');
+  await channel.close();
+  await connection.close();
+}
+
+fullReliabilitySetup().catch(console.error);`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Publisher Confirm Flow",
+      kind: "sequence",
+      caption: "The lifecycle of a message from publish to broker confirmation, showing ack and nack paths.",
+      mermaid: `sequenceDiagram
+  participant P as Publisher
+  participant Ch as Channel (confirm mode)
+  participant Ex as Exchange
+  participant Q as Durable Queue
+  participant Disk as Disk (fsync)
+
+  P->>Ch: confirm.select
+  Ch-->>P: confirm.select-ok
+
+  P->>Ch: basic.publish (persistent, tag=1)
+  Ch->>Ex: Route message
+  Ex->>Q: Deliver to matched queue
+  Q->>Disk: Write to disk
+  Disk-->>Q: fsync complete
+  Q-->>Ch: Message handled
+  Ch-->>P: basic.ack (tag=1)
+
+  P->>Ch: basic.publish (persistent, tag=2)
+  Ch->>Ex: Route message
+  Note over Ex: Internal error
+  Ch-->>P: basic.nack (tag=2)`,
+    },
+    {
+      title: "Dead Letter Exchange Retry Architecture",
+      kind: "architecture",
+      caption: "DLX-based retry pattern with exponential backoff using TTL queues and a parking lot for exhausted retries.",
+      mermaid: `graph LR
+  P[Producer] -->|publish| ME[Main Exchange]
+  ME -->|binding| MQ[Main Queue]
+  MQ -->|consume| C[Consumer]
+
+  C -->|ack| MQ
+  C -->|nack requeue=false| DLX[Dead Letter Exchange]
+
+  DLX -->|retry count < max| RQ1[Retry Queue 1s TTL]
+  DLX -->|retry count < max| RQ2[Retry Queue 5s TTL]
+  DLX -->|retry count < max| RQ3[Retry Queue 30s TTL]
+
+  RQ1 -->|TTL expired| ME
+  RQ2 -->|TTL expired| ME
+  RQ3 -->|TTL expired| ME
+
+  DLX -->|retry count >= max| PLQ[Parking Lot Queue]
+  PLQ -->|manual inspection| Admin[Admin Dashboard]`,
+    },
+    {
+      title: "Message Delivery Guarantees State Machine",
+      kind: "state",
+      caption: "State transitions for a message under different delivery guarantee modes.",
+      mermaid: `stateDiagram-v2
+  [*] --> Published: Producer publishes
+
+  state "At-Most-Once" as AMO {
+    Published --> Delivered: auto-ack
+    Delivered --> Lost: Consumer crashes
+    Delivered --> Processed: Success
+  }
+
+  state "At-Least-Once" as ALO {
+    Published --> Confirmed: Publisher confirm
+    Confirmed --> Queued: Persisted to disk
+    Queued --> Processing: Consumer receives
+    Processing --> Acked: basic.ack
+    Processing --> Redelivered: Consumer crash / nack+requeue
+    Redelivered --> Processing: Redelivery
+    Acked --> [*]
+  }
+
+  state "Exactly-Once (approx)" as EO {
+    Published --> Confirmed2: Publisher confirm
+    Confirmed2 --> Queued2: Persisted
+    Queued2 --> DedupCheck: Consumer receives
+    DedupCheck --> Skipped: Already processed
+    DedupCheck --> ProcessAndRecord: New messageId
+    ProcessAndRecord --> Acked2: Atomic ack + DB write
+    Acked2 --> [*]
+  }`,
+    },
+  ],
+  comparison: {
+    columns: ["Aspect", "At-Most-Once", "At-Least-Once", "Exactly-Once (Approx)"],
+    rows: [
+      ["**Message loss**", "*Possible* — auto-ack, no persistence", "*Never* — confirms + persistence + manual ack", "*Never* — same as at-least-once"],
+      ["**Duplicates**", "*None* — each message delivered at most once", "*Possible* — redelivery on consumer crash", "*None* — consumer-side deduplication"],
+      ["**Publisher setup**", "No confirms, `persistent: false`", "`createConfirmChannel()`, `persistent: true`", "`createConfirmChannel()`, `persistent: true`"],
+      ["**Consumer setup**", "`noAck: true`", "`noAck: false`, manual `channel.ack(msg)`", "Manual ack + **idempotency store** (`messageId` tracking)"],
+      ["**Queue type**", "Transient or classic", "**Durable** classic or *quorum*", "**Quorum** queue recommended"],
+      ["**Performance**", "*Fastest* — no overhead", "Moderate — disk writes + ack round-trips", "*Slowest* — DB lookup per message"],
+      ["**Use cases**", "Logs, metrics, non-critical notifications", "**Most production workloads** — payments, orders", "Financial transactions, exactly-once business operations"],
+    ],
+  },
+  exercises: [
+    "**Implement publisher confirms** with all three patterns: (1) *synchronous* — publish one message and call `waitForConfirms()`, (2) *batch* — publish 50 messages then `waitForConfirms()`, (3) *async* — use `createConfirmChannel()` with per-message callbacks. Measure the **throughput** (messages/second) of each pattern.",
+    "**Build a DLX retry system** with exponential backoff: create three retry queues with TTLs of `1s`, `5s`, and `30s`. Track the `x-retry-count` header. After 5 retries, route to a **parking lot queue**. Simulate consumer failures and verify that messages cycle through the retry queues correctly.",
+    "**Demonstrate message persistence**: publish 100 messages — 50 with `persistent: true` and 50 with `persistent: false` — to a *durable* queue. Restart the RabbitMQ broker and verify which messages survive. Repeat with a *transient* queue to confirm **both** queue durability and message persistence are required.",
+    "**Implement idempotent consumers**: create a consumer that tracks processed `messageId` values in a `Map` (simulating a database). Publish 10 messages, then manually requeue 5 of them. Verify the consumer detects and *skips* the duplicates while processing new messages normally.",
+    "**Compare auto-ack vs manual-ack**: write two consumers for the same queue — one with `noAck: true` and one with `noAck: false`. Publish 100 messages, then kill each consumer mid-processing. Count how many messages are *lost* vs *redelivered* in each mode.",
+  ],
+  cheatSheet: [
+    "**Publisher confirms**: `createConfirmChannel()` in amqplib. Broker sends `basic.ack` after handling (disk write or queue delivery). **250x faster** than AMQP transactions.",
+    "**Consumer ack**: `channel.ack(msg)` removes message. `channel.nack(msg, false, false)` sends to DLX. `channel.nack(msg, false, true)` requeues to queue head.",
+    "**Persistence trifecta**: *durable exchange* + *durable queue* + `persistent: true` (delivery-mode=2). Missing **any one** = message loss on broker restart.",
+    "**Dead lettering triggers**: (1) `nack`/`reject` with `requeue=false`, (2) **TTL expiry** (per-message or per-queue), (3) queue **overflow** (`x-max-length` or `x-max-length-bytes`).",
+    "**Retry pattern**: retry queue with `x-message-ttl` + `x-dead-letter-exchange` pointing back to main exchange. Track `x-retry-count` in headers. Route to *parking lot* after max retries.",
+    "**Exactly-once approximation**: at-least-once delivery + **idempotent consumer** using `messageId` deduplication. Store processed IDs in a database with an atomic *process + record* transaction.",
+  ],
+  revisionNotes: [
+    "**Publisher confirms** are the recommended way to ensure messages reach the broker. The broker acks after the message is *persisted* (for persistent messages) or *routed* (for transient messages). Async confirms via `createConfirmChannel()` provide the best throughput. AMQP transactions (`tx.select/tx.commit`) are **250x slower**.",
+    "**Consumer acks** determine when a message is removed from the queue. `noAck: true` = at-most-once (message lost if consumer crashes). `noAck: false` + manual `ack` = at-least-once (message redelivered if consumer crashes before acking). The `redelivered` flag identifies retried messages.",
+    "**Message persistence** requires THREE things: *durable exchange*, *durable queue*, and `delivery-mode=2`. Even then, there is a small window between broker receiving the message and fsyncing to disk — **publisher confirms close this gap** by acking only after fsync.",
+    "**Dead letter exchanges** handle three failure scenarios: consumer rejection (`requeue=false`), TTL expiry, and queue overflow. The DLX-based retry pattern with TTL queues provides **automatic retry with backoff**. Always set a maximum retry count to avoid infinite loops — route exhausted messages to a *parking lot queue*.",
+    "**Exactly-once delivery** is not natively supported by RabbitMQ. Approximate it by combining *at-least-once delivery* with **idempotent consumers** — track processed `messageId` values in a persistent store and skip duplicates. Use **quorum queues** with `x-delivery-limit` for automatic poison message handling.",
+  ],
 };

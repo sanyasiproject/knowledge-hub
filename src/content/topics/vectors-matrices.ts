@@ -22,58 +22,134 @@ export const vectorsMatrices: TopicContent = {
   ],
   code: [
     {
-      language: "python",
-      caption: "Core vector and matrix operations with NumPy",
-      source: `import numpy as np
+      language: "cpp",
+      caption: "Core vector and matrix operations",
+      source: `#include <iostream>
+#include <array>
+#include <cmath>
+#include <iomanip>
 
-# --- Vector operations ---
-a = np.array([1, 2, 3])
-b = np.array([4, 5, 6])
+// --- Vector operations (3D) ---
+using Vec3 = std::array<double, 3>;
 
-dot = np.dot(a, b)          # 1*4 + 2*5 + 3*6 = 32
-cross = np.cross(a, b)      # [-3, 6, -3]
-l2_norm = np.linalg.norm(a) # sqrt(1+4+9) = 3.742
-cosine_sim = dot / (np.linalg.norm(a) * np.linalg.norm(b))
+double dot(const Vec3& a, const Vec3& b) {
+    return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+}
 
-# --- Matrix operations ---
-A = np.array([[1, 2], [3, 4]])
-B = np.array([[5, 6], [7, 8]])
+Vec3 cross(const Vec3& a, const Vec3& b) {
+    return {a[1]*b[2] - a[2]*b[1],
+            a[2]*b[0] - a[0]*b[2],
+            a[0]*b[1] - a[1]*b[0]};
+}
 
-product = A @ B              # matrix multiply
-trans = A.T                  # transpose
-det = np.linalg.det(A)       # determinant = -2
-inv = np.linalg.inv(A)       # inverse (only if det != 0)
+double norm(const Vec3& v) { return std::sqrt(dot(v, v)); }
 
-# Verify inverse: A @ A_inv ≈ I
-print(np.allclose(A @ inv, np.eye(2)))  # True`,
+// --- Matrix operations (2x2) ---
+using Mat2 = std::array<std::array<double, 2>, 2>;
+
+Mat2 mat_mul(const Mat2& A, const Mat2& B) {
+    return {{{A[0][0]*B[0][0] + A[0][1]*B[1][0], A[0][0]*B[0][1] + A[0][1]*B[1][1]},
+             {A[1][0]*B[0][0] + A[1][1]*B[1][0], A[1][0]*B[0][1] + A[1][1]*B[1][1]}}};
+}
+
+Mat2 transpose(const Mat2& A) {
+    return {{{A[0][0], A[1][0]}, {A[0][1], A[1][1]}}};
+}
+
+double det(const Mat2& A) { return A[0][0]*A[1][1] - A[0][1]*A[1][0]; }
+
+Mat2 inverse(const Mat2& A) {
+    double d = det(A);
+    return {{{ A[1][1]/d, -A[0][1]/d},
+             {-A[1][0]/d,  A[0][0]/d}}};
+}
+
+int main() {
+    Vec3 a = {1, 2, 3}, b = {4, 5, 6};
+
+    double d = dot(a, b);             // 1*4 + 2*5 + 3*6 = 32
+    Vec3 c = cross(a, b);             // [-3, 6, -3]
+    double l2 = norm(a);              // sqrt(1+4+9) = 3.742
+    double cosine_sim = d / (norm(a) * norm(b));
+
+    std::cout << "dot = " << d << "\\n";
+    std::cout << "cross = [" << c[0] << ", " << c[1] << ", " << c[2] << "]\\n";
+    std::cout << "L2 norm = " << l2 << "\\n";
+    std::cout << "cosine sim = " << cosine_sim << "\\n";
+
+    Mat2 A = {{{1, 2}, {3, 4}}};
+    Mat2 B = {{{5, 6}, {7, 8}}};
+
+    Mat2 product = mat_mul(A, B);     // matrix multiply
+    Mat2 trans = transpose(A);        // transpose
+    double determinant = det(A);      // -2
+    Mat2 inv = inverse(A);            // inverse (det != 0)
+
+    // Verify: A * A_inv approx I
+    Mat2 check = mat_mul(A, inv);
+    bool is_identity = std::abs(check[0][0] - 1) < 1e-9
+                    && std::abs(check[1][1] - 1) < 1e-9
+                    && std::abs(check[0][1]) < 1e-9
+                    && std::abs(check[1][0]) < 1e-9;
+    std::cout << "A * A_inv == I: " << std::boolalpha << is_identity << "\\n";
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "2-D rotation matrix and affine transformation",
-      source: `import numpy as np
+      source: `#include <iostream>
+#include <cmath>
+#include <array>
+#include <iomanip>
 
-def rotation_matrix(theta):
-    """Return 2x2 rotation matrix for angle theta (radians)."""
-    c, s = np.cos(theta), np.sin(theta)
-    return np.array([[c, -s],
-                     [s,  c]])
+using Vec2 = std::array<double, 2>;
+using Mat2 = std::array<std::array<double, 2>, 2>;
+using Vec3 = std::array<double, 3>;
+using Mat3 = std::array<std::array<double, 3>, 3>;
 
-# Rotate point (1, 0) by 90 degrees
-R = rotation_matrix(np.pi / 2)
-point = np.array([1, 0])
-rotated = R @ point          # ≈ [0, 1]
+// Return 2x2 rotation matrix for angle theta (radians)
+Mat2 rotation_matrix(double theta) {
+    double c = std::cos(theta), s = std::sin(theta);
+    return {{{ c, -s},
+             { s,  c}}};
+}
 
-# Affine transform: 3x3 matrix for rotation + translation
-def affine_2d(theta, tx, ty):
-    c, s = np.cos(theta), np.sin(theta)
-    return np.array([[c, -s, tx],
-                     [s,  c, ty],
-                     [0,  0,  1]])
+Vec2 mat_vec_mul(const Mat2& M, const Vec2& v) {
+    return {M[0][0]*v[0] + M[0][1]*v[1],
+            M[1][0]*v[0] + M[1][1]*v[1]};
+}
 
-# Apply to homogeneous coordinate [x, y, 1]
-T = affine_2d(np.pi / 4, 5, 3)
-p_h = np.array([1, 0, 1])    # homogeneous
-result = T @ p_h              # rotated then translated`,
+// Affine transform: 3x3 matrix for rotation + translation
+Mat3 affine_2d(double theta, double tx, double ty) {
+    double c = std::cos(theta), s = std::sin(theta);
+    return {{{ c, -s, tx},
+             { s,  c, ty},
+             { 0,  0,  1}}};
+}
+
+Vec3 mat3_vec_mul(const Mat3& M, const Vec3& v) {
+    return {M[0][0]*v[0] + M[0][1]*v[1] + M[0][2]*v[2],
+            M[1][0]*v[0] + M[1][1]*v[1] + M[1][2]*v[2],
+            M[2][0]*v[0] + M[2][1]*v[1] + M[2][2]*v[2]};
+}
+
+int main() {
+    constexpr double PI = 3.14159265358979323846;
+
+    // Rotate point (1, 0) by 90 degrees
+    Mat2 R = rotation_matrix(PI / 2);
+    Vec2 point = {1, 0};
+    Vec2 rotated = mat_vec_mul(R, point);  // approx [0, 1]
+    std::cout << std::fixed << std::setprecision(4);
+    std::cout << "Rotated: [" << rotated[0] << ", " << rotated[1] << "]\\n";
+
+    // Affine transform: apply to homogeneous coordinate [x, y, 1]
+    Mat3 T = affine_2d(PI / 4, 5, 3);
+    Vec3 p_h = {1, 0, 1};  // homogeneous
+    Vec3 result = mat3_vec_mul(T, p_h);  // rotated then translated
+    std::cout << "Affine result: [" << result[0] << ", "
+              << result[1] << ", " << result[2] << "]\\n";
+}`,
     },
   ],
   diagrams: [

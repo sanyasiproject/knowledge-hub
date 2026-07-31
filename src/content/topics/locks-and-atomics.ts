@@ -806,4 +806,11 @@ public class CASExamples {
         "A performance degradation that occurs when threads on different cores modify independent variables that share the same cache line, triggering unnecessary cache coherence invalidations.",
     },
   ],
+  exercises: [
+    "Write a C++ program with two `std::atomic<int>` counters that suffer from **false sharing**. Benchmark it, then fix it using `alignas(64)` padding. Measure the performance difference and explain *why* false sharing causes the slowdown in terms of the **MESI cache coherence protocol**.",
+    "Implement a **bounded producer-consumer queue** in C++ using `std::mutex` and `std::condition_variable`. Then identify: why must the `wait()` call use a **while loop** instead of an `if`? What is a *spurious wakeup*, and what would go wrong without the loop?",
+    "You have a function `transfer(Account& from, Account& to, double amount)` that must lock both accounts. Two threads call `transfer(a, b, 50)` and `transfer(b, a, 30)` concurrently. Show the **deadlock** interleaving, then fix it using (a) `std::scoped_lock`, and (b) a manual **global lock ordering** strategy based on account ID.",
+    "Implement a **spinlock** in C++ using `std::atomic<bool>` with `compare_exchange_weak`. Use `memory_order_acquire` on lock and `memory_order_release` on unlock. Explain: what would go wrong if you used `memory_order_relaxed` for both? Write a test that demonstrates the failure on a weakly-ordered architecture.",
+    "A shared counter is incremented by 8 threads, each performing 1,000,000 increments. Compare three approaches: (a) `std::mutex` with `lock_guard`, (b) `std::atomic<int>` with `fetch_add`, and (c) a CAS loop with `compare_exchange_weak`. Predict which will be fastest and why, then verify by benchmarking.",
+  ],
 };

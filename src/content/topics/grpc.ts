@@ -310,6 +310,98 @@ func main() {
 }`,
     },
   ],
+  diagrams: [
+    {
+      title: "gRPC Communication Patterns",
+      kind: "sequence",
+      caption: "Sequence diagrams showing all four **gRPC streaming patterns**: *unary*, *server streaming*, *client streaming*, and *bidirectional streaming*.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    rect rgb(200, 220, 255)
+    Note over C,S: **Unary RPC** — one request, one response
+    C->>S: CreateOrder(request)
+    S-->>C: CreateOrderResponse
+    end
+
+    rect rgb(200, 255, 220)
+    Note over C,S: **Server Streaming** — one request, stream of responses
+    C->>S: WatchOrderStatus(orderId)
+    S-->>C: StatusUpdate 1
+    S-->>C: StatusUpdate 2
+    S-->>C: StatusUpdate 3 (final)
+    end
+
+    rect rgb(255, 220, 200)
+    Note over C,S: **Client Streaming** — stream of requests, one response
+    C->>S: UploadChunk 1
+    C->>S: UploadChunk 2
+    C->>S: UploadChunk 3 (end)
+    S-->>C: UploadResult
+    end
+
+    rect rgb(255, 255, 200)
+    Note over C,S: **Bidirectional Streaming** — both sides stream
+    C->>S: ChatMessage A
+    S-->>C: ChatMessage B
+    C->>S: ChatMessage C
+    S-->>C: ChatMessage D
+    end`
+    },
+    {
+      title: "gRPC Deadline Propagation Across Services",
+      kind: "sequence",
+      caption: "How a **deadline** set by the original client *propagates* through a chain of microservices via gRPC metadata, with each service calculating remaining time.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant A as Service A
+    participant B as Service B
+    participant DB as Database
+
+    Note over C: Sets deadline: 5s from now
+    C->>A: GetOrder(id)<br/>deadline = T+5s
+    Note over A: Time elapsed: 1s<br/>Remaining: 4s
+    A->>B: GetInventory(productId)<br/>deadline = T+5s (propagated)
+    Note over B: Time elapsed: 2s<br/>Remaining: 2s
+    B->>DB: SELECT stock<br/>deadline = T+5s
+    Note over DB: Time elapsed: 1s
+    DB-->>B: stock = 42
+    B-->>A: InventoryResponse
+    A-->>C: OrderResponse
+
+    Note over C,DB: If total > 5s → DEADLINE_EXCEEDED<br/>All downstream work cancelled`
+    },
+    {
+      title: "gRPC Load Balancing: L4 vs L7 vs Client-Side",
+      kind: "architecture",
+      caption: "Comparison of **L4 load balancing** (fails with HTTP/2 multiplexing), **L7 proxy** (Envoy), and *client-side load balancing* approaches for gRPC traffic.",
+      mermaid: `graph TD
+    subgraph L4Problem ["**L4 Load Balancer** *(problematic)*"]
+        CL4["Client"] -->|"single HTTP/2<br/>connection"| LB4["**TCP LB**"]
+        LB4 -->|"ALL streams<br/>go to one backend"| S4A["Server A ⚠️ overloaded"]
+        LB4 -.->|"no traffic"| S4B["Server B (idle)"]
+    end
+
+    subgraph L7Solution ["**L7 Proxy (Envoy)** *(correct)*"]
+        CL7["Client"] -->|"HTTP/2"| LB7["**Envoy**<br/>*understands frames*"]
+        LB7 -->|"stream 1, 3"| S7A["Server A"]
+        LB7 -->|"stream 2, 4"| S7B["Server B"]
+    end
+
+    subgraph ClientSide ["**Client-Side LB** *(built-in)*"]
+        CCS["Client<br/>*round_robin policy*"] -->|"RPC 1, 3"| SCA["Server A"]
+        CCS -->|"RPC 2, 4"| SCB["Server B"]
+    end`
+    },
+  ],
+  exercises: [
+    "**Build a gRPC CRUD service:** Define a `.proto` file for a `ProductService` with `Create`, `Get`, `Update`, `Delete`, and `List` RPCs. Implement the server in **Node.js** using `@grpc/grpc-js`. Write a client that exercises each RPC. Add an *interceptor* on the server side that logs the method name, duration, and status code for every call.",
+    "**Implement server streaming:** Create a gRPC service where the client sends a `SubscribeToPrice(productId)` request and the server streams back *price updates* every 2 seconds. Implement in Node.js. The client should print each update and gracefully handle `call.on('end')`. Add a **deadline** of 30 seconds so the stream auto-terminates. Verify `DEADLINE_EXCEEDED` is returned after 30s.",
+    "**Add deadline propagation:** Build a chain of three gRPC services: `Gateway -> OrderService -> InventoryService`. The Gateway sets a 5-second deadline. Each service logs the *remaining deadline* before making the downstream call. Simulate a slow database query in `InventoryService` (3-second sleep). Verify that when the total chain exceeds the deadline, all services receive `DEADLINE_EXCEEDED` and stop processing.",
+    "**Implement retry with service config:** Configure a gRPC client in **Go** with a `service config` JSON that enables automatic retries for `UNAVAILABLE` status codes with *exponential backoff* (`initialBackoff: 0.1s`, `maxBackoff: 1s`, `maxAttempts: 3`). Write a flaky server that fails 50% of requests. Measure the client's observed success rate and verify it increases with retries enabled.",
+    "**Compare gRPC vs REST performance:** Build the same API (create and list 1000 items) in both gRPC (protobuf) and REST (JSON over Express). Benchmark both with a load testing tool (`ghz` for gRPC, `autocannon` for REST). Compare **throughput** (RPS), *payload size* (protobuf vs JSON), and *p99 latency*. Document the results and explain why gRPC outperforms for this use case.",
+  ],
   comparison: {
     columns: ["Aspect", "gRPC", "REST", "GraphQL"],
     rows: [
@@ -441,8 +533,8 @@ func main() {
     { label: "Protocol Buffers Language Guide (proto3)", kind: "docs", note: "Complete reference for protobuf syntax and schema evolution." },
     { label: "gRPC Up and Running by Kasun Indrasiri", kind: "book", note: "Practical guide covering all streaming patterns, interceptors, and production deployment." },
     { label: "Envoy Proxy gRPC Bridging", kind: "docs", note: "Setting up Envoy as L7 load balancer for gRPC and gRPC-Web." },
-    { label: "grpcurl GitHub Repository", kind: "tool", note: "CLI tool for interacting with gRPC servers, supporting reflection." },
-    { label: "Buf - Protobuf Tooling", kind: "tool", note: "Modern protobuf linting, breaking change detection, and code generation." },
+    { label: "grpcurl GitHub Repository", kind: "repo", note: "CLI tool for interacting with gRPC servers, supporting reflection." },
+    { label: "Buf - Protobuf Tooling", kind: "repo", note: "Modern protobuf linting, breaking change detection, and code generation." },
   ],
   glossary: [
     { term: "Protocol Buffers (protobuf)", definition: "Google's language-neutral binary serialization format. Defined via .proto files, compiled to language-specific code." },

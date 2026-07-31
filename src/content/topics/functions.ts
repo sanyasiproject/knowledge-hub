@@ -141,57 +141,82 @@ function renderPublishedPage(content: string): string { /* ... */ }
 function renderDraftPreview(content: string): string { /* ... */ }`
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Pure functions and the functional core / imperative shell pattern",
-      source: `# PURE FUNCTIONS: No side effects, testable with simple assertions
-from dataclasses import dataclass
-from decimal import Decimal
-from typing import List
+      source: `#include <iostream>
+#include <numeric>
+#include <string>
+#include <vector>
+#include <cmath>
 
-@dataclass(frozen=True)
-class OrderItem:
-    product_name: str
-    unit_price: Decimal
-    quantity: int
+// --- PURE FUNCTIONS: No side effects, testable with simple assertions ---
 
-@dataclass(frozen=True)
-class PricingResult:
-    subtotal: Decimal
-    discount: Decimal
-    tax: Decimal
-    total: Decimal
+struct OrderItem {
+    std::string product_name;
+    double unit_price;
+    int quantity;
+};
 
-# Pure function: same input always produces same output, no side effects
-def calculate_pricing(items: List[OrderItem], discount_rate: Decimal) -> PricingResult:
-    subtotal = sum_line_totals(items)
-    discount = apply_discount(subtotal, discount_rate)
-    taxable_amount = subtotal - discount
-    tax = calculate_tax(taxable_amount)
-    total = taxable_amount + tax
-    return PricingResult(subtotal, discount, tax, total)
+struct PricingResult {
+    double subtotal;
+    double discount;
+    double tax;
+    double total;
+};
 
-def sum_line_totals(items: List[OrderItem]) -> Decimal:
-    return sum(item.unit_price * item.quantity for item in items)
+// Pure: same input always produces same output, no side effects
+double sum_line_totals(const std::vector<OrderItem>& items) {
+    return std::accumulate(items.begin(), items.end(), 0.0,
+        [](double acc, const OrderItem& item) {
+            return acc + item.unit_price * item.quantity;
+        });
+}
 
-def apply_discount(subtotal: Decimal, rate: Decimal) -> Decimal:
-    return subtotal * rate if subtotal > Decimal("100") else Decimal("0")
+double apply_discount(double subtotal, double rate) {
+    return subtotal > 100.0 ? subtotal * rate : 0.0;
+}
 
-def calculate_tax(amount: Decimal, tax_rate: Decimal = Decimal("0.18")) -> Decimal:
-    return (amount * tax_rate).quantize(Decimal("0.01"))
+double calculate_tax(double amount, double tax_rate = 0.18) {
+    return std::round(amount * tax_rate * 100.0) / 100.0;
+}
 
+PricingResult calculate_pricing(const std::vector<OrderItem>& items,
+                                double discount_rate) {
+    double subtotal = sum_line_totals(items);
+    double discount = apply_discount(subtotal, discount_rate);
+    double taxable  = subtotal - discount;
+    double tax      = calculate_tax(taxable);
+    double total    = taxable + tax;
+    return {subtotal, discount, tax, total};
+}
 
-# IMPERATIVE SHELL: Side effects live at the edges
-def process_order(order_id: str) -> None:
-    """Entry point -- the only place with side effects."""
-    order = order_repository.find_by_id(order_id)     # side effect: DB read
-    items = [to_order_item(line) for line in order.lines]
-    discount_rate = loyalty_service.get_rate(order.customer_id)  # side effect: API call
+// --- IMPERATIVE SHELL: Side effects live at the edges ---
+// In a real application, process_order would call repositories and services.
+// void process_order(const std::string& order_id) {
+//     auto order = order_repository.find_by_id(order_id);   // side effect: DB
+//     auto items = to_order_items(order.lines);
+//     double rate = loyalty_service.get_rate(order.customer_id); // side effect
+//     auto pricing = calculate_pricing(items, rate);          // PURE
+//     auto invoice = create_invoice(order, pricing);          // pure: builds data
+//     invoice_repository.save(invoice);                       // side effect: DB
+//     notification_service.send(order.email, invoice);        // side effect
+// }
 
-    pricing = calculate_pricing(items, discount_rate)  # PURE -- no side effects
+int main() {
+    std::vector<OrderItem> items = {
+        {"Widget",  25.00, 3},
+        {"Gadget",  50.00, 2},
+        {"Gizmo",   15.50, 4},
+    };
 
-    invoice = create_invoice(order, pricing)            # pure: builds data
-    invoice_repository.save(invoice)                    # side effect: DB write
-    notification_service.send_invoice(order.customer_email, invoice)  # side effect: email`
+    auto result = calculate_pricing(items, 0.10);
+
+    std::cout << "Subtotal: " << result.subtotal << "\\n";
+    std::cout << "Discount: " << result.discount << "\\n";
+    std::cout << "Tax:      " << result.tax      << "\\n";
+    std::cout << "Total:    " << result.total     << "\\n";
+    return 0;
+}`
     },
   ],
 

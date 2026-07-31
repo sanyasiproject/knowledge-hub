@@ -81,58 +81,118 @@ kafka-topics.sh --describe --under-replicated-partitions \\
 // controller.listener.names=CONTROLLER`,
     },
     {
-      language: "python",
-      caption: "Monitoring ISR shrink and under-replicated partitions",
-      source: `from kafka.admin import KafkaAdminClient
+      language: "cpp",
+      caption: "Monitoring ISR shrink and under-replicated partitions using librdkafka",
+      source: `// Monitor ISR status and detect under-replicated/offline partitions
+// using librdkafka's admin API (C++ wrapper).
 
-admin = KafkaAdminClient(bootstrap_servers='localhost:9092')
+#include <librdkafka/rdkafkacpp.h>
+#include <iostream>
+#include <vector>
+#include <set>
+#include <string>
+#include <memory>
 
-# Describe all topics to find ISR issues
-topics = admin.list_topics()
-topic_details = admin.describe_topics(topics)
+struct UnderReplicated {
+    std::string topic;
+    int partition;
+    std::set<int> replicas;
+    std::set<int> isr;
+    std::set<int> missing;
+};
 
-under_replicated = []
-offline = []
+int main() {
+    std::string errstr;
+    auto conf = std::unique_ptr<RdKafka::Conf>(
+        RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL));
+    conf->set("bootstrap.servers", "localhost:9092", errstr);
 
-for topic_info in topic_details:
-    topic_name = topic_info['topic']
-    for partition in topic_info['partitions']:
-        p_id = partition['partition']
-        replicas = set(partition['replicas'])
-        isr = set(partition['isr'])
-        leader = partition['leader']
+    auto producer = std::unique_ptr<RdKafka::Producer>(
+        RdKafka::Producer::create(conf.get(), errstr));
+    if (!producer) {
+        std::cerr << "Failed to create producer: " << errstr << std::endl;
+        return 1;
+    }
 
-        if isr < replicas:
-            missing = replicas - isr
-            under_replicated.append({
-                'topic': topic_name,
-                'partition': p_id,
-                'replicas': replicas,
-                'isr': isr,
-                'missing_from_isr': missing
-            })
+    // Fetch cluster metadata for all topics
+    RdKafka::Metadata* raw_metadata = nullptr;
+    RdKafka::ErrorCode err = producer->metadata(
+        true,      // all_topics
+        nullptr,   // only_topic (null = all)
+        &raw_metadata,
+        5000       // timeout_ms
+    );
+    if (err != RdKafka::ERR_NO_ERROR) {
+        std::cerr << "Failed to fetch metadata: "
+                  << RdKafka::err2str(err) << std::endl;
+        return 1;
+    }
+    std::unique_ptr<RdKafka::Metadata> metadata(raw_metadata);
 
-        if leader == -1:
-            offline.append({
-                'topic': topic_name,
-                'partition': p_id
-            })
+    std::vector<UnderReplicated> under_replicated;
+    std::vector<std::pair<std::string, int>> offline;
 
-if under_replicated:
-    print("UNDER-REPLICATED PARTITIONS:")
-    for ur in under_replicated:
-        print(f"  {ur['topic']}-{ur['partition']}: "
-              f"ISR={ur['isr']}, missing={ur['missing_from_isr']}")
+    for (const auto* topic : *metadata->topics()) {
+        for (const auto* partition : *topic->partitions()) {
+            int p_id = partition->id();
+            int leader = partition->leader();
 
-if offline:
-    print("OFFLINE PARTITIONS:")
-    for op in offline:
-        print(f"  {op['topic']}-{op['partition']}")
+            // Collect replica and ISR sets
+            std::set<int> replicas;
+            for (const auto& r : *partition->replicas())
+                replicas.insert(r);
 
-print(f"Summary: {len(under_replicated)} under-replicated, "
-      f"{len(offline)} offline")
+            std::set<int> isr;
+            for (const auto& i : *partition->isrs())
+                isr.insert(i);
 
-admin.close()`,
+            // Check for under-replication
+            if (isr.size() < replicas.size()) {
+                std::set<int> missing;
+                std::set_difference(
+                    replicas.begin(), replicas.end(),
+                    isr.begin(), isr.end(),
+                    std::inserter(missing, missing.begin())
+                );
+                under_replicated.push_back({
+                    topic->topic(), p_id, replicas, isr, missing
+                });
+            }
+
+            // Check for offline partitions
+            if (leader == -1) {
+                offline.push_back({topic->topic(), p_id});
+            }
+        }
+    }
+
+    // Report findings
+    if (!under_replicated.empty()) {
+        std::cout << "UNDER-REPLICATED PARTITIONS:" << std::endl;
+        for (const auto& ur : under_replicated) {
+            std::cout << "  " << ur.topic << "-" << ur.partition
+                      << ": ISR={";
+            for (auto it = ur.isr.begin(); it != ur.isr.end(); ++it)
+                std::cout << (it != ur.isr.begin() ? "," : "") << *it;
+            std::cout << "}, missing={";
+            for (auto it = ur.missing.begin(); it != ur.missing.end(); ++it)
+                std::cout << (it != ur.missing.begin() ? "," : "") << *it;
+            std::cout << "}" << std::endl;
+        }
+    }
+
+    if (!offline.empty()) {
+        std::cout << "OFFLINE PARTITIONS:" << std::endl;
+        for (const auto& op : offline)
+            std::cout << "  " << op.first << "-" << op.second << std::endl;
+    }
+
+    std::cout << "Summary: " << under_replicated.size()
+              << " under-replicated, " << offline.size()
+              << " offline" << std::endl;
+
+    return 0;
+}`,
     },
     {
       language: "java",
@@ -368,5 +428,12 @@ producer.close();`,
     { term: "Controller", definition: "A broker responsible for partition leader elections, ISR management, and cluster metadata operations." },
     { term: "RecordBatch", definition: "Kafka's wire and disk format grouping multiple records with shared metadata and batch-level compression." },
     { term: "LEO (Log End Offset)", definition: "The offset of the next message to be written to a partition. Each replica tracks its own LEO." },
+  ],
+  exercises: [
+    "You have a Kafka topic with `replication.factor=3`, `min.insync.replicas=2`, and `acks=all`. One broker goes down. Describe what happens to **writes** and **reads**. Now a *second* broker goes down -- what changes? Explain the role of the **ISR** and **high-water mark** at each stage.",
+    "Design a **log-compacted topic** for a user-profile service. Specify the key, value schema, and `cleanup.policy`. How would you handle a *GDPR delete request* using **tombstones**? What is the significance of `delete.retention.ms` in this scenario?",
+    "Compare the operational impact of running Kafka in **ZooKeeper mode** versus **KRaft mode**. Write a brief migration plan listing the steps to move a 50-broker cluster from ZooKeeper to KRaft, and identify the risks at each step.",
+    "A consumer group is reading a topic with 12 partitions but consumers report *increasing lag*. Using `kafka-consumer-groups.sh --describe`, you find that 4 partitions have lag > 1 million. Walk through your **troubleshooting process**: which metrics would you check, and how would you determine if the bottleneck is producer throughput, consumer processing speed, or ISR issues?",
+    "Explain how Kafka's **zero-copy** optimization works at the system-call level (`sendfile()`). Draw the data path *with* and *without* zero-copy, counting the number of memory copies and context switches in each case. Why does this matter more for Kafka than for a typical web server?",
   ],
 };

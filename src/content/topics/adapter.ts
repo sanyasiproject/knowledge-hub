@@ -154,66 +154,138 @@ tracker.trackEvent("button", "click", "submit-form", 1);
 tracker.identifyUser("user-42", { plan: "pro", signupDate: "2024-01-15" });`,
     },
     {
-      language: "python",
-      caption: "Python adapter using duck typing for XML-to-JSON data source",
-      source: `import json
-from typing import Any
-from xml.etree import ElementTree as ET
+      language: "cpp",
+      caption: "C++ adapter using abstract base class for XML-to-JSON data source",
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <map>
+#include <sstream>
+#include <variant>
+#include <memory>
+
+using Record = std::map<std::string, std::variant<int, std::string>>;
+
+// Target interface: what the application expects (pure virtual)
+class JsonDataSource {
+public:
+    virtual ~JsonDataSource() = default;
+    virtual std::vector<Record> read_data() = 0;
+};
 
 
-class JsonDataSource:
-    """Target interface: what the application expects."""
-    def read_data(self) -> list[dict[str, Any]]:
-        raise NotImplementedError
+// Concrete target: native JSON source
+class ModernJsonApi : public JsonDataSource {
+    std::string url_;
+public:
+    explicit ModernJsonApi(std::string url) : url_(std::move(url)) {}
+
+    std::vector<Record> read_data() override {
+        // Simulated JSON response
+        return {
+            {{"id", 1}, {"name", std::string("Alice")}},
+            {{"id", 2}, {"name", std::string("Bob")}}
+        };
+    }
+};
 
 
-class ModernJsonApi(JsonDataSource):
-    """Concrete target: native JSON source."""
-    def __init__(self, url: str) -> None:
-        self.url = url
-
-    def read_data(self) -> list[dict[str, Any]]:
-        # Simulated JSON response
-        return [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
-
-
-class LegacyXmlService:
-    """Adaptee: returns XML, not JSON."""
-    def fetch_xml(self) -> str:
-        return """<records>
-            <record><id>1</id><name>Alice</name></record>
-            <record><id>2</id><name>Bob</name></record>
-        </records>"""
+// Adaptee: returns XML, not JSON
+class LegacyXmlService {
+public:
+    std::string fetch_xml() const {
+        return "<records>"
+               "<record><id>1</id><name>Alice</name></record>"
+               "<record><id>2</id><name>Bob</name></record>"
+               "</records>";
+    }
+};
 
 
-class XmlToJsonAdapter(JsonDataSource):
-    """Adapter: wraps the XML service and exposes the JSON interface."""
-    def __init__(self, xml_service: LegacyXmlService) -> None:
-        self._xml_service = xml_service
+// Adapter: wraps the XML service and exposes the JSON interface
+class XmlToJsonAdapter : public JsonDataSource {
+    LegacyXmlService xml_service_;
 
-    def read_data(self) -> list[dict[str, Any]]:
-        xml_string = self._xml_service.fetch_xml()
-        root = ET.fromstring(xml_string)
-        results: list[dict[str, Any]] = []
-        for record in root.findall("record"):
-            row: dict[str, Any] = {}
-            for child in record:
-                text = child.text or ""
-                # Convert numeric strings to ints
-                row[child.tag] = int(text) if text.isdigit() else text
-            results.append(row)
-        return results
+    // Minimal XML tag-content extractor
+    static std::string extract_tag(const std::string& xml,
+                                   const std::string& tag) {
+        auto open  = "<" + tag + ">";
+        auto close = "</" + tag + ">";
+        auto start = xml.find(open);
+        if (start == std::string::npos) return "";
+        start += open.size();
+        auto end = xml.find(close, start);
+        return xml.substr(start, end - start);
+    }
+
+    static bool is_digits(const std::string& s) {
+        return !s.empty() &&
+               s.find_first_not_of("0123456789") == std::string::npos;
+    }
+
+public:
+    explicit XmlToJsonAdapter(LegacyXmlService svc)
+        : xml_service_(std::move(svc)) {}
+
+    std::vector<Record> read_data() override {
+        auto xml = xml_service_.fetch_xml();
+        std::vector<Record> results;
+
+        std::string tag = "<record>";
+        std::string close_tag = "</record>";
+        std::string::size_type pos = 0;
+
+        while ((pos = xml.find(tag, pos)) != std::string::npos) {
+            auto end = xml.find(close_tag, pos);
+            auto block = xml.substr(pos + tag.size(),
+                                    end - pos - tag.size());
+            Record row;
+            auto id_val   = extract_tag(block, "id");
+            auto name_val = extract_tag(block, "name");
+
+            // Convert numeric strings to ints
+            if (is_digits(id_val))
+                row["id"] = std::stoi(id_val);
+            else
+                row["id"] = id_val;
+
+            row["name"] = name_val;
+            results.push_back(row);
+            pos = end + close_tag.size();
+        }
+        return results;
+    }
+};
 
 
-# Client code -- works with any JsonDataSource
-def process_records(source: JsonDataSource) -> None:
-    for record in source.read_data():
-        print(f"Processing: {record}")
+// Helper to print a variant value
+std::ostream& operator<<(std::ostream& os,
+                          const std::variant<int, std::string>& v) {
+    std::visit([&os](auto&& val) { os << val; }, v);
+    return os;
+}
+
+// Client code -- works with any JsonDataSource
+void process_records(JsonDataSource& source) {
+    for (const auto& record : source.read_data()) {
+        std::cout << "Processing: { ";
+        for (const auto& [key, val] : record)
+            std::cout << key << ": " << val << " ";
+        std::cout << "}\\n";
+    }
+}
 
 
-# Seamlessly use either source
-process_records(ModernJsonApi("https://api.example.com/users"))
-process_records(XmlToJsonAdapter(LegacyXmlService()))`,
+int main() {
+    // Seamlessly use either source
+    ModernJsonApi api("https://api.example.com/users");
+    process_records(api);
+
+    LegacyXmlService legacy;
+    XmlToJsonAdapter adapter(std::move(legacy));
+    process_records(adapter);
+    return 0;
+}`,
     },
   ],
   diagrams: [

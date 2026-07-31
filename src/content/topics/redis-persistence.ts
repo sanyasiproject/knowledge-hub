@@ -104,35 +104,60 @@ grep -A2 "Background" /var/log/redis/redis-server.log
 # RDB: 42 MB of memory used by copy-on-write`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Monitoring persistence health programmatically",
-      source: `import redis
+      source: `// Using redis-plus-plus (sw::redis) to monitor persistence health
+#include <sw/redis++/redis++.h>
+#include <iostream>
+#include <string>
+#include <chrono>
+#include <ctime>
 
-r = redis.Redis()
-info = r.info("persistence")
+int main() {
+    auto redis = sw::redis::Redis("tcp://127.0.0.1:6379");
 
-# Check last successful save
-last_save = info["rdb_last_save_time"]
-bgsave_err = info["rdb_last_bgsave_status"]
-aof_err = info["aof_last_bgrewrite_status"]
+    // INFO persistence returns a bulk string; parse key-value pairs
+    auto info_str = redis.command<std::string>("INFO", "persistence");
+    auto parse_field = [&](const std::string& key) -> std::string {
+        auto pos = info_str.find(key + ":");
+        if (pos == std::string::npos) return "";
+        auto start = pos + key.size() + 1;
+        auto end = info_str.find("\\r\\n", start);
+        return info_str.substr(start, end - start);
+    };
 
-# Alert if last save is stale
-import time
-if time.time() - last_save > 3600:
-    print(f"WARNING: Last RDB save was {time.time() - last_save:.0f}s ago")
+    // Check last successful save
+    long last_save = std::stol(parse_field("rdb_last_save_time"));
+    std::string bgsave_err = parse_field("rdb_last_bgsave_status");
+    std::string aof_err = parse_field("aof_last_bgrewrite_status");
 
-if bgsave_err != "ok":
-    print(f"ERROR: Last BGSAVE failed: {bgsave_err}")
+    // Alert if last save is stale
+    auto now = std::time(nullptr);
+    if (now - last_save > 3600) {
+        std::cout << "WARNING: Last RDB save was "
+                  << (now - last_save) << "s ago" << std::endl;
+    }
 
-# Check AOF growth ratio
-aof_current = info["aof_current_size"]
-aof_base = info["aof_base_size"]
-if aof_base > 0 and aof_current / aof_base > 2:
-    print(f"WARNING: AOF is {aof_current/aof_base:.1f}x base size, rewrite needed")
+    if (bgsave_err != "ok") {
+        std::cerr << "ERROR: Last BGSAVE failed: " << bgsave_err << std::endl;
+    }
 
-# Check fork duration (latency impact)
-fork_usec = info.get("rdb_last_cow_size", 0)
-print(f"Last fork COW memory: {fork_usec / 1024 / 1024:.1f} MB")`,
+    // Check AOF growth ratio
+    long aof_current = std::stol(parse_field("aof_current_size"));
+    long aof_base = std::stol(parse_field("aof_base_size"));
+    if (aof_base > 0 && static_cast<double>(aof_current) / aof_base > 2.0) {
+        std::cout << "WARNING: AOF is "
+                  << static_cast<double>(aof_current) / aof_base
+                  << "x base size, rewrite needed" << std::endl;
+    }
+
+    // Check fork COW memory (latency impact)
+    long cow_size = std::stol(parse_field("rdb_last_cow_size"));
+    std::cout << "Last fork COW memory: "
+              << static_cast<double>(cow_size) / 1024.0 / 1024.0
+              << " MB" << std::endl;
+    return 0;
+}`,
     },
     {
       language: "redis",
@@ -334,5 +359,12 @@ DEBUG RELOAD     # Save + quit + reload (testing only)`,
     { term: "Transparent Huge Pages (THP)", definition: "Linux feature using 2 MB pages instead of 4 KB. Harmful for Redis due to increased COW granularity during fork." },
     { term: "Multi-part AOF", definition: "Redis 7.0 feature splitting the AOF into a manifest, base file, and incremental files for safer rewrites and incremental backups." },
     { term: "aof-use-rdb-preamble", definition: "Config option (default yes) that writes the AOF base in compact RDB format for faster loading." },
+  ],
+  exercises: [
+    "Configure Redis with **RDB-only persistence** (`save 60 1000`) and load 50,000 keys. Trigger `BGSAVE`, then immediately kill the Redis process with `kill -9` *before* the next save. Restart and count how many keys survived. Repeat the experiment with **AOF (`appendfsync everysec`)** and compare the data loss.",
+    "Set up Redis with **hybrid AOF persistence** (`aof-use-rdb-preamble yes`). Load 1 million keys, trigger `BGREWRITEAOF`, and inspect the resulting files in the `appendonlydir/` directory. Identify the *RDB base file* and the *incremental AOF file*. How large is each? Time the restart and compare it to restarting with a pure AOF file.",
+    "Write a **monitoring script** that polls `INFO persistence` every 5 seconds and alerts when: (a) `rdb_last_bgsave_status` is not `ok`, (b) time since `rdb_last_save_time` exceeds 10 minutes, or (c) AOF current size is more than **3x the base size** (indicating a rewrite is overdue). Test each alert condition by simulating failures.",
+    "Measure the **fork latency** and **copy-on-write memory overhead** of `BGSAVE` on datasets of 1 GB, 5 GB, and 10 GB. While the child is writing, run a write-heavy workload and monitor `rdb_last_cow_size` from `INFO persistence`. Then enable Transparent Huge Pages, repeat the test, and document the difference in COW memory. *Disable THP afterward.*",
+    "Compare the three `appendfsync` policies (*always*, *everysec*, *no*) by benchmarking `redis-benchmark -t set -n 100000` with each setting. Record throughput (ops/sec) and average latency. Then crash Redis during the benchmark for each policy and measure actual data loss. Present a table summarizing the **throughput vs. durability** trade-off.",
   ],
 };

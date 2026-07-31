@@ -23,82 +23,147 @@ export const tcpUdp: TopicContent = {
   ],
   code: [
     {
-      language: "python",
-      caption: "TCP echo server and client demonstrating connection lifecycle",
-      source: `import socket
-import threading
+      language: "cpp",
+      caption: "TCP echo server and client demonstrating connection lifecycle in C++",
+      source: `#include <iostream>
+#include <cstring>
+#include <thread>
+#include <chrono>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
-# === TCP Echo Server ===
-def tcp_server(host="127.0.0.1", port=9000):
-    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind((host, port))
-    srv.listen(5)                          # backlog of 5 pending connections
-    print(f"TCP server listening on {host}:{port}")
+// === TCP Echo Server ===
+void tcp_server(const char* host = "127.0.0.1", int port = 9000) {
+    int srv = socket(AF_INET, SOCK_STREAM, 0);
+    int opt = 1;
+    setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
-    while True:
-        conn, addr = srv.accept()          # blocks until a client connects (3-way handshake done)
-        print(f"Connection from {addr}")
-        with conn:
-            while True:
-                data = conn.recv(4096)     # read from the byte stream
-                if not data:
-                    break                  # client closed connection (FIN received)
-                conn.sendall(data)         # echo back; sendall handles partial sends
-        print(f"Connection from {addr} closed")
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, host, &addr.sin_addr);
+    bind(srv, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
 
-# === TCP Echo Client ===
-def tcp_client(host="127.0.0.1", port=9000):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect((host, port))            # triggers SYN -> SYN-ACK -> ACK
-        s.sendall(b"Hello, TCP!")
-        response = s.recv(4096)
-        print(f"Received: {response.decode()}")
-    # socket.__exit__ sends FIN -> graceful close
+    listen(srv, 5);                          // backlog of 5 pending connections
+    std::cout << "TCP server listening on " << host << ":" << port << "\\n";
 
-# Run server in background, then client
-t = threading.Thread(target=tcp_server, daemon=True)
-t.start()
+    sockaddr_in client_addr{};
+    socklen_t client_len = sizeof(client_addr);
+    int conn = accept(srv, reinterpret_cast<sockaddr*>(&client_addr), &client_len);
+    std::cout << "Connection accepted\\n";
 
-import time; time.sleep(0.1)              # let server start
-tcp_client()                               # Output: Received: Hello, TCP!`,
+    char buf[4096];
+    while (true) {
+        ssize_t n = recv(conn, buf, sizeof(buf), 0);  // read from the byte stream
+        if (n <= 0) break;                             // client closed (FIN received)
+        send(conn, buf, n, 0);                         // echo back
+    }
+    std::cout << "Connection closed\\n";
+
+    close(conn);
+    close(srv);
+}
+
+// === TCP Echo Client ===
+void tcp_client(const char* host = "127.0.0.1", int port = 9000) {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, host, &addr.sin_addr);
+
+    connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));  // SYN -> SYN-ACK -> ACK
+
+    const char* msg = "Hello, TCP!";
+    send(sock, msg, strlen(msg), 0);
+
+    char buf[4096]{};
+    ssize_t n = recv(sock, buf, sizeof(buf), 0);
+    std::cout << "Received: " << std::string(buf, n) << "\\n";
+
+    close(sock);  // sends FIN -> graceful close
+}
+
+// Run server in background, then client
+int main() {
+    std::thread t(tcp_server, "127.0.0.1", 9000);
+    t.detach();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    tcp_client();  // Output: Received: Hello, TCP!
+}`,
     },
     {
-      language: "python",
-      caption: "UDP echo server and client — no connection, no guarantees",
-      source: `import socket
+      language: "cpp",
+      caption: "UDP echo server and client in C++ -- no connection, no guarantees",
+      source: `#include <iostream>
+#include <cstring>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
-# === UDP Echo Server ===
-def udp_server(host="127.0.0.1", port=9001):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # SOCK_DGRAM = UDP
-    sock.bind((host, port))
-    print(f"UDP server listening on {host}:{port}")
+// === UDP Echo Server ===
+void udp_server(const char* host = "127.0.0.1", int port = 9001) {
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);  // SOCK_DGRAM = UDP
 
-    while True:
-        data, addr = sock.recvfrom(65535)   # receive datagram + sender address
-        print(f"Datagram from {addr}: {data.decode()}")
-        sock.sendto(data, addr)             # echo back to sender — no connection state
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, host, &addr.sin_addr);
+    bind(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
 
-# === UDP Echo Client ===
-def udp_client(host="127.0.0.1", port=9001):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(2.0)                    # must handle loss ourselves
+    std::cout << "UDP server listening on " << host << ":" << port << "\\n";
 
-    sock.sendto(b"Hello, UDP!", (host, port))  # no handshake — just send
-    try:
-        data, _ = sock.recvfrom(65535)
-        print(f"Received: {data.decode()}")
-    except socket.timeout:
-        print("No response — datagram may have been lost")
-    finally:
-        sock.close()
+    while (true) {
+        char buf[65535];
+        sockaddr_in client_addr{};
+        socklen_t client_len = sizeof(client_addr);
+        ssize_t n = recvfrom(sock, buf, sizeof(buf), 0,
+                             reinterpret_cast<sockaddr*>(&client_addr), &client_len);
+        std::cout << "Datagram received: " << std::string(buf, n) << "\\n";
+        sendto(sock, buf, n, 0,
+               reinterpret_cast<sockaddr*>(&client_addr), client_len);  // echo back
+    }
+    close(sock);
+}
 
-# Key differences from TCP:
-# - No connect()/accept() — no connection state
-# - Each sendto/recvfrom is an independent datagram
-# - No guaranteed delivery — we added a timeout as basic loss detection
-# - No stream ordering — datagrams may arrive out of order
-# - No flow control — sender can flood the receiver`,
+// === UDP Echo Client ===
+void udp_client(const char* host = "127.0.0.1", int port = 9001) {
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+
+    // Set receive timeout -- must handle loss ourselves
+    struct timeval tv{2, 0};  // 2 seconds
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, host, &addr.sin_addr);
+
+    const char* msg = "Hello, UDP!";
+    sendto(sock, msg, strlen(msg), 0,
+           reinterpret_cast<sockaddr*>(&addr), sizeof(addr));  // no handshake -- just send
+
+    char buf[65535];
+    ssize_t n = recvfrom(sock, buf, sizeof(buf), 0, nullptr, nullptr);
+    if (n > 0)
+        std::cout << "Received: " << std::string(buf, n) << "\\n";
+    else
+        std::cout << "No response -- datagram may have been lost\\n";
+
+    close(sock);
+}
+
+// Key differences from TCP:
+// - No connect()/accept() -- no connection state
+// - Each sendto/recvfrom is an independent datagram
+// - No guaranteed delivery -- we added a timeout as basic loss detection
+// - No stream ordering -- datagrams may arrive out of order
+// - No flow control -- sender can flood the receiver`,
     },
     {
       language: "text",

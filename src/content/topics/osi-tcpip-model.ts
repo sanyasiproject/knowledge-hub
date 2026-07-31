@@ -23,219 +23,290 @@ export const osiTcpipModel: TopicContent = {
   ],
   code: [
     {
-      language: "python",
-      caption: "Constructing an Ethernet frame + IPv4 packet + TCP segment from scratch (using struct)",
-      source: `import struct
+      language: "cpp",
+      caption: "Constructing an Ethernet frame + IPv4 packet + TCP segment from scratch",
+      source: `#include <iostream>
+#include <cstdint>
+#include <cstring>
+#include <iomanip>
+#include <arpa/inet.h>
 
-# --- Layer 2: Ethernet Frame Header ---
-dst_mac = bytes.fromhex("ffffffffffff")        # Broadcast
-src_mac = bytes.fromhex("001122334455")         # Source MAC
-ether_type = 0x0800                              # IPv4
+// Compute IP header checksum
+uint16_t ipChecksum(const uint8_t* data, size_t len) {
+    uint32_t sum = 0;
+    for (size_t i = 0; i < len; i += 2) {
+        uint16_t word = (data[i] << 8);
+        if (i + 1 < len) word |= data[i + 1];
+        sum += word;
+    }
+    while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
+    return static_cast<uint16_t>(~sum);
+}
 
-eth_header = struct.pack("!6s6sH", dst_mac, src_mac, ether_type)
-# 14 bytes: dst(6) + src(6) + type(2)
+int main() {
+    uint8_t frame[54];  // 14 (Eth) + 20 (IP) + 20 (TCP)
+    size_t offset = 0;
 
-# --- Layer 3: IPv4 Packet Header (20 bytes, no options) ---
-version_ihl = 0x45        # Version 4, IHL 5 (20 bytes)
-dscp_ecn = 0x00
-total_length = 40          # IP header(20) + TCP header(20)
-identification = 54321
-flags_offset = 0x4000      # Don't Fragment
-ttl = 64
-protocol = 6               # TCP
-checksum = 0               # Placeholder (computed later)
-src_ip = bytes([192, 168, 1, 100])
-dst_ip = bytes([10, 0, 0, 1])
+    // --- Layer 2: Ethernet Frame Header (14 bytes) ---
+    uint8_t dstMac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};  // Broadcast
+    uint8_t srcMac[] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint16_t etherType = htons(0x0800);  // IPv4
 
-ip_header = struct.pack("!BBHHHBBH4s4s",
-    version_ihl, dscp_ecn, total_length,
-    identification, flags_offset,
-    ttl, protocol, checksum,
-    src_ip, dst_ip
-)
+    std::memcpy(frame + offset, dstMac, 6); offset += 6;
+    std::memcpy(frame + offset, srcMac, 6); offset += 6;
+    std::memcpy(frame + offset, &etherType, 2); offset += 2;
 
-# Compute IP header checksum
-def ip_checksum(header: bytes) -> int:
-    if len(header) % 2:
-        header += b"\\x00"
-    total = sum(struct.unpack("!%dH" % (len(header) // 2), header))
-    total = (total >> 16) + (total & 0xFFFF)
-    total += total >> 16
-    return ~total & 0xFFFF
+    // --- Layer 3: IPv4 Header (20 bytes, no options) ---
+    uint8_t* ipHeader = frame + offset;
+    ipHeader[0] = 0x45;           // Version 4, IHL 5
+    ipHeader[1] = 0x00;           // DSCP/ECN
+    uint16_t totalLen = htons(40);
+    std::memcpy(ipHeader + 2, &totalLen, 2);
+    uint16_t ident = htons(54321);
+    std::memcpy(ipHeader + 4, &ident, 2);
+    uint16_t flagsOff = htons(0x4000);  // Don't Fragment
+    std::memcpy(ipHeader + 6, &flagsOff, 2);
+    ipHeader[8] = 64;             // TTL
+    ipHeader[9] = 6;              // Protocol: TCP
+    ipHeader[10] = 0; ipHeader[11] = 0;  // Checksum placeholder
+    uint8_t srcIp[] = {192, 168, 1, 100};
+    uint8_t dstIp[] = {10, 0, 0, 1};
+    std::memcpy(ipHeader + 12, srcIp, 4);
+    std::memcpy(ipHeader + 16, dstIp, 4);
 
-chk = ip_checksum(ip_header)
-ip_header = ip_header[:10] + struct.pack("!H", chk) + ip_header[12:]
+    // Compute and set IP checksum
+    uint16_t chk = htons(ipChecksum(ipHeader, 20));
+    std::memcpy(ipHeader + 10, &chk, 2);
+    offset += 20;
 
-# --- Layer 4: TCP Segment Header (20 bytes, no options) ---
-src_port = 12345
-dst_port = 80
-seq_num = 1000
-ack_num = 0
-data_offset_flags = (5 << 12) | 0x002   # Data offset=5, SYN flag
-window = 65535
-tcp_checksum = 0                          # Simplified
-urgent = 0
+    // --- Layer 4: TCP Header (20 bytes, no options) ---
+    uint8_t* tcpHeader = frame + offset;
+    uint16_t srcPort = htons(12345), dstPort = htons(80);
+    uint32_t seqNum = htonl(1000), ackNum = htonl(0);
+    uint16_t dataOffFlags = htons((5 << 12) | 0x002);  // SYN
+    uint16_t window = htons(65535), tcpChk = 0, urgent = 0;
 
-tcp_header = struct.pack("!HHIIHHH H",
-    src_port, dst_port,
-    seq_num, ack_num,
-    data_offset_flags, window,
-    tcp_checksum, urgent
-)
+    std::memcpy(tcpHeader, &srcPort, 2);
+    std::memcpy(tcpHeader + 2, &dstPort, 2);
+    std::memcpy(tcpHeader + 4, &seqNum, 4);
+    std::memcpy(tcpHeader + 8, &ackNum, 4);
+    std::memcpy(tcpHeader + 12, &dataOffFlags, 2);
+    std::memcpy(tcpHeader + 14, &window, 2);
+    std::memcpy(tcpHeader + 16, &tcpChk, 2);
+    std::memcpy(tcpHeader + 18, &urgent, 2);
 
-# Full packet = Ethernet + IP + TCP
-frame = eth_header + ip_header + tcp_header
-print(f"Total frame size: {len(frame)} bytes")
-print(f"  Ethernet header: {len(eth_header)} bytes")
-print(f"  IP header:       {len(ip_header)} bytes")
-print(f"  TCP header:      {len(tcp_header)} bytes")
-print(f"  Hex dump: {frame.hex()}")`,
+    std::cout << "Total frame size: 54 bytes\\n"
+              << "  Ethernet header: 14 bytes\\n"
+              << "  IP header:       20 bytes\\n"
+              << "  TCP header:      20 bytes\\n"
+              << "  Hex dump: ";
+    for (int i = 0; i < 54; ++i)
+        std::cout << std::hex << std::setfill('0') << std::setw(2)
+                  << static_cast<int>(frame[i]);
+    std::cout << std::endl;
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Raw socket: sending a crafted ICMP Echo Request (ping) with manual header construction",
-      source: `import socket
-import struct
-import os
-import time
+      source: `#include <iostream>
+#include <cstring>
+#include <cstdint>
+#include <chrono>
+#include <sys/socket.h>
+#include <netinet/ip_icmp.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
-def build_icmp_echo(identifier: int, seq: int, payload: bytes) -> bytes:
-    """Build an ICMP Echo Request packet (Type 8, Code 0)."""
-    icmp_type = 8   # Echo Request
-    icmp_code = 0
-    checksum = 0
-    # Pack header with zero checksum first
-    header = struct.pack("!BBHHH",
-        icmp_type, icmp_code, checksum, identifier, seq
-    )
-    packet = header + payload
+uint16_t icmpChecksum(const uint8_t* data, size_t len) {
+    uint32_t sum = 0;
+    for (size_t i = 0; i < len; i += 2) {
+        uint16_t word = (data[i] << 8);
+        if (i + 1 < len) word |= data[i + 1];
+        sum += word;
+    }
+    while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
+    return static_cast<uint16_t>(~sum);
+}
 
-    # Compute checksum over entire ICMP packet
-    if len(packet) % 2:
-        packet += b"\\x00"
-    total = sum(struct.unpack("!%dH" % (len(packet) // 2), packet))
-    total = (total >> 16) + (total & 0xFFFF)
-    total += total >> 16
-    checksum = ~total & 0xFFFF
+void ping(const char* dest, int count = 4) {
+    int sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (sock < 0) { perror("socket"); return; }
 
-    # Repack with correct checksum
-    header = struct.pack("!BBHHH",
-        icmp_type, icmp_code, checksum, identifier, seq
-    )
-    return header + payload
+    struct timeval tv = {2, 0};  // 2-second timeout
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-def ping(dest: str, count: int = 4):
-    """Send ICMP Echo Requests using a raw socket (requires root)."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
-    sock.settimeout(2.0)
-    pid = os.getpid() & 0xFFFF
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    inet_pton(AF_INET, dest, &addr.sin_addr);
 
-    for seq in range(1, count + 1):
-        payload = struct.pack("!d", time.time())  # Timestamp as payload
-        packet = build_icmp_echo(pid, seq, payload)
-        sock.sendto(packet, (dest, 0))
+    uint16_t pid = static_cast<uint16_t>(getpid() & 0xFFFF);
 
-        try:
-            data, addr = sock.recvfrom(1024)
-            # IP header is first 20 bytes; ICMP starts at byte 20
-            icmp_header = data[20:28]
-            rtype, rcode, rchk, rid, rseq = struct.unpack("!BBHHH", icmp_header)
-            rtt_payload = data[28:36]
-            send_time = struct.unpack("!d", rtt_payload)[0]
-            rtt_ms = (time.time() - send_time) * 1000
-            print(f"Reply from {addr[0]}: seq={rseq} ttl={data[8]} "
-                  f"time={rtt_ms:.2f}ms")
-        except socket.timeout:
-            print(f"Request timed out for seq={seq}")
+    for (int seq = 1; seq <= count; ++seq) {
+        // Build ICMP Echo Request (Type 8, Code 0)
+        uint8_t packet[16];  // 8-byte header + 8-byte timestamp payload
+        packet[0] = 8;       // Type: Echo Request
+        packet[1] = 0;       // Code
+        packet[2] = 0; packet[3] = 0;  // Checksum placeholder
+        packet[4] = pid >> 8; packet[5] = pid & 0xFF;
+        packet[6] = seq >> 8; packet[7] = seq & 0xFF;
 
-    sock.close()
+        // Timestamp payload
+        auto now = std::chrono::steady_clock::now();
+        auto us = std::chrono::duration_cast<std::chrono::microseconds>(
+                      now.time_since_epoch()).count();
+        std::memcpy(packet + 8, &us, 8);
 
-# Usage (requires root/admin privileges):
-# ping("8.8.8.8")`,
+        // Compute checksum
+        uint16_t chk = htons(icmpChecksum(packet, 16));
+        std::memcpy(packet + 2, &chk, 2);
+
+        sendto(sock, packet, 16, 0, (sockaddr*)&addr, sizeof(addr));
+
+        uint8_t buf[1024];
+        sockaddr_in from{};
+        socklen_t fromLen = sizeof(from);
+        ssize_t n = recvfrom(sock, buf, sizeof(buf), 0, (sockaddr*)&from, &fromLen);
+        if (n > 0) {
+            int ttl = buf[8];
+            int rseq = (buf[26] << 8) | buf[27];
+            int64_t sendTime;
+            std::memcpy(&sendTime, buf + 28, 8);
+            auto recvTime = std::chrono::steady_clock::now();
+            auto recvUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                              recvTime.time_since_epoch()).count();
+            double rttMs = (recvUs - sendTime) / 1000.0;
+
+            char fromStr[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &from.sin_addr, fromStr, sizeof(fromStr));
+            std::cout << "Reply from " << fromStr << ": seq=" << rseq
+                      << " ttl=" << ttl << " time=" << rttMs << "ms\\n";
+        } else {
+            std::cout << "Request timed out for seq=" << seq << "\\n";
+        }
+    }
+    close(sock);
+}
+
+// Usage (requires root/admin privileges):
+// int main() { ping("8.8.8.8"); return 0; }`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Protocol analysis: parsing a captured Ethernet frame and printing layer-by-layer details",
-      source: `import struct
-from typing import Dict, Any
+      source: `#include <iostream>
+#include <cstdint>
+#include <cstring>
+#include <sstream>
+#include <iomanip>
+#include <vector>
+#include <arpa/inet.h>
 
-def parse_ethernet(frame: bytes) -> Dict[str, Any]:
-    """Parse Ethernet frame header (14 bytes)."""
-    dst, src, ethertype = struct.unpack("!6s6sH", frame[:14])
-    return {
-        "dst_mac": ":".join(f"{b:02x}" for b in dst),
-        "src_mac": ":".join(f"{b:02x}" for b in src),
-        "ethertype": f"0x{ethertype:04x}",
-        "ethertype_name": {0x0800: "IPv4", 0x86DD: "IPv6",
-                           0x0806: "ARP"}.get(ethertype, "Unknown"),
-        "payload": frame[14:]
+// --- Header structs (packed) ---
+#pragma pack(push, 1)
+struct EthHeader {
+    uint8_t  dstMac[6];
+    uint8_t  srcMac[6];
+    uint16_t etherType;
+};
+
+struct Ipv4Header {
+    uint8_t  verIhl;
+    uint8_t  dscpEcn;
+    uint16_t totalLength;
+    uint16_t identification;
+    uint16_t flagsOffset;
+    uint8_t  ttl;
+    uint8_t  protocol;
+    uint16_t checksum;
+    uint8_t  srcIp[4];
+    uint8_t  dstIp[4];
+};
+
+struct TcpHeader {
+    uint16_t srcPort;
+    uint16_t dstPort;
+    uint32_t seqNum;
+    uint32_t ackNum;
+    uint8_t  dataOffset;
+    uint8_t  flags;
+    uint16_t window;
+    uint16_t checksum;
+    uint16_t urgent;
+};
+#pragma pack(pop)
+
+std::string formatMac(const uint8_t mac[6]) {
+    std::ostringstream oss;
+    for (int i = 0; i < 6; ++i)
+        oss << (i ? ":" : "") << std::hex << std::setfill('0')
+            << std::setw(2) << static_cast<int>(mac[i]);
+    return oss.str();
+}
+
+std::string formatIp(const uint8_t ip[4]) {
+    return std::to_string(ip[0]) + "." + std::to_string(ip[1]) + "."
+         + std::to_string(ip[2]) + "." + std::to_string(ip[3]);
+}
+
+int main() {
+    // Raw captured frame in hex
+    uint8_t raw[] = {
+        0xff,0xff,0xff,0xff,0xff,0xff, 0x00,0x11,0x22,0x33,0x44,0x55,
+        0x08,0x00,  // EtherType: IPv4
+        0x45,0x00,0x00,0x28, 0x00,0x01,0x00,0x00,
+        0x40,0x06,0xb1,0xc6, 0xc0,0xa8,0x01,0x64,
+        0xc0,0xa8,0x01,0x01,
+        0x30,0x39,0x00,0x50, 0x12,0x34,0x56,0x78,
+        0x00,0x00,0x00,0x00, 0x50,0x02,0x00,0xff,
+        0xd5,0xe4,0x00,0x00
+    };
+
+    // Layer 2: Ethernet
+    auto* eth = reinterpret_cast<EthHeader*>(raw);
+    uint16_t etherType = ntohs(eth->etherType);
+    std::cout << "=== Layer 2 (Ethernet) ===\\n"
+              << "  Src MAC:  " << formatMac(eth->srcMac) << "\\n"
+              << "  Dst MAC:  " << formatMac(eth->dstMac) << "\\n"
+              << "  Type:     " << (etherType == 0x0800 ? "IPv4" : "Other")
+              << " (0x" << std::hex << etherType << std::dec << ")\\n";
+
+    if (etherType == 0x0800) {
+        // Layer 3: IPv4
+        auto* ip = reinterpret_cast<Ipv4Header*>(raw + sizeof(EthHeader));
+        int ihl = (ip->verIhl & 0x0F) * 4;
+        const char* protoName = (ip->protocol == 6) ? "TCP"
+                              : (ip->protocol == 17) ? "UDP"
+                              : (ip->protocol == 1) ? "ICMP" : "Other";
+        std::cout << "\\n=== Layer 3 (IPv4) ===\\n"
+                  << "  Src IP:   " << formatIp(ip->srcIp) << "\\n"
+                  << "  Dst IP:   " << formatIp(ip->dstIp) << "\\n"
+                  << "  TTL:      " << static_cast<int>(ip->ttl) << "\\n"
+                  << "  Protocol: " << protoName
+                  << " (" << static_cast<int>(ip->protocol) << ")\\n";
+
+        if (ip->protocol == 6) {
+            // Layer 4: TCP
+            auto* tcp = reinterpret_cast<TcpHeader*>(
+                raw + sizeof(EthHeader) + ihl);
+            std::string flags;
+            if (tcp->flags & 0x01) flags += "FIN ";
+            if (tcp->flags & 0x02) flags += "SYN ";
+            if (tcp->flags & 0x04) flags += "RST ";
+            if (tcp->flags & 0x08) flags += "PSH ";
+            if (tcp->flags & 0x10) flags += "ACK ";
+            if (tcp->flags & 0x20) flags += "URG ";
+            std::cout << "\\n=== Layer 4 (TCP) ===\\n"
+                      << "  Src Port: " << ntohs(tcp->srcPort) << "\\n"
+                      << "  Dst Port: " << ntohs(tcp->dstPort) << "\\n"
+                      << "  Seq:      " << ntohl(tcp->seqNum) << "\\n"
+                      << "  Flags:    " << flags << "\\n"
+                      << "  Window:   " << ntohs(tcp->window) << "\\n";
+        }
     }
-
-def parse_ipv4(data: bytes) -> Dict[str, Any]:
-    """Parse IPv4 header (20+ bytes)."""
-    ver_ihl = data[0]
-    ihl = (ver_ihl & 0x0F) * 4   # Header length in bytes
-    fields = struct.unpack("!BBHHHBBH4s4s", data[:20])
-    return {
-        "version": ver_ihl >> 4,
-        "header_length": ihl,
-        "total_length": fields[2],
-        "ttl": fields[5],
-        "protocol": fields[6],
-        "protocol_name": {1: "ICMP", 6: "TCP", 17: "UDP"}.get(fields[6], "Other"),
-        "src_ip": ".".join(str(b) for b in fields[8]),
-        "dst_ip": ".".join(str(b) for b in fields[9]),
-        "payload": data[ihl:]
-    }
-
-def parse_tcp(data: bytes) -> Dict[str, Any]:
-    """Parse TCP header (20+ bytes)."""
-    fields = struct.unpack("!HHIIBBHHH", data[:20])
-    data_offset = (fields[4] >> 4) * 4
-    flags = fields[5]
-    flag_names = []
-    for name, bit in [("FIN",0x01),("SYN",0x02),("RST",0x04),
-                       ("PSH",0x08),("ACK",0x10),("URG",0x20)]:
-        if flags & bit:
-            flag_names.append(name)
-    return {
-        "src_port": fields[0],
-        "dst_port": fields[1],
-        "seq": fields[2],
-        "ack": fields[3],
-        "flags": flag_names,
-        "window": fields[6],
-        "payload_size": len(data) - data_offset
-    }
-
-# Example: parse a raw captured frame
-raw = bytes.fromhex(
-    "ffffffffffff00112233445508004500002800010000"
-    "4006b1c6c0a80164c0a80101303900501234567800"
-    "000000500200ffffd5e40000"
-)
-eth = parse_ethernet(raw)
-print(f"=== Layer 2 (Ethernet) ===")
-print(f"  Src MAC:  {eth['src_mac']}")
-print(f"  Dst MAC:  {eth['dst_mac']}")
-print(f"  Type:     {eth['ethertype_name']} ({eth['ethertype']})")
-
-if eth["ethertype"] == "0x0800":
-    ip = parse_ipv4(eth["payload"])
-    print(f"\\n=== Layer 3 (IPv4) ===")
-    print(f"  Src IP:   {ip['src_ip']}")
-    print(f"  Dst IP:   {ip['dst_ip']}")
-    print(f"  TTL:      {ip['ttl']}")
-    print(f"  Protocol: {ip['protocol_name']} ({ip['protocol']})")
-
-    if ip["protocol_name"] == "TCP":
-        tcp = parse_tcp(ip["payload"])
-        print(f"\\n=== Layer 4 (TCP) ===")
-        print(f"  Src Port: {tcp['src_port']}")
-        print(f"  Dst Port: {tcp['dst_port']}")
-        print(f"  Seq:      {tcp['seq']}")
-        print(f"  Flags:    {', '.join(tcp['flags'])}")
-        print(f"  Window:   {tcp['window']}")`,
+    return 0;
+}`,
     },
   ],
   diagrams: [

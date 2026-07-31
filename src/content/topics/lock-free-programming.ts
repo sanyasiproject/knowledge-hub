@@ -835,4 +835,11 @@ unsafe impl<T: Send> Sync for MpscQueue<T> {}
         "A lock-free FIFO queue using separate head and tail atomic pointers with a sentinel node. Features a helping mechanism where threads advance a lagging tail pointer. Used in Java's ConcurrentLinkedQueue.",
     },
   ],
+  exercises: [
+    "Implement a **lock-free counter** in C++ using `std::atomic<int>` and a CAS loop. Then benchmark it against a `std::mutex`-protected counter under *low contention* (2 threads) and *high contention* (16 threads). Explain why the relative performance changes.",
+    "The **Treiber stack** shown in the code examples has a memory leak / use-after-free bug in `pop()`. Identify the exact race window that could cause a thread to dereference freed memory. Then sketch how you would fix it using **hazard pointers** -- describe the protocol each thread must follow before accessing a node.",
+    "Construct a concrete **ABA problem** scenario for a lock-free stack: write out the step-by-step interleaving of two threads (with memory addresses) that leads to corruption. Then show how a **tagged pointer** (with a 16-bit version counter) prevents the bug by causing the CAS to fail.",
+    "Compare **epoch-based reclamation** (EBR) and **hazard pointers** for a lock-free queue used by 64 threads, where some threads may occasionally block for up to 5 seconds on I/O. Which scheme would you choose, and why? What is the worst-case *memory overhead* of each approach in this scenario?",
+    "Write a **Michael-Scott queue** `enqueue` operation in pseudocode. Carefully annotate which `std::memory_order` you would use for each atomic operation (*load*, *store*, and *CAS*) and justify each choice. What would break if you used `memory_order_relaxed` everywhere?",
+  ],
 };

@@ -83,53 +83,127 @@ worker.on('failed', (job, err) => {
 });`,
     },
     {
-      language: "python",
-      caption: "Celery — task definition, retries, and chaining",
-      source: `from celery import Celery, chain, group, chord
-from celery.utils.log import get_task_logger
+      language: "cpp",
+      caption: "Background job framework — task definition, retries, and chaining (conceptual C++ implementation)",
+      source: `#include <iostream>
+#include <string>
+#include <functional>
+#include <vector>
+#include <queue>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <chrono>
+#include <stdexcept>
+#include <cmath>
 
-app = Celery('tasks', broker='redis://localhost:6379/0',
-             backend='redis://localhost:6379/1')
+// Simplified job result
+struct JobResult {
+    bool success;
+    std::string message;
+};
 
-logger = get_task_logger(__name__)
+// Job configuration
+struct JobConfig {
+    int maxRetries = 5;
+    int baseDelaySeconds = 30;
+    bool acksLate = true;  // Ack after processing (at-least-once)
+};
 
-# Configure default retry behavior
-app.conf.update(
-    task_acks_late=True,           # Ack after processing (at-least-once)
-    worker_prefetch_multiplier=1,  # Fetch one task at a time
-    task_reject_on_worker_lost=True,
-)
+// A job with retry support and exponential backoff
+class Job {
+public:
+    using Handler = std::function<JobResult(int /*userId*/, const std::string& /*tpl*/)>;
 
-@app.task(bind=True, max_retries=5, default_retry_delay=30)
-def send_email(self, user_id: int, template: str):
-    try:
-        user = UserService.get(user_id)
-        EmailService.send(user.email, template)
-        return {'sent': True, 'email': user.email}
-    except EmailServiceUnavailable as exc:
-        # Exponential backoff: 30s, 60s, 120s, 240s, 480s
-        raise self.retry(exc=exc, countdown=30 * (2 ** self.request.retries))
+    Job(std::string name, Handler handler, JobConfig config = {})
+        : name_(std::move(name)), handler_(std::move(handler)),
+          config_(config), attempts_(0) {}
 
-@app.task
-def generate_report(user_id: int):
-    return ReportService.generate(user_id)
+    JobResult execute(int userId, const std::string& tpl) {
+        while (attempts_ <= config_.maxRetries) {
+            try {
+                auto result = handler_(userId, tpl);
+                return result;
+            } catch (const std::exception& ex) {
+                ++attempts_;
+                if (attempts_ > config_.maxRetries) {
+                    std::cerr << "Job '" << name_
+                              << "' exhausted retries. Moving to DLQ.\\n";
+                    return {false, "Max retries exceeded: " + std::string(ex.what())};
+                }
+                // Exponential backoff: 30s, 60s, 120s, 240s, 480s
+                int delaySec = config_.baseDelaySeconds
+                               * static_cast<int>(std::pow(2, attempts_ - 1));
+                std::cerr << "Retry " << attempts_ << "/" << config_.maxRetries
+                          << " in " << delaySec << "s: " << ex.what() << "\\n";
+                std::this_thread::sleep_for(std::chrono::seconds(delaySec));
+            }
+        }
+        return {false, "Unexpected failure"};
+    }
 
-@app.task
-def notify_report_ready(results, user_id: int):
-    EmailService.send_report(user_id, results)
+private:
+    std::string name_;
+    Handler handler_;
+    JobConfig config_;
+    int attempts_;
+};
 
-# Workflow: generate report, then notify
-workflow = chain(
-    generate_report.s(user_id=42),
-    notify_report_ready.s(user_id=42)
-)
-workflow.apply_async()
+// Simple thread-safe job queue
+class JobQueue {
+public:
+    void enqueue(std::function<void()> task) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        tasks_.push(std::move(task));
+        cv_.notify_one();
+    }
 
-# Parallel tasks with callback when all complete
-report_chord = chord(
-    [generate_report.s(uid) for uid in [1, 2, 3]],
-    notify_report_ready.s(user_id=0)  # called with list of results
-)`,
+    std::function<void()> dequeue() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        cv_.wait(lock, [this] { return !tasks_.empty(); });
+        auto task = std::move(tasks_.front());
+        tasks_.pop();
+        return task;
+    }
+
+private:
+    std::queue<std::function<void()>> tasks_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+};
+
+// Chain: sequential execution of tasks
+void chainTasks(std::vector<std::function<void()>> tasks) {
+    for (auto& task : tasks) {
+        task();
+    }
+}
+
+// Usage example
+int main() {
+    // Define a send_email job with retries and exponential backoff
+    Job sendEmail("send-email",
+        [](int userId, const std::string& tpl) -> JobResult {
+            std::cout << "Sending " << tpl << " email to user " << userId << "\\n";
+            // Simulate: throw to trigger retry, or return success
+            return {true, "Email sent successfully"};
+        },
+        {.maxRetries = 5, .baseDelaySeconds = 30, .acksLate = true}
+    );
+
+    // Execute with retry support
+    auto result = sendEmail.execute(42, "welcome");
+    std::cout << "Result: " << (result.success ? "OK" : "FAIL")
+              << " - " << result.message << "\\n";
+
+    // Chain: generate report, then notify
+    chainTasks({
+        [] { std::cout << "Generating report for user 42\\n"; },
+        [] { std::cout << "Notifying user 42 that report is ready\\n"; },
+    });
+
+    return 0;
+}`,
     },
     {
       language: "ruby",
@@ -225,6 +299,82 @@ console.log(repeatableJobs);
 // Remove a repeatable job
 await reportQueue.removeRepeatableByKey(repeatableJobs[0].key);`,
     },
+  ],
+  diagrams: [
+    {
+      title: "Background Job Processing Architecture",
+      kind: "architecture",
+      caption: "End-to-end architecture of a **background job system** showing the *producer*, *broker*, *worker pool*, *DLQ*, and *monitoring* components.",
+      mermaid: `graph TD
+    API["**API Server**<br/>*producer*"]
+    Queue["**Redis / RabbitMQ**<br/>*broker & queue*"]
+    W1["**Worker 1**<br/>*concurrency: 10*"]
+    W2["**Worker 2**<br/>*concurrency: 10*"]
+    W3["**Worker 3**<br/>*concurrency: 10*"]
+    DLQ["**Dead Letter Queue**<br/>*failed after retries*"]
+    Monitor["**Dashboard**<br/>*bull-board / Flower*"]
+    ExtAPI["**External APIs**<br/>*email, SMS, payment*"]
+    DB["**Database**<br/>*fetch fresh data*"]
+
+    API -->|"enqueue job<br/>{userId, template}"| Queue
+    Queue --> W1
+    Queue --> W2
+    Queue --> W3
+    W1 --> DB
+    W2 --> ExtAPI
+    W3 --> ExtAPI
+    W1 -->|"exhausted retries"| DLQ
+    W2 -->|"exhausted retries"| DLQ
+    Queue --> Monitor
+    DLQ --> Monitor`
+    },
+    {
+      title: "Job Retry with Exponential Backoff",
+      kind: "flow",
+      caption: "Flow diagram showing a job's lifecycle through **retry attempts** with *exponential backoff and jitter*, ending at either success or the **DLQ**.",
+      mermaid: `graph TD
+    Start["**Job Enqueued**"] --> Process["**Worker Picks Up Job**"]
+    Process --> Success{"**Success?**"}
+    Success -->|"Yes"| Complete["**Job Completed**<br/>*removed after TTL*"]
+    Success -->|"No — error"| RetryCheck{"**Retries < Max?**"}
+    RetryCheck -->|"Yes"| Backoff["**Exponential Backoff**<br/>*delay = base * 2^attempt*<br/>*+ random jitter*"]
+    Backoff --> Wait["**Wait in Delayed Set**<br/>*Redis sorted set by timestamp*"]
+    Wait --> Process
+    RetryCheck -->|"No — exhausted"| DLQ["**Dead Letter Queue**<br/>*manual inspection required*"]
+    DLQ --> Alert["**Alert Triggered**<br/>*PagerDuty / Slack*"]`
+    },
+    {
+      title: "Celery Workflow Patterns",
+      kind: "flow",
+      caption: "Visual representation of Celery's **chain**, **group**, and **chord** workflow patterns for composing *complex task pipelines*.",
+      mermaid: `graph LR
+    subgraph Chain ["**Chain** *(sequential)*"]
+        C1["Task A"] --> C2["Task B"] --> C3["Task C"]
+    end
+
+    subgraph Group ["**Group** *(parallel)*"]
+        G1["Task X"]
+        G2["Task Y"]
+        G3["Task Z"]
+    end
+
+    subgraph Chord ["**Chord** *(parallel + callback)*"]
+        CH1["Task 1"]
+        CH2["Task 2"]
+        CH3["Task 3"]
+        CB["**Callback**<br/>*receives all results*"]
+        CH1 --> CB
+        CH2 --> CB
+        CH3 --> CB
+    end`
+    },
+  ],
+  exercises: [
+    "**Build an email queue with retries:** Using **BullMQ**, create a queue that processes email-sending jobs. Implement *exponential backoff* with jitter (base delay 2s, max 5 retries). Add a `worker.on('failed')` listener that logs failures and, when retries are exhausted, writes the job to a `failed_emails` database table. Test by intentionally throwing errors in the worker to verify retry behavior.",
+    "**Implement a rate-limited API caller:** Create a BullMQ worker that calls an external API (mock it) with a **rate limit** of 60 requests per minute. Enqueue 200 jobs and verify that the worker respects the rate limit using the `limiter` option. Log timestamps to prove no more than 60 jobs are processed per minute. Add *priority levels* so that `critical` jobs are processed before `bulk` jobs.",
+    "**Build a job monitoring dashboard:** Write a Node.js Express server that exposes a `/health` endpoint returning real-time metrics from a BullMQ queue: **queue depth** (waiting + active), *processing latency* (average time from enqueue to completion), *failure rate* (failed/total in last hour), and DLQ size. Use `queue.getJobCounts()` and `queue.getCompleted()` APIs.",
+    "**Implement a cron job with distributed locking:** Set up a BullMQ repeatable job that runs every 5 minutes to aggregate daily statistics. Simulate running **three app instances** simultaneously and verify that only one instance schedules the cron job. Use Redis `SETNX` with a TTL to implement the distributed lock. Log which instance acquired the lock each cycle.",
+    "**Design an idempotent job consumer:** Create a worker that processes `order.payment` jobs. Each job has an `orderId` and `amount`. Implement *idempotency* by checking a `processed_payments` table before processing. Use a **database transaction** to atomically insert the payment record and mark the job as processed. Test by enqueueing the same job twice and verifying only one payment is created.",
   ],
   comparison: {
     columns: ["Feature", "BullMQ (Node.js)", "Sidekiq (Ruby)", "Celery (Python)"],

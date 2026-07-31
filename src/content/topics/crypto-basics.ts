@@ -200,6 +200,348 @@ Where K' is the key (padded or hashed to block size), opad/ipad are fixed paddin
       back: "Non-repudiation means the signer cannot deny having signed a message. Only digital signatures (asymmetric crypto) provide it — since only the private key holder can sign. HMAC does not provide non-repudiation because both parties share the same key.",
     },
   ],
+  deepDive: [
+    `## The Mathematics Behind RSA and Why Key Size Matters
+
+**RSA** relies on a deceptively simple mathematical fact: multiplying two large **prime numbers** is trivial, but *factoring* their product back into those primes is computationally infeasible for sufficiently large numbers. When you generate an RSA key pair, the system selects two random primes *p* and *q*, computes their product \`n = p * q\`, and derives the public exponent *e* and private exponent *d* such that \`(m^e)^d mod n = m\` for any message *m*. The security of the entire scheme rests on the assumption that an attacker who knows *n* (which is public) cannot efficiently recover *p* and *q*. As of today, the **General Number Field Sieve (GNFS)** is the fastest known classical algorithm for factoring, and its sub-exponential runtime means that doubling the key size more than squares the difficulty. This is why **2048-bit RSA** is considered the minimum: a 1024-bit key was once standard but is now within reach of well-resourced adversaries. Looking ahead, **Shor's algorithm** running on a sufficiently powerful *quantum computer* could factor in polynomial time, which is why post-quantum cryptography research (lattice-based, code-based, hash-based schemes) is accelerating.`,
+
+    `## How AES-GCM Achieves Authenticated Encryption Internally
+
+**AES-GCM** (Galois/Counter Mode) is the workhorse of modern symmetric cryptography because it solves *two problems simultaneously*: **confidentiality** and **integrity**. Internally, GCM operates in two parallel tracks. The **CTR (Counter) track** generates a keystream by encrypting successive counter values (\`IV || 0x00000002\`, \`IV || 0x00000003\`, ...) with the AES block cipher, then \`XOR\`-ing the keystream with the plaintext to produce ciphertext. This makes encryption *parallelizable* and eliminates the need for padding. The **GHASH track** runs a *Galois field multiplication* over the ciphertext blocks and any additional authenticated data (AAD) to produce a 128-bit **authentication tag**. The recipient recomputes the tag and compares it to the received tag before even looking at the decrypted plaintext. If a single bit of ciphertext or AAD was altered, the tag will not match, and the entire message is rejected. A critical operational requirement is that the **96-bit IV/nonce must never be reused** with the same key. Reusing a nonce in GCM is catastrophic: it allows an attacker to recover the GHASH key *H* and forge authentication tags, completely destroying both confidentiality and integrity guarantees. This is why *nonce management* (random generation or deterministic counters) is one of the most important implementation details.`,
+
+    `## Key Derivation, Salting, and Password Storage Best Practices
+
+Raw passwords should **never** be stored in any form that is directly reversible. The correct approach is to use a **key derivation function (KDF)** designed to be *intentionally slow* and *memory-hard*. **bcrypt** hashes the password with a configurable cost factor (work factor) that determines how many rounds of the internal Blowfish-based computation are performed. **Argon2** (winner of the 2015 Password Hashing Competition) goes further by being both *CPU-hard* and *memory-hard*, requiring a configurable amount of RAM, which defeats GPU-based and ASIC-based cracking attacks. Both algorithms internally prepend a random **salt** (typically 16 bytes) to each password before hashing, ensuring that identical passwords produce *different* hashes. Without salting, an attacker could precompute a **rainbow table** mapping common passwords to their hashes and instantly look up any match. The salt forces the attacker to crack each hash individually. For deriving encryption keys from passwords (as opposed to storing password hashes), use \`PBKDF2\`, \`scrypt\`, or \`HKDF\`. **HKDF** (HMAC-based Key Derivation Function) is particularly useful when you need to derive *multiple keys* from a single shared secret (e.g., separate encryption key and MAC key from one Diffie-Hellman output), using an *extract-then-expand* paradigm defined in **RFC 5869**.`,
+  ],
+
+  code: [
+    {
+      language: "cpp",
+      caption: "SHA-256 Hashing with OpenSSL (C++)",
+      source: `#include <openssl/evp.h>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <string>
+
+// Compute the **SHA-256** hash of an arbitrary input string
+// using the OpenSSL *EVP* (envelope) API.
+std::string sha256(const std::string& input) {
+    // Create a message-digest context
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    const EVP_MD* md = EVP_sha256();
+
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int hash_len = 0;
+
+    // Initialize, update with data, and finalize the digest
+    EVP_DigestInit_ex(ctx, md, nullptr);
+    EVP_DigestUpdate(ctx, input.c_str(), input.size());
+    EVP_DigestFinal_ex(ctx, hash, &hash_len);
+
+    EVP_MD_CTX_free(ctx);
+
+    // Convert the binary digest to a hex string
+    std::ostringstream oss;
+    for (unsigned int i = 0; i < hash_len; ++i)
+        oss << std::hex << std::setfill('0') << std::setw(2)
+            << static_cast<int>(hash[i]);
+
+    return oss.str();
+}
+
+int main() {
+    std::string message = "Hello, Cryptography!";
+    std::cout << "Input:  " << message << "\\n";
+    std::cout << "SHA-256: " << sha256(message) << "\\n";
+    return 0;
+}
+// Compile: g++ -o sha256_demo sha256_demo.cpp -lssl -lcrypto`,
+    },
+    {
+      language: "cpp",
+      caption: "AES-256-GCM Symmetric Encryption with OpenSSL (C++)",
+      source: `#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <cstring>
+#include <iostream>
+#include <vector>
+
+// **AES-256-GCM** authenticated encryption example.
+// Encrypts plaintext and produces ciphertext + a 128-bit *authentication tag*.
+
+bool aes256_gcm_encrypt(
+    const std::vector<unsigned char>& key,       // 32 bytes (256 bits)
+    const std::vector<unsigned char>& iv,        // 12 bytes (96-bit nonce)
+    const std::string& plaintext,
+    std::vector<unsigned char>& ciphertext,
+    std::vector<unsigned char>& tag              // 16 bytes (128-bit tag)
+) {
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+
+    // Initialize encryption with \`AES-256-GCM\`
+    EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr);
+
+    // Set the IV length (default is 12 bytes for GCM)
+    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, iv.size(), nullptr);
+
+    // Provide key and IV
+    EVP_EncryptInit_ex(ctx, nullptr, nullptr, key.data(), iv.data());
+
+    // Encrypt the plaintext
+    ciphertext.resize(plaintext.size() + 16);
+    int out_len = 0;
+    EVP_EncryptUpdate(ctx,
+        ciphertext.data(), &out_len,
+        reinterpret_cast<const unsigned char*>(plaintext.c_str()),
+        plaintext.size());
+    int total_len = out_len;
+
+    // Finalize encryption
+    EVP_EncryptFinal_ex(ctx, ciphertext.data() + total_len, &out_len);
+    total_len += out_len;
+    ciphertext.resize(total_len);
+
+    // Extract the **authentication tag**
+    tag.resize(16);
+    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, 16, tag.data());
+
+    EVP_CIPHER_CTX_free(ctx);
+    return true;
+}
+
+int main() {
+    // Generate a random 256-bit key and 96-bit IV
+    std::vector<unsigned char> key(32), iv(12);
+    RAND_bytes(key.data(), key.size());
+    RAND_bytes(iv.data(), iv.size());
+
+    std::string plaintext = "Sensitive payload: account_id=42";
+    std::vector<unsigned char> ciphertext, tag;
+
+    aes256_gcm_encrypt(key, iv, plaintext, ciphertext, tag);
+
+    std::cout << "Plaintext size:  " << plaintext.size() << " bytes\\n";
+    std::cout << "Ciphertext size: " << ciphertext.size() << " bytes\\n";
+    std::cout << "Auth tag size:   " << tag.size() << " bytes\\n";
+    return 0;
+}
+// Compile: g++ -o aes_gcm_demo aes_gcm_demo.cpp -lssl -lcrypto`,
+    },
+    {
+      language: "cpp",
+      caption: "HMAC-SHA256 Message Authentication with OpenSSL (C++)",
+      source: `#include <openssl/hmac.h>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <string>
+
+// Compute **HMAC-SHA256** over a message using a secret key.
+// This provides both *integrity* and *authentication*.
+std::string hmac_sha256(const std::string& key, const std::string& message) {
+    unsigned char result[EVP_MAX_MD_SIZE];
+    unsigned int result_len = 0;
+
+    HMAC(EVP_sha256(),
+         key.c_str(), key.size(),
+         reinterpret_cast<const unsigned char*>(message.c_str()),
+         message.size(),
+         result, &result_len);
+
+    std::ostringstream oss;
+    for (unsigned int i = 0; i < result_len; ++i)
+        oss << std::hex << std::setfill('0') << std::setw(2)
+            << static_cast<int>(result[i]);
+
+    return oss.str();
+}
+
+int main() {
+    std::string secret = "my-api-secret-key";
+    std::string payload = "user_id=100&action=transfer&amount=500";
+
+    std::string mac = hmac_sha256(secret, payload);
+    std::cout << "Payload: " << payload << "\\n";
+    std::cout << "HMAC:    " << mac << "\\n";
+
+    // Verification: recompute and compare
+    std::string verify = hmac_sha256(secret, payload);
+    std::cout << "Valid:   " << (mac == verify ? "YES" : "NO") << "\\n";
+    return 0;
+}
+// Compile: g++ -o hmac_demo hmac_demo.cpp -lssl -lcrypto`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "Hybrid Encryption Flow (TLS Pattern)",
+      kind: "sequence",
+      caption: "Shows how asymmetric and symmetric encryption combine in practice: the handshake uses RSA/ECC to exchange a session key, then AES encrypts the data.",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant Server
+    Note over Client,Server: **Asymmetric Phase** (Key Exchange)
+    Client->>Server: ClientHello (supported ciphers, random)
+    Server->>Client: ServerHello + Server Certificate (public key)
+    Client->>Client: Generate random *session key*
+    Client->>Server: Session key encrypted with Server's **public key**
+    Server->>Server: Decrypt session key with **private key**
+    Note over Client,Server: **Symmetric Phase** (Bulk Encryption)
+    Client->>Server: Data encrypted with AES-GCM(session key)
+    Server->>Client: Data encrypted with AES-GCM(session key)
+    Note over Client,Server: All further traffic uses the fast symmetric key`,
+    },
+    {
+      title: "Cryptographic Hash Function Properties",
+      kind: "mindmap",
+      caption: "The core properties every secure hash function must satisfy and the common algorithms in use.",
+      mermaid: `mindmap
+  root((Cryptographic Hashing))
+    Properties
+      **Deterministic**
+        Same input -> same output
+      **One-way**
+        Cannot reverse hash to input
+      **Collision resistant**
+        Infeasible to find two inputs with same hash
+      **Avalanche effect**
+        1-bit change -> ~50% output change
+    Algorithms
+      MD5 ~~broken~~
+        128-bit, collisions trivial
+      SHA-1 ~~deprecated~~
+        160-bit, collision in 2017
+      **SHA-256** ~~recommended~~
+        256-bit, SHA-2 family
+      **SHA-3**
+        Keccak sponge construction
+    Use Cases
+      File integrity checksums
+      Digital signature hashing
+      Password storage with salt
+      Merkle trees in blockchain`,
+    },
+    {
+      title: "AES-GCM Internal Architecture",
+      kind: "flow",
+      caption: "Internal data flow of AES-GCM showing the parallel CTR encryption track and the GHASH authentication track.",
+      mermaid: `flowchart TD
+    subgraph Inputs
+        K[/"**AES Key** (128/256-bit)"/]
+        IV[/"**IV/Nonce** (96-bit)"/]
+        PT[/"**Plaintext** blocks"/]
+        AAD[/"**Additional Auth Data**"/]
+    end
+
+    K --> AES["AES Block Cipher"]
+    IV --> CTR["Counter Generator<br/>IV || counter++"]
+    CTR --> AES
+    AES --> KS["Keystream Block"]
+    KS --> XOR["XOR"]
+    PT --> XOR
+    XOR --> CT["**Ciphertext** Block"]
+
+    CT --> GHASH["GHASH<br/>(Galois Field Multiply)"]
+    AAD --> GHASH
+    GHASH --> TAG["**Authentication Tag**<br/>(128-bit)"]
+
+    CT --> OUT[/"Encrypted Output"/]
+    TAG --> OUT`,
+    },
+  ],
+
+  comparison: {
+    columns: [
+      "Property",
+      "**AES-256** (Symmetric)",
+      "**RSA-2048** (Asymmetric)",
+      "**ECC P-256** (Asymmetric)",
+    ],
+    rows: [
+      [
+        "Type",
+        "Symmetric (shared key)",
+        "Asymmetric (key pair)",
+        "Asymmetric (key pair)",
+      ],
+      [
+        "Key Size",
+        "256 bits",
+        "2048 bits (public + private)",
+        "256 bits (equivalent to RSA-3072)",
+      ],
+      [
+        "Security Basis",
+        "Substitution-permutation network",
+        "Integer factoring problem",
+        "Elliptic curve discrete log problem",
+      ],
+      [
+        "Speed",
+        "*Very fast* (hardware-accelerated via AES-NI)",
+        "*Slow* (~1000x slower than AES for encryption)",
+        "*Moderate* (~10x faster than RSA for signing)",
+      ],
+      [
+        "Primary Use",
+        "Bulk data encryption",
+        "Key exchange, digital signatures, encryption",
+        "Key exchange (ECDH), digital signatures (ECDSA)",
+      ],
+      [
+        "Quantum Resistance",
+        "Partially (Grover's halves effective key size; AES-256 -> 128-bit security)",
+        "**Broken** by Shor's algorithm",
+        "**Broken** by Shor's algorithm",
+      ],
+      [
+        "Key Distribution",
+        "Requires secure channel to share key",
+        "Public key shared openly",
+        "Public key shared openly",
+      ],
+      [
+        "Non-repudiation",
+        "No (shared key means either party could have produced the ciphertext)",
+        "Yes (only private key holder can sign)",
+        "Yes (only private key holder can sign)",
+      ],
+      [
+        "Standard / Adoption",
+        "NIST FIPS 197 (2001); universal",
+        "PKCS#1; TLS, SSH, PGP; being phased out for ECC",
+        "NIST P-256 / secp256r1; TLS 1.3, modern protocols",
+      ],
+    ],
+  },
+
+  exercises: [
+    "**Hash Collision Experiment**: Write a C++ program that generates random 4-character strings and computes their SHA-256 hashes. Count how many strings you need to generate before finding two that share the same *first 4 hex characters* (16-bit prefix collision). Compare this to the theoretical birthday bound of `2^(n/2)` where `n = 16` bits. Extend to 5, 6, and 7 hex characters and plot the relationship.",
+    "**AES Mode Comparison**: Encrypt a 128x128 pixel BMP image (a simple checkerboard pattern) using AES-256 in both **ECB** mode and **CBC** mode with OpenSSL's command-line tool. Visually compare the output files. Explain *why* ECB mode preserves patterns while CBC does not. Document which block cipher mode properties account for this difference.",
+    "**HMAC Verification Pipeline**: Build a C++ program that (1) reads a file, (2) computes its `HMAC-SHA256` using a secret key, and (3) writes the HMAC to a `.sig` file. Then write a *verifier* that re-reads the file, recomputes the HMAC, and compares it to the stored `.sig`. Test by tampering with a single byte of the original file and confirming that verification fails.",
+    "**Diffie-Hellman Key Exchange Simulation**: Implement a simplified Diffie-Hellman key exchange in C++ using small prime numbers (for demonstration). Both \"Alice\" and \"Bob\" should generate private values, compute public values using `g^a mod p`, exchange public values, and independently derive the *same shared secret*. Print each step to show how the math works. Then explain why an eavesdropper who sees both public values cannot recover the shared secret.",
+    "**Envelope Encryption Demo**: Using OpenSSL in C++, implement an *envelope encryption* workflow: (1) generate a random 256-bit **data encryption key (DEK)**, (2) encrypt a file with `AES-256-GCM` using the DEK, (3) encrypt the DEK itself with an RSA-2048 **key encryption key (KEK)**, (4) store the encrypted DEK alongside the ciphertext. Then implement the decryption path. Discuss why this pattern allows key rotation without re-encrypting all data.",
+  ],
+
+  cheatSheet: [
+    "**Symmetric vs Asymmetric**: Symmetric (AES) = same key, fast, bulk data. Asymmetric (RSA/ECC) = key pair, slow, key exchange + signatures. In practice, always *hybrid*: asymmetric exchanges a symmetric session key.",
+    "**AES Mode Selection**: Use `AES-GCM` (authenticated encryption) for almost everything. Avoid `ECB` (leaks patterns), `CBC` without HMAC (no integrity), and `CTR` alone (no authentication). GCM = confidentiality + integrity in one pass.",
+    "**Hash Function Choice**: Use `SHA-256` or `SHA-3`. Never `MD5` (collisions trivial) or `SHA-1` (collision demonstrated 2017). For passwords, use `bcrypt` or `Argon2` (intentionally slow + salted), **not** raw SHA-256.",
+    "**Nonce/IV Rules**: Always generate a *cryptographically random* IV for each encryption operation. **Never reuse** an IV with the same key, especially in GCM mode (reuse leaks the GHASH key and allows forgery). For GCM: 96-bit (12-byte) nonce is standard.",
+    "**HMAC vs Signature**: HMAC = symmetric key, fast, proves integrity + authentication but **not** non-repudiation. Digital signature = asymmetric key, slower, proves integrity + authentication **+** non-repudiation. Use HMAC for API auth; use signatures when you need to prove *who* signed.",
+    "**Key Size Equivalences**: AES-128 ~ RSA-3072 ~ ECC-256. AES-256 ~ RSA-15360 ~ ECC-521. ECC provides equivalent security with *much* smaller keys. Prefer ECC (P-256/Curve25519) over RSA for new systems.",
+  ],
+
+  revisionNotes: [
+    "**Core triad**: *Confidentiality* (encryption prevents unauthorized reading), *Integrity* (hashing/MAC detects tampering), *Authentication* (HMAC/signatures prove origin). Every crypto decision maps to one or more of these goals.",
+    "**The hybrid encryption pattern** is fundamental: (1) generate random symmetric key, (2) encrypt the symmetric key with the recipient's public key, (3) encrypt data with the symmetric key, (4) send encrypted key + encrypted data. This combines the *key distribution* advantage of asymmetric crypto with the *speed* of symmetric crypto. TLS, PGP, and S/MIME all use this pattern.",
+    "**AES-GCM internals** to remember: CTR track encrypts counter values and XORs with plaintext (parallel, no padding). GHASH track multiplies ciphertext blocks in a Galois field to produce a 128-bit authentication tag. The 96-bit nonce **must never repeat** with the same key -- nonce reuse is catastrophic (leaks GHASH key *H*, allows tag forgery).",
+    "**Password storage is not encryption** -- it is *one-way hashing* with salt and intentional slowness. Use `Argon2id` (memory-hard + CPU-hard, PHC winner) or `bcrypt` (cost-factor adjustable). Raw `SHA-256(password)` is crackable via rainbow tables and GPU brute-force. Always add a random **salt** per user to defeat precomputed attacks.",
+    "**Post-quantum awareness**: RSA and ECC are both *broken* by Shor's algorithm on a quantum computer. AES-256 retains ~128-bit security against Grover's algorithm (which halves effective key length). NIST has standardized post-quantum algorithms: **ML-KEM** (Kyber) for key exchange and **ML-DSA** (Dilithium) for signatures. Start planning migration for long-lived data.",
+  ],
+
   glossary: [
     {
       term: "AES (Advanced Encryption Standard)",

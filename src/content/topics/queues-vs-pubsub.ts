@@ -63,109 +63,105 @@ export const queuesVsPubsub: TopicContent = {
 
   code: [
     {
-      language: "python",
-      caption: "RabbitMQ: Competing consumers with manual acknowledgment using pika",
-      source: `import pika
-import json
-import time
+      language: "cpp",
+      caption: "RabbitMQ: Competing consumers with manual acknowledgment using AMQP-CPP",
+      source: `#include <iostream>
+#include <string>
+#include <thread>
+#include <chrono>
+#include <amqpcpp.h>
+#include <amqpcpp/linux_tcp.h>
 
-# Producer: publish tasks to a durable queue
-def publish_task(task: dict):
-    connection = pika.BlockingConnection(
-        pika.ConnectionParameters("localhost")
-    )
-    channel = connection.channel()
-    channel.queue_declare(queue="task_queue", durable=True)
-    channel.basic_publish(
-        exchange="",
-        routing_key="task_queue",
-        body=json.dumps(task),
-        properties=pika.BasicProperties(
-            delivery_mode=pika.DeliveryMode.Persistent,
-            content_type="application/json",
-        ),
-    )
-    connection.close()
+// Producer: publish tasks to a durable queue
+void publishTask(AMQP::Channel& channel, const std::string& taskJson) {
+    // Declare a durable queue
+    channel.declareQueue("task_queue", AMQP::durable);
 
-# Consumer: competing consumer with prefetch=1
-def consume_tasks():
-    connection = pika.BlockingConnection(
-        pika.ConnectionParameters("localhost")
-    )
-    channel = connection.channel()
-    channel.queue_declare(queue="task_queue", durable=True)
-    channel.basic_qos(prefetch_count=1)  # Fair dispatch
+    AMQP::Envelope envelope(taskJson.data(), taskJson.size());
+    envelope.setDeliveryMode(2);  // Persistent
+    envelope.setContentType("application/json");
 
-    def callback(ch, method, properties, body):
-        task = json.loads(body)
-        try:
-            process_task(task)
-            ch.basic_ack(delivery_tag=method.delivery_tag)
-        except Exception as e:
-            # Requeue=False sends to DLQ if configured
-            ch.basic_nack(
-                delivery_tag=method.delivery_tag, requeue=False
-            )
+    channel.publish("", "task_queue", envelope);
+}
 
-    channel.basic_consume(
-        queue="task_queue", on_message_callback=callback
-    )
-    channel.start_consuming()
+// Consumer: competing consumer with prefetch=1
+void consumeTasks(AMQP::Channel& channel) {
+    channel.declareQueue("task_queue", AMQP::durable);
+    channel.setQos(1);  // Fair dispatch: prefetch=1
 
-def process_task(task: dict):
-    print(f"Processing: {task}")
-    time.sleep(1)`,
+    channel.consume("task_queue")
+        .onReceived([&channel](const AMQP::Message& message,
+                               uint64_t deliveryTag, bool redelivered) {
+            std::string body(message.body(), message.bodySize());
+            try {
+                processTask(body);
+                channel.ack(deliveryTag);
+            } catch (const std::exception& e) {
+                // requeue=false sends to DLQ if configured
+                channel.reject(deliveryTag, false);
+            }
+        });
+}
+
+void processTask(const std::string& taskJson) {
+    std::cout << "Processing: " << taskJson << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+}
+
+// Usage with a TCP connection handler (pseudo-code for setup)
+// int main() {
+//     auto handler = std::make_shared<AMQP::LibEvHandler>(loop);
+//     AMQP::TcpConnection conn(handler.get(),
+//         AMQP::Address("amqp://localhost/"));
+//     AMQP::TcpChannel channel(&conn);
+//     publishTask(channel, R"({"type":"email","to":"user@example.com"})");
+//     consumeTasks(channel);
+//     return 0;
+// }`,
     },
     {
-      language: "python",
-      caption: "RabbitMQ: Pub/Sub fan-out using fanout exchange",
-      source: `import pika
-import json
+      language: "cpp",
+      caption: "RabbitMQ: Pub/Sub fan-out using fanout exchange with AMQP-CPP",
+      source: `#include <iostream>
+#include <string>
+#include <functional>
+#include <amqpcpp.h>
+#include <amqpcpp/linux_tcp.h>
 
-# Publisher: emit event to fanout exchange
-def publish_event(event: dict):
-    connection = pika.BlockingConnection(
-        pika.ConnectionParameters("localhost")
-    )
-    channel = connection.channel()
-    channel.exchange_declare(
-        exchange="order_events", exchange_type="fanout"
-    )
-    channel.basic_publish(
-        exchange="order_events",
-        routing_key="",  # Ignored for fanout
-        body=json.dumps(event),
-    )
-    connection.close()
+// Publisher: emit event to fanout exchange
+void publishEvent(AMQP::Channel& channel, const std::string& eventJson) {
+    channel.declareExchange("order_events", AMQP::fanout);
 
-# Subscriber: each service binds its own queue
-def subscribe(service_name: str, handler):
-    connection = pika.BlockingConnection(
-        pika.ConnectionParameters("localhost")
-    )
-    channel = connection.channel()
-    channel.exchange_declare(
-        exchange="order_events", exchange_type="fanout"
-    )
-    # Durable named queue so messages persist if service restarts
-    queue_name = f"order_events_{service_name}"
-    channel.queue_declare(queue=queue_name, durable=True)
-    channel.queue_bind(
-        exchange="order_events", queue=queue_name
-    )
-    channel.basic_consume(
-        queue=queue_name,
-        on_message_callback=lambda ch, m, p, body: (
-            handler(json.loads(body)),
-            ch.basic_ack(delivery_tag=m.delivery_tag),
-        ),
-    )
-    channel.start_consuming()
+    AMQP::Envelope envelope(eventJson.data(), eventJson.size());
+    envelope.setContentType("application/json");
 
-# Each service gets its own copy of every event
-# subscribe("billing", handle_billing)
-# subscribe("inventory", handle_inventory)
-# subscribe("notifications", handle_notifications)`,
+    // Routing key is ignored for fanout exchanges
+    channel.publish("order_events", "", envelope);
+}
+
+// Subscriber: each service binds its own queue
+void subscribe(AMQP::Channel& channel, const std::string& serviceName,
+               std::function<void(const std::string&)> handler) {
+    channel.declareExchange("order_events", AMQP::fanout);
+
+    // Durable named queue so messages persist if service restarts
+    std::string queueName = "order_events_" + serviceName;
+    channel.declareQueue(queueName, AMQP::durable);
+    channel.bindQueue("order_events", queueName, "");
+
+    channel.consume(queueName)
+        .onReceived([&channel, handler](const AMQP::Message& message,
+                                        uint64_t deliveryTag, bool) {
+            std::string body(message.body(), message.bodySize());
+            handler(body);
+            channel.ack(deliveryTag);
+        });
+}
+
+// Each service gets its own copy of every event
+// subscribe(channel, "billing", handleBilling);
+// subscribe(channel, "inventory", handleInventory);
+// subscribe(channel, "notifications", handleNotifications);`,
     },
     {
       language: "java",
@@ -563,5 +559,12 @@ async function consumeQueue(queueUrl: string) {
     { label: "Designing Data-Intensive Applications (Ch. 11)", kind: "book", note: "Martin Kleppmann's treatment of stream processing, message brokers, and log-based messaging." },
     { label: "The Log: What every software engineer should know", kind: "article", note: "Jay Kreps' foundational article on log-based architectures that inspired Kafka's design." },
     { label: "Enterprise Integration Patterns", kind: "book", note: "Gregor Hohpe's catalog of messaging patterns including competing consumers, publish-subscribe, and message routing." },
+  ],
+  exercises: [
+    "Design an **order processing system** where an `order.created` event must be handled by three independent services: *billing*, *inventory*, and *notifications*. Choose between a queue, pub/sub, or a hybrid approach. Draw the architecture, specify the messaging technology (RabbitMQ, Kafka, or SNS+SQS), and explain how each service handles **failures** and **retries** independently.",
+    "You have a Kafka topic with 6 partitions and a consumer group with 8 consumers. Explain what happens to the extra 2 consumers. Now one consumer crashes -- describe the **rebalancing** process step by step. How does *cooperative sticky rebalancing* differ from the default *eager rebalancing*?",
+    "Implement an **idempotent consumer** pattern for processing payment events from an SQS queue. Each payment event has a unique `paymentId`. Show how to use a *deduplication table* in your database to ensure that even if SQS delivers the same message twice, the payment is processed exactly once. Include the SQL schema and the transactional processing logic.",
+    "Compare the **SNS+SQS fan-out** pattern with **Kafka consumer groups** for broadcasting order events to 5 downstream services. For each approach, address: how to add a new service without modifying the publisher, how to handle a slow consumer without affecting others, and how to replay past events after a bug fix.",
+    "A RabbitMQ consumer is failing on 5% of messages due to a transient external API error. Design a **retry strategy** with exponential backoff using **dead-letter exchanges**. Specify the exchange and queue topology: the main queue, a retry queue with a `message-ttl`, and a final DLQ. How many retries would you allow before sending to the DLQ?",
   ],
 };

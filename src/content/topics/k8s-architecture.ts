@@ -138,6 +138,303 @@ export const k8sArchitecture: TopicContent = {
       back: "It watches Service/Endpoints objects and programs iptables/IPVS rules to DNAT traffic from Service ClusterIPs to backing pod IPs.",
     },
   ],
+  deepDive: [
+    "**The API Server as the nervous system of Kubernetes.** Every interaction with a Kubernetes cluster — whether from `kubectl`, a CI/CD pipeline, a custom operator, or an internal controller — flows through the **kube-apiserver**. It exposes a *RESTful API* over HTTPS, and its request lifecycle is both elegant and extensible. An incoming request first hits **authentication** (client certificates, bearer tokens, OIDC providers, or webhook token review). Next, **authorization** — typically *RBAC* — determines whether the authenticated identity may perform the requested verb on the target resource. Then the request passes through a chain of **admission controllers**: *mutating* webhooks can inject sidecars or default labels, while *validating* webhooks can enforce organizational policies like requiring resource limits. Only after passing all these gates is the object serialized and written to **etcd** via a consistent write. The API server's *watch* mechanism (built on HTTP/2 streaming or long-poll) is what makes the entire controller ecosystem reactive — controllers open watch streams and receive near-real-time notifications of state changes, enabling the reconciliation-based architecture that defines Kubernetes.",
+    "**etcd and the guarantees that make orchestration possible.** Distributed systems require a *source of truth* that is both **highly available** and **strongly consistent**. etcd provides exactly this by implementing the **Raft consensus protocol**, where a single elected leader serializes all writes and replicates them to followers before acknowledging. In a 5-node etcd cluster, up to 2 nodes can fail without losing quorum — and read requests can be served from any member when *linearizable reads* are not required (though Kubernetes defaults to linearizable). The performance implications are significant: every `kubectl apply`, every controller reconciliation, and every scheduler binding ultimately results in an etcd write. This is why production clusters isolate etcd on **dedicated SSD-backed nodes**, tune `heartbeat-interval` and `election-timeout` for network conditions, and implement `--quota-backend-bytes` to prevent unbounded growth. Operational best practices include automated **snapshot backups** (via `etcdctl snapshot save`), monitoring with metrics like `etcd_server_has_leader` and `etcd_disk_wal_fsync_duration_seconds`, and never exceeding 8 GB of data per cluster without careful evaluation.",
+    "**The reconciliation model and why it enables self-healing infrastructure.** The *reconciliation loop* is not just an implementation detail — it is the **fundamental design philosophy** that separates Kubernetes from imperative orchestration tools. In an imperative system, you issue commands: \"start 3 containers.\" If one dies, you must detect and re-issue the command. In Kubernetes' **declarative model**, you state desired reality: \"there should be 3 replicas.\" Controllers then *continuously* compare this desired state (persisted in etcd) against actual state (observed from the cluster). The diff drives action — create a pod here, delete one there, update a label, restart a container. Because controllers are **level-triggered** rather than *edge-triggered*, they are inherently resilient to failures: if a controller crashes and restarts, it simply re-reads current state and acts, with no need to replay an event log. This design pattern extends beyond built-in controllers — the **Operator pattern** lets teams encode complex application lifecycle management (database failovers, certificate rotations, schema migrations) as custom controllers watching *CustomResourceDefinitions* (CRDs), making Kubernetes an extensible platform rather than a fixed orchestrator."
+  ],
+  code: [
+    {
+      language: "yaml",
+      caption: "Deployment manifest with resource limits, health probes, and topology spread constraints",
+      source: `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-api
+  labels:
+    app: web-api
+    tier: backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: web-api
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: web-api
+      containers:
+        - name: web-api
+          image: registry.example.com/web-api:v2.4.1
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20`
+    },
+    {
+      language: "bash",
+      caption: "Essential kubectl commands for inspecting cluster architecture and debugging",
+      source: `# --- Cluster & Node Inspection ---
+# View all control-plane and worker nodes with status and roles
+kubectl get nodes -o wide
+
+# Describe a specific node (capacity, allocatable, taints, conditions)
+kubectl describe node <node-name>
+
+# Check component health (scheduler, controller-manager, etcd)
+kubectl get componentstatuses          # deprecated but still works
+kubectl get --raw='/readyz?verbose'     # preferred health endpoint
+
+# --- Workload Debugging ---
+# List all pods across namespaces with node placement
+kubectl get pods -A -o wide
+
+# Watch pod events in real time (useful for scheduling failures)
+kubectl get events --sort-by='.lastTimestamp' -w
+
+# Inspect why a pod is Pending (scheduler issues, resource pressure)
+kubectl describe pod <pod-name> -n <namespace>
+
+# Stream container logs (current + previous crash)
+kubectl logs <pod-name> -c <container> -f --previous
+
+# --- RBAC & API Access ---
+# Check if a service account can perform an action
+kubectl auth can-i create deployments --as=system:serviceaccount:default:my-sa
+
+# List all cluster roles and bindings
+kubectl get clusterroles,clusterrolebindings | grep -v system:`
+    },
+    {
+      language: "yaml",
+      caption: "ClusterRole and ClusterRoleBinding for a read-only monitoring service account",
+      source: `# ClusterRole: grants read access to core resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: monitoring-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "services", "endpoints", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+---
+# ClusterRoleBinding: binds the role to a service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: monitoring-reader-binding
+subjects:
+  - kind: ServiceAccount
+    name: monitoring-agent
+    namespace: monitoring
+roleRef:
+  kind: ClusterRole
+  name: monitoring-reader
+  apiGroup: rbac.authorization.k8s.io`
+    }
+  ],
+  diagrams: [
+    {
+      title: "Kubernetes Cluster Architecture",
+      kind: "architecture",
+      caption: "High-level view of control plane and worker node components with communication flows",
+      mermaid: `graph TB
+  subgraph CP["Control Plane"]
+    API["kube-apiserver<br/><i>REST gateway, auth, admission</i>"]
+    ETCD["etcd<br/><i>Raft consensus, cluster state</i>"]
+    SCHED["kube-scheduler<br/><i>Filter → Score → Bind</i>"]
+    CM["kube-controller-manager<br/><i>Deployment, ReplicaSet,<br/>Node, Job controllers</i>"]
+  end
+
+  subgraph W1["Worker Node 1"]
+    KL1["kubelet<br/><i>Pod lifecycle, CRI, probes</i>"]
+    KP1["kube-proxy<br/><i>iptables / IPVS rules</i>"]
+    CR1["containerd<br/><i>Container runtime</i>"]
+    P1["Pod A"]
+    P2["Pod B"]
+  end
+
+  subgraph W2["Worker Node 2"]
+    KL2["kubelet"]
+    KP2["kube-proxy"]
+    CR2["containerd"]
+    P3["Pod C"]
+  end
+
+  API <-->|"read/write state"| ETCD
+  SCHED -->|"watch unscheduled pods"| API
+  CM -->|"watch & reconcile"| API
+  KL1 -->|"report status & watch specs"| API
+  KL2 -->|"report status & watch specs"| API
+  KP1 -->|"watch Services/Endpoints"| API
+  KP2 -->|"watch Services/Endpoints"| API
+  KL1 --> CR1
+  KL2 --> CR2
+  CR1 --> P1
+  CR1 --> P2
+  CR2 --> P3`
+    },
+    {
+      title: "kubectl apply Request Lifecycle",
+      kind: "flow",
+      caption: "Step-by-step flow from kubectl command to running containers on a worker node",
+      mermaid: `graph LR
+  A["kubectl apply"] --> B["Authentication<br/><i>certs, tokens, OIDC</i>"]
+  B --> C["Authorization<br/><i>RBAC / Webhook</i>"]
+  C --> D["Mutating<br/>Admission"]
+  D --> E["Validating<br/>Admission"]
+  E --> F["Persist to etcd"]
+  F --> G["Deployment<br/>Controller"]
+  G --> H["ReplicaSet<br/>Controller"]
+  H --> I["Scheduler<br/><i>Filter → Score</i>"]
+  I --> J["Kubelet<br/><i>pull image, start container</i>"]
+  J --> K["Container<br/>Running"]`
+    },
+    {
+      title: "Kubernetes Component Mind Map",
+      kind: "mindmap",
+      caption: "Organized breakdown of all major Kubernetes architectural components",
+      mermaid: `mindmap
+  root((K8s Architecture))
+    Control Plane
+      kube-apiserver
+        Authentication
+        Authorization / RBAC
+        Admission Controllers
+      etcd
+        Raft Consensus
+        Watch API
+        Snapshot Backups
+      kube-scheduler
+        Filtering Phase
+        Scoring Phase
+        Preemption
+      kube-controller-manager
+        Deployment Controller
+        ReplicaSet Controller
+        Node Controller
+        Job Controller
+    Worker Nodes
+      kubelet
+        CRI Interface
+        Pod Lifecycle
+        Health Probes
+      kube-proxy
+        iptables Mode
+        IPVS Mode
+        eBPF / Cilium
+      Container Runtime
+        containerd
+        CRI-O
+    Key Concepts
+      Reconciliation Loop
+      Declarative Model
+      Level-triggered Design
+      Operator Pattern`
+    }
+  ],
+  comparison: {
+    columns: [
+      "Aspect",
+      "Control Plane",
+      "Worker Node"
+    ],
+    rows: [
+      [
+        "**Primary role**",
+        "Manages cluster state, makes scheduling and healing decisions",
+        "Runs application workloads (pods and containers)"
+      ],
+      [
+        "**Key components**",
+        "`kube-apiserver`, `etcd`, `kube-scheduler`, `kube-controller-manager`",
+        "`kubelet`, `kube-proxy`, container runtime (`containerd` / `CRI-O`)"
+      ],
+      [
+        "**State storage**",
+        "Hosts **etcd** — the *single source of truth* for all cluster state",
+        "Stateless — receives pod specs from the API server, no local state persistence"
+      ],
+      [
+        "**Failure impact**",
+        "Loss of quorum stops *new* scheduling and healing; existing pods keep running",
+        "Loss of a node triggers pod rescheduling to healthy nodes by the *Node controller*"
+      ],
+      [
+        "**Scaling model**",
+        "Scaled for **availability** (3-5 replicas for HA); not for workload capacity",
+        "Scaled for **capacity** — add more nodes to run more pods"
+      ],
+      [
+        "**Network exposure**",
+        "API server exposes port *6443* (HTTPS); etcd on *2379/2380* (cluster-internal only)",
+        "Kubelet on port *10250*; kube-proxy manages `iptables`/`IPVS` rules for Service routing"
+      ],
+      [
+        "**Communication pattern**",
+        "API server is the *hub* — all components communicate through it",
+        "Kubelet *pulls* pod specs from API server; kube-proxy *watches* Service/Endpoints objects"
+      ]
+    ]
+  },
+  exercises: [
+    "**Cluster Exploration:** Spin up a local cluster with `minikube start` or `kind create cluster`. Run `kubectl get nodes -o wide`, `kubectl get pods -n kube-system`, and `kubectl describe node` to identify all control plane and worker node components. Document which component runs as a *static pod* vs. a *system service*.",
+    "**Reconciliation in Action:** Create a Deployment with 3 replicas (`kubectl create deployment nginx --image=nginx --replicas=3`). Manually delete one pod with `kubectl delete pod <name>`. Observe the ReplicaSet controller recreating the pod. Then scale to 5 replicas and watch the *events* with `kubectl get events -w`. Explain the **level-triggered** behavior you observe.",
+    "**Scheduler Deep Dive:** Create a pod with a `nodeSelector` or `nodeAffinity` rule that *cannot* be satisfied (e.g., label `gpu=true` on a cluster with no GPU nodes). Inspect the pod with `kubectl describe pod` and identify the **FailedScheduling** event. Then add the label to a node with `kubectl label node <name> gpu=true` and watch the pod get scheduled. Explain the *filter* and *score* phases.",
+    "**etcd Backup and Restore:** On a `kubeadm`-based cluster, perform an etcd snapshot: `ETCDCTL_API=3 etcdctl snapshot save /tmp/etcd-backup.db --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/server.crt --key=/etc/kubernetes/pki/etcd/server.key`. Verify the snapshot with `etcdctl snapshot status`. Document the *disaster recovery* steps you would take to restore from this backup.",
+    "**RBAC Policy Design:** Create a `ServiceAccount` called `dev-reader` in the `development` namespace. Write a `Role` that grants **get**, **list**, and **watch** on pods and deployments. Bind it with a `RoleBinding`. Use `kubectl auth can-i` to verify the permissions. Then attempt an unauthorized action (e.g., `kubectl delete pod --as=system:serviceaccount:development:dev-reader`) and explain the *RBAC* denial."
+  ],
+  cheatSheet: [
+    "**Cluster health check:** `kubectl get componentstatuses` (legacy) or `kubectl get --raw='/readyz?verbose'` — quickly verify that the *API server*, *scheduler*, *controller-manager*, and *etcd* are healthy.",
+    "**Node inspection:** `kubectl describe node <name>` — shows **capacity** vs. **allocatable** resources, *taints*, *conditions* (MemoryPressure, DiskPressure, PIDPressure), and all pods scheduled on the node.",
+    "**Pod scheduling debug:** `kubectl describe pod <name>` + `kubectl get events --field-selector involvedObject.name=<pod>` — reveals *FailedScheduling* reasons such as insufficient CPU/memory, unmatched `nodeAffinity`, or unsatisfied `topologySpreadConstraints`.",
+    "**etcd backup:** `ETCDCTL_API=3 etcdctl snapshot save backup.db --endpoints=https://127.0.0.1:2379 --cacert=... --cert=... --key=...` — always use **TLS flags** and verify with `etcdctl snapshot status backup.db`.",
+    "**RBAC quick check:** `kubectl auth can-i <verb> <resource> --as=<user-or-sa> -n <namespace>` — test whether a *service account* or *user* has a specific permission without trial-and-error.",
+    "**Watch reconciliation live:** `kubectl get events -A --sort-by='.lastTimestamp' -w` — stream *cluster-wide events* in real time to observe controllers creating pods, scaling ReplicaSets, and responding to node failures."
+  ],
+  revisionNotes: [
+    "The **API server** is the *only* component that talks to **etcd** directly — every other component (scheduler, controllers, kubelet, kube-proxy) interacts exclusively through the API server, which provides a single point for *authentication*, *authorization*, *admission control*, and *audit logging*.",
+    "Kubernetes controllers are **level-triggered**, not *edge-triggered* — they react to *current state* rather than individual change events. This makes them inherently **idempotent** and resilient to missed events or controller restarts, because they always re-derive required actions from the current state diff.",
+    "The **scheduler** uses a two-phase approach: **filtering** eliminates nodes that cannot run the pod (resource constraints, taints, affinity rules, topology constraints), then **scoring** ranks remaining nodes by factors like resource balance and data locality. The scheduler only *binds* the pod to a node — **kubelet** is responsible for actually starting it.",
+    "**etcd** uses the *Raft consensus* algorithm and requires a **quorum** (majority) to accept writes. In a 5-node cluster, 2 nodes can fail without data loss. If quorum is lost, the API server cannot persist changes — existing workloads keep running but no *new scheduling or self-healing* occurs.",
+    "The **Operator pattern** extends Kubernetes by encoding domain-specific operational knowledge into *custom controllers* that watch **CRDs** (Custom Resource Definitions). This turns Kubernetes from a fixed container orchestrator into an **extensible platform** for managing any stateful application lifecycle."
+  ],
   glossary: [
     {
       term: "Control Plane",

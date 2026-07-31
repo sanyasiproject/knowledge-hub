@@ -59,132 +59,219 @@ ss -tn state syn-recv
 ss -tn state established`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption:
-        "TCP client/server demonstrating the handshake with socket programming",
-      source: `import socket
-import threading
+        "TCP client/server demonstrating the handshake with POSIX sockets in C++",
+      source: `#include <iostream>
+#include <cstring>
+#include <thread>
+#include <chrono>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
-def tcp_server(host='127.0.0.1', port=9999):
-    """Server side: passive open (LISTEN -> SYN_RECEIVED -> ESTABLISHED)"""
-    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+// Server side: passive open (LISTEN -> SYN_RECEIVED -> ESTABLISHED)
+void tcp_server(const char* host = "127.0.0.1", int port = 9999) {
+    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
 
-    # bind() associates the socket with an address
-    server_sock.bind((host, port))
+    int opt = 1;
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
-    # listen(backlog) transitions socket to LISTEN state
-    # backlog = max number of half-open connections (SYN queue size)
-    server_sock.listen(5)
-    print(f"[SERVER] Listening on {host}:{port} (state: LISTEN)")
+    // bind() associates the socket with an address
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, host, &addr.sin_addr);
+    bind(server_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
 
-    # accept() blocks until a client completes the 3-way handshake
-    # Internally: receive SYN -> send SYN-ACK -> receive ACK
-    # Returns only AFTER the connection is ESTABLISHED
-    conn, addr = server_sock.accept()
-    print(f"[SERVER] Connection established with {addr} (state: ESTABLISHED)")
+    // listen(backlog) transitions socket to LISTEN state
+    // backlog = max number of half-open connections (SYN queue size)
+    listen(server_fd, 5);
+    std::cout << "[SERVER] Listening on " << host << ":" << port
+              << " (state: LISTEN)\\n";
 
-    data = conn.recv(1024)
-    print(f"[SERVER] Received: {data.decode()}")
-    conn.sendall(b"Hello from server!")
+    // accept() blocks until a client completes the 3-way handshake
+    // Internally: receive SYN -> send SYN-ACK -> receive ACK
+    // Returns only AFTER the connection is ESTABLISHED
+    sockaddr_in client_addr{};
+    socklen_t client_len = sizeof(client_addr);
+    int conn = accept(server_fd, reinterpret_cast<sockaddr*>(&client_addr), &client_len);
+    std::cout << "[SERVER] Connection established (state: ESTABLISHED)\\n";
 
-    # close() initiates four-way termination (FIN handshake)
-    conn.close()
-    server_sock.close()
+    char buf[1024]{};
+    ssize_t n = recv(conn, buf, sizeof(buf), 0);
+    std::cout << "[SERVER] Received: " << std::string(buf, n) << "\\n";
 
-def tcp_client(host='127.0.0.1', port=9999):
-    """Client side: active open (SYN_SENT -> ESTABLISHED)"""
-    client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    const char* reply = "Hello from server!";
+    send(conn, reply, strlen(reply), 0);
 
-    # Set TCP_NODELAY to disable Nagle's algorithm (send immediately)
-    client_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    // close() initiates four-way termination (FIN handshake)
+    close(conn);
+    close(server_fd);
+}
 
-    # connect() triggers the three-way handshake:
-    #   1. Kernel sends SYN with client ISN (state -> SYN_SENT)
-    #   2. Kernel receives SYN-ACK from server
-    #   3. Kernel sends ACK (state -> ESTABLISHED)
-    # connect() returns only after ESTABLISHED
-    print("[CLIENT] Initiating connection (sending SYN)...")
-    client_sock.connect((host, port))
-    print("[CLIENT] Connection established (state: ESTABLISHED)")
+// Client side: active open (SYN_SENT -> ESTABLISHED)
+void tcp_client(const char* host = "127.0.0.1", int port = 9999) {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
 
-    client_sock.sendall(b"Hello from client!")
-    data = client_sock.recv(1024)
-    print(f"[CLIENT] Received: {data.decode()}")
+    // Set TCP_NODELAY to disable Nagle's algorithm (send immediately)
+    int flag = 1;
+    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 
-    # close() sends FIN to initiate graceful shutdown
-    client_sock.close()
+    // connect() triggers the three-way handshake:
+    //   1. Kernel sends SYN with client ISN (state -> SYN_SENT)
+    //   2. Kernel receives SYN-ACK from server
+    //   3. Kernel sends ACK (state -> ESTABLISHED)
+    // connect() returns only after ESTABLISHED
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, host, &addr.sin_addr);
 
-# Run server in background, then connect with client
-server_thread = threading.Thread(target=tcp_server, daemon=True)
-server_thread.start()
+    std::cout << "[CLIENT] Initiating connection (sending SYN)...\\n";
+    connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+    std::cout << "[CLIENT] Connection established (state: ESTABLISHED)\\n";
 
-import time; time.sleep(0.1)  # Wait for server to start listening
-tcp_client()`,
+    const char* msg = "Hello from client!";
+    send(sock, msg, strlen(msg), 0);
+
+    char buf[1024]{};
+    ssize_t n = recv(sock, buf, sizeof(buf), 0);
+    std::cout << "[CLIENT] Received: " << std::string(buf, n) << "\\n";
+
+    // close() sends FIN to initiate graceful shutdown
+    close(sock);
+}
+
+// Run server in background, then connect with client
+int main() {
+    std::thread server_thread(tcp_server, "127.0.0.1", 9999);
+    server_thread.detach();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    tcp_client();
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption:
-        "Crafting and inspecting a raw SYN packet with Scapy for handshake analysis",
-      source: `from scapy.all import IP, TCP, sr1, RandShort
+        "Crafting and inspecting a raw SYN packet with raw sockets in C++ for handshake analysis",
+      source: `#include <iostream>
+#include <cstring>
+#include <cstdint>
+#include <sys/socket.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
-# Build a SYN packet (step 1 of the handshake)
-target_ip = "93.184.216.34"
-target_port = 80
+// Pseudo-header for TCP checksum calculation
+struct PseudoHeader {
+    uint32_t src_addr;
+    uint32_t dst_addr;
+    uint8_t  placeholder;
+    uint8_t  protocol;
+    uint16_t tcp_length;
+};
 
-# IP layer
-ip_layer = IP(dst=target_ip)
+uint16_t checksum(const void* data, int len) {
+    auto* ptr = static_cast<const uint16_t*>(data);
+    uint32_t sum = 0;
+    for (; len > 1; len -= 2) sum += *ptr++;
+    if (len == 1) sum += *reinterpret_cast<const uint8_t*>(ptr);
+    sum = (sum >> 16) + (sum & 0xFFFF);
+    sum += (sum >> 16);
+    return static_cast<uint16_t>(~sum);
+}
 
-# TCP layer with SYN flag
-#   sport: random ephemeral port
-#   dport: target port
-#   flags: 'S' = SYN
-#   seq: our Initial Sequence Number
-#   options: negotiate MSS, window scaling, SACK, timestamps
-tcp_layer = TCP(
-    sport=RandShort(),
-    dport=target_port,
-    flags='S',
-    seq=1000,
-    options=[
-        ('MSS', 1460),
-        ('SAckOK', b''),
-        ('Timestamp', (12345, 0)),
-        ('NOP', None),
-        ('WScale', 7),
-    ]
-)
+int main() {
+    const char* target_ip = "93.184.216.34";
+    int target_port = 80;
+    uint16_t src_port = 54321;      // ephemeral port
+    uint32_t our_isn  = 1000;       // our Initial Sequence Number
 
-syn_packet = ip_layer / tcp_layer
+    // Create a raw socket (requires root/CAP_NET_RAW)
+    int sock = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
+    if (sock < 0) { perror("socket"); return 1; }
 
-# Send SYN and wait for SYN-ACK (step 2)
-print("[*] Sending SYN packet...")
-syn_ack = sr1(syn_packet, timeout=3, verbose=0)
+    // Tell the kernel we provide our own IP header
+    int one = 1;
+    setsockopt(sock, IPPROTO_IP, IP_HDRINCL, &one, sizeof(one));
 
-if syn_ack and syn_ack.haslayer(TCP):
-    tcp = syn_ack[TCP]
-    if tcp.flags == 'SA':  # SYN-ACK received
-        print(f"[+] Received SYN-ACK:")
-        print(f"    Server ISN (seq): {tcp.seq}")
-        print(f"    Ack number:       {tcp.ack} (our ISN + 1 = {1000 + 1})")
-        print(f"    Window size:      {tcp.window}")
-        print(f"    Flags:            {tcp.flags}")
+    // Build the packet buffer (IP header + TCP header)
+    char packet[4096]{};
+    auto* iph = reinterpret_cast<struct iphdr*>(packet);
+    auto* tcph = reinterpret_cast<struct tcphdr*>(packet + sizeof(struct iphdr));
 
-        # Send ACK to complete the handshake (step 3)
-        ack_packet = ip_layer / TCP(
-            sport=syn_packet[TCP].sport,
-            dport=target_port,
-            flags='A',
-            seq=tcp.ack,        # Our next sequence number
-            ack=tcp.seq + 1,    # Server ISN + 1
-        )
-        from scapy.all import send
-        send(ack_packet, verbose=0)
-        print("[+] Sent ACK — handshake complete!")
-    elif tcp.flags == 'RA':  # RST-ACK
-        print("[-] Port closed (RST-ACK received)")
-else:
-    print("[-] No response (filtered or host unreachable)")`,
+    // IP header
+    iph->ihl     = 5;
+    iph->version = 4;
+    iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr));
+    iph->id      = htons(54321);
+    iph->ttl     = 64;
+    iph->protocol = IPPROTO_TCP;
+    iph->saddr   = inet_addr("0.0.0.0");  // kernel fills source IP
+    iph->daddr   = inet_addr(target_ip);
+
+    // TCP header with SYN flag
+    //   sport: ephemeral port
+    //   dport: target port
+    //   flags: SYN
+    //   seq:   our Initial Sequence Number
+    tcph->source  = htons(src_port);
+    tcph->dest    = htons(target_port);
+    tcph->seq     = htonl(our_isn);
+    tcph->ack_seq = 0;
+    tcph->doff    = 5;              // header length in 32-bit words
+    tcph->syn     = 1;              // SYN flag set
+    tcph->window  = htons(65535);
+
+    // Compute TCP checksum using pseudo-header
+    PseudoHeader psh{};
+    psh.src_addr   = iph->saddr;
+    psh.dst_addr   = iph->daddr;
+    psh.protocol   = IPPROTO_TCP;
+    psh.tcp_length = htons(sizeof(struct tcphdr));
+
+    char csum_buf[sizeof(PseudoHeader) + sizeof(struct tcphdr)];
+    std::memcpy(csum_buf, &psh, sizeof(psh));
+    std::memcpy(csum_buf + sizeof(psh), tcph, sizeof(struct tcphdr));
+    tcph->check = checksum(csum_buf, sizeof(csum_buf));
+
+    // Send SYN packet (step 1 of the handshake)
+    sockaddr_in dest{};
+    dest.sin_family = AF_INET;
+    dest.sin_port   = htons(target_port);
+    inet_pton(AF_INET, target_ip, &dest.sin_addr);
+
+    std::cout << "[*] Sending SYN packet...\\n";
+    sendto(sock, packet, ntohs(iph->tot_len), 0,
+           reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+
+    // Receive SYN-ACK (step 2)
+    char recv_buf[4096]{};
+    ssize_t n = recv(sock, recv_buf, sizeof(recv_buf), 0);
+    if (n > 0) {
+        auto* resp_ip  = reinterpret_cast<struct iphdr*>(recv_buf);
+        auto* resp_tcp = reinterpret_cast<struct tcphdr*>(recv_buf + resp_ip->ihl * 4);
+
+        if (resp_tcp->syn && resp_tcp->ack) {
+            std::cout << "[+] Received SYN-ACK:\\n";
+            std::cout << "    Server ISN (seq): " << ntohl(resp_tcp->seq) << "\\n";
+            std::cout << "    Ack number:       " << ntohl(resp_tcp->ack_seq)
+                      << " (our ISN + 1 = " << our_isn + 1 << ")\\n";
+            std::cout << "    Window size:      " << ntohs(resp_tcp->window) << "\\n";
+        } else if (resp_tcp->rst) {
+            std::cout << "[-] Port closed (RST received)\\n";
+        }
+    } else {
+        std::cout << "[-] No response (filtered or host unreachable)\\n";
+    }
+
+    close(sock);
+}`,
     },
   ],
   diagrams: [

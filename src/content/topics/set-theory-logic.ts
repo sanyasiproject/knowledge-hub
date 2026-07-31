@@ -22,60 +22,123 @@ export const setTheoryLogic: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Set operations and verification of De Morgan's laws",
-      source: `# Python's built-in set type supports all standard operations
-A = {1, 2, 3, 4, 5}
-B = {4, 5, 6, 7, 8}
-U = set(range(1, 11))  # Universal set {1..10}
+      source: `#include <set>
+#include <algorithm>
+#include <iostream>
+#include <iterator>
+#include <cassert>
+#include <cmath>
 
-# Core operations
-print("Union:       ", A | B)           # {1,2,3,4,5,6,7,8}
-print("Intersection:", A & B)           # {4,5}
-print("Difference:  ", A - B)           # {1,2,3}
-print("Sym. Diff:   ", A ^ B)           # {1,2,3,6,7,8}
-print("Complement:  ", U - A)           # {6,7,8,9,10}
-print("Power set size:", 2 ** len(A))   # 32
+// Helper to print a set
+void print_set(const std::string& label, const std::set<int>& s) {
+    std::cout << label;
+    for (int x : s) std::cout << x << " ";
+    std::cout << std::endl;
+}
 
-# Verify De Morgan's laws
-complement = lambda S: U - S
-assert complement(A | B) == complement(A) & complement(B)  # (A U B)' = A' n B'
-assert complement(A & B) == complement(A) | complement(B)  # (A n B)' = A' U B'
-print("De Morgan's laws verified!")
+int main() {
+    std::set<int> A = {1, 2, 3, 4, 5};
+    std::set<int> B = {4, 5, 6, 7, 8};
+    std::set<int> U;
+    for (int i = 1; i <= 10; ++i) U.insert(i); // Universal set {1..10}
 
-# Subset and superset
-C = {1, 2}
-print(f"{C} subset of {A}?", C <= A)      # True
-print(f"{A} superset of {C}?", A >= C)     # True`,
+    // Core operations using <algorithm>
+    std::set<int> union_ab, inter_ab, diff_ab, sym_diff, comp_a;
+    std::set_union(A.begin(), A.end(), B.begin(), B.end(),
+                   std::inserter(union_ab, union_ab.begin()));
+    std::set_intersection(A.begin(), A.end(), B.begin(), B.end(),
+                          std::inserter(inter_ab, inter_ab.begin()));
+    std::set_difference(A.begin(), A.end(), B.begin(), B.end(),
+                        std::inserter(diff_ab, diff_ab.begin()));
+    std::set_symmetric_difference(A.begin(), A.end(), B.begin(), B.end(),
+                                  std::inserter(sym_diff, sym_diff.begin()));
+    std::set_difference(U.begin(), U.end(), A.begin(), A.end(),
+                        std::inserter(comp_a, comp_a.begin()));
+
+    print_set("Union:        ", union_ab);    // {1,2,3,4,5,6,7,8}
+    print_set("Intersection: ", inter_ab);    // {4,5}
+    print_set("Difference:   ", diff_ab);     // {1,2,3}
+    print_set("Sym. Diff:    ", sym_diff);    // {1,2,3,6,7,8}
+    print_set("Complement:   ", comp_a);      // {6,7,8,9,10}
+    std::cout << "Power set size: " << (1 << A.size()) << std::endl; // 32
+
+    // Verify De Morgan's laws
+    auto complement = [&U](const std::set<int>& S) {
+        std::set<int> result;
+        std::set_difference(U.begin(), U.end(), S.begin(), S.end(),
+                            std::inserter(result, result.begin()));
+        return result;
+    };
+    auto set_intersect = [](const std::set<int>& X, const std::set<int>& Y) {
+        std::set<int> r;
+        std::set_intersection(X.begin(), X.end(), Y.begin(), Y.end(),
+                              std::inserter(r, r.begin()));
+        return r;
+    };
+    auto set_union_fn = [](const std::set<int>& X, const std::set<int>& Y) {
+        std::set<int> r;
+        std::set_union(X.begin(), X.end(), Y.begin(), Y.end(),
+                       std::inserter(r, r.begin()));
+        return r;
+    };
+
+    assert(complement(union_ab) == set_intersect(complement(A), complement(B)));
+    assert(complement(inter_ab) == set_union_fn(complement(A), complement(B)));
+    std::cout << "De Morgan's laws verified!" << std::endl;
+
+    // Subset and superset
+    std::set<int> C = {1, 2};
+    std::cout << "C subset of A? "
+              << std::boolalpha << std::includes(A.begin(), A.end(),
+                                                  C.begin(), C.end())
+              << std::endl; // true
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Truth table generator for propositional logic",
-      source: `from itertools import product
+      source: `#include <iostream>
+#include <iomanip>
+#include <string>
+#include <vector>
+#include <functional>
 
-def truth_table(expr_str, variables):
-    """Generate truth table for a propositional logic expression."""
-    header = variables + [expr_str]
-    print(" | ".join(f"{h:>8}" for h in header))
-    print("-" * (11 * len(header)))
+using Expr = std::function<bool(bool, bool)>;
 
-    for values in product([False, True], repeat=len(variables)):
-        env = dict(zip(variables, values))
-        result = eval(expr_str, {"__builtins__": {}}, env)
-        row = list(values) + [result]
-        print(" | ".join(f"{str(v):>8}" for v in row))
+void truth_table(const std::string& label, Expr expr) {
+    std::cout << std::setw(8) << "p" << " | "
+              << std::setw(8) << "q" << " | "
+              << std::setw(20) << label << std::endl;
+    std::cout << std::string(44, '-') << std::endl;
 
-# Verify De Morgan's law: not (p and q) == (not p) or (not q)
-print("De Morgan's Law: not(p and q) vs (not p) or (not q)")
-print()
-truth_table("not (p and q)", ["p", "q"])
-print()
-truth_table("(not p) or (not q)", ["p", "q"])
-print()
+    for (int p = 0; p <= 1; ++p) {
+        for (int q = 0; q <= 1; ++q) {
+            bool result = expr(p, q);
+            std::cout << std::setw(8) << std::boolalpha << (bool)p << " | "
+                      << std::setw(8) << (bool)q << " | "
+                      << std::setw(20) << result << std::endl;
+        }
+    }
+}
 
-# Verify implication equivalence: (p -> q) == (not p or q)
-print("Implication: (not p or q) -- equivalent to p -> q")
-truth_table("(not p) or q", ["p", "q"])`,
+int main() {
+    // Verify De Morgan's law: !(p && q) == (!p || !q)
+    std::cout << "De Morgan's Law: !(p && q) vs (!p || !q)" << std::endl;
+    std::cout << std::endl;
+    truth_table("!(p && q)", [](bool p, bool q) { return !(p && q); });
+    std::cout << std::endl;
+    truth_table("(!p || !q)", [](bool p, bool q) { return (!p || !q); });
+    std::cout << std::endl;
+
+    // Verify implication equivalence: (p -> q) == (!p || q)
+    std::cout << "Implication: (!p || q) -- equivalent to p -> q" << std::endl;
+    truth_table("(!p || q)", [](bool p, bool q) { return (!p || q); });
+
+    return 0;
+}`,
     },
   ],
   diagrams: [

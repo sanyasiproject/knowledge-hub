@@ -179,6 +179,454 @@ Retrieval quality directly impacts generation quality. If irrelevant chunks are 
       back: "The latest message in a conversation may lack context. Reformulating it with conversation history improves retrieval relevance.",
     },
   ],
+  deepDive: [
+    `## Embedding Models and Vector Representations
+
+The foundation of any RAG system is the **embedding model** that converts text into dense vector representations. Models like OpenAI's \`text-embedding-3-large\`, Cohere's \`embed-v3\`, and open-source alternatives like \`BGE\` or \`E5\` produce vectors of varying dimensionality (typically **768 to 3072 dimensions**). The choice of embedding model profoundly affects retrieval quality — a model trained on *general web text* may underperform on *domain-specific corpora* such as legal contracts or medical literature. **Matryoshka Representation Learning (MRL)** enables truncating embeddings to smaller dimensions without retraining, offering a flexible trade-off between storage cost and retrieval accuracy. When selecting an embedding model, evaluate it on your *actual retrieval tasks* using benchmarks like MTEB, and consider factors such as \`max token length\` (most models cap at 512 or 8192 tokens per chunk), inference latency, and whether the model supports **instruction-prefixed embeddings** where you prepend task descriptions like \`"search_query:"\` or \`"search_document:"\` to differentiate query and document embeddings.`,
+
+    `## Advanced Retrieval Architectures
+
+Production RAG systems go far beyond simple *top-K cosine similarity* retrieval. **Multi-stage retrieval** pipelines first cast a wide net with a fast ANN search (retrieving 50-100 candidates), then apply a **cross-encoder reranker** to select the best 3-5 passages. **Contextual retrieval** prepends a short document-level summary to each chunk before embedding, so the embedding captures both *local detail* and *global context*. For complex queries, **query decomposition** breaks a multi-faceted question into sub-queries, retrieves independently for each, and merges results — this is critical for questions like *"Compare the revenue growth of Company A and Company B in Q3"* which require retrieving from multiple document sections. **Parent-child retrieval** indexes small chunks for precision but returns the *parent chunk* (a larger surrounding passage) to the LLM for richer context. **Recursive retrieval** starts with a summary-level index, identifies relevant documents, then retrieves specific chunks from those documents — acting like a two-tier search system. Each of these patterns addresses a specific failure mode of naive RAG: lost context, diluted relevance, or incomplete coverage.`,
+
+    `## Evaluation, Guardrails, and Production Considerations
+
+Deploying RAG to production requires rigorous **evaluation frameworks** and operational guardrails. The *RAGAS framework* measures four key dimensions: **faithfulness** (is the answer supported by retrieved context?), **answer relevancy** (does the answer address the question?), **context precision** (are the retrieved chunks relevant?), and **context recall** (were all necessary chunks retrieved?). Beyond automated metrics, build a **golden test set** of question-answer-source triples curated by domain experts, and run regression tests on every pipeline change. On the operational side, implement \`guardrails\` to handle failure modes: set a **relevance score threshold** below which the system admits uncertainty rather than hallucinating, add **content filters** to prevent retrieval of outdated or revoked documents, and implement **token budget management** to prevent context window overflow. Monitor retrieval latency (target **< 200ms p95** for the retrieval stage), track embedding drift as your corpus evolves, and set up alerts for sudden drops in retrieval recall. Consider **caching** frequent queries and their retrieved chunks to reduce both latency and cost — a simple LRU cache on the query embedding can eliminate redundant vector searches for repeated or near-duplicate questions.`,
+  ],
+
+  code: [
+    {
+      language: "javascript",
+      caption:
+        "Node.js/Express RAG pipeline with **MongoDB Atlas Vector Search** — handles document ingestion, embedding, and query-time retrieval",
+      source: `const express = require("express");
+const { MongoClient } = require("mongodb");
+const { OpenAI } = require("openai");
+
+const app = express();
+app.use(express.json());
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const client = new MongoClient(process.env.MONGODB_URI);
+const db = client.db("rag_demo");
+const collection = db.collection("documents");
+
+// --- Embedding helper ---
+async function getEmbedding(text) {
+  const response = await openai.embeddings.create({
+    model: "text-embedding-3-small",
+    input: text,
+  });
+  return response.data[0].embedding;
+}
+
+// --- Chunking utility (recursive, with overlap) ---
+function chunkText(text, maxTokens = 512, overlap = 50) {
+  const sentences = text.split(/(?<=[.!?])\\s+/);
+  const chunks = [];
+  let current = [];
+  let currentLen = 0;
+
+  for (const sentence of sentences) {
+    const tokenEstimate = Math.ceil(sentence.length / 4);
+    if (currentLen + tokenEstimate > maxTokens && current.length > 0) {
+      chunks.push(current.join(" "));
+      // Keep last few sentences for overlap
+      const overlapSentences = current.slice(-2);
+      current = [...overlapSentences];
+      currentLen = overlapSentences.join(" ").length / 4;
+    }
+    current.push(sentence);
+    currentLen += tokenEstimate;
+  }
+  if (current.length > 0) chunks.push(current.join(" "));
+  return chunks;
+}
+
+// --- POST /ingest: chunk, embed, and store documents ---
+app.post("/ingest", async (req, res) => {
+  const { title, content, source } = req.body;
+  const chunks = chunkText(content);
+
+  const docs = await Promise.all(
+    chunks.map(async (chunk, index) => ({
+      title,
+      source,
+      chunkIndex: index,
+      text: chunk,
+      embedding: await getEmbedding(chunk),
+      createdAt: new Date(),
+    }))
+  );
+
+  await collection.insertMany(docs);
+  res.json({ ingested: docs.length, title });
+});
+
+// --- POST /query: retrieve relevant chunks and generate answer ---
+app.post("/query", async (req, res) => {
+  const { question, topK = 5 } = req.body;
+  const queryEmbedding = await getEmbedding(question);
+
+  // MongoDB Atlas Vector Search aggregation pipeline
+  const results = await collection
+    .aggregate([
+      {
+        $vectorSearch: {
+          index: "vector_index",
+          path: "embedding",
+          queryVector: queryEmbedding,
+          numCandidates: topK * 10,
+          limit: topK,
+        },
+      },
+      {
+        $project: {
+          text: 1,
+          title: 1,
+          source: 1,
+          score: { $meta: "vectorSearchScore" },
+        },
+      },
+    ])
+    .toArray();
+
+  // Filter by relevance threshold
+  const relevant = results.filter((r) => r.score > 0.7);
+
+  // Build augmented prompt
+  const context = relevant
+    .map((r, i) => \`[Source \${i + 1}: \${r.title}]\\n\${r.text}\`)
+    .join("\\n\\n");
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [
+      {
+        role: "system",
+        content: \`Answer based ONLY on the provided context.
+If the context doesn't contain the answer, say "I don't have
+enough information to answer that."
+Cite sources using [Source N] notation.\`,
+      },
+      {
+        role: "user",
+        content: \`Context:\\n\${context}\\n\\nQuestion: \${question}\`,
+      },
+    ],
+    temperature: 0.1,
+  });
+
+  res.json({
+    answer: completion.choices[0].message.content,
+    sources: relevant.map((r) => ({
+      title: r.title,
+      source: r.source,
+      score: r.score,
+    })),
+  });
+});
+
+app.listen(3000, () => console.log("RAG server on :3000"));`,
+    },
+    {
+      language: "cpp",
+      caption:
+        "C++ embedding utilities with normalization, truncation, and cosine similarity for RAG indexing",
+      source: `/*
+ * Embedding utilities for a RAG indexing pipeline.
+ * Demonstrates vector normalization, Matryoshka truncation,
+ * and cosine similarity ranking in pure C++.
+ *
+ * In production, embeddings are generated via an HTTP call to
+ * an embedding API (OpenAI, Cohere, or a local model server).
+ * This module handles the post-processing and similarity search.
+ */
+
+#include <iostream>
+#include <vector>
+#include <string>
+#include <cmath>
+#include <algorithm>
+#include <numeric>
+#include <iomanip>
+
+using Embedding = std::vector<float>;
+using EmbeddingMatrix = std::vector<Embedding>;
+
+// L2-normalize a vector in place
+void normalize(Embedding& vec) {
+    float norm = 0.0f;
+    for (float v : vec) norm += v * v;
+    norm = std::sqrt(norm);
+    if (norm > 0.0f) {
+        for (float& v : vec) v /= norm;
+    }
+}
+
+// Matryoshka truncation: reduce dimensionality without retraining
+EmbeddingMatrix truncateEmbeddings(const EmbeddingMatrix& embeddings,
+                                   int truncateDim, bool renormalize = true) {
+    EmbeddingMatrix result;
+    result.reserve(embeddings.size());
+    for (const auto& emb : embeddings) {
+        int dim = std::min(truncateDim, static_cast<int>(emb.size()));
+        Embedding truncated(emb.begin(), emb.begin() + dim);
+        if (renormalize) normalize(truncated);
+        result.push_back(std::move(truncated));
+    }
+    return result;
+}
+
+// Cosine similarity (assumes normalized vectors, so dot product suffices)
+float cosineSimilarity(const Embedding& a, const Embedding& b) {
+    float dot = 0.0f;
+    for (size_t i = 0; i < a.size() && i < b.size(); ++i) {
+        dot += a[i] * b[i];
+    }
+    return dot;
+}
+
+// Compute similarity scores between a query and all documents
+std::vector<float> computeSimilarities(const Embedding& queryVec,
+                                       const EmbeddingMatrix& docVecs) {
+    std::vector<float> scores;
+    scores.reserve(docVecs.size());
+    for (const auto& doc : docVecs) {
+        scores.push_back(cosineSimilarity(queryVec, doc));
+    }
+    return scores;
+}
+
+// Rank documents by similarity score
+std::vector<std::pair<int, float>> rankByScore(const std::vector<float>& scores) {
+    std::vector<std::pair<int, float>> ranked;
+    for (int i = 0; i < static_cast<int>(scores.size()); ++i) {
+        ranked.push_back({i, scores[i]});
+    }
+    std::sort(ranked.begin(), ranked.end(),
+              [](auto& a, auto& b) { return a.second > b.second; });
+    return ranked;
+}
+
+int main() {
+    // Simulated embeddings (in production, these come from an embedding API)
+    std::vector<std::string> documents = {
+        "RAG retrieves relevant documents before generation.",
+        "Vector databases store embeddings for similarity search.",
+        "Chunking splits documents into smaller retrievable units.",
+        "Rerankers improve retrieval precision with cross-encoders.",
+    };
+
+    // Simulated 8-dimensional embeddings for demonstration
+    EmbeddingMatrix docEmbeddings = {
+        {0.8f, 0.3f, 0.5f, 0.1f, 0.9f, 0.2f, 0.4f, 0.7f},
+        {0.2f, 0.9f, 0.1f, 0.8f, 0.3f, 0.7f, 0.5f, 0.4f},
+        {0.5f, 0.5f, 0.7f, 0.3f, 0.6f, 0.4f, 0.8f, 0.2f},
+        {0.3f, 0.7f, 0.4f, 0.6f, 0.2f, 0.8f, 0.1f, 0.9f},
+    };
+    for (auto& emb : docEmbeddings) normalize(emb);
+
+    // Query embedding
+    Embedding queryEmb = {0.7f, 0.4f, 0.6f, 0.2f, 0.8f, 0.3f, 0.5f, 0.6f};
+    normalize(queryEmb);
+
+    // Truncation example (reduce to 4 dimensions)
+    auto truncated = truncateEmbeddings(docEmbeddings, 4);
+    std::cout << "Original dims: " << docEmbeddings[0].size()
+              << ", Truncated dims: " << truncated[0].size() << std::endl;
+
+    // Compute similarities and rank
+    auto scores = computeSimilarities(queryEmb, docEmbeddings);
+    auto ranked = rankByScore(scores);
+
+    std::cout << std::fixed << std::setprecision(4);
+    std::cout << "\\nRanked results:" << std::endl;
+    for (auto& [idx, score] : ranked) {
+        std::cout << "  [" << score << "] " << documents[idx] << std::endl;
+    }
+    return 0;
+}`,
+    },
+    {
+      language: "javascript",
+      caption:
+        "MongoDB Atlas **vector search index** definition — required for the `$vectorSearch` aggregation stage",
+      source: `// Create this index in MongoDB Atlas UI or via the Atlas Admin API.
+// Collection: "documents" in database "rag_demo"
+{
+  "name": "vector_index",
+  "type": "vectorSearch",
+  "definition": {
+    "fields": [
+      {
+        "type": "vector",
+        "path": "embedding",
+        "numDimensions": 1536,
+        "similarity": "cosine"
+      },
+      {
+        "type": "filter",
+        "path": "source"
+      },
+      {
+        "type": "filter",
+        "path": "createdAt"
+      }
+    ]
+  }
+}`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "RAG Pipeline Architecture",
+      kind: "architecture",
+      caption:
+        "End-to-end RAG architecture showing the **offline indexing** path (top) and **online query** path (bottom) converging at the vector store.",
+      mermaid: `flowchart TB
+    subgraph Offline["Offline Indexing Pipeline"]
+        D[/"Raw Documents<br/>(PDF, HTML, MD)"/] --> C["Chunking<br/>(recursive / semantic)"]
+        C --> E["Embedding Model<br/>(text-embedding-3-small)"]
+        E --> VS[("Vector Store<br/>(MongoDB Atlas)")]
+    end
+
+    subgraph Online["Online Query Pipeline"]
+        Q[/"User Query"/] --> QE["Query Embedding"]
+        QE --> SR["Vector Similarity<br/>Search (ANN)"]
+        VS --> SR
+        SR --> RR["Reranker<br/>(cross-encoder)"]
+        RR --> CTX["Context Assembly<br/>(top-K chunks)"]
+        CTX --> LLM["LLM Generation<br/>(GPT-4o / Claude)"]
+        LLM --> A[/"Grounded Answer<br/>with Citations"/]
+    end
+
+    style Offline fill:#e8f4e8,stroke:#2d6a2d,color:#000
+    style Online fill:#e8f0fe,stroke:#1a56db,color:#000
+    style VS fill:#fef3c7,stroke:#d97706,color:#000`,
+    },
+    {
+      title: "Retrieval and Reranking Flow",
+      kind: "flow",
+      caption:
+        "Detailed flow of the **multi-stage retrieval** process: from query transformation through hybrid search to final context selection.",
+      mermaid: `flowchart LR
+    Q["User Query"] --> QT{"Query<br/>Transformation?"}
+    QT -->|"HyDE"| HY["Generate Hypothetical<br/>Answer → Embed"]
+    QT -->|"Decompose"| DC["Split into<br/>Sub-queries"]
+    QT -->|"Direct"| DE["Embed Query<br/>Directly"]
+
+    HY --> HS["Hybrid Search"]
+    DC --> HS
+    DE --> HS
+
+    HS --> VS["Vector Search<br/>(top 50)"]
+    HS --> KW["Keyword/BM25<br/>Search (top 50)"]
+
+    VS --> RRF["Reciprocal Rank<br/>Fusion (RRF)"]
+    KW --> RRF
+
+    RRF --> RR["Cross-Encoder<br/>Reranker"]
+    RR --> TH{"Score ><br/>threshold?"}
+    TH -->|"Yes"| CTX["Selected Chunks<br/>(top 3-5)"]
+    TH -->|"No"| FB["Fallback:<br/>Acknowledge Gap"]
+
+    CTX --> LLM["LLM + Prompt"]
+    FB --> LLM`,
+    },
+  ],
+
+  comparison: {
+    columns: [
+      "Aspect",
+      "Naive RAG",
+      "Advanced RAG",
+      "Fine-tuning",
+    ],
+    rows: [
+      [
+        "**Knowledge Update**",
+        "Add documents to vector store; *no retraining*",
+        "Add documents + re-index with metadata; *no retraining*",
+        "Requires *full or partial retraining* on new data",
+      ],
+      [
+        "**Retrieval Quality**",
+        "Basic `top-K` cosine similarity; prone to irrelevant results",
+        "Hybrid search + **reranker** + query transformation; high precision",
+        "No retrieval — knowledge is *baked into weights*",
+      ],
+      [
+        "**Hallucination Control**",
+        "Moderate — context may be noisy or insufficient",
+        "Strong — relevance thresholds, **guardrails**, and citation enforcement",
+        "Weak — model may still hallucinate beyond training data",
+      ],
+      [
+        "**Implementation Complexity**",
+        "*Low* — embed, store, retrieve, prompt",
+        "*High* — reranking, query routing, evaluation pipelines",
+        "*Very High* — training infra, dataset curation, GPU compute",
+      ],
+      [
+        "**Cost Profile**",
+        "Embedding + LLM inference per query; vector DB hosting",
+        "Higher inference cost (reranker + LLM); more complex infra",
+        "High upfront training cost; lower per-query inference cost",
+      ],
+      [
+        "**Best For**",
+        "Prototypes, FAQ bots, simple document Q&A",
+        "Production systems requiring **high accuracy** and auditability",
+        "Changing model *behavior/style* or compressing specialized knowledge",
+      ],
+      [
+        "**Source Attribution**",
+        "Basic — return chunk sources alongside answer",
+        "Rich — **cited passages**, confidence scores, source links",
+        "Not available — no external sources to cite",
+      ],
+    ],
+  },
+
+  exercises: [
+    `**Build a Basic RAG Pipeline**: Using Node.js and MongoDB Atlas, create a RAG system that ingests a set of markdown files, chunks them with \`512-token\` windows and \`50-token\` overlap, generates embeddings with \`text-embedding-3-small\`, stores them with metadata, and answers user queries with source citations. Test with at least **10 documents** and evaluate retrieval quality using *recall@5*.`,
+
+    `**Implement Hybrid Search**: Extend your RAG pipeline to support **hybrid search** by combining MongoDB Atlas vector search with a text index for keyword matching. Implement *Reciprocal Rank Fusion (RRF)* to merge results from both retrieval methods. Compare retrieval quality against pure vector search on queries containing specific terms, acronyms, or error codes.`,
+
+    `**Add a Reranker Stage**: Integrate a cross-encoder reranker (e.g., using the \`cross-encoder/ms-marco-MiniLM-L-6-v2\` model via Python) as a microservice. Modify your pipeline to retrieve **top-20** candidates via vector search, then rerank to select the **top-3**. Measure the improvement in *answer faithfulness* and *context precision* using the RAGAS framework.`,
+
+    `**Chunking Strategy Comparison**: Take a corpus of at least **5 long documents** (2000+ words each) and implement three chunking strategies: *fixed-size* (512 tokens), *recursive* (split by paragraphs then sentences), and *semantic* (split by embedding similarity shifts). Index each separately, run the same 20 test queries against all three, and compare **recall@5** and **answer quality**. Document which strategy works best for your corpus and why.`,
+
+    `**Build a RAG Evaluation Harness**: Create an automated evaluation pipeline that: (1) maintains a **golden test set** of 20+ question-answer-source triples, (2) runs each question through your RAG pipeline, (3) computes *faithfulness*, *answer relevancy*, *context precision*, and *context recall* using RAGAS or a custom LLM-as-judge approach, and (4) outputs a report with pass/fail thresholds. Integrate this into your CI pipeline to catch retrieval regressions.`,
+  ],
+
+  cheatSheet: [
+    `**Chunk size sweet spot**: Start with \`512 tokens\` and \`50-token overlap\` (~10%). Smaller chunks (256) improve precision but lose context; larger chunks (1024) retain context but dilute relevance. *Always benchmark on your actual queries.*`,
+
+    `**Embedding model selection**: Use \`text-embedding-3-small\` (1536d) for cost efficiency or \`text-embedding-3-large\` (3072d) for max quality. For open-source, **BGE-large-en-v1.5** and **E5-large-v2** are top performers. Match the model to your *language and domain*.`,
+
+    `**Retrieval pipeline pattern**: Retrieve **top-50** via ANN vector search → apply **hybrid fusion** with BM25 keyword results → **rerank** with a cross-encoder to select top-3-5 → set a *relevance score threshold* (e.g., > 0.7) to filter low-confidence results.`,
+
+    `**MongoDB Atlas Vector Search index**: Define the index with \`"similarity": "cosine"\`, set \`numDimensions\` to match your embedding model output, and add \`"type": "filter"\` fields for metadata filtering. Use \`numCandidates = limit * 10\` for good recall.`,
+
+    `**Prompt engineering for RAG**: Always include: (1) *system instruction* to answer only from context, (2) *fallback instruction* to admit when context is insufficient, (3) *citation format* like \`[Source N]\`, and (4) the retrieved context clearly delimited from the question.`,
+
+    `**Evaluation metrics to track**: *Context Precision* (are retrieved chunks relevant?), *Context Recall* (are all needed chunks retrieved?), *Faithfulness* (does the answer match sources?), *Answer Relevancy* (does the answer address the question?). Use **RAGAS** or **TruLens** for automated scoring.`,
+  ],
+
+  revisionNotes: [
+    `RAG follows a **retrieve-then-generate** pattern: documents are chunked and embedded *offline*, then at query time the user query is embedded, similar chunks are retrieved via **ANN search**, and the top results are injected into the LLM prompt as grounding context. The key advantage over fine-tuning is that knowledge can be *updated without retraining*.`,
+
+    `**Hybrid search** (vector + keyword/BM25) with **Reciprocal Rank Fusion** outperforms pure vector search in most production settings. A **cross-encoder reranker** as a second stage further improves precision by jointly encoding query-document pairs, catching relevance signals that bi-encoder embeddings miss.`,
+
+    `Chunking strategy directly impacts retrieval quality. *Recursive chunking* (split by structure, then by size) with **10-20% overlap** is the most reliable default. **Parent-child retrieval** indexes small chunks for matching but returns the larger parent chunk to the LLM for richer context.`,
+
+    `Production RAG requires **guardrails**: relevance score thresholds to avoid hallucination on low-confidence retrievals, token budget management to prevent context window overflow, content freshness checks to exclude stale documents, and a \`fallback response\` when no relevant context is found.`,
+
+    `Evaluate RAG end-to-end with four dimensions: **context precision**, **context recall**, **faithfulness**, and **answer relevancy**. Maintain a *golden test set* of curated question-answer-source triples, automate evaluation with frameworks like **RAGAS**, and run regression tests on every pipeline change to catch retrieval quality drops early.`,
+  ],
+
   glossary: [
     {
       term: "RAG",

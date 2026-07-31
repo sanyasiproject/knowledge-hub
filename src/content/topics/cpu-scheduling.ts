@@ -23,72 +23,139 @@ export const cpuScheduling: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Round Robin scheduling simulation",
-      source: `from collections import deque
+      source: `#include <iostream>
+#include <vector>
+#include <queue>
+#include <string>
 
-def round_robin(processes, burst_times, quantum):
-    """Simulate Round Robin scheduling.
-    Returns (completion_time, turnaround_time, waiting_time) for each process.
-    """
-    n = len(processes)
-    remaining = list(burst_times)
-    queue = deque(range(n))
-    time = 0
-    completion = [0] * n
+struct ProcessResult {
+    std::string name;
+    int completion;
+    int turnaround;
+    int waiting;
+};
 
-    while queue:
-        i = queue.popleft()
-        run = min(remaining[i], quantum)
-        time += run
-        remaining[i] -= run
-        if remaining[i] == 0:
-            completion[i] = time
-        else:
-            queue.append(i)
+// Simulate Round Robin scheduling.
+// Returns (completion_time, turnaround_time, waiting_time) for each process.
+std::vector<ProcessResult> roundRobin(
+    const std::vector<std::string>& processes,
+    const std::vector<int>& burstTimes,
+    int quantum)
+{
+    int n = static_cast<int>(processes.size());
+    std::vector<int> remaining(burstTimes.begin(), burstTimes.end());
+    std::queue<int> q;
+    for (int i = 0; i < n; ++i) q.push(i);
 
-    turnaround = [completion[i] - 0 for i in range(n)]  # assuming arrival=0
-    waiting = [turnaround[i] - burst_times[i] for i in range(n)]
-    return list(zip(processes, completion, turnaround, waiting))
+    int time = 0;
+    std::vector<int> completion(n, 0);
 
-# Example: P1=10, P2=5, P3=8 with quantum=3
-result = round_robin(["P1", "P2", "P3"], [10, 5, 8], 3)
-for proc, ct, tat, wt in result:
-    print(f"{proc}: completion={ct}, turnaround={tat}, waiting={wt}")`,
+    while (!q.empty()) {
+        int i = q.front(); q.pop();
+        int run = std::min(remaining[i], quantum);
+        time += run;
+        remaining[i] -= run;
+        if (remaining[i] == 0) {
+            completion[i] = time;
+        } else {
+            q.push(i);
+        }
+    }
+
+    std::vector<ProcessResult> results;
+    for (int i = 0; i < n; ++i) {
+        int turnaround = completion[i];  // assuming arrival=0
+        int waiting = turnaround - burstTimes[i];
+        results.push_back({processes[i], completion[i], turnaround, waiting});
+    }
+    return results;
+}
+
+int main() {
+    // Example: P1=10, P2=5, P3=8 with quantum=3
+    auto result = roundRobin({"P1", "P2", "P3"}, {10, 5, 8}, 3);
+    for (const auto& r : result) {
+        std::cout << r.name << ": completion=" << r.completion
+                  << ", turnaround=" << r.turnaround
+                  << ", waiting=" << r.waiting << "\\n";
+    }
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Shortest Job First (non-preemptive) scheduling",
-      source: `def sjf_non_preemptive(processes):
-    """SJF non-preemptive scheduling.
-    processes: list of (name, arrival_time, burst_time)
-    """
-    procs = sorted(processes, key=lambda p: (p[1], p[2]))
-    n = len(procs)
-    completed = []
-    time = 0
-    remaining = list(procs)
+      source: `#include <iostream>
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <tuple>
 
-    while remaining:
-        # Find processes that have arrived by current time
-        available = [p for p in remaining if p[1] <= time]
-        if not available:
-            time = remaining[0][1]  # jump to next arrival
-            continue
-        # Pick the one with shortest burst
-        chosen = min(available, key=lambda p: p[2])
-        remaining.remove(chosen)
-        name, arrival, burst = chosen
-        time += burst
-        turnaround = time - arrival
-        waiting = turnaround - burst
-        completed.append((name, time, turnaround, waiting))
+struct Process {
+    std::string name;
+    int arrival;
+    int burst;
+};
 
-    return completed
+struct SjfResult {
+    std::string name;
+    int completion;
+    int turnaround;
+    int waiting;
+};
 
-procs = [("P1", 0, 7), ("P2", 2, 4), ("P3", 4, 1), ("P4", 5, 4)]
-for name, ct, tat, wt in sjf_non_preemptive(procs):
-    print(f"{name}: completion={ct}, turnaround={tat}, waiting={wt}")`,
+// SJF non-preemptive scheduling.
+std::vector<SjfResult> sjfNonPreemptive(std::vector<Process> procs) {
+    // Sort by arrival time, then burst time
+    std::sort(procs.begin(), procs.end(), [](const Process& a, const Process& b) {
+        return std::tie(a.arrival, a.burst) < std::tie(b.arrival, b.burst);
+    });
+
+    std::vector<SjfResult> completed;
+    std::vector<Process> remaining = procs;
+    int time = 0;
+
+    while (!remaining.empty()) {
+        // Find processes that have arrived by current time
+        std::vector<Process*> available;
+        for (auto& p : remaining) {
+            if (p.arrival <= time) available.push_back(&p);
+        }
+        if (available.empty()) {
+            time = remaining.front().arrival;  // jump to next arrival
+            continue;
+        }
+        // Pick the one with shortest burst
+        auto chosen = *std::min_element(available.begin(), available.end(),
+            [](const Process* a, const Process* b) { return a->burst < b->burst; });
+
+        time += chosen->burst;
+        int turnaround = time - chosen->arrival;
+        int waiting = turnaround - chosen->burst;
+        completed.push_back({chosen->name, time, turnaround, waiting});
+
+        // Remove chosen from remaining
+        remaining.erase(
+            std::remove_if(remaining.begin(), remaining.end(),
+                [&](const Process& p) { return &p == chosen; }),
+            remaining.end());
+    }
+    return completed;
+}
+
+int main() {
+    std::vector<Process> procs = {
+        {"P1", 0, 7}, {"P2", 2, 4}, {"P3", 4, 1}, {"P4", 5, 4}
+    };
+    for (const auto& r : sjfNonPreemptive(procs)) {
+        std::cout << r.name << ": completion=" << r.completion
+                  << ", turnaround=" << r.turnaround
+                  << ", waiting=" << r.waiting << "\\n";
+    }
+    return 0;
+}`,
     },
     {
       language: "c",

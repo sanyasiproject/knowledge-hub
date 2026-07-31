@@ -221,97 +221,133 @@ class Order {
 }`
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Divergent Change and Shotgun Surgery identification",
-      source: `# SMELL: Divergent Change -- this class changes for many unrelated reasons
-class ReportService:
-    """This class changes when:
-    1. A new report format is added (PDF, CSV, Excel)
-    2. A new data source is added (MySQL, Postgres, API)
-    3. A new report type is added (sales, inventory, financial)
-    Each change affects different methods -- classic Divergent Change.
-    """
-
-    def fetch_sales_data(self): ...       # Changes for data source reasons
-    def fetch_inventory_data(self): ...    # Changes for data source reasons
-    def calculate_sales_summary(self): ... # Changes for business logic reasons
-    def calculate_inventory_metrics(self): ...  # Changes for business logic reasons
-    def render_as_pdf(self, data): ...     # Changes for format reasons
-    def render_as_csv(self, data): ...     # Changes for format reasons
-    def render_as_excel(self, data): ...   # Changes for format reasons
-
-
-# REFACTORED: Each class has one reason to change
-
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Any
+      source: `// SMELL: Divergent Change -- this class changes for many unrelated reasons
+class ReportService {
+    // This class changes when:
+    // 1. A new report format is added (PDF, CSV, Excel)
+    // 2. A new data source is added (MySQL, Postgres, API)
+    // 3. A new report type is added (sales, inventory, financial)
+    // Each change affects different methods -- classic Divergent Change.
+public:
+    std::vector<Row> fetchSalesData();        // Changes for data source reasons
+    std::vector<Row> fetchInventoryData();     // Changes for data source reasons
+    Summary calculateSalesSummary();           // Changes for business logic reasons
+    Metrics calculateInventoryMetrics();        // Changes for business logic reasons
+    std::vector<uint8_t> renderAsPdf(const ReportData& data);   // Changes for format reasons
+    std::string renderAsCsv(const ReportData& data);            // Changes for format reasons
+    std::vector<uint8_t> renderAsExcel(const ReportData& data); // Changes for format reasons
+};
 
 
-class DataSource(ABC):
-    """Changes only when data access logic changes."""
-    @abstractmethod
-    def fetch(self) -> list[dict[str, Any]]: ...
+// REFACTORED: Each class has one reason to change
 
-class SalesDataSource(DataSource):
-    def fetch(self) -> list[dict[str, Any]]:
-        return self._query_sales_database()
+#include <string>
+#include <vector>
+#include <map>
+#include <memory>
+#include <numeric>
+#include <cstdint>
 
-class InventoryDataSource(DataSource):
-    def fetch(self) -> list[dict[str, Any]]:
-        return self._query_inventory_api()
+using Row = std::map<std::string, std::string>;
 
+// Changes only when data access logic changes.
+class DataSource {
+public:
+    virtual ~DataSource() = default;
+    virtual std::vector<Row> fetch() = 0;
+};
 
-class ReportCalculator(ABC):
-    """Changes only when business logic changes."""
-    @abstractmethod
-    def compute(self, raw_data: list[dict[str, Any]]) -> "ReportData": ...
+class SalesDataSource : public DataSource {
+public:
+    std::vector<Row> fetch() override {
+        return querySalesDatabase();
+    }
+private:
+    std::vector<Row> querySalesDatabase();
+};
 
-class SalesSummaryCalculator(ReportCalculator):
-    def compute(self, raw_data):
-        total = sum(row["amount"] for row in raw_data)
-        return ReportData(title="Sales Summary", rows=raw_data, total=total)
-
-
-class ReportRenderer(ABC):
-    """Changes only when output format changes."""
-    @abstractmethod
-    def render(self, report: "ReportData") -> bytes: ...
-
-class PdfRenderer(ReportRenderer):
-    def render(self, report):
-        # PDF generation logic
-        ...
-
-class CsvRenderer(ReportRenderer):
-    def render(self, report):
-        # CSV generation logic
-        ...
+class InventoryDataSource : public DataSource {
+public:
+    std::vector<Row> fetch() override {
+        return queryInventoryApi();
+    }
+private:
+    std::vector<Row> queryInventoryApi();
+};
 
 
-@dataclass
-class ReportData:
-    title: str
-    rows: list[dict[str, Any]]
-    total: float
+struct ReportData {
+    std::string title;
+    std::vector<Row> rows;
+    double total;
+};
+
+// Changes only when business logic changes.
+class ReportCalculator {
+public:
+    virtual ~ReportCalculator() = default;
+    virtual ReportData compute(const std::vector<Row>& rawData) = 0;
+};
+
+class SalesSummaryCalculator : public ReportCalculator {
+public:
+    ReportData compute(const std::vector<Row>& rawData) override {
+        double total = 0.0;
+        for (const auto& row : rawData) {
+            total += std::stod(row.at("amount"));
+        }
+        return {"Sales Summary", rawData, total};
+    }
+};
 
 
-# Composition: each piece changes independently
-class ReportPipeline:
-    def __init__(
-        self,
-        source: DataSource,
-        calculator: ReportCalculator,
-        renderer: ReportRenderer,
-    ):
-        self.source = source
-        self.calculator = calculator
-        self.renderer = renderer
+// Changes only when output format changes.
+class ReportRenderer {
+public:
+    virtual ~ReportRenderer() = default;
+    virtual std::vector<uint8_t> render(const ReportData& report) = 0;
+};
 
-    def generate(self) -> bytes:
-        raw_data = self.source.fetch()
-        report = self.calculator.compute(raw_data)
-        return self.renderer.render(report)`
+class PdfRenderer : public ReportRenderer {
+public:
+    std::vector<uint8_t> render(const ReportData& report) override {
+        // PDF generation logic
+        return {};
+    }
+};
+
+class CsvRenderer : public ReportRenderer {
+public:
+    std::vector<uint8_t> render(const ReportData& report) override {
+        // CSV generation logic
+        return {};
+    }
+};
+
+
+// Composition: each piece changes independently
+class ReportPipeline {
+public:
+    ReportPipeline(std::unique_ptr<DataSource> source,
+                   std::unique_ptr<ReportCalculator> calculator,
+                   std::unique_ptr<ReportRenderer> renderer)
+        : source_(std::move(source))
+        , calculator_(std::move(calculator))
+        , renderer_(std::move(renderer)) {}
+
+    std::vector<uint8_t> generate() {
+        auto rawData = source_->fetch();
+        auto report = calculator_->compute(rawData);
+        return renderer_->render(report);
+    }
+
+private:
+    std::unique_ptr<DataSource> source_;
+    std::unique_ptr<ReportCalculator> calculator_;
+    std::unique_ptr<ReportRenderer> renderer_;
+};`
     }
   ],
 

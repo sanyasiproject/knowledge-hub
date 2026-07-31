@@ -166,63 +166,90 @@ SENTINEL CKQUORUM mymaster
 # OK 3 usable Sentinels. Quorum: 2. OK!`,
     },
     {
-      language: "python",
-      caption: "Connecting to Redis Cluster with smart client",
-      source: `from redis.cluster import RedisCluster, ClusterNode
+      language: "cpp",
+      caption: "Connecting to Redis Cluster with hiredis-cluster (redis-plus-plus)",
+      source: `#include <iostream>
+#include <sw/redis++/redis++.h>
 
-# Smart client auto-discovers all nodes from seed nodes
-startup_nodes = [
-    ClusterNode("127.0.0.1", 7000),
-    ClusterNode("127.0.0.1", 7001),
-]
+using namespace sw::redis;
 
-rc = RedisCluster(
-    startup_nodes=startup_nodes,
-    decode_responses=True,
-    skip_full_coverage_check=False,
-)
+int main() {
+    // Smart client auto-discovers all nodes from seed nodes
+    ConnectionOptions opts;
+    opts.host = "127.0.0.1";
+    opts.port = 7000;
 
-# Basic operations — client handles MOVED/ASK transparently
-rc.set("key1", "value1")
-rc.get("key1")
+    ConnectionPoolOptions poolOpts;
+    poolOpts.size = 3;
 
-# Hash tags for multi-key operations
-rc.mset({"{order:100}:status": "paid", "{order:100}:total": "59.99"})
-result = rc.mget("{order:100}:status", "{order:100}:total")
+    auto cluster = RedisCluster(opts, poolOpts);
 
-# Pipeline within a single slot (using hash tags)
-pipe = rc.pipeline()
-pipe.hset("{user:1}:data", "visits", 0)
-pipe.hincrby("{user:1}:data", "visits", 1)
-pipe.hget("{user:1}:data", "visits")
-results = pipe.execute()
+    // Basic operations -- client handles MOVED/ASK transparently
+    cluster.set("key1", "value1");
+    auto val = cluster.get("key1");  // returns Optional<std::string>
+    if (val) std::cout << "key1 = " << *val << std::endl;
 
-# Cross-slot pipeline will raise an error
-# pipe.set("key_a", "1")  # slot X
-# pipe.set("key_b", "2")  # slot Y -- CrossSlotError!`,
+    // Hash tags for multi-key operations
+    cluster.set("{order:100}:status", "paid");
+    cluster.set("{order:100}:total", "59.99");
+
+    std::vector<OptionalString> results;
+    cluster.mget({"{order:100}:status", "{order:100}:total"},
+                 std::back_inserter(results));
+
+    // Pipeline within a single slot (using hash tags)
+    auto pipe = cluster.pipeline("{user:1}");
+    pipe.hset("{user:1}:data", "visits", "0");
+    pipe.hincrby("{user:1}:data", "visits", 1);
+    pipe.hget("{user:1}:data", "visits");
+    auto pipeResults = pipe.exec();
+
+    // Cross-slot pipeline will throw an error
+    // auto badPipe = cluster.pipeline("key_a");
+    // badPipe.set("key_a", "1");  // slot X
+    // badPipe.set("key_b", "2");  // slot Y -- MovedError!
+
+    return 0;
+}`,
     },
     {
-      language: "python",
-      caption: "Sentinel-aware client connection",
-      source: `from redis.sentinel import Sentinel
+      language: "cpp",
+      caption: "Sentinel-aware client connection with redis-plus-plus",
+      source: `#include <iostream>
+#include <sw/redis++/redis++.h>
 
-# Connect to Sentinel instances
-sentinel = Sentinel([
-    ("sentinel-1.example.com", 26379),
-    ("sentinel-2.example.com", 26379),
-    ("sentinel-3.example.com", 26379),
-], socket_timeout=0.5)
+using namespace sw::redis;
 
-# Get a connection to the current master
-master = sentinel.master_for("mymaster", socket_timeout=0.5, db=0)
-master.set("key", "value")
+int main() {
+    // Connect to Sentinel instances
+    SentinelOptions sentinelOpts;
+    sentinelOpts.nodes = {
+        {"sentinel-1.example.com", 26379},
+        {"sentinel-2.example.com", 26379},
+        {"sentinel-3.example.com", 26379},
+    };
+    sentinelOpts.connect_timeout = std::chrono::milliseconds(500);
+    sentinelOpts.socket_timeout = std::chrono::milliseconds(500);
 
-# Get a connection for read-only queries to a replica
-replica = sentinel.slave_for("mymaster", socket_timeout=0.5, db=0)
-value = replica.get("key")
+    auto sentinel = Sentinel(sentinelOpts);
 
-# The client automatically reconnects to the new master after failover
-# No application code change needed`,
+    // Get a connection to the current master
+    ConnectionOptions masterOpts;
+    masterOpts.connect_timeout = std::chrono::milliseconds(500);
+    masterOpts.socket_timeout = std::chrono::milliseconds(500);
+
+    auto master = Redis(sentinel, "mymaster", Role::MASTER, masterOpts);
+    master.set("key", "value");
+
+    // Get a connection for read-only queries to a replica
+    auto replica = Redis(sentinel, "mymaster", Role::SLAVE, masterOpts);
+    auto value = replica.get("key");
+    if (value) std::cout << "key = " << *value << std::endl;
+
+    // The client automatically reconnects to the new master after failover
+    // No application code change needed
+    return 0;
+}`,
     },
   ],
   diagrams: [
@@ -415,5 +442,12 @@ value = replica.get("key")
     { term: "Replica migration", definition: "Automatic redistribution of replicas in Cluster mode from masters with excess replicas to masters that have lost theirs." },
     { term: "Config epoch", definition: "Monotonically increasing counter used to resolve conflicts when multiple nodes claim ownership of the same hash slots." },
     { term: "Replication backlog", definition: "Circular buffer (default 1 MB) on the master storing recent write commands. Enables partial resynchronization after brief replica disconnections." },
+  ],
+  exercises: [
+    "Set up a **6-node Redis Cluster** (3 masters, 3 replicas) on your local machine. Use `CLUSTER INFO` and `CLUSTER NODES` to verify slot distribution. Then **kill one master process** and observe the failover: how long does it take? What do `CLUSTER NODES` and client-side *MOVED* redirections look like before and after?",
+    "Design a **hash tag strategy** for a social media app where each user has a profile, a follower list, and a feed. Ensure all three can participate in a `MULTI/EXEC` transaction within Redis Cluster. Write out the key names and verify with `CLUSTER KEYSLOT` that they share the same slot.",
+    "Write a **Python or Node.js script** that connects to a Redis Cluster, inserts 10,000 keys *without* hash tags, and then queries `CLUSTER KEYSLOT` for a sample of keys. Plot or print the distribution of keys across slots. Is the distribution roughly uniform? What happens to the mapping if you add a 4th master and reshard?",
+    "Simulate a **network partition** using `iptables` or `CLUSTER FAILOVER TAKEOVER`. With `min-replicas-to-write` set to 1, attempt writes on the minority side of the partition. Document which writes succeed, which fail, and what data is lost when the partition heals.",
+    "Compare **Redis Sentinel** vs **Redis Cluster** by deploying both for the same dataset. Benchmark write throughput and failover time. Write a short analysis: under what workload characteristics would you choose Sentinel over Cluster, and vice versa?",
   ],
 };

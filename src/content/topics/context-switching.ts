@@ -55,41 +55,58 @@ swtch:
     ret                   # return to new thread's saved return address`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Measuring context-switch overhead using pipe ping-pong",
-      source: `import os
-import time
+      source: `#include <unistd.h>
+#include <sys/wait.h>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 
-def measure_context_switch(iterations=100000):
-    """Measure context-switch time by bouncing a byte between
-    parent and child processes through pipes."""
-    r1, w1 = os.pipe()  # parent -> child
-    r2, w2 = os.pipe()  # child -> parent
+void measure_context_switch(int iterations = 100000) {
+    // Measure context-switch time by bouncing a byte between
+    // parent and child processes through pipes.
+    int p2c[2], c2p[2]; // parent-to-child, child-to-parent
+    pipe(p2c);
+    pipe(c2p);
 
-    pid = os.fork()
-    if pid == 0:
-        # Child: read from r1, write to w2
-        os.close(w1)
-        os.close(r2)
-        for _ in range(iterations):
-            os.read(r1, 1)
-            os.write(w2, b'x')
-        os._exit(0)
-    else:
-        # Parent: write to w1, read from r2
-        os.close(r1)
-        os.close(w2)
-        start = time.perf_counter_ns()
-        for _ in range(iterations):
-            os.write(w1, b'x')
-            os.read(r2, 1)
-        elapsed_ns = time.perf_counter_ns() - start
-        os.waitpid(pid, 0)
-        # Each iteration = 2 context switches (parent->child, child->parent)
-        per_switch_ns = elapsed_ns / (2 * iterations)
-        print(f"Estimated context-switch time: {per_switch_ns:.0f} ns")
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Child: read from p2c, write to c2p
+        close(p2c[1]);
+        close(c2p[0]);
+        char buf;
+        for (int i = 0; i < iterations; ++i) {
+            read(p2c[0], &buf, 1);
+            write(c2p[1], "x", 1);
+        }
+        _exit(0);
+    } else {
+        // Parent: write to p2c, read from c2p
+        close(p2c[0]);
+        close(c2p[1]);
+        char buf;
 
-measure_context_switch()`,
+        auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < iterations; ++i) {
+            write(p2c[1], "x", 1);
+            read(c2p[0], &buf, 1);
+        }
+        auto end = std::chrono::steady_clock::now();
+
+        waitpid(pid, nullptr, 0);
+        auto elapsed_ns = std::chrono::duration_cast<
+            std::chrono::nanoseconds>(end - start).count();
+        // Each iteration = 2 context switches (parent->child, child->parent)
+        long per_switch_ns = elapsed_ns / (2 * iterations);
+        std::printf("Estimated context-switch time: %ld ns\\n", per_switch_ns);
+    }
+}
+
+int main() {
+    measure_context_switch();
+    return 0;
+}`,
     },
     {
       language: "c",

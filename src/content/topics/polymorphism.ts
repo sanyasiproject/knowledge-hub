@@ -88,37 +88,54 @@ fn draw_all(shapes: &[Box<dyn Drawable>]) {
 }`,
     },
     {
-      language: "python",
-      caption: "Duck typing and operator overloading",
-      source: `# Duck typing: no interface declaration needed
-class Duck:
-    def quack(self): return "Quack!"
+      language: "cpp",
+      caption: "Template-based duck typing and operator overloading",
+      source: `#include <iostream>
+#include <string>
 
-class Person:
-    def quack(self): return "I'm quacking like a duck!"
+// "Duck typing" via templates: no interface declaration needed
+struct Duck {
+    std::string quack() const { return "Quack!"; }
+};
 
-def make_it_quack(thing):  # works with anything that has quack()
-    print(thing.quack())
+struct Person {
+    std::string quack() const { return "I'm quacking like a duck!"; }
+};
 
-make_it_quack(Duck())    # "Quack!"
-make_it_quack(Person())  # "I'm quacking like a duck!"
+// Works with anything that has quack() -- compile-time duck typing
+template <typename T>
+void makeItQuack(const T& thing) {
+    std::cout << thing.quack() << std::endl;
+}
 
-# Operator overloading via dunder methods
-class Vector:
-    def __init__(self, x, y):
-        self.x, self.y = x, y
+// Operator overloading
+struct Vector {
+    double x, y;
+    Vector(double x, double y) : x(x), y(y) {}
 
-    def __add__(self, other):     # v1 + v2
-        return Vector(self.x + other.x, self.y + other.y)
+    Vector operator+(const Vector& other) const {    // v1 + v2
+        return Vector(x + other.x, y + other.y);
+    }
 
-    def __mul__(self, scalar):    # v * 3
-        return Vector(self.x * scalar, self.y * scalar)
+    Vector operator*(double scalar) const {          // v * 3
+        return Vector(x * scalar, y * scalar);
+    }
 
-    def __repr__(self):
-        return f"Vector({self.x}, {self.y})"
+    friend std::ostream& operator<<(std::ostream& os, const Vector& v) {
+        return os << "Vector(" << v.x << ", " << v.y << ")";
+    }
+};
 
-v = Vector(1, 2) + Vector(3, 4)  # Vector(4, 6)
-w = Vector(1, 2) * 3             # Vector(3, 6)`,
+int main() {
+    makeItQuack(Duck());    // "Quack!"
+    makeItQuack(Person());  // "I'm quacking like a duck!"
+
+    Vector v = Vector(1, 2) + Vector(3, 4);  // Vector(4, 6)
+    Vector w = Vector(1, 2) * 3;             // Vector(3, 6)
+    std::cout << v << std::endl;
+    std::cout << w << std::endl;
+    return 0;
+}`,
     },
     {
       language: "haskell",

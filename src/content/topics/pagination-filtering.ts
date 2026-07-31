@@ -297,4 +297,11 @@ function buildWhereClause(filters: FilterParam[]): { sql: string; params: any[] 
     { term: "Compound filter", definition: "Multiple filter conditions combined with AND/OR logic to narrow results." },
     { term: "Faceted search", definition: "Filtering that shows available filter values and counts alongside results, commonly implemented with search engines like Elasticsearch." },
   ],
+  exercises: [
+    "Write SQL queries for both **offset-based** and **keyset-based** pagination on a `products` table sorted by `price DESC, id DESC`. Create the required composite index. Run `EXPLAIN ANALYZE` on both queries at `OFFSET 0`, `OFFSET 10000`, and `OFFSET 100000`. Compare the execution plans and explain why keyset pagination maintains constant performance.",
+    "Implement a **cursor-based pagination** endpoint in TypeScript that supports **multi-column sorting** with mixed directions (`ORDER BY priority DESC, created_at ASC, id ASC`). The cursor must encode all three values. Write the `WHERE` clause that correctly handles the mixed sort directions -- note that row-value comparison `(a, b) < (x, y)` only works for uniform directions.",
+    "Design a REST API endpoint `GET /articles` that supports **compound filtering** (status, author, date range, full-text search on title), **sorting** (by any of 3 fields), and **cursor-based pagination**. Define the query parameter format, validate inputs against an *allowlist*, and ensure the implementation is safe from **SQL injection**.",
+    "A social media feed uses offset-based pagination. A user scrolls to page 5, and meanwhile 3 new posts are inserted at the top. Demonstrate (with concrete examples) how the user will see **duplicate posts**. Then redesign using cursor-based pagination and prove that the duplicates no longer occur.",
+    "You need to add a `totalCount` field to your paginated API response, but `COUNT(*)` takes 800ms on your 50-million-row table. Propose three alternative strategies: *approximate count* using `pg_class.reltuples`, *cached count* with a TTL, and *deferred async count*. Discuss the tradeoffs of accuracy, freshness, and latency for each.",
+  ],
 };

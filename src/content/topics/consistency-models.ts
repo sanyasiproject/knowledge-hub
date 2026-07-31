@@ -163,4 +163,375 @@ In practice, most systems are tunable. Cassandra's consistency levels (ONE, QUOR
         "The ability to configure consistency guarantees per operation, as in Cassandra's consistency levels (ONE, QUORUM, ALL).",
     },
   ],
+  deepDive: [
+    "**Linearizability** imposes a *total order* on all operations such that each operation appears to execute atomically at a single point between its invocation and response -- this is called the **linearization point**. Implementing linearizability requires a **consensus protocol** like *Raft* or *Multi-Paxos* where a designated leader serializes all writes and a quorum of replicas acknowledges before the write is considered committed. The critical insight is that *reads must also go through the leader* (or use a lease mechanism) to avoid returning stale data from a follower that has not yet received the latest write. Google **Spanner** achieves *external consistency* (stronger than linearizability) by using **TrueTime** -- GPS and atomic clock-synchronized timestamps with bounded uncertainty -- allowing it to order transactions across globally distributed nodes without requiring all reads to hit a single leader. The cost is measurable: linearizable operations in Spanner add 7-14ms of commit latency for cross-region transactions.",
+    "**Eventual consistency** is deceptively simple to define but *complex to reason about* in practice. The key challenge is **conflict resolution** when concurrent writes happen at different replicas. **Last-Writer-Wins (LWW)** uses timestamps to pick a winner, but clock skew can silently discard valid writes. **Version vectors** (generalizations of vector clocks) detect conflicts but push resolution to the application. **CRDTs** (Conflict-free Replicated Data Types) provide *mathematically guaranteed convergence* without coordination: a *G-Counter* uses per-replica counters that only increment, merging via element-wise max; an *OR-Set* (Observed-Remove Set) tracks add/remove operations with unique tags. CRDTs are used in production by **Riak** (CRDT maps, sets, counters), **Redis** (CRDB module), and **Figma** (real-time collaborative editing). The limitation is that not all data structures have efficient CRDT representations -- arbitrary relational operations, for instance, cannot be expressed as CRDTs.",
+    "**Causal consistency** occupies a *sweet spot* in the consistency spectrum: it is the strongest model achievable without sacrificing availability during partitions (proven by Mahajan et al., 2011). Implementation relies on tracking **causal dependencies** between operations. Each operation carries a *dependency metadata* (typically a **vector clock** or **dotted version vector**) that records which operations it has observed. When a replica receives an operation, it *delays delivery* until all causally preceding operations have been applied locally. In practice, the metadata overhead grows with the number of writers, so systems like **COPS** (Clusters of Order-Preserving Servers) and **Eiger** compress dependency metadata using *explicit dependency tracking* -- only tracking the immediate dependencies rather than the full transitive closure. MongoDB offers causal consistency within a *client session* by passing an `operationTime` token that ensures reads at a replica reflect all prior writes from that session."
+  ],
+  code: [
+    {
+      language: "cpp",
+      caption: "Simulating linearizable register with Raft-style quorum reads and writes",
+      source: `#include <iostream>
+#include <vector>
+#include <mutex>
+#include <thread>
+#include <optional>
+#include <chrono>
+
+// Simplified **linearizable register** using quorum-based reads/writes.
+// In a real system, this would use Raft consensus across network nodes.
+
+class LinearizableRegister {
+    struct VersionedValue {
+        int value;
+        uint64_t version;       // Monotonically increasing *write timestamp*
+    };
+
+    // Simulates N replicas — each holds a copy of the value
+    std::vector<VersionedValue> replicas_;
+    std::mutex mu_;
+    uint64_t next_version_ = 1;
+    int num_replicas_;
+
+public:
+    explicit LinearizableRegister(int n) : num_replicas_(n), replicas_(n, {0, 0}) {}
+
+    // **Quorum write**: must be acknowledged by majority (N/2 + 1)
+    bool Write(int value) {
+        std::lock_guard<std::mutex> lock(mu_);
+        uint64_t ver = next_version_++;
+        int acks = 0;
+        int quorum = num_replicas_ / 2 + 1;
+
+        for (auto& replica : replicas_) {
+            // In practice: RPC to each replica, wait for quorum
+            if (replica.version < ver) {
+                replica = {value, ver};
+                ++acks;
+            }
+        }
+        // Write succeeds only if **quorum** acknowledges
+        return acks >= quorum;
+    }
+
+    // **Quorum read**: read from majority, return highest version
+    std::optional<int> Read() {
+        std::lock_guard<std::mutex> lock(mu_);
+        int quorum = num_replicas_ / 2 + 1;
+
+        uint64_t max_ver = 0;
+        int result = 0;
+        int responses = 0;
+
+        for (const auto& replica : replicas_) {
+            if (replica.version >= max_ver) {
+                max_ver = replica.version;
+                result = replica.value;
+            }
+            ++responses;
+            if (responses >= quorum) break;
+        }
+        // Linearizability: read reflects the **latest committed write**
+        return result;
+    }
+};
+
+int main() {
+    LinearizableRegister reg(5);  // 5 replicas, quorum = 3
+
+    reg.Write(42);
+    auto val = reg.Read();
+    std::cout << "Linearizable read: " << val.value_or(-1) << std::endl;
+    // Always prints 42 — **strong consistency** guaranteed
+
+    reg.Write(100);
+    val = reg.Read();
+    std::cout << "After second write: " << val.value_or(-1) << std::endl;
+    // Always prints 100 — reads never return stale data
+
+    return 0;
+}`
+    },
+    {
+      language: "cpp",
+      caption: "Vector clock implementation for tracking causal dependencies between distributed nodes",
+      source: `#include <iostream>
+#include <map>
+#include <string>
+#include <algorithm>
+#include <sstream>
+
+// **Vector Clock** — tracks causal dependencies across distributed nodes.
+// Each node maintains a map of {node_id -> logical_timestamp}.
+
+class VectorClock {
+    std::map<std::string, uint64_t> clock_;
+
+public:
+    // **Local event**: increment this node's counter
+    void Tick(const std::string& node_id) {
+        clock_[node_id]++;
+    }
+
+    // **Send event**: tick and return clock to attach to message
+    VectorClock Send(const std::string& node_id) {
+        Tick(node_id);
+        return *this;  // Sender attaches its *full vector clock*
+    }
+
+    // **Receive event**: merge incoming clock, then tick local
+    void Receive(const std::string& node_id, const VectorClock& incoming) {
+        // Element-wise **max** ensures causal history is preserved
+        for (const auto& [id, ts] : incoming.clock_) {
+            clock_[id] = std::max(clock_[id], ts);
+        }
+        Tick(node_id);  // Record the receive as a local event
+    }
+
+    // **Happens-before** (causal ordering): a -> b iff a[i] <= b[i] for all i
+    bool HappensBefore(const VectorClock& other) const {
+        bool strictly_less = false;
+        for (const auto& [id, ts] : clock_) {
+            auto it = other.clock_.find(id);
+            uint64_t other_ts = (it != other.clock_.end()) ? it->second : 0;
+            if (ts > other_ts) return false;  // Not causally before
+            if (ts < other_ts) strictly_less = true;
+        }
+        // Check for keys in other but not in this (implicitly 0 here)
+        for (const auto& [id, ts] : other.clock_) {
+            if (clock_.find(id) == clock_.end() && ts > 0)
+                strictly_less = true;
+        }
+        return strictly_less;
+    }
+
+    // **Concurrent**: neither happens-before the other
+    bool IsConcurrent(const VectorClock& other) const {
+        return !HappensBefore(other) && !other.HappensBefore(*this);
+    }
+
+    std::string ToString() const {
+        std::ostringstream oss;
+        oss << "{";
+        for (auto it = clock_.begin(); it != clock_.end(); ++it) {
+            if (it != clock_.begin()) oss << ", ";
+            oss << it->first << ":" << it->second;
+        }
+        oss << "}";
+        return oss.str();
+    }
+};
+
+int main() {
+    VectorClock a, b, c;
+
+    // Node A writes, sends to B
+    auto msg1 = a.Send("A");               // A={A:1}
+    b.Receive("B", msg1);                   // B={A:1, B:1}
+
+    // Node B writes, sends to C
+    auto msg2 = b.Send("B");               // B={A:1, B:2}
+    c.Receive("C", msg2);                   // C={A:1, B:2, C:1}
+
+    // Independent write on A (concurrent with B's write)
+    a.Tick("A");                            // A={A:2}
+
+    std::cout << "A: " << a.ToString() << std::endl;
+    std::cout << "B: " << b.ToString() << std::endl;
+    std::cout << "C: " << c.ToString() << std::endl;
+
+    std::cout << "msg1 -> C? " << msg1.HappensBefore(c) << std::endl;  // true
+    std::cout << "A concurrent with C? " << a.IsConcurrent(c) << std::endl;  // true
+
+    return 0;
+}`
+    },
+    {
+      language: "cpp",
+      caption: "G-Counter CRDT: conflict-free replicated counter that converges without coordination",
+      source: `#include <iostream>
+#include <map>
+#include <string>
+#include <algorithm>
+#include <numeric>
+
+// **G-Counter** (Grow-only Counter) — a CRDT that supports
+// increment operations and **converges automatically** across replicas.
+// Merge operation: element-wise max. No coordination needed.
+
+class GCounter {
+    std::map<std::string, uint64_t> counts_;  // Per-replica counters
+
+public:
+    // **Increment**: only the local replica's counter increases
+    void Increment(const std::string& replica_id, uint64_t amount = 1) {
+        counts_[replica_id] += amount;
+    }
+
+    // **Query**: total count is the sum of all replica counters
+    uint64_t Value() const {
+        return std::accumulate(
+            counts_.begin(), counts_.end(), uint64_t{0},
+            [](uint64_t sum, const auto& pair) { return sum + pair.second; }
+        );
+    }
+
+    // **Merge**: element-wise max guarantees *convergence*
+    // This is the key CRDT property — merge is:
+    //   - **Commutative**: merge(a,b) == merge(b,a)
+    //   - **Associative**: merge(merge(a,b),c) == merge(a,merge(b,c))
+    //   - **Idempotent**: merge(a,a) == a
+    void Merge(const GCounter& other) {
+        for (const auto& [replica, count] : other.counts_) {
+            counts_[replica] = std::max(counts_[replica], count);
+        }
+    }
+
+    void Print(const std::string& label) const {
+        std::cout << label << " = " << Value() << " (";
+        for (const auto& [r, c] : counts_)
+            std::cout << r << ":" << c << " ";
+        std::cout << ")" << std::endl;
+    }
+};
+
+int main() {
+    GCounter replica_a, replica_b, replica_c;
+
+    // Concurrent increments on different replicas (no coordination!)
+    replica_a.Increment("A", 5);
+    replica_b.Increment("B", 3);
+    replica_c.Increment("C", 7);
+
+    // Each replica has a *partial view*
+    replica_a.Print("A before merge");  // A=5 (only knows about itself)
+    replica_b.Print("B before merge");  // B=3
+
+    // **Merge** in any order — result is always the same (convergence)
+    replica_a.Merge(replica_b);
+    replica_a.Merge(replica_c);
+    replica_a.Print("A after merge");   // A=15 (5+3+7)
+
+    // Replicas B and C merge independently — same result
+    replica_b.Merge(replica_c);
+    replica_b.Merge(replica_a);
+    replica_b.Print("B after merge");   // B=15 — **converged**
+
+    return 0;
+}`
+    }
+  ],
+  diagrams: [
+    {
+      title: "Consistency Model Spectrum",
+      kind: "flow" as const,
+      caption: "Consistency models ordered from strongest to weakest, showing the trade-off between consistency guarantees and availability/performance",
+      mermaid: `flowchart LR
+    L["Linearizability<br/><i>Strongest</i><br/>Spanner, etcd"] --> SS["Strict<br/>Serializability"]
+    SS --> SC["Sequential<br/>Consistency"]
+    SC --> CC["Causal<br/>Consistency<br/>COPS, MongoDB"]
+    CC --> RYW["Read-Your-Writes<br/><i>Session guarantee</i>"]
+    RYW --> MR["Monotonic Reads<br/><i>Session guarantee</i>"]
+    MR --> EC["Eventual<br/>Consistency<br/><i>Weakest</i><br/>DynamoDB, Cassandra"]
+
+    style L fill:#d32f2f,color:#fff
+    style EC fill:#388e3c,color:#fff
+    style CC fill:#f57c00,color:#fff`
+    },
+    {
+      title: "Quorum Read/Write Protocol",
+      kind: "sequence" as const,
+      caption: "How quorum-based replication achieves strong consistency with N=3, W=2, R=2 ensuring R+W > N",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant R1 as Replica 1
+    participant R2 as Replica 2
+    participant R3 as Replica 3
+
+    Note over C,R3: Write x=42 (W=2 quorum)
+    C->>R1: Write(x=42, v=5)
+    C->>R2: Write(x=42, v=5)
+    C->>R3: Write(x=42, v=5)
+    R1-->>C: ACK v=5
+    R2-->>C: ACK v=5
+    Note over C: 2 ACKs received (W=2) → committed
+    R3-->>C: ACK v=5 (late, already committed)
+
+    Note over C,R3: Read x (R=2 quorum)
+    C->>R1: Read(x)
+    C->>R2: Read(x)
+    R1-->>C: x=42, v=5
+    R2-->>C: x=42, v=5
+    Note over C: Return highest version → x=42
+    Note over C,R3: R+W=4 > N=3 → guaranteed overlap`
+    },
+    {
+      title: "CAP and PACELC Classification of Distributed Databases",
+      kind: "mindmap" as const,
+      caption: "Real-world distributed databases classified by their CAP and PACELC trade-off choices",
+      mermaid: `mindmap
+  root((Distributed DB<br/>Trade-offs))
+    CP Systems
+      Spanner
+        External consistency
+        TrueTime
+      etcd / ZooKeeper
+        Raft consensus
+        Leader-based reads
+      CockroachDB
+        Serializable
+        Raft per range
+    AP Systems
+      DynamoDB
+        Eventual default
+        Strong reads optional
+      Cassandra
+        Tunable consistency
+        Hinted handoff
+      Riak
+        CRDTs
+        Vector clocks
+    PACELC: Else
+      Low Latency
+        Cassandra ONE
+        DynamoDB eventual
+      Consistency
+        Spanner
+        CockroachDB`
+    }
+  ],
+  comparison: {
+    columns: ["Property", "Linearizability", "Sequential", "Causal", "Eventual"],
+    rows: [
+      ["**Real-time ordering**", "*Yes* -- ops respect wall-clock order", "No -- any total order is valid", "Only for causally related ops", "No ordering guarantees"],
+      ["**Availability under partition**", "No (must reject ops)", "No", "*Yes* (strongest available model)", "*Yes* (maximum availability)"],
+      ["**Coordination required**", "Consensus (Raft/Paxos)", "Total order broadcast", "Dependency tracking only", "None (anti-entropy)"],
+      ["**Read staleness**", "Never stale", "May see stale across sessions", "Never stale for causal chain", "Can be *arbitrarily stale*"],
+      ["**Performance cost**", "*Highest* (quorum round-trips)", "High (total ordering)", "Moderate (vector clocks)", "*Lowest* (local reads)"],
+      ["**Example systems**", "Spanner, etcd, ZooKeeper", "ZooKeeper (per-client)", "COPS, MongoDB sessions", "DynamoDB, Cassandra, DNS"],
+      ["**Conflict resolution**", "Not needed (serialized)", "Not needed", "Not needed for causal ops", "LWW, vector clocks, CRDTs"]
+    ]
+  },
+  exercises: [
+    "**Quorum Calculator**: Given a replication factor `N=5`, determine the minimum values of `W` (write quorum) and `R` (read quorum) such that `R + W > N` for strong consistency. Then calculate all valid `(R, W)` pairs. For each pair, discuss the trade-off: which favors *read-heavy* workloads? Which favors *write-heavy*? What happens if you set `W=1, R=1`?",
+    "**Vector Clock Conflict Detection**: Three nodes (A, B, C) perform these operations in order: (1) A writes x=1, sends to B; (2) B writes x=2, sends to C; (3) A writes x=3 (independent of B's write); (4) C receives A's update. Draw the vector clocks at each step. Identify which pairs of operations are *concurrent* and which have a *happens-before* relationship. What conflict does C detect?",
+    "**CRDT Design Exercise**: Design a **PN-Counter** (positive-negative counter) CRDT that supports both `increment` and `decrement` operations using two internal G-Counters (one for increments, one for decrements). Implement the `merge` function and prove it satisfies *commutativity*, *associativity*, and *idempotency*. Then implement it in C++ and test with 3 concurrent replicas.",
+    "**Consistency Level Analysis**: A Cassandra cluster has `N=3` replicas. A client writes with `CL=QUORUM` (2 replicas) and immediately reads with `CL=ONE` (1 replica). Can the read return stale data? What if the read uses `CL=QUORUM`? Prove your answer using the quorum intersection property. Then consider: what happens if one replica is down during the write?",
+    "**Session Guarantee Implementation**: Implement a *read-your-writes* guarantee for a client talking to 3 eventually consistent replicas. The client should track the version of its last write and, on read, either (a) route to the replica that received the write, or (b) wait until the target replica has caught up. Code this in C++ with simulated replicas and demonstrate that the guarantee holds even when replicas have different lag."
+  ],
+  cheatSheet: [
+    "**Linearizability** = every read returns the *latest write*; requires **consensus** (Raft/Paxos); sacrifices availability during partitions (CP in CAP)",
+    "**Eventual consistency** = replicas *converge* given no new writes; no ordering guarantees; maximum availability; conflict resolution via **LWW**, **vector clocks**, or **CRDTs**",
+    "**Causal consistency** = preserves *happens-before* order; strongest model that remains **available under partitions**; tracked via vector clocks or Lamport timestamps",
+    "**Quorum rule**: `R + W > N` guarantees read-write overlap for strong consistency; `R + W <= N` allows stale reads (eventual consistency)",
+    "**CAP theorem**: during partition, choose **C** (reject requests) or **A** (serve potentially stale data); cannot have both. **PACELC** adds: without partition, choose **L**atency or **C**onsistency",
+    "**CRDTs** converge automatically via *commutative + associative + idempotent* merge; no coordination needed; types include G-Counter, PN-Counter, G-Set, OR-Set, LWW-Register"
+  ],
+  revisionNotes: [
+    "The consistency spectrum runs from **linearizability** (strongest, highest cost) through **sequential**, **causal**, and **session guarantees** down to **eventual consistency** (weakest, highest availability). *Causal consistency* is the strongest model achievable without losing availability during partitions.",
+    "**Quorum systems** achieve strong consistency when `R + W > N` because every read quorum *must overlap* with the most recent write quorum. Tuning R and W independently lets you optimize for read-heavy (`R=1, W=N`) or write-heavy (`R=N, W=1`) workloads.",
+    "**CRDTs** are the gold standard for *coordination-free convergence*: they define merge operations that are commutative, associative, and idempotent, guaranteeing that replicas converge regardless of message order or duplication. Common types: **G-Counter** (grow-only), **PN-Counter** (positive-negative), **OR-Set** (observed-remove set).",
+    "In practice, most systems offer **tunable consistency**: Cassandra's per-query consistency levels, DynamoDB's strongly vs eventually consistent reads, MongoDB's read/write concern. The right choice depends on the operation: use strong consistency for *financial transactions*, eventual for *page view counters*, causal for *social media feeds*."
+  ],
 };

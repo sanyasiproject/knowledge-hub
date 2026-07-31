@@ -124,47 +124,71 @@ sorter.setStrategy(new MergeSort());
 sorter.sort([3, 1, 4, 1, 5]); // now uses mergesort`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Decorator Pattern — layering behavior via composition",
-      source: `from abc import ABC, abstractmethod
+      source: `#include <iostream>
+#include <memory>
+#include <string>
 
-# Component interface
-class Notifier(ABC):
-    @abstractmethod
-    def send(self, message: str) -> None:
-        pass
+// Component interface
+class Notifier {
+public:
+    virtual ~Notifier() = default;
+    virtual void send(const std::string& message) = 0;
+};
 
-# Concrete component
-class EmailNotifier(Notifier):
-    def send(self, message: str) -> None:
-        print(f"Email: {message}")
+// Concrete component
+class EmailNotifier : public Notifier {
+public:
+    void send(const std::string& message) override {
+        std::cout << "Email: " << message << "\\n";
+    }
+};
 
-# Base decorator — uses composition (wraps a Notifier)
-class NotifierDecorator(Notifier):
-    def __init__(self, wrapped: Notifier):
-        self._wrapped = wrapped  # composition, not inheritance of behavior
+// Base decorator -- uses composition (wraps a Notifier)
+class NotifierDecorator : public Notifier {
+protected:
+    std::unique_ptr<Notifier> wrapped_; // composition, not inheritance of behavior
+public:
+    explicit NotifierDecorator(std::unique_ptr<Notifier> wrapped)
+        : wrapped_(std::move(wrapped)) {}
 
-    def send(self, message: str) -> None:
-        self._wrapped.send(message)
+    void send(const std::string& message) override {
+        wrapped_->send(message);
+    }
+};
 
-# Concrete decorators layer additional behavior
-class SlackDecorator(NotifierDecorator):
-    def send(self, message: str) -> None:
-        super().send(message)
-        print(f"Slack: {message}")
+// Concrete decorators layer additional behavior
+class SlackDecorator : public NotifierDecorator {
+public:
+    using NotifierDecorator::NotifierDecorator;
+    void send(const std::string& message) override {
+        NotifierDecorator::send(message);
+        std::cout << "Slack: " << message << "\\n";
+    }
+};
 
-class SMSDecorator(NotifierDecorator):
-    def send(self, message: str) -> None:
-        super().send(message)
-        print(f"SMS: {message}")
+class SMSDecorator : public NotifierDecorator {
+public:
+    using NotifierDecorator::NotifierDecorator;
+    void send(const std::string& message) override {
+        NotifierDecorator::send(message);
+        std::cout << "SMS: " << message << "\\n";
+    }
+};
 
-# Stack decorators at runtime — no class explosion
-notifier = SMSDecorator(SlackDecorator(EmailNotifier()))
-notifier.send("Server is down!")
-# Output:
-# Email: Server is down!
-# Slack: Server is down!
-# SMS: Server is down!`,
+int main() {
+    // Stack decorators at runtime -- no class explosion
+    auto notifier = std::make_unique<SMSDecorator>(
+        std::make_unique<SlackDecorator>(
+            std::make_unique<EmailNotifier>()));
+    notifier->send("Server is down!");
+    // Output:
+    // Email: Server is down!
+    // Slack: Server is down!
+    // SMS: Server is down!
+    return 0;
+}`,
     },
     {
       language: "go",

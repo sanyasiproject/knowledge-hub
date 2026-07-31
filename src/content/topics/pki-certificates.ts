@@ -248,4 +248,286 @@ Short-lived certificates (90 days) encourage automation and limit the exposure w
         "RFC 8555 protocol for automated certificate issuance and renewal, used by Let's Encrypt and other CAs to enable fully automated TLS certificate lifecycle management.",
     },
   ],
+  deepDive: [
+    `**Public Key Infrastructure** is fundamentally a *trust distribution system*. At its core, PKI solves the problem of **binding a public key to a verified identity** in a scalable way. The *root of trust* begins with **Root Certificate Authorities**, whose self-signed certificates are embedded in every major OS and browser \`trust store\`. These root CAs use **Hardware Security Modules (HSMs)** — tamper-resistant devices that store the root private key *offline* — because a compromised root key would \`invalidate\` the **entire certificate hierarchy** beneath it. The mathematical foundation relies on **asymmetric cryptography**: the CA signs a certificate's hash with its *private key*, and anyone with the CA's *public key* can verify that signature using algorithms like \`RSA-2048\`, \`ECDSA P-256\`, or the newer \`Ed25519\`.`,
+
+    `The **certificate validation pipeline** is more nuanced than a simple *chain walk*. When a TLS client receives a **leaf certificate**, it must perform several checks: verify the \`notBefore\` and \`notAfter\` timestamps, confirm the **Subject Alternative Names (SANs)** include the requested hostname, validate every signature from *leaf* up to a trusted **root CA**, and check revocation status via \`OCSP\` or \`CRL\`. Modern browsers also enforce **Certificate Transparency (CT)** — requiring that certificates appear in *publicly auditable*, **append-only logs** (typically \`2-3 independent logs\`). This prevents CAs from issuing *rogue certificates* without detection. The \`Expect-CT\` header and **SCTs (Signed Certificate Timestamps)** embedded in certificates provide *cryptographic proof* of CT log inclusion.`,
+
+    `**Automated certificate management** via the \`ACME\` protocol has revolutionized PKI operations. Tools like \`certbot\`, \`acme.sh\`, and built-in support in **Caddy** and **Traefik** handle the entire lifecycle: *key generation*, **CSR creation**, \`challenge validation\` (HTTP-01, DNS-01, TLS-ALPN-01), *certificate issuance*, and **automated renewal**. For production deployments, best practices include using \`DNS-01\` challenges for **wildcard certificates** (\`*.example.com\`), implementing *OCSP stapling* in your web server config (\`ssl_stapling on\` in **Nginx**), and configuring \`CAA DNS records\` to restrict which CAs can issue certificates for your domain. The shift toward **short-lived certificates** (90 days with *Let's Encrypt*, and proposals for even shorter *6-day certificates*) reflects a broader trend of treating certificates as **ephemeral, automatically rotated credentials** rather than long-lived static assets.`,
+  ],
+  code: [
+    {
+      language: "cpp",
+      caption: "Verifying an X.509 certificate chain using OpenSSL in C++",
+      source: `#include <openssl/x509.h>
+#include <openssl/x509_vfy.h>
+#include <openssl/pem.h>
+#include <iostream>
+
+bool verifyCertificateChain(const char* certFile, const char* caFile) {
+    // Load the certificate to verify
+    FILE* fp = fopen(certFile, "r");
+    X509* cert = PEM_read_X509(fp, nullptr, nullptr, nullptr);
+    fclose(fp);
+
+    // Create a trusted certificate store and load CA certs
+    X509_STORE* store = X509_STORE_new();
+    X509_STORE_load_locations(store, caFile, nullptr);
+
+    // Create a verification context
+    X509_STORE_CTX* ctx = X509_STORE_CTX_new();
+    X509_STORE_CTX_init(ctx, store, cert, nullptr);
+
+    // Perform verification
+    int result = X509_verify_cert(ctx);
+
+    if (result != 1) {
+        int err = X509_STORE_CTX_get_error(ctx);
+        std::cerr << "Verification failed: "
+                  << X509_verify_cert_error_string(err) << std::endl;
+    } else {
+        std::cout << "Certificate chain verified successfully." << std::endl;
+    }
+
+    // Cleanup
+    X509_STORE_CTX_free(ctx);
+    X509_STORE_free(store);
+    X509_free(cert);
+    return result == 1;
+}
+
+int main() {
+    verifyCertificateChain("server.pem", "ca-bundle.pem");
+    return 0;
+}`,
+    },
+    {
+      language: "javascript",
+      caption: "Generating a CSR and self-signed certificate with Node.js (node-forge)",
+      source: `const forge = require("node-forge");
+
+// Generate a 2048-bit RSA key pair
+const keys = forge.pki.rsa.generateKeyPair(2048);
+
+// Create a Certificate Signing Request (CSR)
+const csr = forge.pki.createCertificationRequest();
+csr.publicKey = keys.publicKey;
+csr.setSubject([
+  { name: "commonName", value: "example.com" },
+  { name: "organizationName", value: "Example Inc" },
+  { name: "countryName", value: "US" },
+]);
+
+// Add Subject Alternative Names extension
+csr.setAttributes([{
+  name: "extensionRequest",
+  extensions: [{
+    name: "subjectAltName",
+    altNames: [
+      { type: 2, value: "example.com" },       // DNS
+      { type: 2, value: "www.example.com" },    // DNS
+      { type: 7, ip: "192.168.1.1" },           // IP
+    ],
+  }],
+}]);
+
+// Sign the CSR with the private key
+csr.sign(keys.privateKey, forge.md.sha256.create());
+
+// Verify the CSR signature
+const verified = csr.verify();
+console.log("CSR valid:", verified);
+
+// Output CSR in PEM format
+const csrPem = forge.pki.certificationRequestToPem(csr);
+console.log(csrPem);`,
+    },
+    {
+      language: "javascript",
+      caption: "Implementing TLS certificate pinning in a Node.js HTTPS client",
+      source: `const https = require("https");
+const crypto = require("crypto");
+const tls = require("tls");
+
+// SHA-256 fingerprint of the expected certificate's public key (SPKI pin)
+const PINNED_SPKI_HASH = "base64+encoded+sha256+hash+of+spki==";
+
+function makeSecureRequest(hostname, path) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname,
+      port: 443,
+      path,
+      method: "GET",
+      // Custom certificate verification with pinning
+      checkServerIdentity: (host, cert) => {
+        // First, perform standard hostname verification
+        const err = tls.checkServerIdentity(host, cert);
+        if (err) return err;
+
+        // Extract the public key and compute its SHA-256 hash
+        const pubkey = cert.pubkey;
+        const spkiHash = crypto
+          .createHash("sha256")
+          .update(pubkey)
+          .digest("base64");
+
+        // Compare against our pinned hash
+        if (spkiHash !== PINNED_SPKI_HASH) {
+          return new Error(
+            \`Certificate pin mismatch! Expected: \${PINNED_SPKI_HASH}, Got: \${spkiHash}\`
+          );
+        }
+        console.log("Certificate pin verified successfully");
+        return undefined;
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => resolve({ status: res.statusCode, body: data }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+makeSecureRequest("api.example.com", "/v1/data")
+  .then((res) => console.log("Response:", res.status))
+  .catch((err) => console.error("Pin verification failed:", err.message));`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "PKI Certificate Chain of Trust",
+      kind: "flow",
+      caption: "Hierarchical trust model from root CA down to end-entity leaf certificates, showing the verification path browsers follow during TLS handshake.",
+      mermaid: `flowchart TD
+    ROOT["Root CA\\n(Self-signed, offline in HSM)\\nTrusted by OS/Browser"]
+    INT1["Intermediate CA 1\\n(Signed by Root CA)\\nOnline, issues certs"]
+    INT2["Intermediate CA 2\\n(Signed by Root CA)\\nOnline, issues certs"]
+    LEAF1["Leaf Certificate\\nexample.com\\n(Signed by Intermediate CA 1)"]
+    LEAF2["Leaf Certificate\\napi.example.com\\n(Signed by Intermediate CA 1)"]
+    LEAF3["Leaf Certificate\\nother.org\\n(Signed by Intermediate CA 2)"]
+    BROWSER["Browser / TLS Client"]
+
+    ROOT -->|Signs| INT1
+    ROOT -->|Signs| INT2
+    INT1 -->|Signs| LEAF1
+    INT1 -->|Signs| LEAF2
+    INT2 -->|Signs| LEAF3
+    BROWSER -->|"Verifies chain:\\nLeaf → Intermediate → Root"| LEAF1
+
+    style ROOT fill:#4a9,stroke:#333,color:#fff
+    style INT1 fill:#49a,stroke:#333,color:#fff
+    style INT2 fill:#49a,stroke:#333,color:#fff
+    style LEAF1 fill:#a94,stroke:#333,color:#fff
+    style LEAF2 fill:#a94,stroke:#333,color:#fff
+    style LEAF3 fill:#a94,stroke:#333,color:#fff
+    style BROWSER fill:#94a,stroke:#333,color:#fff`,
+    },
+    {
+      title: "ACME Certificate Issuance Flow",
+      kind: "sequence",
+      caption: "Step-by-step sequence of the ACME protocol used by Let's Encrypt for automated certificate issuance via HTTP-01 challenge.",
+      mermaid: `sequenceDiagram
+    participant Client as ACME Client<br/>(certbot)
+    participant CA as Let's Encrypt<br/>CA Server
+    participant DNS as DNS / Web Server
+
+    Client->>CA: 1. Register account (public key)
+    CA-->>Client: Account created
+
+    Client->>CA: 2. Request certificate for example.com
+    CA-->>Client: Authorization challenge (HTTP-01 token)
+
+    Client->>DNS: 3. Place token at<br/>/.well-known/acme-challenge/{token}
+    Client->>CA: 4. Notify: challenge is ready
+
+    CA->>DNS: 5. Fetch http://example.com/.well-known/acme-challenge/{token}
+    DNS-->>CA: Token + key authorization
+
+    CA-->>Client: 6. Challenge validated
+
+    Client->>CA: 7. Submit CSR
+    CA-->>Client: 8. Signed X.509 certificate + chain
+
+    Note over Client,CA: Certificate valid for 90 days.<br/>Renew automatically before expiry.`,
+    },
+  ],
+  comparison: {
+    columns: [
+      "Feature",
+      "DV (Domain Validation)",
+      "OV (Organization Validation)",
+      "EV (Extended Validation)",
+    ],
+    rows: [
+      [
+        "**Validation scope**",
+        "*Domain ownership* only",
+        "*Domain* + **organization legal identity**",
+        "*Domain* + **rigorous legal, operational, physical verification**",
+      ],
+      [
+        "**Issuance time**",
+        "Minutes (automated via `ACME`)",
+        "1-3 business days",
+        "1-2 weeks",
+      ],
+      [
+        "**Cost**",
+        "*Free* (Let's Encrypt) or low cost",
+        "**$50-$200**/year",
+        "**$150-$500+**/year",
+      ],
+      [
+        "**Browser indicator**",
+        "Padlock icon only",
+        "Padlock icon only",
+        "Padlock + *organization name* (legacy; most browsers **removed** green bar)",
+      ],
+      [
+        "**Use case**",
+        "Blogs, personal sites, *internal APIs*",
+        "**Business websites**, e-commerce",
+        "**Banking**, financial services, *high-trust sites*",
+      ],
+      [
+        "**Wildcard support**",
+        "Yes (via `DNS-01`)",
+        "Yes",
+        "**No** (each subdomain must be individually validated)",
+      ],
+      [
+        "**Automation**",
+        "Fully automated (`certbot`, `ACME`)",
+        "*Partially* manual",
+        "**Fully manual** verification process",
+      ],
+    ],
+  },
+  exercises: [
+    "Use `openssl` to generate a **2048-bit RSA key pair**, create a **CSR** with SANs for `example.com` and `www.example.com`, then *self-sign* the certificate. Inspect the certificate with `openssl x509 -text -noout` and identify all **v3 extensions**.",
+    "Set up a local **CA hierarchy**: create a *root CA* certificate, use it to sign an **intermediate CA** certificate, then use the intermediate to sign a *leaf certificate*. Verify the full chain with `openssl verify -CAfile root.pem -untrusted intermediate.pem leaf.pem`.",
+    "Install `certbot` and use the **ACME protocol** with the `--dry-run` flag to simulate obtaining a certificate for a domain you control. Compare the *HTTP-01* and *DNS-01* challenge flows, and document the **pros and cons** of each.",
+    "Implement **certificate pinning** in a Node.js application: extract the `SPKI` hash of a server's certificate using `openssl s_client` and `openssl x509 -pubkey`, then write a client that *rejects connections* if the pin does not match. Test with both **matching** and **mismatched** pins.",
+    "Configure **OCSP stapling** on an Nginx or Apache server. Use `openssl s_client -status` to verify the *stapled response* is present in the TLS handshake. Compare the handshake time **with and without** stapling enabled.",
+  ],
+  cheatSheet: [
+    "Generate a **private key**: `openssl genpkey -algorithm RSA -out key.pem -pkeyopt rsa_keygen_bits:2048`",
+    "Create a **CSR**: `openssl req -new -key key.pem -out csr.pem -subj \"/CN=example.com/O=Example Inc\"`",
+    "**Self-sign** a certificate: `openssl req -x509 -key key.pem -in csr.pem -out cert.pem -days 365`",
+    "Inspect a certificate: `openssl x509 -in cert.pem -text -noout` -- shows *issuer*, **subject**, `SANs`, validity, and **extensions**",
+    "Verify a **chain of trust**: `openssl verify -CAfile ca-bundle.pem -untrusted intermediate.pem server.pem`",
+    "Check **OCSP stapling**: `openssl s_client -connect example.com:443 -status` -- look for *OCSP Response Status: successful*",
+  ],
+  revisionNotes: [
+    "**PKI** is a *hierarchical trust system*: **Root CAs** (offline, in `HSMs`) sign **Intermediate CAs**, which sign *leaf certificates*. The browser verifies the chain from leaf to a trusted root in its `trust store`.",
+    "**Certificate types** differ in *validation rigor*: `DV` (automated, domain-only), `OV` (organization verified), `EV` (rigorous legal verification). All provide **identical encryption** -- the difference is *identity assurance*.",
+    "**Revocation checking** has three mechanisms: `CRL` (bulk download of revoked serials -- *stale and large*), `OCSP` (real-time check -- *adds latency and privacy concerns*), and **OCSP Stapling** (server-side caching -- *best practice* for performance and privacy).",
+    "The **ACME protocol** (`RFC 8555`) enables *fully automated* certificate lifecycle: account registration, challenge-based domain validation (`HTTP-01`, `DNS-01`, `TLS-ALPN-01`), CSR submission, and **90-day certificate** issuance. Tools: `certbot`, `acme.sh`, **Caddy**, **Traefik**.",
+    "**Certificate pinning** binds a client to specific *certificates or public keys* for a domain, preventing **MITM** even with a compromised CA. Best practice: pin the **intermediate CA's SPKI hash** + a *backup pin*. Avoid `HPKP` (deprecated due to lockout risks).",
+  ],
 };

@@ -259,12 +259,12 @@ GET /_cat/recovery/products-split?v&h=index,shard,stage,bytes_percent`
   diagrams: [
     {
       title: "Elasticsearch Cluster Architecture",
-      kind: "structure",
+      kind: "architecture",
       caption: "A production cluster with dedicated master nodes (3 for quorum), hot/warm/cold data nodes for tiered storage, coordinating nodes for request routing, and ingest nodes for pipeline processing. Each index is split into primary shards distributed across data nodes, with replicas on different nodes."
     },
     {
       title: "Shard Allocation and Awareness",
-      kind: "structure",
+      kind: "architecture",
       caption: "Shards are distributed across nodes respecting allocation awareness (e.g., availability zones). Primary shard P0 on zone-a, replica R0 on zone-b. The allocation decider framework prevents primary and replica from co-locating on the same node or zone."
     },
     {
@@ -449,6 +449,13 @@ GET /_cat/recovery/products-split?v&h=index,shard,stage,bytes_percent`
     "GET /_cat/nodes?v -- check node roles, heap, disk, CPU"
   ],
 
+  exercises: [
+    "Your Elasticsearch cluster is showing **red health** with 3 unassigned primary shards on the `orders` index. Walk through the diagnostic process: which APIs would you call (hint: `_cluster/health`, `_cat/shards`, `_cluster/allocation/explain`), what are the most likely root causes, and how would you resolve each one?",
+    "Design an **ILM policy** for a logging platform that ingests 100 GB/day. The policy should rollover at 50 GB or 1 day, move to warm tier after 7 days with `forcemerge` to 1 segment, transition to cold tier with *searchable snapshots* at 30 days, and delete at 365 days. Write the full `PUT /_ilm/policy` request.",
+    "You are planning a production cluster across **3 availability zones** (us-east-1a, 1b, 1c). Configure *allocation awareness* with *forced awareness* so that replicas are never co-located in the same AZ, even during a zone failure. Write the `PUT /_cluster/settings` request and explain why forced awareness keeps replicas unassigned rather than co-locating them.",
+    "An index has 10 primary shards but traffic has decreased and you want to **shrink it to 2 shards**. Describe the prerequisites (read-only, all shards on one node), write the `PUT` and `POST /_shrink` commands, and explain why the target shard count must be a *factor* of the source shard count.",
+    "Your cluster has a *single master-eligible node* and you need to add two more to prevent **split brain**. Describe the configuration changes in `elasticsearch.yml` for each node, explain how the *voting configuration* is automatically updated, and verify the setup using `GET /_cat/nodes?v&h=name,role`.",
+  ],
   resources: [
     { label: "Elasticsearch Cluster Administration documentation", kind: "docs", note: "Official guide covering cluster settings, shard allocation, and node configuration" },
     { label: "Elasticsearch: The Definitive Guide - Cluster chapter", kind: "book", note: "Comprehensive explanation of cluster architecture, shard allocation, and scaling" },

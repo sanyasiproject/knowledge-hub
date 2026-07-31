@@ -22,86 +22,122 @@ export const bayesTheorem: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Bayes' theorem: medical test and Bayesian updating",
-      source: `def bayes_theorem(prior: float, likelihood: float,
-                     false_positive_rate: float) -> float:
-    """
-    Compute posterior probability using Bayes' theorem.
-    P(H|E) = P(E|H) * P(H) / P(E)
-    where P(E) = P(E|H)*P(H) + P(E|~H)*P(~H)
-    """
-    p_evidence = likelihood * prior + false_positive_rate * (1 - prior)
-    posterior = (likelihood * prior) / p_evidence
-    return posterior
+      source: `#include <iostream>
+#include <iomanip>
 
-# Medical test example
-prevalence = 0.01        # P(disease) = 1%
-sensitivity = 0.99       # P(positive | disease) = 99%
-false_pos_rate = 0.05    # P(positive | no disease) = 5%
+// Compute posterior probability using Bayes' theorem.
+// P(H|E) = P(E|H) * P(H) / P(E)
+// where P(E) = P(E|H)*P(H) + P(E|~H)*P(~H)
+double bayes_theorem(double prior, double likelihood, double false_positive_rate) {
+    double p_evidence = likelihood * prior + false_positive_rate * (1.0 - prior);
+    return (likelihood * prior) / p_evidence;
+}
 
-posterior = bayes_theorem(prevalence, sensitivity, false_pos_rate)
-print(f"P(disease | positive test) = {posterior:.4f}")  # ~0.167
+int main() {
+    // Medical test example
+    double prevalence    = 0.01;  // P(disease) = 1%
+    double sensitivity   = 0.99;  // P(positive | disease) = 99%
+    double false_pos_rate = 0.05; // P(positive | no disease) = 5%
 
-# Bayesian updating: second independent test comes back positive
-posterior_after_2 = bayes_theorem(posterior, sensitivity, false_pos_rate)
-print(f"P(disease | 2 positive tests) = {posterior_after_2:.4f}")  # ~0.795
+    double posterior = bayes_theorem(prevalence, sensitivity, false_pos_rate);
+    std::cout << std::fixed << std::setprecision(4);
+    std::cout << "P(disease | positive test) = " << posterior << "\\n";  // ~0.167
 
-# Third positive test
-posterior_after_3 = bayes_theorem(posterior_after_2, sensitivity, false_pos_rate)
-print(f"P(disease | 3 positive tests) = {posterior_after_3:.4f}")  # ~0.987`,
+    // Bayesian updating: second independent test comes back positive
+    double posterior_after_2 = bayes_theorem(posterior, sensitivity, false_pos_rate);
+    std::cout << "P(disease | 2 positive tests) = " << posterior_after_2 << "\\n";  // ~0.795
+
+    // Third positive test
+    double posterior_after_3 = bayes_theorem(posterior_after_2, sensitivity, false_pos_rate);
+    std::cout << "P(disease | 3 positive tests) = " << posterior_after_3 << "\\n";  // ~0.987
+
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Naive Bayes spam classifier from scratch",
-      source: `from collections import defaultdict
-import math
+      source: `#include <string>
+#include <vector>
+#include <unordered_map>
+#include <unordered_set>
+#include <cmath>
+#include <limits>
+#include <iostream>
+#include <numeric>
 
-class NaiveBayesClassifier:
-    def __init__(self, alpha: float = 1.0):
-        self.alpha = alpha  # Laplace smoothing
-        self.class_counts: dict[str, int] = defaultdict(int)
-        self.word_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        self.vocab: set[str] = set()
+class NaiveBayesClassifier {
+public:
+    explicit NaiveBayesClassifier(double alpha = 1.0) : alpha_(alpha) {}
 
-    def train(self, documents: list[tuple[list[str], str]]):
-        for words, label in documents:
-            self.class_counts[label] += 1
-            for word in words:
-                self.word_counts[label][word] += 1
-                self.vocab.add(word)
+    void train(const std::vector<std::pair<std::vector<std::string>, std::string>>& documents) {
+        for (const auto& [words, label] : documents) {
+            class_counts_[label]++;
+            for (const auto& word : words) {
+                word_counts_[label][word]++;
+                vocab_.insert(word);
+            }
+        }
+    }
 
-    def predict(self, words: list[str]) -> str:
-        total = sum(self.class_counts.values())
-        best_label, best_score = None, -math.inf
-        for label, count in self.class_counts.items():
-            # Log prior
-            score = math.log(count / total)
-            # Log likelihoods with Laplace smoothing
-            total_words = sum(self.word_counts[label].values())
-            for word in words:
-                word_freq = self.word_counts[label].get(word, 0)
-                score += math.log((word_freq + self.alpha) /
-                                  (total_words + self.alpha * len(self.vocab)))
-            if score > best_score:
-                best_score = score
-                best_label = label
-        return best_label
+    std::string predict(const std::vector<std::string>& words) const {
+        int total = 0;
+        for (const auto& [label, count] : class_counts_)
+            total += count;
 
-# Training data: (words, label)
-training_data = [
-    (["buy", "cheap", "pills", "now"], "spam"),
-    (["limited", "offer", "buy", "now"], "spam"),
-    (["free", "winner", "click", "now"], "spam"),
-    (["meeting", "tomorrow", "project", "update"], "ham"),
-    (["lunch", "tomorrow", "team", "meeting"], "ham"),
-    (["project", "deadline", "review", "code"], "ham"),
-]
+        std::string best_label;
+        double best_score = -std::numeric_limits<double>::infinity();
 
-clf = NaiveBayesClassifier()
-clf.train(training_data)
-print(clf.predict(["buy", "free", "click"]))   # spam
-print(clf.predict(["project", "meeting"]))       # ham`,
+        for (const auto& [label, count] : class_counts_) {
+            // Log prior
+            double score = std::log(static_cast<double>(count) / total);
+
+            // Log likelihoods with Laplace smoothing
+            const auto& wc = word_counts_.at(label);
+            int total_words = 0;
+            for (const auto& [w, c] : wc) total_words += c;
+
+            for (const auto& word : words) {
+                int word_freq = 0;
+                auto it = wc.find(word);
+                if (it != wc.end()) word_freq = it->second;
+                score += std::log((word_freq + alpha_) /
+                                  (total_words + alpha_ * vocab_.size()));
+            }
+            if (score > best_score) {
+                best_score = score;
+                best_label = label;
+            }
+        }
+        return best_label;
+    }
+
+private:
+    double alpha_;
+    std::unordered_map<std::string, int> class_counts_;
+    std::unordered_map<std::string, std::unordered_map<std::string, int>> word_counts_;
+    std::unordered_set<std::string> vocab_;
+};
+
+int main() {
+    // Training data: {words, label}
+    std::vector<std::pair<std::vector<std::string>, std::string>> training_data = {
+        {{"buy", "cheap", "pills", "now"}, "spam"},
+        {{"limited", "offer", "buy", "now"}, "spam"},
+        {{"free", "winner", "click", "now"}, "spam"},
+        {{"meeting", "tomorrow", "project", "update"}, "ham"},
+        {{"lunch", "tomorrow", "team", "meeting"}, "ham"},
+        {{"project", "deadline", "review", "code"}, "ham"},
+    };
+
+    NaiveBayesClassifier clf;
+    clf.train(training_data);
+    std::cout << clf.predict({"buy", "free", "click"}) << "\\n";   // spam
+    std::cout << clf.predict({"project", "meeting"}) << "\\n";      // ham
+    return 0;
+}`,
     },
   ],
   diagrams: [

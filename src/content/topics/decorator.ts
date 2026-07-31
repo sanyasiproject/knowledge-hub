@@ -236,94 +236,114 @@ const client: HttpClient = new LoggingHttpClient(
 await client.request("https://api.example.com/data");`,
     },
     {
-      language: "python",
-      caption: "Python decorator (language feature) vs Decorator pattern",
-      source: `import functools
-import time
-from typing import Callable, Any
+      language: "cpp",
+      caption: "C++ higher-order function wrappers vs GoF Decorator pattern",
+      source: `#include <iostream>
+#include <functional>
+#include <chrono>
+#include <string>
+#include <memory>
+#include <stdexcept>
+#include <map>
 
+// --- Higher-order function wrappers (analogous to Python @decorator) ---
+// Wraps a callable to measure execution time.
 
-# --- Python @decorator (language feature) ---
-# Modifies a function at definition time using higher-order functions
+template <typename Func>
+auto timing(Func func) {
+    return [func](auto&&... args) {
+        auto start = std::chrono::steady_clock::now();
+        auto result = func(std::forward<decltype(args)>(args)...);
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        auto ms = std::chrono::duration<double>(elapsed).count();
+        std::cout << "Call took " << ms << "s\\n";
+        return result;
+    };
+}
 
-def timing(func: Callable) -> Callable:
-    """Language-level decorator: measures execution time."""
-    @functools.wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        start = time.perf_counter()
-        result = func(*args, **kwargs)
-        elapsed = time.perf_counter() - start
-        print(f"{func.__name__} took {elapsed:.4f}s")
-        return result
-    return wrapper
+// Wraps a callable with retry logic.
+template <typename Func>
+auto retry(Func func, int maxAttempts = 3) {
+    return [func, maxAttempts](auto&&... args) {
+        for (int attempt = 0; attempt < maxAttempts; ++attempt) {
+            try {
+                return func(std::forward<decltype(args)>(args)...);
+            } catch (const std::exception& e) {
+                if (attempt == maxAttempts - 1) throw;
+                std::cout << "Retry " << (attempt + 1) << "/"
+                          << maxAttempts << " after: " << e.what() << "\\n";
+            }
+        }
+        throw std::runtime_error("unreachable");
+    };
+}
 
+// Compose wrappers: timing(retry(fetchData))
+std::map<std::string, std::string> fetchDataImpl(const std::string& url) {
+    std::cout << "Fetching " << url << "\\n";
+    return {{"status", "ok"}};
+}
 
-def retry(max_attempts: int = 3):
-    """Parameterized language-level decorator."""
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            for attempt in range(max_attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    if attempt == max_attempts - 1:
-                        raise
-                    print(f"Retry {attempt + 1}/{max_attempts} after: {e}")
-            return None
-        return wrapper
-    return decorator
+// --- GoF Decorator pattern (runtime object wrapping) ---
 
+class Notifier {
+public:
+    virtual ~Notifier() = default;
+    virtual void send(const std::string& message) = 0;
+};
 
-@timing
-@retry(max_attempts=3)
-def fetch_data(url: str) -> dict:
-    """Both decorators are applied at definition time."""
-    print(f"Fetching {url}")
-    return {"status": "ok"}
+class EmailNotifier : public Notifier {
+public:
+    void send(const std::string& message) override {
+        std::cout << "Email: " << message << "\\n";
+    }
+};
 
+class NotifierDecorator : public Notifier {
+protected:
+    std::unique_ptr<Notifier> wrapped_;
+public:
+    explicit NotifierDecorator(std::unique_ptr<Notifier> wrapped)
+        : wrapped_(std::move(wrapped)) {}
+    void send(const std::string& message) override {
+        wrapped_->send(message);
+    }
+};
 
-# --- GoF Decorator pattern (runtime object wrapping) ---
-from abc import ABC, abstractmethod
+class SlackDecorator : public NotifierDecorator {
+public:
+    using NotifierDecorator::NotifierDecorator;
+    void send(const std::string& message) override {
+        NotifierDecorator::send(message);
+        std::cout << "Slack: " << message << "\\n";
+    }
+};
 
+class SmsDecorator : public NotifierDecorator {
+public:
+    using NotifierDecorator::NotifierDecorator;
+    void send(const std::string& message) override {
+        NotifierDecorator::send(message);
+        std::cout << "SMS: " << message << "\\n";
+    }
+};
 
-class Notifier(ABC):
-    @abstractmethod
-    def send(self, message: str) -> None: ...
+int main() {
+    // Higher-order function wrapper composition
+    auto fetchData = timing(retry(fetchDataImpl, 3));
+    auto result = fetchData("https://example.com/data");
 
+    // GoF Decorator: compose at runtime based on preferences
+    bool userWantsSlack = true, userWantsSms = true;
 
-class EmailNotifier(Notifier):
-    def send(self, message: str) -> None:
-        print(f"Email: {message}")
-
-
-class NotifierDecorator(Notifier, ABC):
-    def __init__(self, wrapped: Notifier) -> None:
-        self._wrapped = wrapped
-
-    def send(self, message: str) -> None:
-        self._wrapped.send(message)
-
-
-class SlackDecorator(NotifierDecorator):
-    def send(self, message: str) -> None:
-        super().send(message)
-        print(f"Slack: {message}")
-
-
-class SmsDecorator(NotifierDecorator):
-    def send(self, message: str) -> None:
-        super().send(message)
-        print(f"SMS: {message}")
-
-
-# Compose at runtime based on user preferences
-notifier: Notifier = EmailNotifier()
-if user_wants_slack:
-    notifier = SlackDecorator(notifier)
-if user_wants_sms:
-    notifier = SmsDecorator(notifier)
-notifier.send("Server is down!")`,
+    std::unique_ptr<Notifier> notifier = std::make_unique<EmailNotifier>();
+    if (userWantsSlack)
+        notifier = std::make_unique<SlackDecorator>(std::move(notifier));
+    if (userWantsSms)
+        notifier = std::make_unique<SmsDecorator>(std::move(notifier));
+    notifier->send("Server is down!");
+    return 0;
+}`,
     },
   ],
   diagrams: [

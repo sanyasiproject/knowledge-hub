@@ -25,32 +25,82 @@ const cloudComputing: TopicContent = {
 
   code: [
     {
-      language: "python",
-      caption: "Provisioning a cloud VM using the AWS SDK (Boto3)",
-      source: `import boto3
+      language: "cpp",
+      caption: "Provisioning a cloud VM using the AWS SDK for C++",
+      source: `#include <aws/core/Aws.h>
+#include <aws/ec2/EC2Client.h>
+#include <aws/ec2/model/RunInstancesRequest.h>
+#include <aws/ec2/model/CreateTagsRequest.h>
+#include <aws/ec2/model/DescribeInstancesRequest.h>
+#include <aws/ec2/model/MonitorInstancesRequest.h>
+#include <iostream>
 
-ec2 = boto3.resource('ec2', region_name='us-east-1')
+int main() {
+    Aws::SDKOptions options;
+    Aws::InitAPI(options);
+    {
+        Aws::Client::ClientConfiguration config;
+        config.region = "us-east-1";
+        Aws::EC2::EC2Client ec2(config);
 
-# Launch a t3.micro instance with Amazon Linux 2
-instances = ec2.create_instances(
-    ImageId='ami-0c55b159cbfafe1f0',   # Amazon Linux 2 AMI
-    MinCount=1,
-    MaxCount=1,
-    InstanceType='t3.micro',
-    KeyName='my-key-pair',
-    TagSpecifications=[{
-        'ResourceType': 'instance',
-        'Tags': [{'Key': 'Name', 'Value': 'MyCloudVM'}]
-    }],
-    # Enable detailed monitoring
-    Monitoring={'Enabled': True},
-)
+        // Launch a t3.micro instance with Amazon Linux 2
+        Aws::EC2::Model::RunInstancesRequest runRequest;
+        runRequest.SetImageId("ami-0c55b159cbfafe1f0");  // Amazon Linux 2 AMI
+        runRequest.SetMinCount(1);
+        runRequest.SetMaxCount(1);
+        runRequest.SetInstanceType(Aws::EC2::Model::InstanceType::t3_micro);
+        runRequest.SetKeyName("my-key-pair");
 
-instance = instances[0]
-print(f"Launched instance {instance.id}, waiting for running state...")
-instance.wait_until_running()
-instance.reload()
-print(f"Instance running at {instance.public_ip_address}")`
+        // Enable detailed monitoring
+        Aws::EC2::Model::RunInstancesMonitoringEnabled monitoring;
+        monitoring.SetEnabled(true);
+        runRequest.SetMonitoring(monitoring);
+
+        auto runOutcome = ec2.RunInstances(runRequest);
+        if (!runOutcome.IsSuccess()) {
+            std::cerr << "Failed to launch instance: "
+                      << runOutcome.GetError().GetMessage() << std::endl;
+            return 1;
+        }
+
+        auto instanceId = runOutcome.GetResult()
+            .GetInstances()[0].GetInstanceId();
+        std::cout << "Launched instance " << instanceId
+                  << ", waiting for running state..." << std::endl;
+
+        // Tag the instance
+        Aws::EC2::Model::Tag nameTag;
+        nameTag.SetKey("Name");
+        nameTag.SetValue("MyCloudVM");
+        Aws::EC2::Model::CreateTagsRequest tagRequest;
+        tagRequest.AddResources(instanceId);
+        tagRequest.AddTags(nameTag);
+        ec2.CreateTags(tagRequest);
+
+        // Wait for running state by polling DescribeInstances
+        Aws::EC2::Model::DescribeInstancesRequest describeRequest;
+        describeRequest.AddInstanceIds(instanceId);
+        bool running = false;
+        while (!running) {
+            auto describeOutcome = ec2.DescribeInstances(describeRequest);
+            if (describeOutcome.IsSuccess()) {
+                auto state = describeOutcome.GetResult()
+                    .GetReservations()[0].GetInstances()[0]
+                    .GetState().GetName();
+                if (state == Aws::EC2::Model::InstanceStateName::running) {
+                    auto publicIp = describeOutcome.GetResult()
+                        .GetReservations()[0].GetInstances()[0]
+                        .GetPublicIpAddress();
+                    std::cout << "Instance running at " << publicIp << std::endl;
+                    running = true;
+                }
+            }
+            if (!running) std::this_thread::sleep_for(std::chrono::seconds(5));
+        }
+    }
+    Aws::ShutdownAPI(options);
+    return 0;
+}`
     },
     {
       language: "typescript",

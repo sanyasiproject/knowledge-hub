@@ -137,6 +137,334 @@ export const azureCompute: TopicContent = {
       back: "An Isolated-tier deployment of App Service into your own VNET, providing network-level isolation, dedicated compute, and support for high-scale deployments.",
     },
   ],
+  deepDive: [
+    "## VM Architecture and Placement in Azure\n\n**Azure Virtual Machines** run on top of **Hyper-V hypervisors** across Microsoft's global datacenter fleet. When you create a VM, the **Azure Fabric Controller** selects a physical host that satisfies your requested *VM size*, *region*, and *availability constraints*. Each VM is allocated **dedicated CPU cores, memory, and network bandwidth** based on its SKU — for example, a `Standard_D4s_v5` provides 4 vCPUs, 16 GiB RAM, and up to 12,500 Mbps network bandwidth. The **temporary disk** (often the D: drive on Windows or `/dev/sdb` on Linux) resides on the *physical host's local SSD* and is **ephemeral** — data is lost on VM deallocation, stop, or host migration. **Managed Disks** (OS and data disks) are stored in **Azure Storage** as *page blobs* with three replicas (LRS) or zone-redundant replicas (ZRS), providing *99.999% durability*. Understanding this separation between ephemeral local storage and durable managed disks is critical for designing **data persistence strategies**.",
+    "## Serverless Compute Deep Dive: Azure Functions Internals\n\nThe **Azure Functions runtime** operates on a *scale controller* that monitors event sources and decides when to **add or remove worker instances**. In the **Consumption plan**, the scale controller evaluates metrics like *queue length*, *HTTP request rate*, and *Event Hub partition lag* to determine the target instance count — scaling from **zero to hundreds of instances** within seconds. Each instance runs in an **Azure App Service sandbox** with resource limits: the Consumption plan caps at **1.5 GB memory** and **5-minute execution timeout** (configurable up to 10 minutes). The **Premium plan** maintains a pool of *pre-warmed instances* (minimum 1 by default, configurable) that are always ready to handle requests, **eliminating cold starts** entirely. Premium also supports **VNET integration**, allowing functions to access resources in private networks via *regional VNET integration* or *private endpoints*. **Durable Functions** extend the programming model with *orchestrator functions* that use **event sourcing** and **checkpointing** — the orchestration state is persisted to **Azure Storage** (tables, queues, and blobs), enabling reliable long-running workflows that survive process restarts.",
+    "## AKS Networking, Identity, and Security Architecture\n\nAKS networking is built on **Azure Virtual Network** integration with two primary CNI options. **Azure CNI** allocates pod IPs from the VNET subnet, requiring careful **IP address planning** — you need enough IPs for `(max_pods_per_node × node_count) + node_count`. The newer **Azure CNI Overlay** uses a *separate overlay CIDR* for pods while routing through the VNET, dramatically reducing VNET IP consumption. **Network Policies** (using *Calico* or *Azure NPM*) define *ingress and egress rules* at the pod level, acting as a **firewall for pod-to-pod traffic**. For identity, AKS integrates with **Microsoft Entra ID** (formerly Azure AD) for both *cluster authentication* (via `kubelogin`) and *workload identity* — the **Workload Identity** feature uses **federated identity credentials** to let pods assume Entra ID managed identities without storing secrets, replacing the older *AAD Pod Identity* approach. The **Secrets Store CSI Driver** mounts secrets from **Azure Key Vault** directly into pods as *volumes or environment variables*, ensuring secrets are **never stored in Kubernetes etcd**. For ingress, the **Application Gateway Ingress Controller (AGIC)** or the newer **Web Application Routing** add-on provide *Layer 7 load balancing* with **WAF protection** and **TLS termination**.",
+  ],
+  code: [
+    {
+      language: "bash",
+      caption: "Create an Azure VM with managed disk and availability zone using Azure CLI",
+      source: `# Create a resource group
+az group create \\
+  --name rg-compute-prod \\
+  --location eastus2
+
+# Create a Linux VM in Availability Zone 1
+az vm create \\
+  --resource-group rg-compute-prod \\
+  --name vm-web-01 \\
+  --image Ubuntu2204 \\
+  --size Standard_D4s_v5 \\
+  --zone 1 \\
+  --admin-username azureadmin \\
+  --generate-ssh-keys \\
+  --os-disk-size-gb 128 \\
+  --storage-sku Premium_LRS \\
+  --nsg-rule SSH \\
+  --public-ip-sku Standard \\
+  --tags Environment=Production Team=WebApp
+
+# Attach a 256 GiB data disk
+az vm disk attach \\
+  --resource-group rg-compute-prod \\
+  --vm-name vm-web-01 \\
+  --name disk-data-01 \\
+  --size-gb 256 \\
+  --sku Premium_LRS \\
+  --new
+
+# Enable auto-shutdown at 7 PM UTC for cost savings
+az vm auto-shutdown \\
+  --resource-group rg-compute-prod \\
+  --name vm-web-01 \\
+  --time 1900`,
+    },
+    {
+      language: "bicep",
+      caption: "Deploy an Azure Function App with Premium plan and VNET integration using Bicep",
+      source: `param location string = resourceGroup().location
+param functionAppName string = 'func-orders-prod'
+param vnetName string = 'vnet-app-prod'
+param subnetName string = 'snet-functions'
+
+// Premium App Service Plan for Functions (Elastic Premium EP1)
+resource hostingPlan 'Microsoft.Web/serverfarms@2023-01-01' = {
+  name: 'plan-\${functionAppName}'
+  location: location
+  sku: {
+    name: 'EP1'
+    tier: 'ElasticPremium'
+    family: 'EP'
+  }
+  kind: 'elastic'
+  properties: {
+    maximumElasticWorkerCount: 20
+    reserved: true  // Linux
+  }
+}
+
+// Storage account for function runtime
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: 'st\${uniqueString(resourceGroup().id)}'
+  location: location
+  sku: { name: 'Standard_LRS' }
+  kind: 'StorageV2'
+}
+
+// Reference existing VNET and subnet
+resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' existing = {
+  name: vnetName
+}
+
+resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-05-01' existing = {
+  parent: vnet
+  name: subnetName
+}
+
+// Function App with VNET integration
+resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
+  name: functionAppName
+  location: location
+  kind: 'functionapp,linux'
+  properties: {
+    serverFarmId: hostingPlan.id
+    virtualNetworkSubnetId: subnet.id
+    siteConfig: {
+      linuxFxVersion: 'NODE|20'
+      appSettings: [
+        { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
+        { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'node' }
+        {
+          name: 'AzureWebJobsStorage'
+          value: 'DefaultEndpointsProtocol=https;AccountName=\${storageAccount.name};AccountKey=\${storageAccount.listKeys().keys[0].value}'
+        }
+      ]
+    }
+  }
+}`,
+    },
+    {
+      language: "bash",
+      caption: "Create an AKS cluster with Workload Identity and Key Vault integration",
+      source: `# Create AKS cluster with Azure CNI Overlay and Workload Identity
+az aks create \\
+  --resource-group rg-aks-prod \\
+  --name aks-microservices-prod \\
+  --node-count 3 \\
+  --node-vm-size Standard_D4s_v5 \\
+  --network-plugin azure \\
+  --network-plugin-mode overlay \\
+  --pod-cidr 192.168.0.0/16 \\
+  --enable-oidc-issuer \\
+  --enable-workload-identity \\
+  --enable-addons azure-keyvault-secrets-provider \\
+  --enable-managed-identity \\
+  --kubernetes-version 1.29 \\
+  --zones 1 2 3 \\
+  --tier standard \\
+  --generate-ssh-keys
+
+# Add a GPU node pool for ML workloads
+az aks nodepool add \\
+  --resource-group rg-aks-prod \\
+  --cluster-name aks-microservices-prod \\
+  --name gpupool \\
+  --node-count 2 \\
+  --node-vm-size Standard_NC6s_v3 \\
+  --node-taints sku=gpu:NoSchedule \\
+  --labels workload=ml \\
+  --zones 1 2
+
+# Get credentials and verify
+az aks get-credentials \\
+  --resource-group rg-aks-prod \\
+  --name aks-microservices-prod
+
+kubectl get nodes -o wide`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Azure Compute Services Architecture",
+      kind: "architecture",
+      caption: "Overview of Azure compute services and their positioning across IaaS, PaaS, and serverless models",
+      mermaid: `graph TB
+  subgraph IaaS["**IaaS - Full Control**"]
+    VM["Azure Virtual Machines<br/>OS-level control"]
+    VMSS["VM Scale Sets<br/>Auto-scaling VM groups"]
+  end
+  subgraph PaaS["**PaaS - Managed Platform**"]
+    AppSvc["Azure App Service<br/>Web apps & APIs"]
+    AKS["Azure Kubernetes Service<br/>Managed Kubernetes"]
+    ACI["Azure Container Instances<br/>Single container groups"]
+  end
+  subgraph Serverless["**Serverless - Event-Driven**"]
+    Func["Azure Functions<br/>Event-triggered code"]
+    Logic["Azure Logic Apps<br/>Workflow automation"]
+  end
+  VM --> |"Scale out"| VMSS
+  ACI --> |"Burst scaling"| AKS
+  Func --> |"Durable Functions"| Logic
+  AppSvc --> |"Container deploy"| ACI
+  style IaaS fill:#e6f3ff,stroke:#0078d4
+  style PaaS fill:#e6ffe6,stroke:#00a86b
+  style Serverless fill:#fff3e6,stroke:#ff8c00`,
+    },
+    {
+      title: "Azure Functions Scaling Flow",
+      kind: "flow",
+      caption: "How the Azure Functions scale controller manages instance scaling based on event source metrics",
+      mermaid: `flowchart LR
+  A["**Event Source**<br/>Queue / HTTP / Timer"] --> B["**Scale Controller**<br/>Monitors metrics"]
+  B --> C{"Pending<br/>events?"}
+  C -->|"Yes"| D["**Add Worker**<br/>Allocate instance"]
+  C -->|"No"| E{"Idle<br/>instances?"}
+  E -->|"Yes"| F["**Remove Worker**<br/>Scale in"]
+  E -->|"No"| G["**Steady State**<br/>Maintain count"]
+  D --> H["**Worker Instance**<br/>Execute function"]
+  H --> I["**Return Result**<br/>Output bindings"]
+  I --> B
+  F --> B
+  G --> B`,
+    },
+    {
+      title: "AKS Networking with Azure CNI",
+      kind: "network",
+      caption: "Network architecture showing pod IP allocation and traffic flow in AKS with Azure CNI",
+      mermaid: `graph TB
+  subgraph VNET["**Azure VNET** 10.0.0.0/8"]
+    subgraph NodeSubnet["**Node Subnet** 10.240.0.0/16"]
+      N1["Node 1<br/>10.240.0.4"]
+      N2["Node 2<br/>10.240.0.5"]
+      N3["Node 3<br/>10.240.0.6"]
+    end
+    subgraph PodCIDR["**Pod IPs from Subnet**"]
+      P1["Pod A<br/>10.240.1.10"]
+      P2["Pod B<br/>10.240.1.11"]
+      P3["Pod C<br/>10.240.1.12"]
+    end
+    subgraph Services["**Azure Services**"]
+      KV["Key Vault"]
+      SQL["Azure SQL"]
+      ACR["Container Registry"]
+    end
+  end
+  LB["**Azure Load Balancer**"] --> N1
+  LB --> N2
+  LB --> N3
+  N1 --> P1
+  N2 --> P2
+  N3 --> P3
+  P1 --> KV
+  P2 --> SQL
+  P3 --> ACR
+  OnPrem["**On-Premises**"] -->|"ExpressRoute /<br/>VPN Gateway"| VNET`,
+    },
+    {
+      title: "VM Availability Decision Tree",
+      kind: "flow",
+      caption: "Decision flow for choosing between Availability Sets, Availability Zones, and single VM placement",
+      mermaid: `flowchart TD
+  Start["**Need High Availability?**"] --> Q1{"Multi-region<br/>required?"}
+  Q1 -->|"Yes"| MR["Deploy across<br/>**multiple regions**<br/>with Traffic Manager"]
+  Q1 -->|"No"| Q2{"Datacenter-level<br/>resilience needed?"}
+  Q2 -->|"Yes"| AZ["Use **Availability Zones**<br/>99.99% SLA<br/>Cross-datacenter"]
+  Q2 -->|"No"| Q3{"Rack-level<br/>protection enough?"}
+  Q3 -->|"Yes"| AS["Use **Availability Set**<br/>99.95% SLA<br/>Fault & Update Domains"]
+  Q3 -->|"No"| SV["**Single VM**<br/>with Premium SSD<br/>99.9% SLA"]`,
+    },
+  ],
+  comparison: {
+    columns: [
+      "Feature",
+      "Azure VMs",
+      "App Service",
+      "Azure Functions",
+      "AKS",
+    ],
+    rows: [
+      [
+        "**Service Model**",
+        "*IaaS* — full OS control",
+        "*PaaS* — managed platform",
+        "*Serverless* — event-driven",
+        "*Managed Kubernetes* — container orchestration",
+      ],
+      [
+        "**Scaling**",
+        "VMSS with autoscale rules",
+        "Built-in autoscale (up to 30 instances)",
+        "Auto-scale from **zero** to hundreds",
+        "Cluster autoscaler + HPA/KEDA",
+      ],
+      [
+        "**Cold Start**",
+        "Minutes (VM boot)",
+        "None (always running)",
+        "Seconds (Consumption plan)",
+        "Seconds (pod scheduling)",
+      ],
+      [
+        "**Max SLA**",
+        "**99.99%** (Availability Zones)",
+        "**99.95%** (Standard tier)",
+        "N/A (event-driven)",
+        "**99.95%** (Standard tier with AZs: 99.99%)",
+      ],
+      [
+        "**Cost Model**",
+        "Per-second VM billing",
+        "Per App Service Plan",
+        "Per execution + GB-seconds",
+        "Per worker node VM",
+      ],
+      [
+        "**Best For**",
+        "Legacy apps, custom OS needs",
+        "Web apps, REST APIs",
+        "Event processing, microservices glue",
+        "Microservices, multi-container apps",
+      ],
+      [
+        "**VNET Integration**",
+        "Native (deployed in VNET)",
+        "Regional VNET integration",
+        "Premium plan only",
+        "Native (Azure CNI / kubenet)",
+      ],
+      [
+        "**OS Access**",
+        "Full SSH/RDP access",
+        "Limited (Kudu console)",
+        "None",
+        "SSH to nodes (not recommended)",
+      ],
+    ],
+  },
+  exercises: [
+    "**VM Sizing and Cost Exercise:** You have a *.NET application* that requires **8 vCPUs**, **32 GiB RAM**, and needs to run 24/7 in `East US 2`. Compare the monthly cost of a `Standard_D8s_v5` VM on *pay-as-you-go* vs. a **1-year Reserved Instance** vs. using **Azure Hybrid Benefit** with an existing Windows Server license. Use the `az vm list-skus` command and the **Azure Pricing Calculator** to determine the best option.",
+    "**AKS Multi-Tier Deployment:** Design and deploy a **three-tier application** on AKS: a *React frontend*, a *Node.js API*, and a *PostgreSQL database*. Implement **Network Policies** using Calico to restrict traffic so that only the API pods can reach the database pods, and only the frontend pods can reach the API pods. Use `kubectl apply` to deploy and `kubectl get networkpolicy` to verify. Test by exec-ing into a frontend pod and confirming it **cannot** reach the database directly.",
+    "**Azure Functions with Durable Orchestration:** Build a **Durable Functions** orchestration that processes an order: (1) *validate inventory* via an activity function, (2) *charge payment* via an activity function, (3) *send confirmation email* via an activity function. Implement **error handling** with retry policies (`maxNumberOfAttempts: 3`, `firstRetryIntervalInSeconds: 5`) and a **compensation pattern** that reverses the payment if email sending fails. Deploy using `func azure functionapp publish`.",
+    "**App Service Blue-Green Deployment:** Create an App Service with a **staging deployment slot**. Deploy version 1 of a web app to production, then deploy version 2 to the staging slot. Configure **slot-specific app settings** (e.g., `FEATURE_FLAG=v2` on staging, `FEATURE_FLAG=v1` on production). Perform a **swap operation** using `az webapp deployment slot swap`, verify the settings behavior, then practice a **rollback** by swapping back.",
+    "**VMSS with Custom Autoscale:** Deploy a **Virtual Machine Scale Set** with a custom autoscale profile: scale out by 2 instances when *average CPU exceeds 70%* for 5 minutes, and scale in by 1 instance when *CPU drops below 30%* for 10 minutes. Set a minimum of **2 instances** and maximum of **10 instances**. Use `az monitor autoscale create` and `az monitor autoscale rule create`. Stress-test using a CPU load generator and observe the scale-out behavior in **Azure Monitor**.",
+  ],
+  cheatSheet: [
+    "**VM Quick Create:** `az vm create -g <rg> -n <name> --image Ubuntu2204 --size Standard_D2s_v5 --generate-ssh-keys` — creates a Linux VM with *auto-generated SSH keys* and a public IP",
+    "**List Available VM Sizes:** `az vm list-sizes --location eastus2 --output table` — shows all *VM SKUs* with their CPU, memory, and disk specs for a given region",
+    "**Deploy Function App:** `func init --worker-runtime node && func new --template 'HTTP trigger'` to scaffold, then `func azure functionapp publish <app-name>` to deploy",
+    "**AKS Credentials:** `az aks get-credentials -g <rg> -n <cluster>` — merges the cluster's *kubeconfig* into `~/.kube/config` for `kubectl` access",
+    "**App Service Slot Swap:** `az webapp deployment slot swap -g <rg> -n <app> --slot staging --target-slot production` — performs a **zero-downtime swap** between staging and production",
+    "**Scale VMSS Manually:** `az vmss scale -g <rg> -n <vmss> --new-capacity 5` — immediately sets the instance count to 5; use `az monitor autoscale create` for *auto-scaling rules*",
+  ],
+  revisionNotes: [
+    "**VM families** map to workload types: *B-series* (burstable/dev-test), *D-series* (general purpose), *E-series* (memory-optimized), *F-series* (compute-optimized), *N-series* (GPU/ML), *L-series* (storage-optimized). Temporary disks are **ephemeral** — never store persistent data on them.",
+    "**Availability Zones** provide **99.99% SLA** by distributing across *separate datacenters* within a region, while **Availability Sets** provide **99.95% SLA** using *fault domains* (racks) and *update domains* (maintenance groups) within a single datacenter.",
+    "**Azure Functions** hosting plans differ in key ways: *Consumption* scales from zero and bills per-execution but has **cold starts**; *Premium* maintains **pre-warmed instances** with VNET support; *Dedicated* runs on an App Service Plan with **always-on** capability. **Durable Functions** enable stateful orchestrations with automatic checkpointing.",
+    "**AKS** manages the *control plane* for free (API server, etcd, scheduler); you pay only for **worker node VMs**. Use **Azure CNI** for direct pod-to-VNET communication (more IP consumption) or **Azure CNI Overlay** for IP-efficient pod networking. **Workload Identity** replaces AAD Pod Identity for secure, secretless access to Azure resources.",
+    "**Cost optimization** levers: *Reserved Instances* (up to **72% savings**), *Savings Plans* (flexible across VM families), *Spot VMs* (up to **90% discount**, evictable), *Azure Hybrid Benefit* (reuse on-prem licenses for **40% savings**), and *auto-shutdown schedules* for dev/test workloads.",
+  ],
   glossary: [
     {
       term: "Fault Domain",

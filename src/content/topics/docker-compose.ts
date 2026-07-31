@@ -116,6 +116,369 @@ export const dockerCompose: TopicContent = {
       back: "It runs three container instances of the `web` service. Port mappings must avoid conflicts (use ranges or omit host ports).",
     },
   ],
+  deepDive: [
+    "## The Compose File Specification and Build Pipeline\n\nDocker Compose relies on the **Compose Specification**, an open standard that decouples the file format from any single tool. The `compose.yaml` file (preferred over the legacy `docker-compose.yml` name) is parsed into a **project model** consisting of *services*, *networks*, *volumes*, *configs*, and *secrets*. When you run `docker compose up`, the CLI resolves **build contexts** for any service with a `build` key, executes multi-stage `Dockerfile` builds (optionally leveraging **BuildKit** for layer caching, parallel stages, and secret mounts), tags the resulting image with the project name, and then creates containers from those images. Understanding this pipeline is critical: the `build.context` is the directory sent to the Docker daemon, `build.dockerfile` names the Dockerfile within that context, and `build.target` selects a specific stage in a multi-stage build. **Build arguments** (`build.args`) inject values at build time (e.g., `NODE_ENV=production`), while **environment variables** (`environment` or `env_file`) are injected at *run time*. Confusing the two is a common source of bugs in MERN stack deployments where the React frontend needs build-time `REACT_APP_*` variables baked into the static bundle.",
+    "## Networking, Service Discovery, and Security Boundaries\n\nCompose networking goes far beyond the default bridge. Each project gets an **isolated bridge network** named `<project>_default`, and every service is reachable by its *service name* as a DNS hostname. For a MERN stack, this means the **Express API** can connect to MongoDB at `mongodb://mongo:27017` without hardcoding IPs. Custom networks create **security boundaries**: placing `mongo` only on a `backend` network and `nginx` only on a `frontend` network ensures the reverse proxy *cannot* reach the database directly -- the API service, joined to both networks, acts as the sole bridge. **Network aliases** let you assign additional DNS names to a service (useful when migrating from one database to another without changing application config). The `extra_hosts` directive can inject `/etc/hosts` entries for services that need to reach external systems by name. For **production-grade setups**, overlay networks extend this model across Docker Swarm nodes, while `network_mode: host` removes network isolation entirely for latency-sensitive workloads.",
+    "## Development Workflow: Watch, Overrides, and Secrets Management\n\nA modern Compose development workflow combines **override files**, **Compose Watch**, and **secrets management**. The base `compose.yaml` defines production-like services, while `compose.override.yaml` (automatically merged) adds development conveniences: bind mounts for live code reloading, debug ports, and relaxed resource limits. Compose Watch (v2.22+) improves on bind mounts by giving explicit control -- `sync` actions hot-reload source files, `rebuild` actions handle dependency changes like `package.json` or `go.mod`, and `sync+restart` handles config files that require a process restart. For secrets, Compose supports a top-level `secrets` key that mounts files into `/run/secrets/<name>` inside the container, avoiding environment variables (which leak into logs, child processes, and crash dumps). In a MERN stack, you would store the **MongoDB connection string**, **JWT signing key**, and **API keys** as secrets. The `configs` top-level key similarly injects read-only configuration files (like `nginx.conf`) without baking them into the image, enabling the same image to serve multiple environments.",
+  ],
+  code: [
+    {
+      language: "yaml",
+      caption: "Full MERN stack compose.yaml with health checks, networks, and Compose Watch",
+      source: `# compose.yaml — MERN Stack (MongoDB, Express, React, Nginx)
+services:
+  # --- MongoDB ---
+  mongo:
+    image: mongo:7
+    container_name: mern-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/mongo_password
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    secrets:
+      - mongo_password
+
+  # --- Express API ---
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+      target: development
+    container_name: mern-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      MONGO_URI: mongodb://admin:\${MONGO_PASSWORD}@mongo:27017/app?authSource=admin
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - backend
+      - frontend
+    develop:
+      watch:
+        - action: sync
+          path: ./server/src
+          target: /app/src
+        - action: rebuild
+          path: ./server/package.json
+
+  # --- React Frontend ---
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      target: development
+      args:
+        REACT_APP_API_URL: http://localhost:3000/api
+    container_name: mern-client
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    networks:
+      - frontend
+    develop:
+      watch:
+        - action: sync
+          path: ./client/src
+          target: /app/src
+        - action: rebuild
+          path: ./client/package.json
+
+  # --- Nginx Reverse Proxy ---
+  nginx:
+    image: nginx:alpine
+    container_name: mern-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+      - client
+    networks:
+      - frontend
+
+  # --- Debug Tools (profile-gated) ---
+  mongo-express:
+    image: mongo-express:latest
+    profiles: ["debug"]
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: admin
+      ME_CONFIG_MONGODB_ADMINPASSWORD_FILE: /run/secrets/mongo_password
+      ME_CONFIG_MONGODB_URL: mongodb://admin:\${MONGO_PASSWORD}@mongo:27017/
+    ports:
+      - "8081:8081"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - backend
+    secrets:
+      - mongo_password
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+
+volumes:
+  mongo-data:
+
+secrets:
+  mongo_password:
+    file: ./secrets/mongo_password.txt`,
+    },
+    {
+      language: "dockerfile",
+      caption: "Multi-stage Dockerfile for the Express API (development and production targets)",
+      source: `# server/Dockerfile — Multi-stage build for Express API
+
+# ---- Base stage ----
+FROM node:20-alpine AS base
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --only=production && \\
+    cp -R node_modules /prod_modules
+
+# ---- Development stage ----
+FROM node:20-alpine AS development
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+EXPOSE 3000
+CMD ["npx", "nodemon", "--watch", "src", "src/index.js"]
+
+# ---- Production stage ----
+FROM node:20-alpine AS production
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=base /prod_modules ./node_modules
+COPY . .
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=3s \\
+  CMD wget -qO- http://localhost:3000/health || exit 1
+CMD ["node", "src/index.js"]`,
+    },
+    {
+      language: "dockerfile",
+      caption: "Multi-stage Dockerfile for the React client with Nginx production serving",
+      source: `# client/Dockerfile — Multi-stage build for React frontend
+
+# ---- Development stage ----
+FROM node:20-alpine AS development
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+EXPOSE 5173
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+
+# ---- Build stage ----
+FROM node:20-alpine AS build
+WORKDIR /app
+ARG REACT_APP_API_URL
+ENV REACT_APP_API_URL=\${REACT_APP_API_URL}
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# ---- Production stage ----
+FROM nginx:alpine AS production
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "MERN Stack Compose Architecture",
+      kind: "architecture",
+      caption: "Service topology showing network segmentation, volume mounts, and dependency flow",
+      mermaid: `graph TB
+  subgraph "Frontend Network"
+    NGINX["**nginx** :80<br/>Reverse Proxy"]
+    CLIENT["**client** :5173<br/>React Dev Server"]
+    API_F["**api** :3000<br/>Express API"]
+  end
+
+  subgraph "Backend Network"
+    API_B["**api** :3000<br/>Express API"]
+    MONGO["**mongo** :27017<br/>MongoDB 7"]
+    ME["**mongo-express** :8081<br/>Debug UI"]
+  end
+
+  subgraph "Volumes"
+    VOL[("mongo-data")]
+  end
+
+  subgraph "Secrets"
+    SEC[/"mongo_password.txt"/]
+  end
+
+  NGINX --> CLIENT
+  NGINX --> API_F
+  API_B -->|depends_on: healthy| MONGO
+  ME -.->|profile: debug| MONGO
+  MONGO --- VOL
+  MONGO --- SEC
+  ME --- SEC`,
+    },
+    {
+      title: "Docker Compose Up Lifecycle",
+      kind: "flow",
+      caption: "The sequence of steps when running docker compose up with build and health checks",
+      mermaid: `flowchart TD
+  A["**docker compose up --build**"] --> B["Parse compose.yaml"]
+  B --> C{"Services with<br/>build key?"}
+  C -->|Yes| D["Resolve build context<br/>and Dockerfile"]
+  C -->|No| E["Pull image<br/>from registry"]
+  D --> F["Build image<br/>(BuildKit)"]
+  F --> G["Tag image with<br/>project prefix"]
+  E --> H["Create networks"]
+  G --> H
+  H --> I["Create volumes"]
+  I --> J["Sort services by<br/>depends_on DAG"]
+  J --> K["Start dependency<br/>services first"]
+  K --> L{"Health check<br/>defined?"}
+  L -->|Yes| M["Wait for<br/>service_healthy"]
+  L -->|No| N["Container started =<br/>dependency met"]
+  M --> O["Start dependent<br/>services"]
+  N --> O
+  O --> P["All services running"]
+  P --> Q{"Watch mode<br/>enabled?"}
+  Q -->|Yes| R["Monitor file changes<br/>sync / rebuild / restart"]
+  Q -->|No| S["Attach to logs"]`,
+    },
+    {
+      title: "Compose Watch Decision Flow",
+      kind: "flow",
+      caption: "How Compose Watch selects sync, rebuild, or sync+restart based on file change type",
+      mermaid: `flowchart LR
+  A["File change<br/>detected"] --> B{"Matches which<br/>watch rule?"}
+  B -->|"Source code<br/>(src/)"|C["**action: sync**"]
+  B -->|"Dependency file<br/>(package.json)"|D["**action: rebuild**"]
+  B -->|"Config file<br/>(.env, config/)"|E["**action: sync+restart**"]
+  C --> F["Copy changed file<br/>to container target"]
+  F --> G["Hot reload picks<br/>up change"]
+  D --> H["Rebuild Docker<br/>image"]
+  H --> I["Recreate and<br/>restart container"]
+  E --> J["Copy file to<br/>container target"]
+  J --> K["Restart container<br/>process"]`,
+    },
+  ],
+  comparison: {
+    columns: [
+      "Feature",
+      "**Docker Compose**",
+      "**Docker Swarm**",
+      "**Kubernetes (K8s)**",
+    ],
+    rows: [
+      [
+        "**Primary use case**",
+        "Local dev & single-host deployment",
+        "Simple multi-host orchestration",
+        "Production-grade container orchestration at scale",
+      ],
+      [
+        "**Config format**",
+        "`compose.yaml` (Compose Spec)",
+        "`compose.yaml` with `deploy` key",
+        "YAML manifests (Deployment, Service, ConfigMap, etc.)",
+      ],
+      [
+        "**Scaling**",
+        "`--scale` flag, manual",
+        "Declarative replicas via `deploy.replicas`",
+        "HPA, VPA, KEDA — auto-scaling on metrics",
+      ],
+      [
+        "**Service discovery**",
+        "DNS on bridge network (service name)",
+        "DNS + VIP-based load balancing",
+        "CoreDNS, `ClusterIP` Services, Ingress controllers",
+      ],
+      [
+        "**Rolling updates**",
+        "Recreate only (`up --build`)",
+        "`update_config` with parallelism & delay",
+        "Rolling update strategy with `maxSurge` / `maxUnavailable`",
+      ],
+      [
+        "**Health checks**",
+        "`healthcheck` in compose file",
+        "Same + affects rolling updates",
+        "Liveness, readiness, and startup probes",
+      ],
+      [
+        "**Secrets management**",
+        "File-based (`/run/secrets`)",
+        "Encrypted Raft log secrets",
+        "Kubernetes Secrets (base64), external vaults (Sealed Secrets, Vault)",
+      ],
+      [
+        "**Networking**",
+        "Bridge (single host)",
+        "Overlay (multi-host)",
+        "CNI plugins (Calico, Cilium, Flannel), NetworkPolicies",
+      ],
+      [
+        "**Learning curve**",
+        "Low — single YAML file",
+        "Medium — extends Compose with Swarm concepts",
+        "High — many resource types, RBAC, CRDs, operators",
+      ],
+      [
+        "**Best for**",
+        "Dev environments, CI, small self-hosted apps",
+        "Small production clusters, teams already on Docker",
+        "Large-scale production, microservices, cloud-native",
+      ],
+    ],
+  },
+  exercises: [
+    "**MERN Stack Setup**: Create a `compose.yaml` that runs *MongoDB*, an *Express API*, and a *React frontend*. The API must not start until MongoDB's health check passes. Add a named volume for database persistence and custom networks to isolate frontend from backend traffic.",
+    "**Compose Watch Configuration**: Extend your MERN stack Compose file with `develop.watch` rules. Configure `sync` for source code changes in both the API and client, `rebuild` for `package.json` changes, and `sync+restart` for `.env` file changes. Verify each action triggers correctly by modifying the appropriate files.",
+    "**Multi-Environment Overrides**: Create a base `compose.yaml` for production and a `compose.override.yaml` for development. The override should add bind mounts, expose debug ports (e.g., `9229` for Node.js inspector), relax resource limits, and enable `mongo-express` via a `debug` profile. Verify that `docker compose config` merges them correctly.",
+    "**Secrets and Environment Separation**: Refactor a Compose file that passes database credentials via `environment` to use the `secrets` top-level key instead. Mount the secret files into `/run/secrets/` and update the application to read credentials from there. Confirm that `docker compose exec api env` no longer leaks the password.",
+    "**Blue-Green Deployment Simulation**: Define two versions of an API service (`api-blue` and `api-green`) in the same Compose file, each on the `frontend` network. Configure the `nginx` reverse proxy to route traffic to `api-blue` by default. Practice switching traffic to `api-green` by updating `nginx.conf` and running `docker compose exec nginx nginx -s reload` without downtime.",
+  ],
+  cheatSheet: [
+    "`docker compose up -d --build` — **Build** images and start all services in **detached** mode. The `--build` flag forces a rebuild even if the image cache is valid.",
+    "`docker compose down --volumes --remove-orphans` — **Stop** and remove containers, networks, named volumes, and any orphaned containers from previous runs. Omit `--volumes` to preserve database data.",
+    "`docker compose logs -f --tail=100 api mongo` — **Stream** the last 100 lines of logs from the `api` and `mongo` services. Use `--since 5m` to filter by time.",
+    "`docker compose exec api sh` — **Open a shell** inside the running `api` container. Use `exec` for interactive debugging; use `run` to spin up a one-off container from a service definition.",
+    "`docker compose watch` — Start **Compose Watch** to monitor file changes and apply `sync`, `rebuild`, or `sync+restart` actions defined in the `develop.watch` section of each service.",
+    "`docker compose config --no-interpolate` — **Validate and display** the fully merged Compose configuration (base + overrides) without resolving environment variable interpolation. Useful for debugging merge conflicts between `compose.yaml` and `compose.override.yaml`.",
+  ],
+  revisionNotes: [
+    "Docker Compose uses a **declarative YAML file** to define multi-container applications. The three core primitives are *services* (containers), *networks* (DNS-based discovery and traffic isolation), and *volumes* (persistent storage). Services communicate by **service name** over the project's default bridge network.",
+    "**`depends_on` alone only orders container startup** — it does not wait for readiness. Combine it with `condition: service_healthy` and a `healthcheck` block (using commands like `pg_isready`, `mongosh --eval`, or `curl -f`) to ensure dependencies are truly ready before dependent services start.",
+    "**Compose Watch** (v2.22+) replaces fragile bind-mount workflows with three explicit actions: `sync` copies files without restart (hot reload), `rebuild` rebuilds the image and recreates the container (dependency changes), and `sync+restart` copies files then restarts the process (config changes). Override files (`compose.override.yaml`) layer development settings on top of a production-like base.",
+    "**Secrets** should be mounted via the `secrets` top-level key into `/run/secrets/` rather than passed as environment variables, which leak into logs and process listings. Similarly, **configs** inject read-only configuration files without baking them into the image.",
+    "For orchestration beyond a single host, **Docker Swarm** extends Compose with `deploy` keys for replicas and rolling updates, while **Kubernetes** provides auto-scaling, advanced networking (CNI, NetworkPolicies), and a rich ecosystem of operators — but with significantly higher complexity. Choose Compose for *development and small deployments*, Swarm for *simple multi-host needs*, and Kubernetes for *production-scale microservices*.",
+  ],
   glossary: [
     {
       term: "Service",

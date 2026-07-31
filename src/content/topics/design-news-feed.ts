@@ -112,6 +112,664 @@ export const designNewsFeed: TopicContent = {
       back: "The cursor encodes the score/timestamp of the last seen item. The next page requests items with scores below the cursor. This is stable even when new items are added at the top, unlike offset-based pagination which can cause duplicates or gaps.",
     },
   ],
+  deepDive: [
+    "**Understanding Fan-Out Trade-offs at Scale**\n\nThe core tension in news feed design lies in *when* to do the computational work of assembling a feed. **Fan-out on write** front-loads the cost: every `POST /posts` triggers a cascade of writes to followers' feed caches. For a social network with 500M DAU, where the average user follows ~200 accounts, each post potentially touches hundreds of sorted sets in Redis. The *write amplification factor* is directly proportional to the author's follower count. At Twitter's scale (~500M tweets/day), even with a modest average of 100 followers per author, that is **50 billion cache mutations per day**. The system must handle bursty writes (celebrity posting during prime time) without degrading feed read latency. To mitigate this, engineers introduce **async fan-out workers** backed by message queues like Kafka or RabbitMQ. The post service enqueues a `FanOutTask` containing the `postId` and `authorId`, and a fleet of fan-out workers consume these tasks, batch-fetching follower lists and performing `ZADD` operations on each follower's Redis sorted set. Worker concurrency, batch sizes, and queue partitioning (by author ID hash) become critical tuning knobs.",
+    "**Feed Ranking and the ML Pipeline**\n\nModern feeds are *not* purely chronological. Facebook's **EdgeRank** (now deprecated in favor of deeper ML) introduced the concept of scoring each candidate post with `Score = Affinity x Weight x Decay`. Today's systems use **gradient-boosted decision trees** (XGBoost/LightGBM) or **deep neural networks** trained on engagement labels (`clicked`, `liked`, `commented`, `shared`, `reported`, `hid`). The feature vector for each `(user, post)` pair includes: *author features* (follower count, post frequency, historical engagement rate), *viewer features* (session recency, device type, topic interests), *interaction features* (messages exchanged, profile views, mutual friends), and *content features* (media type, text sentiment, entity tags, image quality score). The ranking service fetches a **candidate set** (e.g., 500 posts from the precomputed feed + celebrity pull), computes features from a **feature store** (often backed by Redis or a purpose-built system like Feast), scores them via the ML model, and returns the **top-N** with diversity constraints (no more than 3 posts from the same author, mix content types). The entire scoring pipeline must complete in <100ms to keep the end-to-end feed latency under 500ms.",
+    "**Consistency, Availability, and Failure Modes**\n\nNews feed systems are designed for **eventual consistency** — a post appearing 2-5 seconds late in a follower's feed is acceptable. However, certain invariants must hold: a user must *always* see their own posts in their feed (read-your-writes consistency), and deleting a post must propagate within seconds to avoid showing removed content. For fan-out on write, if a fan-out worker crashes mid-way, some followers get the post and others do not until the worker retries. Using **idempotent `ZADD`** operations (Redis sorted set adds are naturally idempotent) ensures retries are safe. For the pull path, if the cache for a celebrity's recent posts is stale, the system falls back to a **database query** with a short TTL cache-aside pattern. **Circuit breakers** protect the ranking service: if the ML scoring service is down, the system falls back to a simpler chronological sort rather than returning an error. Feed caches are sharded across Redis clusters using **consistent hashing** (e.g., hashing `userId` to a shard). If a shard goes down, the system can either serve a *degraded feed* (missing some posts) or redirect to a replica. The key design principle is **graceful degradation**: the feed should always render *something*, even if it is slightly stale or unranked.",
+  ],
+  code: [
+    {
+      language: "javascript",
+      caption: "Node.js/Express Feed API with MongoDB and Redis",
+      source: `const express = require('express');
+const { MongoClient, ObjectId } = require('mongodb');
+const Redis = require('ioredis');
+
+const app = express();
+app.use(express.json());
+
+const redis = new Redis({ host: 'localhost', port: 6379 });
+const FEED_MAX_SIZE = 500;
+
+let db;
+MongoClient.connect('mongodb://localhost:27017')
+  .then(client => { db = client.db('newsfeed'); });
+
+// POST /posts — Create a post and fan-out to followers
+app.post('/posts', async (req, res) => {
+  const { authorId, content, mediaUrls } = req.body;
+  const post = {
+    authorId,
+    content,
+    mediaUrls: mediaUrls || [],
+    createdAt: new Date(),
+    likes: 0,
+    comments: 0,
+  };
+
+  // 1. Store post in MongoDB
+  const result = await db.collection('posts').insertOne(post);
+  const postId = result.insertedId.toString();
+
+  // 2. Cache the post object in Redis (TTL: 24 hours)
+  await redis.set(
+    \`post:\${postId}\`,
+    JSON.stringify({ ...post, _id: postId }),
+    'EX', 86400
+  );
+
+  // 3. Check if author is a "celebrity" (>10K followers)
+  const followerCount = await db.collection('follows')
+    .countDocuments({ followeeId: authorId });
+
+  if (followerCount <= 10000) {
+    // Fan-out on write for regular users
+    const cursor = db.collection('follows')
+      .find({ followeeId: authorId })
+      .project({ followerId: 1 });
+
+    const batch = [];
+    await cursor.forEach(doc => {
+      batch.push(
+        redis.zadd(\`feed:\${doc.followerId}\`, Date.now(), postId)
+      );
+    });
+    await Promise.all(batch);
+
+    // Trim each feed to max size (async, fire-and-forget)
+    const trimCursor = db.collection('follows')
+      .find({ followeeId: authorId })
+      .project({ followerId: 1 });
+    trimCursor.forEach(doc => {
+      redis.zremrangebyrank(\`feed:\${doc.followerId}\`, 0, -(FEED_MAX_SIZE + 1));
+    });
+  }
+  // Celebrity posts are NOT fanned out — pulled at read time
+
+  res.status(201).json({ postId });
+});
+
+// GET /feed/:userId — Retrieve personalized feed with cursor pagination
+app.get('/feed/:userId', async (req, res) => {
+  const { userId } = req.params;
+  const cursor = req.query.cursor
+    ? parseFloat(req.query.cursor)
+    : '+inf';
+  const pageSize = parseInt(req.query.limit) || 20;
+
+  // 1. Read precomputed feed from Redis (fan-out on write posts)
+  const postIds = await redis.zrevrangebyscore(
+    \`feed:\${userId}\`,
+    cursor === '+inf' ? '+inf' : \`(\${cursor}\`,
+    '-inf',
+    'WITHSCORES',
+    'LIMIT', 0, pageSize
+  );
+
+  // 2. Pull celebrity posts (fan-out on read)
+  const following = await db.collection('follows')
+    .find({ followerId: userId })
+    .project({ followeeId: 1 })
+    .toArray();
+
+  const celebrityIds = [];
+  for (const f of following) {
+    const count = await redis.get(\`follower_count:\${f.followeeId}\`);
+    if (count && parseInt(count) > 10000) {
+      celebrityIds.push(f.followeeId);
+    }
+  }
+
+  let celebrityPosts = [];
+  if (celebrityIds.length > 0) {
+    celebrityPosts = await db.collection('posts')
+      .find({
+        authorId: { $in: celebrityIds },
+        createdAt: { $gte: new Date(Date.now() - 86400000) }
+      })
+      .sort({ createdAt: -1 })
+      .limit(pageSize)
+      .toArray();
+  }
+
+  // 3. Merge precomputed + celebrity posts, sort by timestamp
+  const allPostIds = [];
+  for (let i = 0; i < postIds.length; i += 2) {
+    allPostIds.push({ id: postIds[i], score: parseFloat(postIds[i + 1]) });
+  }
+  for (const cp of celebrityPosts) {
+    allPostIds.push({ id: cp._id.toString(), score: cp.createdAt.getTime() });
+  }
+  allPostIds.sort((a, b) => b.score - a.score);
+  const topN = allPostIds.slice(0, pageSize);
+
+  // 4. Fetch full post objects
+  const posts = await Promise.all(
+    topN.map(async ({ id, score }) => {
+      let post = await redis.get(\`post:\${id}\`);
+      if (post) return { ...JSON.parse(post), _score: score };
+      const dbPost = await db.collection('posts').findOne({ _id: new ObjectId(id) });
+      return dbPost ? { ...dbPost, _score: score } : null;
+    })
+  );
+
+  // 5. Build next cursor
+  const nextCursor = topN.length > 0
+    ? topN[topN.length - 1].score.toString()
+    : null;
+
+  res.json({
+    posts: posts.filter(Boolean),
+    nextCursor,
+    hasMore: topN.length === pageSize,
+  });
+});
+
+app.listen(3000, () => console.log('Feed service on :3000'));`,
+    },
+    {
+      language: "cpp",
+      caption: "C++ Fan-Out Implementation with Thread Pool and Concurrent Queue",
+      source: `#include <iostream>
+#include <vector>
+#include <queue>
+#include <unordered_map>
+#include <unordered_set>
+#include <mutex>
+#include <thread>
+#include <condition_variable>
+#include <functional>
+#include <string>
+#include <algorithm>
+#include <chrono>
+#include <atomic>
+
+// Thread-safe sorted feed (simulates Redis sorted set)
+class FeedCache {
+public:
+    struct FeedEntry {
+        std::string postId;
+        double      score;  // timestamp as double
+        bool operator<(const FeedEntry& o) const { return score > o.score; }
+    };
+
+    void addPost(const std::string& userId,
+                 const std::string& postId,
+                 double score,
+                 size_t maxSize = 500) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        auto& feed = feeds_[userId];
+        feed.push_back({postId, score});
+        std::sort(feed.begin(), feed.end());
+        // Trim to maxSize (evict oldest)
+        if (feed.size() > maxSize) {
+            feed.resize(maxSize);
+        }
+    }
+
+    std::vector<FeedEntry> getFeed(const std::string& userId,
+                                   double cursorScore,
+                                   size_t limit) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        std::vector<FeedEntry> result;
+        auto it = feeds_.find(userId);
+        if (it == feeds_.end()) return result;
+
+        for (const auto& entry : it->second) {
+            if (entry.score < cursorScore) {
+                result.push_back(entry);
+                if (result.size() >= limit) break;
+            }
+        }
+        return result;
+    }
+
+private:
+    std::unordered_map<std::string, std::vector<FeedEntry>> feeds_;
+    std::mutex mtx_;
+};
+
+// Simple thread pool for async fan-out workers
+class ThreadPool {
+public:
+    explicit ThreadPool(size_t numThreads) : stop_(false) {
+        for (size_t i = 0; i < numThreads; ++i) {
+            workers_.emplace_back([this] { workerLoop(); });
+        }
+    }
+
+    ~ThreadPool() {
+        { std::lock_guard<std::mutex> lock(mtx_);  stop_ = true; }
+        cv_.notify_all();
+        for (auto& w : workers_) w.join();
+    }
+
+    void enqueue(std::function<void()> task) {
+        { std::lock_guard<std::mutex> lock(mtx_); tasks_.push(std::move(task)); }
+        cv_.notify_one();
+    }
+
+private:
+    void workerLoop() {
+        while (true) {
+            std::function<void()> task;
+            {
+                std::unique_lock<std::mutex> lock(mtx_);
+                cv_.wait(lock, [&] { return stop_ || !tasks_.empty(); });
+                if (stop_ && tasks_.empty()) return;
+                task = std::move(tasks_.front());
+                tasks_.pop();
+            }
+            task();
+        }
+    }
+
+    std::vector<std::thread>          workers_;
+    std::queue<std::function<void()>> tasks_;
+    std::mutex                        mtx_;
+    std::condition_variable           cv_;
+    bool                              stop_;
+};
+
+// Social graph (simulates Follow table)
+class SocialGraph {
+public:
+    void addFollow(const std::string& follower, const std::string& followee) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        followers_[followee].insert(follower);
+        following_[follower].insert(followee);
+    }
+
+    std::vector<std::string> getFollowers(const std::string& userId) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        auto it = followers_.find(userId);
+        if (it == followers_.end()) return {};
+        return {it->second.begin(), it->second.end()};
+    }
+
+    size_t followerCount(const std::string& userId) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        auto it = followers_.find(userId);
+        return it == followers_.end() ? 0 : it->second.size();
+    }
+
+private:
+    std::unordered_map<std::string, std::unordered_set<std::string>> followers_;
+    std::unordered_map<std::string, std::unordered_set<std::string>> following_;
+    std::mutex mtx_;
+};
+
+// Fan-out service
+class FanOutService {
+public:
+    static constexpr size_t CELEBRITY_THRESHOLD = 10000;
+
+    FanOutService(size_t workerCount)
+        : pool_(workerCount), postsProcessed_(0) {}
+
+    // Called when a user creates a new post
+    void onPostCreated(const std::string& authorId,
+                       const std::string& postId) {
+        double score = static_cast<double>(
+            std::chrono::system_clock::now().time_since_epoch().count()
+        );
+
+        size_t count = graph_.followerCount(authorId);
+
+        if (count <= CELEBRITY_THRESHOLD) {
+            // Fan-out on write: enqueue async tasks
+            auto followers = graph_.getFollowers(authorId);
+
+            // Batch followers into chunks for parallel processing
+            const size_t BATCH_SIZE = 1000;
+            for (size_t i = 0; i < followers.size(); i += BATCH_SIZE) {
+                size_t end = std::min(i + BATCH_SIZE, followers.size());
+                std::vector<std::string> batch(
+                    followers.begin() + i, followers.begin() + end
+                );
+
+                pool_.enqueue([this, batch, postId, score]() {
+                    for (const auto& followerId : batch) {
+                        cache_.addPost(followerId, postId, score);
+                    }
+                    postsProcessed_ += batch.size();
+                });
+            }
+        }
+        // Celebrity posts: skip fan-out (pulled at read time)
+    }
+
+    FeedCache&    cache() { return cache_; }
+    SocialGraph&  graph() { return graph_; }
+    size_t        processed() const { return postsProcessed_.load(); }
+
+private:
+    FeedCache               cache_;
+    SocialGraph             graph_;
+    ThreadPool              pool_;
+    std::atomic<size_t>     postsProcessed_;
+};
+
+int main() {
+    FanOutService svc(4);  // 4 fan-out worker threads
+
+    // Build social graph
+    for (int i = 1; i <= 100; ++i) {
+        svc.graph().addFollow("user_" + std::to_string(i), "author_1");
+    }
+
+    // Author creates a post
+    svc.onPostCreated("author_1", "post_abc123");
+
+    // Allow fan-out workers to complete
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Read a follower's feed
+    auto feed = svc.cache().getFeed(
+        "user_1", std::numeric_limits<double>::max(), 10
+    );
+
+    std::cout << "Feed for user_1 (" << feed.size() << " items):" << std::endl;
+    for (const auto& entry : feed) {
+        std::cout << "  postId=" << entry.postId
+                  << "  score=" << entry.score << std::endl;
+    }
+    std::cout << "Total fan-out writes: " << svc.processed() << std::endl;
+    return 0;
+}`,
+    },
+    {
+      language: "javascript",
+      caption: "Feed Ranking Scoring Function (Simplified)",
+      source: `/**
+ * Simplified feed ranking scorer.
+ *
+ * In production this would be backed by an ML model (XGBoost/DNN)
+ * served via a feature store. This illustrates the scoring logic.
+ */
+
+function scoreFeedPost(post, viewer, interactionHistory) {
+  // --- Recency decay (exponential) ---
+  const ageHours = (Date.now() - new Date(post.createdAt).getTime()) / 3.6e6;
+  const recencyScore = Math.exp(-0.05 * ageHours);  // half-life ~14 hours
+
+  // --- Engagement signal ---
+  const engagementScore = Math.log1p(
+    post.likes * 1.0 +
+    post.comments * 2.0 +   // comments weighted higher
+    post.shares * 3.0
+  ) / 10.0;
+
+  // --- Affinity (interaction strength between viewer and author) ---
+  const history = interactionHistory[post.authorId] || {};
+  const affinityScore = Math.min(1.0,
+    (history.likes     || 0) * 0.1 +
+    (history.comments  || 0) * 0.2 +
+    (history.dms       || 0) * 0.3 +
+    (history.profileViews || 0) * 0.05
+  );
+
+  // --- Content type boost ---
+  const typeBoost = {
+    video: 1.2,
+    image: 1.1,
+    link:  1.0,
+    text:  0.9,
+  };
+  const contentScore = typeBoost[post.contentType] || 1.0;
+
+  // --- Weighted combination ---
+  const finalScore =
+    0.35 * recencyScore +
+    0.25 * engagementScore +
+    0.25 * affinityScore +
+    0.15 * contentScore;
+
+  return { postId: post._id, score: finalScore };
+}
+
+// Rank a candidate set and return top N with diversity constraints
+function rankFeed(candidates, viewer, interactionHistory, limit = 20) {
+  const scored = candidates.map(post =>
+    scoreFeedPost(post, viewer, interactionHistory)
+  );
+  scored.sort((a, b) => b.score - a.score);
+
+  // Diversity: max 3 posts from same author
+  const result = [];
+  const authorCount = {};
+  for (const item of scored) {
+    const post = candidates.find(p => p._id === item.postId);
+    const aid = post.authorId;
+    authorCount[aid] = (authorCount[aid] || 0) + 1;
+    if (authorCount[aid] <= 3) {
+      result.push(item);
+      if (result.length >= limit) break;
+    }
+  }
+  return result;
+}`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "News Feed System Architecture",
+      kind: "architecture",
+      caption: "High-level architecture showing the fan-out on write path, fan-out on read path, and feed ranking service.",
+      mermaid: `graph TB
+    subgraph Client
+      A[Mobile / Web App]
+    end
+
+    subgraph API_Gateway["API Gateway & Load Balancer"]
+      B[API Gateway]
+    end
+
+    subgraph Write_Path["Fan-Out on Write Path"]
+      C[Post Service]
+      D[Message Queue<br/>Kafka / RabbitMQ]
+      E[Fan-Out Workers]
+    end
+
+    subgraph Read_Path["Fan-Out on Read Path"]
+      F[Feed Service]
+      G[Celebrity Post<br/>Fetcher]
+      H[Feed Ranker<br/>ML Scoring]
+    end
+
+    subgraph Storage
+      I[(Posts DB<br/>MongoDB)]
+      J[(Social Graph DB<br/>Follow Table)]
+      K[Redis Cluster<br/>Feed Cache]
+      L[Feature Store<br/>Feast / Redis]
+    end
+
+    subgraph Media
+      M[Object Storage<br/>S3]
+      N[CDN<br/>CloudFront]
+    end
+
+    A -->|POST /posts| B
+    A -->|GET /feed| B
+    B --> C
+    B --> F
+    C --> I
+    C --> D
+    D --> E
+    E -->|ZADD feed:userId| K
+    E -->|Read followers| J
+    F -->|ZREVRANGEBYSCORE| K
+    F --> G
+    G -->|Query celebrity posts| I
+    F --> H
+    H -->|Fetch features| L
+    H -->|Return ranked feed| A
+    C -->|Upload media| M
+    M --> N
+    N -->|Serve media| A`,
+    },
+    {
+      title: "Fan-Out on Write Flow",
+      kind: "sequence",
+      caption: "Sequence diagram showing how a post is created and fanned out to followers' feed caches.",
+      mermaid: `sequenceDiagram
+    participant U as User (Author)
+    participant API as API Gateway
+    participant PS as Post Service
+    participant MQ as Message Queue
+    participant FW as Fan-Out Worker
+    participant DB as Posts DB
+    participant SG as Social Graph DB
+    participant RC as Redis Feed Cache
+
+    U->>API: POST /posts {content, media}
+    API->>PS: Create post
+    PS->>DB: INSERT post record
+    DB-->>PS: postId
+    PS->>MQ: Enqueue FanOutTask(postId, authorId)
+    PS-->>API: 201 Created {postId}
+    API-->>U: Post created
+
+    Note over MQ,FW: Async processing
+    MQ->>FW: Dequeue FanOutTask
+    FW->>SG: Get followers(authorId)
+    SG-->>FW: [follower1, follower2, ..., followerN]
+    loop For each follower batch
+        FW->>RC: ZADD feed:{followerId} timestamp postId
+    end
+    FW->>RC: ZREMRANGEBYRANK (trim to max size)`,
+    },
+    {
+      title: "Hybrid Feed Read Flow",
+      kind: "flow",
+      caption: "How the feed service merges precomputed feed with celebrity posts and applies ranking.",
+      mermaid: `flowchart TD
+    A[User requests feed<br/>GET /feed/:userId] --> B[Read precomputed feed<br/>from Redis sorted set]
+    B --> C{User follows<br/>any celebrities?}
+    C -->|Yes| D[Fetch celebrity IDs<br/>from social graph cache]
+    C -->|No| F[Candidate set =<br/>precomputed posts only]
+    D --> E[Query recent celebrity posts<br/>from Posts DB / cache]
+    E --> F2[Merge precomputed +<br/>celebrity posts]
+    F --> G[Feed Ranking Service]
+    F2 --> G
+    G --> H[Compute features from<br/>Feature Store]
+    H --> I[Score each candidate<br/>via ML model]
+    I --> J[Apply diversity constraints<br/>max 3 per author]
+    J --> K[Return top N posts<br/>with cursor token]
+    K --> L[Client renders feed]`,
+    },
+    {
+      title: "Feed Cache Data Model in Redis",
+      kind: "mindmap",
+      caption: "Overview of Redis data structures used for feed caching, post storage, and social graph.",
+      mermaid: `mindmap
+  root((Redis Data Model))
+    Feed Cache
+      Sorted Set per user
+        Key: feed:{userId}
+        Member: postId
+        Score: timestamp or rank
+      Operations
+        ZADD for insert
+        ZREVRANGEBYSCORE for read
+        ZREMRANGEBYRANK for trim
+    Post Cache
+      Hash or String per post
+        Key: post:{postId}
+        Value: serialized JSON
+        TTL: 24 hours
+    Social Graph Cache
+      Set per user
+        Key: following:{userId}
+        Members: followeeIds
+      Counter
+        Key: follower_count:{userId}
+        Value: integer count
+    Session / Rate Limit
+      Token bucket counters
+      API rate limit keys`,
+    },
+  ],
+  comparison: {
+    columns: [
+      "Aspect",
+      "**Push** (Fan-Out on Write)",
+      "**Pull** (Fan-Out on Read)",
+      "**Hybrid** (Push + Pull)",
+    ],
+    rows: [
+      [
+        "**Write cost**",
+        "High — O(N) writes per post where N = follower count",
+        "Low — O(1), just store the post",
+        "Medium — O(N) only for non-celebrity users",
+      ],
+      [
+        "**Read latency**",
+        "Very low — single cache read",
+        "High — must fetch and merge from many sources",
+        "Low — cache read + small celebrity merge",
+      ],
+      [
+        "**Celebrity handling**",
+        "Extremely expensive (millions of writes per post)",
+        "Natural fit (posts fetched on demand)",
+        "Celebrities use pull; rest use push",
+      ],
+      [
+        "**Storage overhead**",
+        "High — post ID duplicated across all follower feeds",
+        "Low — posts stored once",
+        "Moderate — duplication only for non-celebrity posts",
+      ],
+      [
+        "**Inactive user waste**",
+        "Yes — feeds computed for users who never read them",
+        "None — feed computed only when requested",
+        "Partial — can skip fan-out for users inactive > N days",
+      ],
+      [
+        "**Post visibility delay**",
+        "Small — time for async fan-out to complete",
+        "None — posts visible immediately on next read",
+        "Small for push users; none for pull celebrities",
+      ],
+      [
+        "**System complexity**",
+        "Moderate — fan-out workers, queue, cache management",
+        "Moderate — merge logic, multi-source queries",
+        "High — both paths, threshold logic, merge + rank",
+      ],
+      [
+        "**Best suited for**",
+        "Networks with low avg follower counts (private apps)",
+        "Networks with many high-follower users or low read rates",
+        "Large-scale public social networks (Twitter, Facebook, Instagram)",
+      ],
+    ],
+  },
+  exercises: [
+    "**Design a Fan-Out Threshold Optimizer**: Given a dataset of `(userId, followerCount, avgPostsPerDay, followerActiveRate)`, write a program that determines the optimal **celebrity threshold** (fan-out on write vs. read cutoff) to minimize total system cost. Define cost as `writeCost = followerCount * postsPerDay` for push users and `readCost = followingCelebrities * readsPerDay` for pull. Plot total cost vs. threshold value.",
+    "**Implement Cursor-Based Pagination**: Extend the Node.js feed API to support *bidirectional* cursor pagination. The API should accept `cursor`, `direction` (`next` or `prev`), and `limit`. Handle edge cases: what happens when new posts are inserted between page fetches? Write tests proving no posts are duplicated or skipped across pages.",
+    "**Build a Simple Feed Ranker**: Implement the `scoreFeedPost` function in your language of choice. Given a list of 100 mock posts with varying `likes`, `comments`, `shares`, `createdAt`, and `contentType`, rank them using the weighted formula: `0.35 * recency + 0.25 * engagement + 0.25 * affinity + 0.15 * contentBoost`. Verify that a highly-engaged old post can outrank a recent low-engagement post.",
+    "**Simulate Write Amplification**: Write a simulation that models a social network with 1M users where follower counts follow a **power-law distribution** (most users have <500 followers, a few have >1M). Simulate 10,000 posts and measure: total Redis writes under pure push, pure pull reads, and hybrid (threshold = 10K). Compare the total I/O cost of each strategy.",
+    "**Design a Feed Notification System**: Extend the news feed design to support *push notifications* for high-priority posts (e.g., posts from close friends, posts in groups with notifications enabled). Design the notification pipeline: how do you avoid spamming users? How do you batch notifications? How do you handle notification preferences per user? Provide an architecture diagram and API contracts.",
+  ],
+  cheatSheet: [
+    "**Fan-out on write** = push model: post is written to all followers' feed caches at *write time*. Use for users with `followerCount <= threshold` (typically 10K). Redis `ZADD feed:{userId} timestamp postId`.",
+    "**Fan-out on read** = pull model: feed is assembled at *read time* by fetching posts from all followed users. Use for celebrities with `followerCount > threshold`. Avoids write amplification entirely.",
+    "**Hybrid approach**: push for regular users + pull for celebrities. At read time, merge precomputed feed (from Redis) with freshly fetched celebrity posts, then rank. This is what **Twitter, Facebook, and Instagram** use in production.",
+    "**Feed cache**: Redis sorted set per user. Key = `feed:{userId}`, member = `postId`, score = `timestamp`. Read with `ZREVRANGEBYSCORE`. Trim with `ZREMRANGEBYRANK` to cap at 500-1000 entries.",
+    "**Cursor-based pagination**: encode last item's `(score, postId)` as an opaque base64 cursor. Next page = `ZREVRANGEBYSCORE feed:{userId} (cursor_score -inf LIMIT 0 pageSize`. Stable under concurrent inserts (unlike offset-based).",
+    "**Ranking formula**: `Score = w1*Recency + w2*Engagement + w3*Affinity + w4*ContentBoost`. Production systems use ML models (XGBoost, deep nets) with features from a **feature store**. Must complete scoring in <100ms for 500 candidates.",
+  ],
+  revisionNotes: [
+    "The two fundamental feed distribution strategies are **fan-out on write** (push: fast reads, expensive writes proportional to follower count) and **fan-out on read** (pull: cheap writes, expensive reads requiring multi-source merge). Production systems use a **hybrid**: push for normal users, pull for celebrities with follower counts above a configurable threshold (~10K).",
+    "**Redis sorted sets** are the backbone of feed caching. Each user gets a sorted set (`feed:{userId}`) where post IDs are members and timestamps are scores. `ZADD` inserts, `ZREVRANGEBYSCORE` reads in reverse chronological order, and `ZREMRANGEBYRANK` trims to a max size. Fan-out workers consume from a **message queue** (Kafka/RabbitMQ) and perform batch `ZADD` operations asynchronously.",
+    "**Feed ranking** transforms a chronological candidate set into a relevance-ordered feed. The scoring function combines *recency decay* (exponential), *engagement signals* (likes/comments/shares), *affinity* (viewer-author interaction strength), and *content type boost*. Modern systems train **ML models** on engagement labels and serve predictions via a feature store in <100ms per request.",
+    "**Cursor-based pagination** is essential for feeds because new posts are continuously inserted at the top. Unlike offset-based pagination (where `page=2` shifts when new items arrive), a cursor anchored to the last seen item's score/ID provides a stable reference point. The cursor is encoded as an opaque token (base64 of score + postId for tiebreaking) and returned in each API response.",
+    "**Graceful degradation** is a key design principle: if the ranking service is down, fall back to chronological order; if a Redis shard is unavailable, serve a partial feed from replicas; if celebrity post cache is stale, query the database with a short TTL. The feed should *always render something* rather than return an error. **Read-your-writes consistency** is the one hard requirement: a user must always see their own posts immediately.",
+  ],
   glossary: [
     {
       term: "Fan-Out on Write",

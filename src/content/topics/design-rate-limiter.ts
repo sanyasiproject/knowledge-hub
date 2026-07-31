@@ -112,6 +112,426 @@ export const designRateLimiter: TopicContent = {
       back: "Local: each server enforces its own limit (limit/N per server). Fast but inaccurate if traffic is unevenly distributed. Global: all servers check a centralized store (Redis). Accurate but adds latency. Hybrid: local fast path with periodic global sync.",
     },
   ],
+  deepDive: [
+    "**Rate limiting** is far more than a simple counter — it is a critical component of any production-grade distributed system. At its core, a rate limiter must make a **sub-millisecond decision** on every incoming request: *allow* or *reject*. This decision depends on the **algorithm chosen**, the **granularity of tracking** (per IP, per user, per API key, per endpoint), and the **storage backend** used to maintain state. In high-throughput systems handling millions of requests per second, the rate limiter itself must not become a bottleneck. This means the algorithm must operate in **O(1) time and space** per check, and the storage layer must support **atomic read-modify-write** operations. The *Token Bucket* algorithm achieves this with a **lazy refill** strategy: rather than running a background timer to add tokens, it calculates how many tokens *should have been added* since the last request, using `elapsed_time * refill_rate`. This makes each check a simple arithmetic operation with two state variables (`tokens` and `last_refill_ts`), stored per client. The *Sliding Window Counter* similarly achieves O(1) by maintaining just two counters per window and computing a **weighted approximation** of the true sliding count.",
+    "In a **distributed microservices architecture**, rate limiting introduces the challenge of **shared mutable state** across multiple server instances. A naive approach — each server maintaining its own local counter — fails because traffic is rarely evenly distributed across nodes. Consider a system with 4 servers and a global limit of 1000 req/min: setting each server to 250 req/min means a client whose requests all hit the same server gets only 250, while one with evenly distributed traffic gets the full 1000. The standard solution is a **centralized store like Redis**. The key insight is that the *check-and-update* operation must be **atomic**. Redis provides this through **Lua scripting**: a Lua script executes on the Redis server in a single, uninterruptible step. For the token bucket algorithm, the Lua script reads the current `tokens` and `last_refill_ts`, calculates the refill, checks if tokens are available, decrements if so, writes back the updated state, and returns the result — all *atomically*. Without this atomicity, a **TOCTOU race condition** occurs: two servers read the same token count (say, 1), both decide to allow, and both decrement, resulting in a **negative token count** and exceeding the rate limit.",
+    "**Advanced production patterns** go beyond basic allow/reject. **Multi-tier rate limiting** applies different limits at different scopes simultaneously: per-user (100 req/min), per-API-key (10,000 req/min), and global (1,000,000 req/min). A request must pass *all* applicable tiers. This is implemented as a **chain of rate limiters**, each checking its own scope. **Adaptive rate limiting** dynamically adjusts limits based on system health: when CPU usage exceeds 80% or p99 latency spikes, the limiter *tightens* automatically, shedding load before the system degrades. **Graceful degradation** strategies include *throttling* (adding artificial delay via `setTimeout` or `sleep` rather than rejecting), *queueing* (buffering requests in a queue for later processing), and *degraded responses* (returning cached or simplified data). The **`Retry-After`** header is essential for client-side cooperation: it tells clients *exactly* when to retry, preventing thundering herd retries. Finally, **rate limit observability** is critical — tracking metrics like `rate_limit_hits_total`, `rate_limit_rejections_total`, and `rate_limit_latency_seconds` enables alerting on potential attacks or misconfigurations.",
+  ],
+  code: [
+    {
+      language: "cpp",
+      caption: "Token Bucket Rate Limiter in C++",
+      source: `#include <chrono>
+#include <mutex>
+#include <unordered_map>
+#include <string>
+
+class TokenBucket {
+private:
+    double maxTokens_;
+    double refillRate_;  // tokens per second
+    double tokens_;
+    std::chrono::steady_clock::time_point lastRefill_;
+    std::mutex mutex_;
+
+    void refill() {
+        auto now = std::chrono::steady_clock::now();
+        double elapsed = std::chrono::duration<double>(
+            now - lastRefill_).count();
+        tokens_ = std::min(maxTokens_, tokens_ + elapsed * refillRate_);
+        lastRefill_ = now;
+    }
+
+public:
+    TokenBucket(double maxTokens, double refillRate)
+        : maxTokens_(maxTokens),
+          refillRate_(refillRate),
+          tokens_(maxTokens),
+          lastRefill_(std::chrono::steady_clock::now()) {}
+
+    // Returns true if the request is allowed
+    bool tryConsume(double tokens = 1.0) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        refill();
+        if (tokens_ >= tokens) {
+            tokens_ -= tokens;
+            return true;  // Request allowed
+        }
+        return false;  // Request rejected (429)
+    }
+
+    double remainingTokens() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        refill();
+        return tokens_;
+    }
+};
+
+// Per-client rate limiter using a map of buckets
+class RateLimiter {
+private:
+    double maxTokens_;
+    double refillRate_;
+    std::unordered_map<std::string, TokenBucket> buckets_;
+    std::mutex mapMutex_;
+
+public:
+    RateLimiter(double maxTokens, double refillRate)
+        : maxTokens_(maxTokens), refillRate_(refillRate) {}
+
+    bool allowRequest(const std::string& clientId) {
+        std::lock_guard<std::mutex> lock(mapMutex_);
+        auto it = buckets_.find(clientId);
+        if (it == buckets_.end()) {
+            auto [newIt, _] = buckets_.emplace(
+                clientId, TokenBucket(maxTokens_, refillRate_));
+            return newIt->second.tryConsume();
+        }
+        return it->second.tryConsume();
+    }
+};`,
+    },
+    {
+      language: "cpp",
+      caption: "Sliding Window Counter Rate Limiter in C++",
+      source: `#include <chrono>
+#include <mutex>
+
+class SlidingWindowCounter {
+private:
+    int limit_;                   // max requests per window
+    int windowSizeMs_;            // window duration in milliseconds
+    int prevCount_ = 0;
+    int currCount_ = 0;
+    int64_t currWindowStart_ = 0; // ms since epoch
+    std::mutex mutex_;
+
+    int64_t nowMs() {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()
+        ).count();
+    }
+
+public:
+    SlidingWindowCounter(int limit, int windowSizeMs)
+        : limit_(limit), windowSizeMs_(windowSizeMs),
+          currWindowStart_(0) {}
+
+    bool allowRequest() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        int64_t now = nowMs();
+
+        // Initialize on first call
+        if (currWindowStart_ == 0) {
+            currWindowStart_ = now;
+        }
+
+        // Advance windows if needed
+        int64_t elapsed = now - currWindowStart_;
+        if (elapsed >= windowSizeMs_ * 2) {
+            // Skipped an entire window
+            prevCount_ = 0;
+            currCount_ = 0;
+            currWindowStart_ = now;
+        } else if (elapsed >= windowSizeMs_) {
+            // Move to next window
+            prevCount_ = currCount_;
+            currCount_ = 0;
+            currWindowStart_ += windowSizeMs_;
+        }
+
+        // Compute weighted count
+        double elapsedInCurr = static_cast<double>(
+            now - currWindowStart_);
+        double overlapFraction =
+            (windowSizeMs_ - elapsedInCurr) / windowSizeMs_;
+        double weightedCount =
+            prevCount_ * overlapFraction + currCount_;
+
+        if (weightedCount < limit_) {
+            currCount_++;
+            return true;  // Allowed
+        }
+        return false;     // Rejected
+    }
+};`,
+    },
+    {
+      language: "typescript",
+      caption: "Express.js Rate Limiting Middleware with Redis (Token Bucket)",
+      source: `import { Request, Response, NextFunction } from "express";
+import Redis from "ioredis";
+
+const redis = new Redis({ host: "127.0.0.1", port: 6379 });
+
+// Lua script for atomic token bucket check-and-update
+const TOKEN_BUCKET_SCRIPT = \`
+  local key = KEYS[1]
+  local maxTokens = tonumber(ARGV[1])
+  local refillRate = tonumber(ARGV[2])
+  local now = tonumber(ARGV[3])
+
+  local bucket = redis.call('HMGET', key, 'tokens', 'lastRefill')
+  local tokens = tonumber(bucket[1]) or maxTokens
+  local lastRefill = tonumber(bucket[2]) or now
+
+  -- Refill tokens based on elapsed time
+  local elapsed = (now - lastRefill) / 1000
+  tokens = math.min(maxTokens, tokens + elapsed * refillRate)
+
+  if tokens >= 1 then
+    tokens = tokens - 1
+    redis.call('HMSET', key, 'tokens', tokens, 'lastRefill', now)
+    redis.call('EXPIRE', key, math.ceil(maxTokens / refillRate) + 10)
+    return {1, math.floor(tokens)}  -- allowed, remaining
+  else
+    redis.call('HMSET', key, 'tokens', tokens, 'lastRefill', now)
+    redis.call('EXPIRE', key, math.ceil(maxTokens / refillRate) + 10)
+    return {0, 0}                   -- rejected, remaining
+  end
+\`;
+
+interface RateLimitOptions {
+  maxTokens: number;   // Burst capacity
+  refillRate: number;   // Tokens per second
+  keyPrefix?: string;
+}
+
+function rateLimiter(options: RateLimitOptions) {
+  const { maxTokens, refillRate, keyPrefix = "rl" } = options;
+
+  return async (req: Request, res: Response, next: NextFunction) => {
+    // Identify client by IP or authenticated user ID
+    const clientId = (req as any).userId ?? req.ip ?? "unknown";
+    const key = \`\${keyPrefix}:\${clientId}\`;
+    const now = Date.now();
+
+    try {
+      const [allowed, remaining] = (await redis.eval(
+        TOKEN_BUCKET_SCRIPT, 1, key, maxTokens, refillRate, now
+      )) as [number, number];
+
+      // Set standard rate limit headers
+      res.set("X-RateLimit-Limit", String(maxTokens));
+      res.set("X-RateLimit-Remaining", String(remaining));
+
+      if (allowed === 1) {
+        return next();  // Request passes
+      }
+
+      // Calculate retry delay
+      const retryAfter = Math.ceil(1 / refillRate);
+      res.set("Retry-After", String(retryAfter));
+      return res.status(429).json({
+        error: "Too Many Requests",
+        message: \`Rate limit exceeded. Retry after \${retryAfter}s.\`,
+        retryAfter,
+      });
+    } catch (err) {
+      // If Redis is down, fail open (allow) or fail closed (deny)
+      console.error("Rate limiter error:", err);
+      return next();  // Fail open — adjust for your risk tolerance
+    }
+  };
+}
+
+// Usage in Express app:
+// app.use("/api/", rateLimiter({ maxTokens: 100, refillRate: 10 }));
+// app.use("/api/payments", rateLimiter({ maxTokens: 10, refillRate: 1 }));
+
+export { rateLimiter };`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Rate Limiter System Architecture",
+      kind: "architecture",
+      caption: "High-level architecture showing how the rate limiter sits between clients and backend services, using Redis for distributed state.",
+      mermaid: `graph TB
+    Client1[Client A] -->|HTTP Request| Gateway[API Gateway]
+    Client2[Client B] -->|HTTP Request| Gateway
+    Client3[Client C] -->|HTTP Request| Gateway
+
+    Gateway -->|Check Rate Limit| RL[Rate Limiter Middleware]
+    RL -->|Atomic Read/Write| Redis[(Redis - Token Buckets)]
+
+    RL -->|Allowed| LB[Load Balancer]
+    RL -->|Rejected 429| Client1
+    RL -->|Rejected 429| Client2
+
+    LB --> S1[Service Instance 1]
+    LB --> S2[Service Instance 2]
+    LB --> S3[Service Instance 3]
+
+    Redis -.->|Lua Script: Atomic Check & Decrement| Redis
+
+    style RL fill:#f96,stroke:#333,stroke-width:2px
+    style Redis fill:#d63,stroke:#333,stroke-width:2px
+    style Gateway fill:#69f,stroke:#333,stroke-width:2px`,
+    },
+    {
+      title: "Token Bucket Algorithm Flow",
+      kind: "flow",
+      caption: "Step-by-step decision flow for the token bucket algorithm on each incoming request.",
+      mermaid: `flowchart TD
+    A[Request Arrives] --> B[Calculate elapsed time since last refill]
+    B --> C[Add elapsed * refillRate tokens]
+    C --> D{tokens > maxTokens?}
+    D -->|Yes| E[Cap tokens = maxTokens]
+    D -->|No| F[Keep current tokens]
+    E --> G{tokens >= 1?}
+    F --> G
+    G -->|Yes| H[Decrement tokens by 1]
+    H --> I[Update lastRefill timestamp]
+    I --> J[Return 200 OK - Request Allowed]
+    G -->|No| K[Calculate Retry-After header]
+    K --> L[Return 429 Too Many Requests]
+
+    style J fill:#4a4,stroke:#333,color:#fff
+    style L fill:#d44,stroke:#333,color:#fff`,
+    },
+    {
+      title: "Sliding Window Counter Visualization",
+      kind: "sequence",
+      caption: "Sequence diagram showing how the sliding window counter weights previous and current window counts to approximate a true sliding window.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant RL as Rate Limiter
+    participant Store as Counter Store
+
+    Note over Store: Window N-1: count=80<br/>Window N: count=30<br/>Window size: 60s
+
+    C->>RL: Request at t=40s into Window N
+    RL->>Store: Read prev_count, curr_count
+    Store-->>RL: prev=80, curr=30
+
+    Note over RL: overlap = (60-40)/60 = 0.333<br/>weighted = 80*0.333 + 30 = 56.67<br/>limit = 100 → ALLOW
+
+    RL->>Store: Increment curr_count to 31
+    RL-->>C: 200 OK (Remaining: 43)
+
+    C->>RL: Request at t=55s into Window N
+    RL->>Store: Read prev_count, curr_count
+    Store-->>RL: prev=80, curr=85
+
+    Note over RL: overlap = (60-55)/60 = 0.083<br/>weighted = 80*0.083 + 85 = 91.67<br/>limit = 100 → ALLOW
+
+    RL->>Store: Increment curr_count to 86
+    RL-->>C: 200 OK (Remaining: 8)`,
+    },
+    {
+      title: "Rate Limiting Algorithm Decision Mindmap",
+      kind: "mindmap",
+      caption: "A mindmap showing how to choose the right rate limiting algorithm based on requirements.",
+      mermaid: `mindmap
+  root((Rate Limiting))
+    Token Bucket
+      Allows bursts
+      maxTokens = burst size
+      refillRate = sustained rate
+      Best for APIs with spiky traffic
+    Leaky Bucket
+      Smooth output rate
+      No bursts allowed
+      FIFO queue based
+      Best for downstream protection
+    Fixed Window
+      Simplest to implement
+      Boundary burst problem
+      O(1) memory
+      Best for non-critical limits
+    Sliding Window Log
+      Perfect accuracy
+      O(n) memory per client
+      Stores all timestamps
+      Best when accuracy is critical
+    Sliding Window Counter
+      Near-perfect accuracy
+      O(1) memory per client
+      Weighted approximation
+      Best general-purpose choice`,
+    },
+  ],
+  comparison: {
+    columns: [
+      "Feature",
+      "Token Bucket",
+      "Leaky Bucket",
+      "Sliding Window Counter",
+    ],
+    rows: [
+      [
+        "**Burst handling**",
+        "Allows bursts up to `maxTokens`",
+        "No bursts — constant output rate",
+        "Smooth; no boundary bursts",
+      ],
+      [
+        "**Memory per client**",
+        "*O(1)* — 2 values (`tokens`, `lastRefill`)",
+        "*O(queue size)* — bounded FIFO queue",
+        "*O(1)* — 2 counters + timestamp",
+      ],
+      [
+        "**Accuracy**",
+        "Exact for burst + sustained rate",
+        "Exact — FIFO guarantees order",
+        "Approximate (~1% error typical)",
+      ],
+      [
+        "**Time complexity**",
+        "*O(1)* per request",
+        "*O(1)* enqueue/dequeue",
+        "*O(1)* per request",
+      ],
+      [
+        "**Implementation complexity**",
+        "Low — lazy refill arithmetic",
+        "Medium — requires queue management",
+        "Low — two counters + weighted sum",
+      ],
+      [
+        "**Best suited for**",
+        "APIs tolerating short bursts",
+        "Downstream systems needing smooth input",
+        "General-purpose rate limiting",
+      ],
+      [
+        "**Distributed support**",
+        "Redis + Lua script (atomic)",
+        "Harder — queue state is complex",
+        "Redis + Lua script (atomic)",
+      ],
+      [
+        "**Boundary burst problem**",
+        "N/A (not window-based)",
+        "N/A (not window-based)",
+        "Solved via weighted approximation",
+      ],
+    ],
+  },
+  exercises: [
+    "**Design a multi-tier rate limiter**: Implement a rate limiter that enforces three simultaneous limits — 10 requests/second per user, 500 requests/minute per API key, and 50,000 requests/hour globally. Define the data structures, storage layout in Redis, and the Lua script that checks all three tiers atomically. How do you handle the case where one tier allows but another rejects?",
+    "**Implement a sliding window log** in C++ using `std::deque<int64_t>` to store timestamps. Support `allowRequest(clientId)` and `cleanup()` methods. Analyze the memory usage for 10,000 clients each making 100 requests/minute. Compare the memory footprint to the sliding window counter approach and discuss when the log's perfect accuracy justifies the extra memory.",
+    "**Build an adaptive rate limiter**: Design a rate limiter that automatically tightens its limits when the system is under stress (high CPU, high latency, high error rate). Define the health metrics it monitors, the algorithm for adjusting limits (e.g., *AIMD — Additive Increase, Multiplicative Decrease*), and how it recovers when the system stabilizes. Implement the core logic in Node.js/TypeScript.",
+    "**Handle Redis failover**: Your distributed rate limiter uses Redis as the central store. Design the behavior when Redis becomes unavailable. Consider: Should you *fail open* (allow all requests) or *fail closed* (reject all)? How do you implement a local fallback with periodic sync? Write the Express middleware that gracefully degrades when the Redis connection drops.",
+    "**Rate limiting WebSocket connections**: Design a rate limiter for a WebSocket-based chat application. Unlike HTTP, WebSocket connections are long-lived. Define how you limit: (a) connection establishment rate, (b) message send rate per connection, and (c) payload size per time window. Discuss how the token bucket parameters differ from a REST API rate limiter.",
+  ],
+  cheatSheet: [
+    "**Token Bucket formula**: `tokens = min(maxTokens, tokens + elapsed * refillRate)`. If `tokens >= 1`, allow and decrement. Two params: `maxTokens` (burst size), `refillRate` (sustained rate).",
+    "**Sliding Window Counter formula**: `weighted_count = prev_count * ((window_size - elapsed_in_current) / window_size) + current_count`. If `weighted_count < limit`, allow and increment `current_count`.",
+    "**Redis atomic pattern**: Use `EVAL` with a Lua script to perform read-check-update in a single atomic operation. Never do separate `GET` then `SET` — this creates a **TOCTOU race condition** in distributed systems.",
+    "**HTTP 429 response headers**: Always include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` (Unix timestamp), and `Retry-After` (seconds). These are essential for well-behaved clients.",
+    "**Rule of thumb for distributed limiting**: Use *local* rate limiting (limit/N per node) only when traffic is evenly distributed. Use *centralized* Redis when accuracy matters. Use *hybrid* (local fast path + periodic Redis sync) for ultra-low-latency requirements.",
+    "**Key design decisions checklist**: (1) Algorithm choice based on burst tolerance, (2) Scope — per IP, user, API key, or endpoint, (3) Storage — in-memory vs Redis vs hybrid, (4) Failure mode — fail open vs fail closed, (5) Response — hard reject (429) vs throttle vs degrade.",
+  ],
+  revisionNotes: [
+    "**Core algorithms**: *Fixed Window* is simplest but has the **boundary burst problem**. *Sliding Window Counter* solves it with a **weighted approximation** using O(1) memory. *Token Bucket* allows **controlled bursts** (burst size = `maxTokens`, sustained rate = `refillRate`). *Leaky Bucket* produces **smooth, constant-rate output** via a FIFO queue. *Sliding Window Log* is **perfectly accurate** but uses O(n) memory per client.",
+    "**Distributed rate limiting** requires **atomic operations** to prevent race conditions. Redis + Lua scripts provide atomicity. The Lua script reads state, computes the decision, and writes updated state in a **single uninterruptible step**. Without atomicity, concurrent requests can bypass the limit via **TOCTOU (Time of Check, Time of Use)** vulnerabilities.",
+    "**Production essentials**: Return proper **HTTP 429** with `Retry-After` header. Implement **multi-tier limits** (per-user, per-key, global) as a chain — request must pass *all* tiers. Support **graceful degradation**: fail open (allow on Redis failure) for availability-critical services, fail closed (reject) for security-critical ones. Monitor `rejection_rate` and alert on anomalies.",
+    "**Trade-off matrix**: Token Bucket trades burst allowance for slightly more complex tuning (two params). Sliding Window Counter trades ~1% accuracy for O(1) memory. Centralized (Redis) rate limiting trades an extra network round-trip (~1ms) for global accuracy. Local-only limiting trades accuracy for zero added latency. Choose based on your system's **primary constraint**: accuracy, latency, or simplicity.",
+    "**Interview talking points**: Rate limiter placement (API Gateway vs middleware vs per-service). Why Lua scripts in Redis (atomicity without distributed locks). How to handle rate limit key extraction (IP for unauthenticated, user ID for authenticated, composite keys for fine-grained control). Adaptive limiting with AIMD. The relationship between rate limiting and **circuit breakers** (rate limiting prevents overload *from clients*; circuit breakers prevent cascading failures *between services*).",
+  ],
   glossary: [
     {
       term: "Token Bucket",

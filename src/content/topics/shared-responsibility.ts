@@ -88,6 +88,239 @@ export const sharedResponsibility: TopicContent = {
     { front: "Customer-specific controls", back: "Controls solely the customer's responsibility — data classification, application security, user access management. These must be implemented and evidenced independently." }
   ],
 
+  deepDive: [
+    "## Responsibility Shifts Across Service Models\n\n**The shared responsibility boundary shifts** depending on the AWS service model. With **IaaS (EC2)**, the customer is responsible for the guest OS, patching, firewall configuration, application code, and data encryption. AWS manages the hypervisor, physical hardware, and network infrastructure. With **managed services (RDS)**, AWS takes over OS patching, database engine updates, and backup management — but the customer still owns data classification, IAM policies, security group rules, and encryption key management. With **serverless (Lambda, DynamoDB, S3)**, AWS manages nearly everything below the application layer — the customer's responsibility narrows to function code security, IAM permissions, data encryption configuration, and access policies. The critical insight: **moving up the service abstraction stack reduces customer responsibility surface area** but never eliminates the duty to protect data and manage access. Even with a fully managed service, misconfigured S3 bucket policies or overly permissive IAM roles remain customer-side vulnerabilities.",
+    "## Compliance and Audit in the Shared Model\n\n**AWS provides compliance artifacts** through **AWS Artifact** — SOC 1/2/3 reports, PCI DSS AOC, HIPAA BAA, ISO 27001 certificates, and FedRAMP packages. These prove AWS meets its infrastructure obligations. **The customer must separately demonstrate** their own compliance for the layers they manage. For **HIPAA**, AWS signs a BAA covering eligible services, but the customer must implement encryption at rest (KMS), encryption in transit (TLS), access logging (CloudTrail), and access controls (IAM). For **PCI DSS**, AWS is a Level 1 service provider, but the customer must segment their cardholder data environment, implement WAF rules, enable VPC Flow Logs, and pass their own PCI audit. **AWS Config** continuously evaluates resource configurations against compliance rules. **AWS Audit Manager** automates evidence collection for frameworks like SOC 2, PCI, and GDPR. **Security Hub** aggregates findings from GuardDuty, Inspector, Macie, and Config into a unified compliance dashboard with automated scoring.",
+    "## Operationalizing Shared Responsibility with Preventive and Detective Controls\n\n**Preventive controls** stop non-compliant actions before they occur. **SCPs** deny restricted operations across all accounts (e.g., deny launching instances without encrypted EBS volumes). **IAM permission boundaries** cap what developers can self-provision. **S3 Block Public Access** at the account level prevents any bucket from being made public. **AWS Control Tower guardrails** provide pre-packaged preventive controls for multi-account environments. **Detective controls** identify issues after they occur. **GuardDuty** uses ML to detect threats: cryptocurrency mining, credential compromise, S3 data exfiltration, anomalous API calls. **AWS Config rules** (managed or custom Lambda) continuously evaluate resource compliance — e.g., 'all EBS volumes must be encrypted', 'all S3 buckets must have versioning'. **CloudTrail** logs every API call for forensic analysis. **Amazon Macie** uses ML to discover and classify sensitive data (PII, financial data, credentials) in S3 buckets. The recommended approach is **defense in depth**: combine preventive controls (SCPs, permission boundaries) with detective controls (Config, GuardDuty) and responsive controls (Lambda auto-remediation triggered by EventBridge)."
+  ],
+
+  code: [
+    {
+      language: "hcl",
+      caption: "Terraform: AWS Config rules for compliance monitoring",
+      source: `resource "aws_config_configuration_recorder" "main" {
+  name     = "config-recorder"
+  role_arn = aws_iam_role.config.arn
+
+  recording_group {
+    all_supported                 = true
+    include_global_resource_types = true
+  }
+}
+
+resource "aws_config_config_rule" "encrypted_volumes" {
+  name = "encrypted-volumes"
+  source {
+    owner             = "AWS"
+    source_identifier = "ENCRYPTED_VOLUMES"
+  }
+  depends_on = [aws_config_configuration_recorder.main]
+}
+
+resource "aws_config_config_rule" "s3_bucket_versioning" {
+  name = "s3-bucket-versioning-enabled"
+  source {
+    owner             = "AWS"
+    source_identifier = "S3_BUCKET_VERSIONING_ENABLED"
+  }
+  depends_on = [aws_config_configuration_recorder.main]
+}
+
+resource "aws_config_config_rule" "root_mfa" {
+  name = "root-account-mfa-enabled"
+  source {
+    owner             = "AWS"
+    source_identifier = "ROOT_ACCOUNT_MFA_ENABLED"
+  }
+  depends_on = [aws_config_configuration_recorder.main]
+}
+
+resource "aws_config_config_rule" "iam_password_policy" {
+  name = "iam-password-policy"
+  source {
+    owner             = "AWS"
+    source_identifier = "IAM_PASSWORD_POLICY"
+  }
+  input_parameters = jsonencode({
+    RequireUppercaseCharacters = "true"
+    RequireLowercaseCharacters = "true"
+    RequireSymbols             = "true"
+    RequireNumbers             = "true"
+    MinimumPasswordLength      = "14"
+    PasswordReusePrevention    = "24"
+    MaxPasswordAge             = "90"
+  })
+  depends_on = [aws_config_configuration_recorder.main]
+}`
+    },
+    {
+      language: "json",
+      caption: "SCP: enforce encryption and restrict regions",
+      source: `{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyUnencryptedEBSVolumes",
+      "Effect": "Deny",
+      "Action": "ec2:CreateVolume",
+      "Resource": "*",
+      "Condition": {
+        "Bool": {
+          "ec2:Encrypted": "false"
+        }
+      }
+    },
+    {
+      "Sid": "DenyNonApprovedRegions",
+      "Effect": "Deny",
+      "NotAction": [
+        "iam:*",
+        "organizations:*",
+        "sts:*",
+        "support:*",
+        "budgets:*",
+        "cloudfront:*",
+        "route53:*",
+        "waf:*"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": {
+          "aws:RequestedRegion": [
+            "us-east-1",
+            "us-west-2",
+            "eu-west-1"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "DenyLeavingOrganization",
+      "Effect": "Deny",
+      "Action": "organizations:LeaveOrganization",
+      "Resource": "*"
+    }
+  ]
+}`
+    },
+    {
+      language: "bash",
+      caption: "AWS CLI: security audit — check customer-side responsibilities",
+      source: `# Check for S3 buckets with public access
+aws s3api list-buckets --query 'Buckets[].Name' --output text | \\
+  tr '\\t' '\\n' | while read bucket; do
+    public=$(aws s3api get-public-access-block --bucket "$bucket" 2>/dev/null)
+    if [ $? -ne 0 ]; then
+      echo "WARNING: No public access block on bucket: $bucket"
+    fi
+  done
+
+# Find unencrypted EBS volumes
+aws ec2 describe-volumes \\
+  --filters "Name=encrypted,Values=false" \\
+  --query 'Volumes[].{ID:VolumeId,State:State,Size:Size}' \\
+  --output table
+
+# Check CloudTrail is enabled in all regions
+aws cloudtrail describe-trails \\
+  --query 'trailList[].{Name:Name,IsMultiRegion:IsMultiRegionTrail,IsLogging:HasCustomEventSelectors}' \\
+  --output table
+
+# Find security groups with 0.0.0.0/0 ingress on sensitive ports
+aws ec2 describe-security-groups \\
+  --filters "Name=ip-permission.cidr,Values=0.0.0.0/0" \\
+  --query 'SecurityGroups[].{ID:GroupId,Name:GroupName,Rules:IpPermissions[?contains(IpRanges[].CidrIp,\`0.0.0.0/0\`)].{Port:FromPort,Proto:IpProtocol}}' \\
+  --output json
+
+# Check GuardDuty is enabled
+aws guardduty list-detectors --query 'DetectorIds' --output text`
+    }
+  ],
+
+  comparison: {
+    columns: ["Responsibility", "IaaS (EC2)", "PaaS/Managed (RDS, ECS)", "Serverless (Lambda, S3, DynamoDB)"],
+    rows: [
+      ["Physical security", "AWS", "AWS", "AWS"],
+      ["Network infrastructure", "AWS", "AWS", "AWS"],
+      ["Hypervisor / host OS", "AWS", "AWS", "AWS"],
+      ["Guest OS patching", "Customer", "AWS", "AWS"],
+      ["Runtime / engine updates", "Customer", "AWS (managed patching)", "AWS"],
+      ["Application code", "Customer", "Customer", "Customer"],
+      ["Network configuration (SG, NACL)", "Customer", "Customer (SG only)", "Customer (resource policies)"],
+      ["IAM and access management", "Customer", "Customer", "Customer"],
+      ["Data encryption (at rest)", "Customer configures", "Customer enables, AWS manages", "Customer enables, AWS manages"],
+      ["Data encryption (in transit)", "Customer (TLS setup)", "Customer (enforce SSL)", "Customer (enforce HTTPS)"],
+      ["Backup and recovery", "Customer", "AWS automated + customer config", "AWS (built-in durability)"],
+      ["Logging and monitoring", "Customer", "Customer (CloudTrail, CloudWatch)", "Customer (CloudTrail, CloudWatch)"],
+      ["Compliance validation", "Customer", "Customer", "Customer"]
+    ]
+  },
+
+  exercises: [
+    "Your company is preparing for a SOC 2 Type II audit and runs workloads on EC2, RDS, S3, and Lambda. For each service, create a matrix mapping SOC 2 trust service criteria (Security, Availability, Confidentiality) to specific AWS controls (AWS-side) and customer controls (your side). Identify which AWS Artifact reports you need and what customer evidence you must produce.",
+    "A security incident: an S3 bucket containing customer PII was found publicly accessible for 72 hours. Conduct a root cause analysis within the shared responsibility framework. What customer-side controls failed? Design preventive controls (SCPs, S3 Block Public Access, Config rules) and detective controls (Macie, GuardDuty, CloudTrail) to prevent recurrence. Write the specific Config rule and remediation Lambda.",
+    "Design a multi-account security architecture using AWS Control Tower for a healthcare company (HIPAA). Specify: OU structure (security, log archive, production, development), mandatory guardrails (SCPs), detective controls (Config conformance packs for HIPAA), centralized logging (CloudTrail organization trail to S3 with Object Lock), and incident response automation with EventBridge and Step Functions.",
+    "Compare the customer's security responsibilities when running PostgreSQL on: (1) EC2 instance, (2) RDS, (3) Aurora Serverless. For each deployment model, list exactly what the customer must manage vs what AWS handles for: OS patches, DB engine updates, backup management, encryption, network isolation, connection management, and high availability configuration.",
+    "An external auditor asks you to demonstrate that your AWS infrastructure meets CIS AWS Foundations Benchmark v1.5. Identify the top 10 controls that are customer responsibilities (not AWS-managed). For each, specify: the CIS control number, what it requires, the AWS service to implement it (Config rule, CloudTrail, IAM policy, etc.), and how to provide audit evidence."
+  ],
+
+  cheatSheet: [
+    "**Simple rule**: AWS is responsible for security OF the cloud (infrastructure). Customer is responsible for security IN the cloud (data, access, configuration)",
+    "**Service model shift**: IaaS (EC2) = most customer responsibility. Managed (RDS) = shared. Serverless (Lambda) = least customer responsibility. Data protection is ALWAYS the customer's job",
+    "**Encryption responsibility**: AWS provides the tools (KMS, ACM, S3 SSE). Customer must ENABLE and CONFIGURE them. Unencrypted data is a customer misconfiguration, not an AWS failure",
+    "**Compliance artifacts**: AWS Artifact provides SOC, PCI, ISO, HIPAA reports proving AWS's side. Customer must separately prove their own controls through their own audits",
+    "**Network security layers**: VPC, subnets, route tables, NACLs, security groups, WAF, Shield — all customer-configured. AWS provides the building blocks, not the security architecture",
+    "**Patch management**: EC2 = customer patches OS and apps. RDS = AWS patches engine (maintenance window). Lambda = AWS patches runtime. Customer always patches their own application code",
+    "**Incident response**: AWS handles physical incidents and infrastructure-level attacks. Customer handles application-level incidents, data breaches from misconfiguration, and compromised credentials",
+    "**Key AWS security services to know**: GuardDuty (threat detection), Inspector (vulnerability scanning), Macie (data classification), Security Hub (aggregation), Config (compliance), CloudTrail (audit)"
+  ],
+
+  revisionNotes: [
+    "The shared responsibility model is a framework, not a product. It defines who is accountable for what — and accountability cannot be transferred even when using managed services",
+    "AWS manages physical security of data centers, including biometric access, video surveillance, environmental controls, and hardware decommissioning with media destruction (DoD 5220.22-M)",
+    "Customer-side data breaches are almost always due to misconfiguration: public S3 buckets, overly permissive security groups, unrotated credentials, or missing encryption — not AWS infrastructure failures",
+    "AWS Config records resource configuration history and evaluates compliance rules continuously. Config rules trigger on configuration changes or run periodically. Non-compliant resources can trigger auto-remediation",
+    "GuardDuty analyzes VPC Flow Logs, CloudTrail logs, DNS logs, and S3 data events using ML to detect threats. It requires no customer infrastructure — just enable it. Findings go to Security Hub and EventBridge",
+    "AWS Control Tower provides a pre-configured multi-account landing zone with mandatory guardrails (SCPs), centralized logging, and account provisioning. It automates many customer-side security responsibilities",
+    "For HIPAA: AWS signs a BAA for eligible services. Customer must implement encryption, access controls, audit logging, and data backup on those services. Using a non-eligible service for PHI violates the BAA",
+    "The AWS Well-Architected Security Pillar organizes customer responsibilities into 7 areas: identity management, detection, infrastructure protection, data protection, incident response, application security, and security governance"
+  ],
+
+  resources: [
+    { label: "AWS Shared Responsibility Model documentation", kind: "docs", note: "Official AWS page defining the shared responsibility model with diagrams for each service type" },
+    { label: "AWS Security Blog — Automating compliance with AWS Config", kind: "article", note: "Practical guide to implementing continuous compliance monitoring using Config rules and auto-remediation" },
+    { label: "AWS re:Invent — Security Best Practices: The Well-Architected Way (SEC205)", kind: "video", note: "Comprehensive walkthrough of security pillar best practices organized by the shared responsibility model" },
+    { label: "CIS Amazon Web Services Foundations Benchmark", kind: "docs", note: "Industry-standard security checklist for AWS accounts — covers IAM, logging, monitoring, networking controls" },
+    { label: "prowler - AWS Security Assessment Tool GitHub", kind: "repo", note: "Open-source tool that audits 300+ security checks based on CIS, PCI, HIPAA, and GDPR frameworks" }
+  ],
+
+  diagrams: [
+    {
+      title: "Shared Responsibility by Service Type",
+      kind: "architecture" as const,
+      caption: "Side-by-side comparison showing how the responsibility boundary shifts between IaaS (EC2), PaaS (RDS), and Serverless (Lambda) service models"
+    },
+    {
+      title: "Defense in Depth Security Controls",
+      kind: "flow" as const,
+      caption: "Flow diagram showing preventive controls (SCPs, IAM, security groups) feeding into detective controls (GuardDuty, Config, Macie) feeding into responsive controls (EventBridge, Lambda auto-remediation)"
+    }
+  ],
+
+  animations: [
+    {
+      title: "Security Incident Detection and Response Flow",
+      steps: [
+        { label: "Suspicious activity occurs", detail: "An IAM access key is used from an unusual IP address to list and download objects from an S3 bucket containing customer data. This is a potential credential compromise." },
+        { label: "GuardDuty detects the anomaly", detail: "GuardDuty analyzes CloudTrail logs and flags a finding: 'UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration'. The finding includes the IP, API calls made, and affected resources." },
+        { label: "EventBridge triggers automation", detail: "An EventBridge rule matches the GuardDuty finding type and triggers a Step Functions workflow. The workflow runs in parallel: notify the security team via SNS, create a JIRA incident ticket, and begin automated containment." },
+        { label: "Automated containment", detail: "A Lambda function attaches a deny-all IAM policy to the compromised user, disables the access key, and captures a snapshot of the IAM user's recent API activity from CloudTrail for forensic analysis." },
+        { label: "Investigation and remediation", detail: "The security team reviews CloudTrail logs to determine scope: which S3 objects were accessed, whether data was exfiltrated, and how the credentials were compromised. They check for lateral movement to other services." },
+        { label: "Post-incident hardening", detail: "Root cause: access key was committed to a public GitHub repo. Remediation: rotate all keys, enable GitHub secret scanning, implement SCP requiring MFA for sensitive operations, add Config rule detecting keys older than 90 days, update incident response runbook." }
+      ]
+    }
+  ],
+
   glossary: [
     { term: "Shared responsibility model", definition: "Framework dividing security and compliance obligations between the cloud provider (infrastructure) and customer (workloads, data, configuration)." },
     { term: "CSPM", definition: "Cloud Security Posture Management — automated tools that detect misconfigurations, compliance violations, and security risks in cloud environments." },

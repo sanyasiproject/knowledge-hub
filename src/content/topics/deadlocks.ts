@@ -23,162 +23,209 @@ export const deadlocks: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Deadlock demonstration with two threads and two locks",
-      source: `import threading
-import time
+      source: `#include <iostream>
+#include <thread>
+#include <mutex>
+#include <chrono>
 
-lock_a = threading.Lock()
-lock_b = threading.Lock()
+std::mutex lockA;
+std::mutex lockB;
 
-def thread_1():
-    print("Thread 1: acquiring lock A...")
-    lock_a.acquire()
-    print("Thread 1: acquired lock A, sleeping...")
-    time.sleep(0.1)  # Increase chance of deadlock
-    print("Thread 1: acquiring lock B...")
-    lock_b.acquire()  # Blocked -- Thread 2 holds lock B
-    print("Thread 1: acquired lock B")
-    lock_b.release()
-    lock_a.release()
+void thread1() {
+    std::cout << "Thread 1: acquiring lock A...\\n";
+    lockA.lock();
+    std::cout << "Thread 1: acquired lock A, sleeping...\\n";
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::cout << "Thread 1: acquiring lock B...\\n";
+    lockB.lock();  // Blocked -- Thread 2 holds lock B
+    std::cout << "Thread 1: acquired lock B\\n";
+    lockB.unlock();
+    lockA.unlock();
+}
 
-def thread_2():
-    print("Thread 2: acquiring lock B...")
-    lock_b.acquire()
-    print("Thread 2: acquired lock B, sleeping...")
-    time.sleep(0.1)
-    print("Thread 2: acquiring lock A...")
-    lock_a.acquire()  # Blocked -- Thread 1 holds lock A
-    print("Thread 2: acquired lock A")
-    lock_a.release()
-    lock_b.release()
+void thread2() {
+    std::cout << "Thread 2: acquiring lock B...\\n";
+    lockB.lock();
+    std::cout << "Thread 2: acquired lock B, sleeping...\\n";
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::cout << "Thread 2: acquiring lock A...\\n";
+    lockA.lock();  // Blocked -- Thread 1 holds lock A
+    std::cout << "Thread 2: acquired lock A\\n";
+    lockA.unlock();
+    lockB.unlock();
+}
 
-t1 = threading.Thread(target=thread_1)
-t2 = threading.Thread(target=thread_2)
-t1.start()
-t2.start()
-t1.join(timeout=5)
-t2.join(timeout=5)
+int main() {
+    std::thread t1(thread1);
+    std::thread t2(thread2);
 
-if t1.is_alive() or t2.is_alive():
-    print("DEADLOCK DETECTED -- threads are stuck")`,
+    // Use timed join to detect deadlock
+    // (std::thread does not have timed join, so we detach after a timeout)
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+
+    // In real code, if threads are still running after 5s, it is a deadlock.
+    // Note: this is a demonstration -- production code should use
+    // std::lock() or std::scoped_lock to avoid deadlocks.
+    std::cout << "If this line does not appear promptly, DEADLOCK occurred\\n";
+
+    t1.join();
+    t2.join();
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Banker's algorithm for deadlock avoidance",
-      source: `def bankers_algorithm(available, max_demand, allocation):
-    """
-    Banker's algorithm: determines if the system is in a safe state.
-    Returns (is_safe, safe_sequence).
+      source: `#include <iostream>
+#include <vector>
+#include <string>
 
-    available:  list of available instances per resource type
-    max_demand: matrix[process][resource] of max demand
-    allocation: matrix[process][resource] of current allocation
-    """
-    n = len(allocation)       # number of processes
-    m = len(available)        # number of resource types
+struct BankersResult {
+    bool isSafe;
+    std::vector<int> safeSequence;
+};
 
-    # Calculate Need matrix: Need[i][j] = Max[i][j] - Allocation[i][j]
-    need = [
-        [max_demand[i][j] - allocation[i][j] for j in range(m)]
-        for i in range(n)
-    ]
+// Banker's algorithm: determines if the system is in a safe state.
+// Returns {is_safe, safe_sequence}.
+BankersResult bankersAlgorithm(
+    std::vector<int> available,
+    const std::vector<std::vector<int>>& maxDemand,
+    const std::vector<std::vector<int>>& allocation)
+{
+    int n = static_cast<int>(allocation.size());    // number of processes
+    int m = static_cast<int>(available.size());     // number of resource types
 
-    work = list(available)
-    finish = [False] * n
-    safe_sequence = []
+    // Calculate Need matrix: Need[i][j] = Max[i][j] - Allocation[i][j]
+    std::vector<std::vector<int>> need(n, std::vector<int>(m));
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < m; ++j)
+            need[i][j] = maxDemand[i][j] - allocation[i][j];
 
-    while len(safe_sequence) < n:
-        found = False
-        for i in range(n):
-            if not finish[i] and all(need[i][j] <= work[j] for j in range(m)):
-                # Process i can finish; release its resources
-                for j in range(m):
-                    work[j] += allocation[i][j]
-                finish[i] = True
-                safe_sequence.append(i)
-                found = True
-                break
-        if not found:
-            return False, []  # Unsafe state -- no process can finish
+    std::vector<int> work = available;
+    std::vector<bool> finish(n, false);
+    std::vector<int> safeSequence;
 
-    return True, safe_sequence
+    while (static_cast<int>(safeSequence.size()) < n) {
+        bool found = false;
+        for (int i = 0; i < n; ++i) {
+            if (finish[i]) continue;
+            bool canFinish = true;
+            for (int j = 0; j < m; ++j) {
+                if (need[i][j] > work[j]) { canFinish = false; break; }
+            }
+            if (canFinish) {
+                // Process i can finish; release its resources
+                for (int j = 0; j < m; ++j)
+                    work[j] += allocation[i][j];
+                finish[i] = true;
+                safeSequence.push_back(i);
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            return {false, {}};  // Unsafe state -- no process can finish
+    }
+    return {true, safeSequence};
+}
 
-# Example: 3 resource types (A, B, C), 5 processes (P0-P4)
-available  = [3, 3, 2]
-max_demand = [
-    [7, 5, 3],  # P0
-    [3, 2, 2],  # P1
-    [9, 0, 2],  # P2
-    [2, 2, 2],  # P3
-    [4, 3, 3],  # P4
-]
-allocation = [
-    [0, 1, 0],  # P0
-    [2, 0, 0],  # P1
-    [3, 0, 2],  # P2
-    [2, 1, 1],  # P3
-    [0, 0, 2],  # P4
-]
+int main() {
+    // Example: 3 resource types (A, B, C), 5 processes (P0-P4)
+    std::vector<int> available = {3, 3, 2};
+    std::vector<std::vector<int>> maxDemand = {
+        {7, 5, 3},  // P0
+        {3, 2, 2},  // P1
+        {9, 0, 2},  // P2
+        {2, 2, 2},  // P3
+        {4, 3, 3},  // P4
+    };
+    std::vector<std::vector<int>> allocation = {
+        {0, 1, 0},  // P0
+        {2, 0, 0},  // P1
+        {3, 0, 2},  // P2
+        {2, 1, 1},  // P3
+        {0, 0, 2},  // P4
+    };
 
-is_safe, seq = bankers_algorithm(available, max_demand, allocation)
-print(f"Safe: {is_safe}, Sequence: {['P'+str(i) for i in seq]}")
-# Output: Safe: True, Sequence: ['P1', 'P3', 'P4', 'P0', 'P2']`,
+    auto [isSafe, seq] = bankersAlgorithm(available, maxDemand, allocation);
+    std::cout << "Safe: " << (isSafe ? "true" : "false") << ", Sequence: [";
+    for (size_t i = 0; i < seq.size(); ++i) {
+        if (i > 0) std::cout << ", ";
+        std::cout << "P" << seq[i];
+    }
+    std::cout << "]\\n";
+    // Output: Safe: true, Sequence: [P1, P3, P4, P0, P2]
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Deadlock prevention via consistent lock ordering",
-      source: `import threading
+      source: `#include <iostream>
+#include <mutex>
+#include <vector>
+#include <thread>
+#include <stdexcept>
+#include <string>
 
-class OrderedLockManager:
-    """
-    Prevents deadlock by enforcing a global total order on lock acquisition.
-    Each lock is assigned an integer rank. Locks must be acquired in
-    ascending rank order; violating the order raises an error.
-    """
-    _local = threading.local()
+// Prevents deadlock by enforcing a global total order on lock acquisition.
+// Each lock is assigned an integer rank. Locks must be acquired in
+// ascending rank order; violating the order raises an error.
+class OrderedLock {
+public:
+    explicit OrderedLock(int rank) : rank_(rank) {}
 
-    def __init__(self, rank: int):
-        self.rank = rank
-        self._lock = threading.Lock()
+    void lock() {
+        auto& held = heldRanks();
+        if (!held.empty() && held.back() >= rank_) {
+            throw std::runtime_error(
+                "Lock ordering violation: cannot acquire rank "
+                + std::to_string(rank_) + " while holding rank "
+                + std::to_string(held.back()));
+        }
+        mutex_.lock();
+        held.push_back(rank_);
+    }
 
-    def acquire(self):
-        held = getattr(OrderedLockManager._local, "held_ranks", [])
-        if held and held[-1] >= self.rank:
-            raise RuntimeError(
-                f"Lock ordering violation: cannot acquire rank {self.rank} "
-                f"while holding rank {held[-1]}"
-            )
-        self._lock.acquire()
-        held.append(self.rank)
-        OrderedLockManager._local.held_ranks = held
+    void unlock() {
+        mutex_.unlock();
+        auto& held = heldRanks();
+        held.pop_back();
+    }
 
-    def release(self):
-        self._lock.release()
-        held = OrderedLockManager._local.held_ranks
-        held.pop()
+    int rank() const { return rank_; }
 
-    def __enter__(self):
-        self.acquire()
-        return self
+private:
+    int rank_;
+    std::mutex mutex_;
 
-    def __exit__(self, *args):
-        self.release()
+    // Thread-local storage for tracking held lock ranks
+    static std::vector<int>& heldRanks() {
+        thread_local std::vector<int> ranks;
+        return ranks;
+    }
+};
 
-# Usage: both threads acquire locks in the same order (rank 1, then rank 2)
-lock_a = OrderedLockManager(rank=1)
-lock_b = OrderedLockManager(rank=2)
+// Usage: both threads acquire locks in the same order (rank 1, then rank 2)
+OrderedLock lockA(1);
+OrderedLock lockB(2);
 
-def safe_worker(name):
-    with lock_a:
-        with lock_b:
-            print(f"{name}: holding both locks safely")
+void safeWorker(const std::string& name) {
+    std::lock_guard<OrderedLock> guardA(lockA);
+    std::lock_guard<OrderedLock> guardB(lockB);
+    std::cout << name << ": holding both locks safely\\n";
+}
 
-t1 = threading.Thread(target=safe_worker, args=("Thread-1",))
-t2 = threading.Thread(target=safe_worker, args=("Thread-2",))
-t1.start(); t2.start()
-t1.join(); t2.join()
-print("No deadlock -- consistent lock ordering works")`,
+int main() {
+    std::thread t1(safeWorker, "Thread-1");
+    std::thread t2(safeWorker, "Thread-2");
+    t1.join();
+    t2.join();
+    std::cout << "No deadlock -- consistent lock ordering works\\n";
+    return 0;
+}`,
     },
   ],
   diagrams: [

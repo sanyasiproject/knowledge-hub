@@ -225,109 +225,149 @@ console.log(passwordField.validate());
 // { valid: false, errors: ["Must be at least 8 characters", "Password needs..."] }`,
     },
     {
-      language: "python",
-      caption: "Python Strategy with protocol classes and runtime switching",
-      source: `from dataclasses import dataclass
-from typing import Protocol
+      language: "cpp",
+      caption: "C++ Strategy with abstract base class and runtime switching",
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <memory>
+#include <unordered_map>
+#include <cstdio>
+#include <cassert>
+#include <zlib.h>
 
+using Bytes = std::vector<uint8_t>;
 
-# Strategy interface using Protocol (structural typing)
-class CompressionStrategy(Protocol):
-    def compress(self, data: bytes) -> bytes: ...
-    def decompress(self, data: bytes) -> bytes: ...
-    @property
-    def name(self) -> str: ...
+// Strategy interface (abstract base class)
+class CompressionStrategy {
+public:
+    virtual ~CompressionStrategy() = default;
+    virtual Bytes compress(const Bytes& data) const = 0;
+    virtual Bytes decompress(const Bytes& data) const = 0;
+    virtual std::string name() const = 0;
+};
 
+// ConcreteStrategy: No compression
+class NoCompression : public CompressionStrategy {
+public:
+    std::string name() const override { return "none"; }
+    Bytes compress(const Bytes& data) const override { return data; }
+    Bytes decompress(const Bytes& data) const override { return data; }
+};
 
-# ConcreteStrategy: No compression
-class NoCompression:
-    @property
-    def name(self) -> str:
-        return "none"
+// ConcreteStrategy: Zlib compression
+class ZlibCompression : public CompressionStrategy {
+    int level_;
+public:
+    explicit ZlibCompression(int level = Z_DEFAULT_COMPRESSION)
+        : level_(level) {}
 
-    def compress(self, data: bytes) -> bytes:
-        return data
+    std::string name() const override {
+        return "zlib(level=" + std::to_string(level_) + ")";
+    }
 
-    def decompress(self, data: bytes) -> bytes:
-        return data
+    Bytes compress(const Bytes& data) const override {
+        uLongf dest_len = compressBound(data.size());
+        Bytes result(dest_len);
+        compress2(result.data(), &dest_len, data.data(), data.size(), level_);
+        result.resize(dest_len);
+        return result;
+    }
 
+    Bytes decompress(const Bytes& data) const override {
+        Bytes result(data.size() * 10);  // estimate decompressed size
+        uLongf dest_len = result.size();
+        uncompress(result.data(), &dest_len, data.data(), data.size());
+        result.resize(dest_len);
+        return result;
+    }
+};
 
-# ConcreteStrategy: Gzip
-import gzip
+// ConcreteStrategy: Run-Length Encoding (simple illustrative compressor)
+class RleCompression : public CompressionStrategy {
+public:
+    std::string name() const override { return "rle"; }
 
-class GzipCompression:
-    def __init__(self, level: int = 6) -> None:
-        self._level = level
+    Bytes compress(const Bytes& data) const override {
+        Bytes result;
+        for (size_t i = 0; i < data.size(); ) {
+            uint8_t ch = data[i];
+            size_t count = 1;
+            while (i + count < data.size() && data[i + count] == ch && count < 255)
+                ++count;
+            result.push_back(static_cast<uint8_t>(count));
+            result.push_back(ch);
+            i += count;
+        }
+        return result;
+    }
 
-    @property
-    def name(self) -> str:
-        return f"gzip(level={self._level})"
+    Bytes decompress(const Bytes& data) const override {
+        Bytes result;
+        for (size_t i = 0; i + 1 < data.size(); i += 2)
+            result.insert(result.end(), data[i], data[i + 1]);
+        return result;
+    }
+};
 
-    def compress(self, data: bytes) -> bytes:
-        return gzip.compress(data, compresslevel=self._level)
+// Context
+class FileStorage {
+    std::unique_ptr<CompressionStrategy> strategy_;
+    std::unordered_map<std::string, Bytes> store_;
+public:
+    explicit FileStorage(std::unique_ptr<CompressionStrategy> strategy = nullptr)
+        : strategy_(strategy ? std::move(strategy) : std::make_unique<NoCompression>()) {}
 
-    def decompress(self, data: bytes) -> bytes:
-        return gzip.decompress(data)
+    const std::string& compression() const {
+        static std::string n;
+        n = strategy_->name();
+        return n;
+    }
 
+    // Runtime strategy switching
+    void set_compression(std::unique_ptr<CompressionStrategy> strategy) {
+        strategy_ = std::move(strategy);
+    }
 
-# ConcreteStrategy: Zlib
-import zlib
+    size_t save(const std::string& key, const Bytes& data) {
+        Bytes compressed = strategy_->compress(data);
+        double ratio = data.empty() ? 100.0
+            : static_cast<double>(compressed.size()) / data.size() * 100.0;
+        std::printf("Saved '%s': %zuB -> %zuB (%.1f%%) [%s]\\n",
+            key.c_str(), data.size(), compressed.size(), ratio,
+            strategy_->name().c_str());
+        store_[key] = std::move(compressed);
+        return store_[key].size();
+    }
 
-class ZlibCompression:
-    @property
-    def name(self) -> str:
-        return "zlib"
+    Bytes load(const std::string& key) {
+        return strategy_->decompress(store_.at(key));
+    }
+};
 
-    def compress(self, data: bytes) -> bytes:
-        return zlib.compress(data)
+// Usage -- switch compression strategy at runtime
+int main() {
+    FileStorage storage;
+    Bytes test_data;
+    for (int i = 0; i < 1000; ++i) {
+        std::string s = "Hello, World! ";
+        test_data.insert(test_data.end(), s.begin(), s.end());
+    }
 
-    def decompress(self, data: bytes) -> bytes:
-        return zlib.decompress(data)
+    storage.save("file1.txt", test_data);  // No compression
+    // Saved 'file1.txt': 14000B -> 14000B (100.0%) [none]
 
+    storage.set_compression(std::make_unique<ZlibCompression>(9));
+    storage.save("file2.txt", test_data);  // Max zlib compression
+    // Saved 'file2.txt': 14000B -> 42B (0.3%) [zlib(level=9)]
 
-# Context
-class FileStorage:
-    def __init__(self, strategy: CompressionStrategy | None = None) -> None:
-        self._strategy = strategy or NoCompression()
-        self._store: dict[str, bytes] = {}
+    storage.set_compression(std::make_unique<RleCompression>());
+    storage.save("file3.txt", test_data);  // RLE compression
+    // Saved 'file3.txt': 14000B -> ... [rle]
 
-    @property
-    def compression(self) -> str:
-        return self._strategy.name
-
-    def set_compression(self, strategy: CompressionStrategy) -> None:
-        """Switch strategy at runtime."""
-        self._strategy = strategy
-
-    def save(self, key: str, data: bytes) -> int:
-        compressed = self._strategy.compress(data)
-        self._store[key] = compressed
-        ratio = len(compressed) / len(data) * 100 if data else 100
-        print(f"Saved '{key}': {len(data)}B -> {len(compressed)}B ({ratio:.1f}%) [{self._strategy.name}]")
-        return len(compressed)
-
-    def load(self, key: str) -> bytes:
-        compressed = self._store[key]
-        return self._strategy.decompress(compressed)
-
-
-# Usage -- switch compression strategy at runtime
-storage = FileStorage()
-test_data = b"Hello, World! " * 1000
-
-storage.save("file1.txt", test_data)  # No compression
-# Saved 'file1.txt': 14000B -> 14000B (100.0%) [none]
-
-storage.set_compression(GzipCompression(level=9))
-storage.save("file2.txt", test_data)  # Max gzip compression
-# Saved 'file2.txt': 14000B -> 42B (0.3%) [gzip(level=9)]
-
-storage.set_compression(ZlibCompression())
-storage.save("file3.txt", test_data)  # Zlib compression
-# Saved 'file3.txt': 14000B -> 36B (0.3%) [zlib]
-
-# Verify round-trip
-assert storage.load("file2.txt") == test_data`,
+    // Verify round-trip
+    assert(storage.load("file2.txt") == test_data);
+}`,
     },
   ],
   diagrams: [

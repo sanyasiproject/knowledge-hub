@@ -169,4 +169,241 @@ This decoupling enables independent deployment, scaling, and evolution of servic
         "An event published across bounded context boundaries with a stable, versioned schema serving as the public contract between services.",
     },
   ],
+  deepDive: [
+    `**Event-Driven Architecture** represents a fundamental shift in how distributed systems communicate. In traditional *request-response* architectures, service A calls service B synchronously and waits for a reply — this creates **tight temporal coupling** where both services must be available simultaneously. EDA breaks this by introducing an *intermediary* (the **message broker**) that decouples producers from consumers. The producer publishes an event like \`OrderPlaced\` to the broker and moves on immediately; the broker stores it durably and delivers it to interested consumers when they are ready. This *fire-and-forget* model means the producer has **zero knowledge** of downstream consumers — you can add analytics, notification, or audit services that subscribe to \`OrderPlaced\` without touching a single line of producer code. However, this decoupling introduces **eventual consistency**: after an order is placed, the inventory service may take milliseconds or seconds to reserve stock, and during that window the system state is *inconsistent*. Developers must design UIs and APIs that embrace this reality — showing "processing" states, using **optimistic updates**, and handling the case where a downstream step *fails* after the initial event was accepted.`,
+
+    `The distinction between **choreography** and **orchestration** is one of the most consequential architectural decisions in EDA. In *choreography*, each service is autonomous: \`OrderService\` emits \`OrderPlaced\`, \`PaymentService\` listens and emits \`PaymentProcessed\`, \`InventoryService\` listens to both and emits \`StockReserved\`. The **workflow is emergent** — no single service knows the full saga. This is powerful for *team autonomy* (each team owns its service and its reactions) but creates **implicit workflows** that are hard to debug. When something goes wrong, you must correlate events across multiple services using a \`correlationId\` header. In contrast, *orchestration* uses a **central coordinator** (like a saga manager) that explicitly calls \`paymentService.charge()\`, waits for the result, then calls \`inventoryService.reserve()\`. The workflow is **explicit and visible** — you can inspect the orchestrator's state machine to see exactly where a process is stuck. The trade-off is that the orchestrator becomes a **coupling point** and potential bottleneck. The pragmatic approach is a **hybrid**: use choreography *across* bounded contexts (services react to each other's integration events) and orchestration *within* a bounded context (a coordinator manages multi-step internal workflows).`,
+
+    `**Schema evolution** is the hidden challenge that makes or breaks EDA at scale. Every event is a **contract** between the producing service and all consuming services, deployed and versioned independently. When \`OrderService\` adds a \`loyaltyPoints\` field to the \`OrderPlaced\` event, every consumer must handle both the old format (without the field) and the new format (with it). This is **backward compatibility** — new producers, old consumers. **Forward compatibility** means old producers can coexist with new consumers that expect fields not yet present. Schema registries like *Confluent Schema Registry* enforce compatibility rules automatically: \`BACKWARD\` (can add optional fields, cannot remove required fields), \`FORWARD\` (can remove fields, cannot add required fields), and \`FULL\` (both). In practice, the safest strategy is to **never remove or rename fields** — only *add* optional fields with sensible defaults. Use formats like **Avro** or **Protobuf** that support schema evolution natively, or enforce \`JSON Schema\` validation at the broker level. Without disciplined schema management, EDA systems degrade into a tangle of *brittle integrations* where any producer change triggers cascading consumer failures.`,
+  ],
+  code: [
+    {
+      language: "typescript",
+      caption: "Publishing an event with amqplib using a fanout exchange (broadcast pattern)",
+      source: `const amqp = require('amqplib');
+
+async function publishEvent() {
+  const connection = await amqp.connect('amqp://localhost');
+  const channel = await connection.createChannel();
+
+  // Declare a fanout exchange for broadcasting events
+  const exchange = 'events.order';
+  await channel.assertExchange(exchange, 'fanout', { durable: true });
+
+  // Create the event payload
+  const event = {
+    type: 'OrderPlaced',
+    timestamp: new Date().toISOString(),
+    correlationId: 'corr-' + Date.now(),
+    data: {
+      orderId: 'ORD-12345',
+      customerId: 'CUST-789',
+      items: [{ sku: 'WIDGET-A', qty: 2, price: 29.99 }],
+      total: 59.98,
+    },
+  };
+
+  // Publish — routing key is ignored by fanout exchanges
+  channel.publish(exchange, '', Buffer.from(JSON.stringify(event)), {
+    persistent: true,         // delivery-mode = 2
+    contentType: 'application/json',
+    messageId: 'msg-' + Date.now(),
+    headers: { 'x-event-type': 'OrderPlaced' },
+  });
+
+  console.log('Event published:', event.type);
+  await channel.close();
+  await connection.close();
+}
+
+publishEvent().catch(console.error);`,
+    },
+    {
+      language: "typescript",
+      caption: "Consuming events with competing consumers pattern (multiple workers on one queue)",
+      source: `const amqp = require('amqplib');
+
+async function startConsumer(workerId: number) {
+  const connection = await amqp.connect('amqp://localhost');
+  const channel = await connection.createChannel();
+
+  const exchange = 'events.order';
+  const queue = 'inventory.order-placed'; // shared queue for competing consumers
+
+  await channel.assertExchange(exchange, 'fanout', { durable: true });
+  await channel.assertQueue(queue, { durable: true });
+  await channel.bindQueue(queue, exchange, '');
+
+  // Prefetch 1 ensures fair dispatch among workers
+  await channel.prefetch(1);
+
+  console.log(\`Worker \${workerId} waiting for events...\`);
+
+  channel.consume(queue, (msg) => {
+    if (!msg) return;
+
+    const event = JSON.parse(msg.content.toString());
+    console.log(\`Worker \${workerId} processing: \${event.type} [\${event.data.orderId}]\`);
+
+    // Simulate async processing
+    setTimeout(() => {
+      console.log(\`Worker \${workerId} done with \${event.data.orderId}\`);
+      channel.ack(msg); // Manual ack after successful processing
+    }, 1000);
+  }, { noAck: false }); // Manual acknowledgment mode
+}
+
+// Start 3 competing consumers
+Promise.all([startConsumer(1), startConsumer(2), startConsumer(3)]);`,
+    },
+    {
+      language: "typescript",
+      caption: "Choreography pattern: independent services reacting to events via topic exchange",
+      source: `const amqp = require('amqplib');
+
+async function setupChoreography() {
+  const connection = await amqp.connect('amqp://localhost');
+  const channel = await connection.createChannel();
+
+  const exchange = 'events.domain';
+  await channel.assertExchange(exchange, 'topic', { durable: true });
+
+  // --- Payment Service: listens for order events ---
+  const paymentQueue = 'payment.order-events';
+  await channel.assertQueue(paymentQueue, { durable: true });
+  await channel.bindQueue(paymentQueue, exchange, 'order.placed');
+
+  channel.consume(paymentQueue, async (msg) => {
+    if (!msg) return;
+    const event = JSON.parse(msg.content.toString());
+    console.log('PaymentService: charging for', event.data.orderId);
+
+    // After processing, emit its own event (choreography)
+    const paymentEvent = {
+      type: 'PaymentProcessed',
+      data: { orderId: event.data.orderId, status: 'charged' },
+    };
+    channel.publish(exchange, 'payment.processed',
+      Buffer.from(JSON.stringify(paymentEvent)),
+      { persistent: true, contentType: 'application/json' }
+    );
+    channel.ack(msg);
+  }, { noAck: false });
+
+  // --- Notification Service: listens for multiple event types ---
+  const notifyQueue = 'notifications.all-events';
+  await channel.assertQueue(notifyQueue, { durable: true });
+  await channel.bindQueue(notifyQueue, exchange, 'order.*');
+  await channel.bindQueue(notifyQueue, exchange, 'payment.*');
+
+  channel.consume(notifyQueue, (msg) => {
+    if (!msg) return;
+    const event = JSON.parse(msg.content.toString());
+    console.log('NotificationService: sending notification for', event.type);
+    channel.ack(msg);
+  }, { noAck: false });
+}
+
+setupChoreography().catch(console.error);`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Event-Driven Architecture Overview",
+      kind: "architecture",
+      caption: "Producers publish events to the broker; consumers subscribe independently, enabling loose coupling and independent scaling.",
+      mermaid: `graph LR
+  P1[Order Service] -->|OrderPlaced| B[Message Broker]
+  P2[Payment Service] -->|PaymentProcessed| B
+  B -->|OrderPlaced| C1[Inventory Service]
+  B -->|OrderPlaced| C2[Notification Service]
+  B -->|OrderPlaced| C3[Analytics Service]
+  B -->|PaymentProcessed| C4[Shipping Service]
+  B -->|PaymentProcessed| C2`,
+    },
+    {
+      title: "Choreography vs Orchestration Flow",
+      kind: "sequence",
+      caption: "Choreography: services react independently to events. Orchestration: a coordinator directs each step.",
+      mermaid: `sequenceDiagram
+  participant OS as OrderService
+  participant Broker as Message Broker
+  participant PS as PaymentService
+  participant IS as InventoryService
+
+  rect rgb(200, 230, 255)
+  Note over OS, IS: Choreography Pattern
+  OS->>Broker: publish OrderPlaced
+  Broker->>PS: deliver OrderPlaced
+  Broker->>IS: deliver OrderPlaced
+  PS->>Broker: publish PaymentProcessed
+  IS->>Broker: publish StockReserved
+  end
+
+  rect rgb(255, 230, 200)
+  Note over OS, IS: Orchestration Pattern
+  OS->>PS: charge(orderId)
+  PS-->>OS: success
+  OS->>IS: reserve(orderId)
+  IS-->>OS: success
+  end`,
+    },
+    {
+      title: "Event Types Mind Map",
+      kind: "mindmap",
+      caption: "Overview of event categories and their characteristics in EDA.",
+      mermaid: `mindmap
+  root((EDA Events))
+    Domain Events
+      OrderPlaced
+      PaymentReceived
+      Scoped to bounded context
+    Integration Events
+      Cross-context communication
+      Stable versioned schemas
+      Public API of a service
+    Notification Events
+      Minimal payload
+      Consumer calls back for details
+      Low schema coupling
+    State Transfer Events
+      Full payload included
+      No callback needed
+      Higher schema coupling`,
+    },
+  ],
+  comparison: {
+    columns: ["Aspect", "Choreography", "Orchestration"],
+    rows: [
+      ["**Coupling**", "*Loose* — services are independent", "*Tighter* — coordinator knows all services"],
+      ["**Workflow visibility**", "*Implicit* — must trace across services", "*Explicit* — visible in coordinator's state machine"],
+      ["**Debugging**", "*Harder* — requires distributed tracing with `correlationId`", "*Easier* — inspect orchestrator state"],
+      ["**Single point of failure**", "*None* — no central coordinator", "*Yes* — the orchestrator is a critical component"],
+      ["**Team autonomy**", "*High* — teams own their reactions", "*Lower* — changes require orchestrator updates"],
+      ["**Error handling**", "*Distributed* — each service handles its own compensation", "*Centralized* — orchestrator manages retries and rollbacks"],
+      ["**Best for**", "Cross-bounded-context communication", "Complex multi-step workflows within a context"],
+    ],
+  },
+  exercises: [
+    "**Design an event schema** for an e-commerce system: define the `OrderPlaced`, `PaymentProcessed`, `ShipmentDispatched`, and `OrderCancelled` events with appropriate fields, *naming conventions* (past tense), and `correlationId` headers. Ensure **backward compatibility** — add a new `loyaltyPoints` field to `OrderPlaced` without breaking existing consumers.",
+    "**Implement a choreography flow** using `amqplib` where three services (`OrderService`, `PaymentService`, `NotificationService`) communicate *only* through events on a **topic exchange**. Each service should publish its own domain event after processing. Add a `correlationId` to trace the full flow.",
+    "**Build an event-carried state transfer** vs **notification event** comparison: implement the same `UserRegistered` flow twice — once with a minimal notification event (consumer queries for details) and once with a full payload. Measure the *latency* and *coupling* trade-offs.",
+    "**Implement idempotent consumers**: create a consumer that processes `PaymentProcessed` events but uses a **deduplication store** (e.g., a `Set` or `Map` of `messageId` values) to ensure each event is processed *exactly once* even if delivered multiple times.",
+    "**Design a hybrid choreography-orchestration system**: use *choreography* across two bounded contexts (Order and Shipping) and an *orchestrator* within the Order context to manage the `PlaceOrder -> Charge -> ReserveStock -> Confirm` saga. Draw the architecture and implement the orchestrator logic.",
+  ],
+  cheatSheet: [
+    "**Events** = past tense (*OrderPlaced*), **Commands** = imperative (*PlaceOrder*). Events *inform*, commands *instruct*.",
+    "**Three decouplings**: *temporal* (don't run simultaneously), *spatial* (don't know each other), *platform* (different tech stacks).",
+    "**Choreography** = no coordinator, emergent workflow, *loose coupling*. **Orchestration** = central coordinator, explicit workflow, *better visibility*.",
+    "**Notification events** = minimal payload + callback. **State transfer events** = full payload, no callback, higher *schema coupling*.",
+    "**Schema evolution rule**: *never* remove or rename required fields. Only **add optional fields** with defaults. Use `Avro` / `Protobuf` / `JSON Schema` for enforcement.",
+    "**Idempotent consumers** are mandatory for *at-least-once* delivery — use `messageId` + deduplication store to handle redeliveries.",
+  ],
+  revisionNotes: [
+    "EDA provides **temporal**, **spatial**, and **platform decoupling** — producers and consumers can be *offline*, *unaware of each other*, and *built with different technologies*. The trade-off is **eventual consistency**.",
+    "**Events vs Commands**: events are *immutable facts* (past tense, broadcast, zero coupling), commands are *directed instructions* (imperative, point-to-point, expects response). A command disguised as an event (e.g., `SendEmailEvent`) defeats the purpose of EDA.",
+    "**Choreography** works best *across bounded contexts* where team autonomy matters. **Orchestration** works best *within a bounded context* for complex multi-step sagas with error handling. Most production systems use a **hybrid**.",
+    "**Schema evolution** is the most underestimated challenge in EDA. Use a **schema registry** with **backward compatibility** rules. Never remove fields; only add optional ones. Breaking schema changes require a *new event type* (e.g., `OrderPlacedV2`).",
+    "The **competing consumers** pattern provides horizontal scaling — multiple instances share a queue. **Pub-sub** provides fan-out — each consumer type gets its own queue bound to the exchange. These are complementary, not competing patterns.",
+  ],
 };

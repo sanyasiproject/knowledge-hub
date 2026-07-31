@@ -171,4 +171,269 @@ export const branchingMerging: TopicContent = {
         "The most recent common ancestor commit of two branches, used as the reference point for three-way merge comparison.",
     },
   ],
+
+  deepDive: [
+    "## How Git Stores Branches Internally\n\nUnder the hood, a Git branch is nothing more than a **40-byte file** stored in `.git/refs/heads/`. When you run `git branch feature-login`, Git creates the file `.git/refs/heads/feature-login` containing the SHA-1 hash of the current commit. The special ref `HEAD` (stored in `.git/HEAD`) is typically a *symbolic reference* pointing to the current branch — e.g., `ref: refs/heads/main`. When you commit, Git updates the branch file that HEAD points to with the new commit's SHA.\n\nThis design has profound implications:\n- Branch creation is **O(1)** — no file copying, no snapshots, just one file write\n- Switching branches (`git switch`) updates HEAD and adjusts the working tree via the index\n- Deleting a branch removes the pointer file; the commits remain in the object database until `git gc` prunes unreachable objects (default: 2 weeks via `gc.pruneExpire`)\n- **Packed refs**: for performance, Git periodically packs loose ref files into `.git/packed-refs`, a single file with one line per ref",
+
+    "## Merge Algorithms in Depth\n\nGit's default merge strategy is **ort** (Ostensibly Recursive's Twin, replacing the older *recursive* strategy in Git 2.34+). The algorithm works as follows:\n\n1. **Find the merge base**: Git walks the commit DAG to find the *lowest common ancestor* (LCA) of the two branch tips. If multiple LCAs exist (criss-cross merges), ort recursively merges them to produce a virtual merge base.\n2. **Three-way diff**: Git diffs both branch tips against the merge base. Changes that appear on only one side are applied cleanly. Changes on both sides to *different* regions of the same file are combined.\n3. **Conflict detection**: When both sides modify the *same lines*, Git cannot auto-resolve and writes conflict markers.\n\nOther strategies include:\n- `resolve` — simpler, single merge base, faster but less capable\n- `octopus` — merges more than two branches simultaneously (used by `git merge A B C`); aborts if conflicts arise\n- `ours` — keeps the current branch's tree entirely, discarding the other branch's changes (useful for recording that a merge happened without taking changes)\n- `subtree` — adjusts one tree to match the other's structure before merging, useful for project subdirectory merges",
+
+    "## Rebase vs. Merge: Trade-offs\n\n**Rebasing** (`git rebase main`) replays your branch's commits on top of the target branch, rewriting commit SHAs to produce a *linear* history. **Merging** preserves the original commit graph with an explicit merge commit.\n\n| Aspect | Merge | Rebase |\n|--------|-------|--------|\n| History | Preserves true topology | Linear, cleaner `git log` |\n| Commit SHAs | Unchanged | Rewritten (new SHAs) |\n| Conflict resolution | Once, at merge time | Per-commit during rebase |\n| Safety | Safe for shared branches | **Never rebase published/shared commits** |\n| Bisect friendliness | Merge commits can confuse bisect | Linear history is bisect-friendly |\n\nA common workflow combines both: *rebase locally* to clean up feature branch history, then *merge with --no-ff* into the integration branch to preserve the feature boundary. Interactive rebase (`git rebase -i`) lets you squash, reorder, edit, or drop commits before merging — essential for crafting a clean, reviewable history.",
+
+    "## Advanced Conflict Resolution Techniques\n\nBeyond basic marker editing, Git provides powerful conflict resolution tools:\n\n- **`git rerere`** (Reuse Recorded Resolution): Enable with `git config --global rerere.enabled true`. Git records how you resolve each conflict and automatically applies the same resolution if the identical conflict recurs — invaluable during long-running rebases or repeated merges.\n- **`git checkout --ours <file>` / `git checkout --theirs <file>`**: Accept one side entirely for a conflicted file. Combine with `git checkout --conflict=merge <file>` to re-create conflict markers if you need to start over.\n- **Merge strategies with options**: `git merge -X theirs feature` auto-resolves conflicts by favoring the incoming branch. Similarly, `-X ours` favors the current branch. These are *strategy options*, not the `ours` strategy.\n- **`git diff --cc`**: Shows a combined diff for merge conflicts, helping you understand what both sides changed relative to the base.\n- **Binary file conflicts**: Git cannot merge binaries. Use `git checkout --ours/--theirs` or configure a custom merge driver in `.gitattributes` (e.g., for `*.pbxproj` files in Xcode projects or `*.vcxproj` in C++ Visual Studio projects).",
+  ],
+
+  code: [
+    {
+      language: "bash",
+      caption: "Creating, switching, and managing branches",
+      source: `# Create a new branch from current HEAD
+git branch feature/add-parser
+
+# Create and switch to the branch in one command
+git switch -c feature/add-parser
+
+# List all branches (local and remote)
+git branch -a
+
+# Rename a branch
+git branch -m old-name new-name
+
+# Delete a fully merged branch
+git branch -d feature/add-parser
+
+# Force-delete an unmerged branch (use with caution)
+git branch -D experimental-refactor
+
+# See which branches contain a specific commit
+git branch --contains abc1234`,
+    },
+    {
+      language: "bash",
+      caption: "Merging strategies and options",
+      source: `# Fast-forward merge (default when possible)
+git switch main
+git merge feature/add-parser
+
+# Force a merge commit even when ff is possible
+git merge --no-ff feature/add-parser
+
+# Squash all feature commits into a single staged change
+git merge --squash feature/add-parser
+git commit -m "Add parser module"
+
+# Merge with automatic conflict resolution favoring incoming changes
+git merge -X theirs feature/add-parser
+
+# Abort a conflicted merge and return to pre-merge state
+git merge --abort
+
+# Octopus merge: combine multiple branches at once
+git merge feature/lexer feature/parser feature/codegen`,
+    },
+    {
+      language: "bash",
+      caption: "Resolving merge conflicts step by step",
+      source: `# 1. Start the merge (conflicts arise)
+git merge feature/refactor-engine
+# CONFLICT (content): Merge conflict in src/engine.cpp
+
+# 2. See which files are conflicted
+git status
+# both modified: src/engine.cpp
+
+# 3. Open the file, resolve markers, then stage
+# (edit src/engine.cpp to remove <<<<<<< / ======= / >>>>>>>)
+git add src/engine.cpp
+
+# 4. Complete the merge
+git commit
+
+# Alternative: use a visual merge tool
+git mergetool
+
+# Alternative: accept one side entirely
+git checkout --theirs src/engine.cpp
+git add src/engine.cpp
+
+# Enable rerere to auto-resolve recurring conflicts
+git config --global rerere.enabled true`,
+    },
+    {
+      language: "bash",
+      caption: "Rebasing a feature branch onto main",
+      source: `# Rebase feature branch onto latest main
+git switch feature/optimize-allocator
+git rebase main
+
+# If conflicts arise during rebase, resolve and continue
+git add src/allocator.cpp
+git rebase --continue
+
+# Abort the rebase entirely
+git rebase --abort
+
+# Interactive rebase: squash, reorder, edit last 5 commits
+git rebase -i HEAD~5
+# In the editor, change 'pick' to 'squash' for commits to combine
+
+# After rebasing, force-push to update a remote feature branch
+# (only do this on branches YOU own, never on shared branches)
+git push --force-with-lease origin feature/optimize-allocator`,
+    },
+    {
+      language: "cpp",
+      caption: "C++ example: feature flag pattern for trunk-based development",
+      source: `// feature_flags.h — compile-time and runtime feature toggles
+#pragma once
+#include <string>
+#include <unordered_map>
+
+// Compile-time flags (set via CMake: -DENABLE_NEW_PARSER=ON)
+#ifndef ENABLE_NEW_PARSER
+#define ENABLE_NEW_PARSER 0
+#endif
+
+// Runtime feature flag registry
+class FeatureFlags {
+public:
+    static FeatureFlags& instance() {
+        static FeatureFlags flags;
+        return flags;
+    }
+
+    void setFlag(const std::string& name, bool enabled) {
+        flags_[name] = enabled;
+    }
+
+    bool isEnabled(const std::string& name) const {
+        auto it = flags_.find(name);
+        return it != flags_.end() && it->second;
+    }
+
+private:
+    std::unordered_map<std::string, bool> flags_;
+};
+
+// Usage in application code:
+// if (FeatureFlags::instance().isEnabled("new_allocator")) {
+//     return newAllocator.allocate(size);
+// } else {
+//     return legacyAllocator.allocate(size);
+// }`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "Git Fast-Forward vs Three-Way Merge",
+      kind: "flow",
+      caption: "Visual comparison of fast-forward merge (linear) and three-way merge (diverged branches)",
+      mermaid: `flowchart LR
+  subgraph FF["Fast-Forward Merge"]
+    A1((A)) --> B1((B)) --> C1((C)) --> D1((D)) --> E1((E))
+    C1 -. "main was here" .-> C1
+    E1 -. "main moves here" .-> E1
+  end
+  subgraph TW["Three-Way Merge"]
+    A2((A)) --> B2((B)) --> C2((C)) --> F2((F)) --> G2((G))
+    C2 --> D2((D)) --> E2((E)) --> G2
+    G2 -. "merge commit" .-> G2
+  end`,
+    },
+    {
+      title: "Git Flow Branching Model",
+      kind: "flow",
+      caption: "The standard Git Flow workflow showing branch relationships and merge directions",
+      mermaid: `flowchart TB
+  main["main\n(production)"] --- hotfix["hotfix/*"]
+  main --- release["release/*"]
+  develop["develop\n(integration)"] --- feature["feature/*"]
+  develop --- release
+  hotfix -->|"merge"| main
+  hotfix -->|"merge"| develop
+  feature -->|"merge"| develop
+  develop -->|"branch"| release
+  release -->|"merge"| main
+  release -->|"merge"| develop
+  main -->|"branch"| hotfix
+  develop -->|"branch"| feature`,
+    },
+    {
+      title: "Merge Conflict Resolution Flow",
+      kind: "flow",
+      caption: "Step-by-step decision flow for resolving merge conflicts",
+      mermaid: `flowchart TD
+  Start["git merge feature"] --> Check{"Conflicts?"}
+  Check -->|No| Done["Merge complete\n(auto or ff)"]
+  Check -->|Yes| Status["git status\n(identify conflicted files)"]
+  Status --> Open["Open file\nResolve markers"]
+  Open --> Choose{"Resolution\nmethod?"}
+  Choose -->|Manual edit| Edit["Edit file\nRemove markers"]
+  Choose -->|Accept ours| Ours["git checkout --ours file"]
+  Choose -->|Accept theirs| Theirs["git checkout --theirs file"]
+  Choose -->|Visual tool| Tool["git mergetool"]
+  Edit --> Stage["git add resolved files"]
+  Ours --> Stage
+  Theirs --> Stage
+  Tool --> Stage
+  Stage --> More{"More\nconflicts?"}
+  More -->|Yes| Open
+  More -->|No| Commit["git commit"]
+  Commit --> Done2["Merge complete"]`,
+    },
+    {
+      title: "Rebase vs Merge Sequence",
+      kind: "sequence",
+      caption: "Sequence diagram showing the difference between merge and rebase workflows",
+      mermaid: `sequenceDiagram
+  participant M as main
+  participant F as feature
+  Note over M,F: Both branches diverge
+  M->>M: commit C3
+  F->>F: commit C4
+  F->>F: commit C5
+  rect rgb(200, 220, 255)
+    Note over M,F: Merge workflow
+    F->>M: git merge feature
+    M->>M: merge commit M1 (parents: C3, C5)
+  end
+  rect rgb(220, 255, 200)
+    Note over M,F: Rebase workflow
+    F->>F: git rebase main
+    Note over F: C4, C5 replayed as C4', C5'
+    F->>M: git merge feature (fast-forward)
+    Note over M: Linear history: C3 → C4' → C5'
+  end`,
+    },
+  ],
+
+  exercises: [
+    "Create a repository with a `main` branch. Make 3 commits on main, then create a `feature` branch and add 2 commits. Merge the feature branch back into main using fast-forward. Verify the linear history with `git log --oneline --graph`. Then reset, repeat with `--no-ff`, and compare the graph output.",
+    "Simulate a merge conflict: create two branches from the same commit, modify the same lines of a C++ source file (`main.cpp`) on both branches, then merge one into the other. Practice resolving the conflict manually by editing the markers, then try again using `git checkout --ours` and `git checkout --theirs` to see the difference.",
+    "Set up a small Git Flow workflow: initialize a repo with `main` and `develop` branches. Create a `feature/add-logger` branch from develop, add commits, merge it back. Then create a `release/1.0` branch, make a version bump commit, merge to both main and develop. Tag main as `v1.0`.",
+    "Practice interactive rebase: create a feature branch with 5 commits (including a typo fix and a \"WIP\" commit). Use `git rebase -i HEAD~5` to squash the typo fix into its parent commit, reword the WIP message, and reorder commits logically. Verify the cleaned history with `git log`.",
+    "Enable `git rerere`, create a conflict scenario, resolve it, then recreate the same conflict (e.g., by aborting the merge and retrying). Observe how rerere automatically applies your previous resolution. Check the recorded resolutions in `.git/rr-cache/`.",
+  ],
+
+  cheatSheet: [
+    "`git branch <name>` — create a new branch; `git switch -c <name>` — create and switch in one step",
+    "`git merge <branch>` — merge branch into current; `--no-ff` forces a merge commit; `--squash` collapses into one changeset",
+    "`git merge --abort` — cancel an in-progress conflicted merge and restore pre-merge state",
+    "`git rebase <base>` — replay current branch commits on top of base; `git rebase -i HEAD~N` for interactive editing",
+    "`git branch -d <name>` — safe delete (must be merged); `git branch -D <name>` — force delete unmerged branch",
+    "`git log --oneline --graph --all` — visualize branch topology in the terminal",
+    "`git mergetool` — launch configured visual merge tool; `git config merge.tool <tool>` to set default (e.g., vimdiff, meld, kdiff3)",
+    "`git rerere` — enable with `git config --global rerere.enabled true` to automatically reuse recorded conflict resolutions",
+  ],
+
+  revisionNotes: [
+    "A Git branch is just a 40-byte file containing a commit SHA — branch creation is O(1) and virtually free, so branch early and often.",
+    "Fast-forward merges produce no merge commit and keep history linear; three-way merges create a merge commit with two parents when branches have diverged.",
+    "Use `--no-ff` when you want to preserve the record that work happened on a feature branch, even if fast-forward was possible.",
+    "Merge conflicts only occur when both branches modify the same lines of the same file — non-overlapping changes are auto-merged.",
+    "Git Flow suits teams with scheduled releases and multiple supported versions; trunk-based development suits continuous delivery with short-lived branches and feature flags.",
+    "Never rebase commits that have been pushed to a shared branch — rebase rewrites commit SHAs, which causes divergence for others who based work on those commits.",
+    "Interactive rebase (`git rebase -i`) is your tool for cleaning up commit history before merging — squash fixups, reword messages, reorder logically.",
+    "`git rerere` records your conflict resolutions and replays them automatically — essential for long-running branches or repeated rebase workflows.",
+  ],
 };

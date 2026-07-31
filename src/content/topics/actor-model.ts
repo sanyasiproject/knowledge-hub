@@ -473,4 +473,12 @@ object SupervisedAccount {
     { term: "BEAM", definition: "Bogdan/Bjorn's Erlang Abstract Machine -- the virtual machine that executes Erlang and Elixir code, featuring preemptive scheduling, per-process GC, and native distribution." },
     { term: "Back-pressure", definition: "A flow-control mechanism where a slow consumer signals upstream producers to reduce their sending rate, preventing mailbox overflow and memory exhaustion." }
   ],
+
+  exercises: [
+    "Design a **chat room server** using the actor model. Each chat room is an actor, and each connected user is an actor. Define the message types for *joining a room*, *sending a message*, *leaving a room*, and *listing active users*. How would you structure the **supervision tree** so that a crash in one user's actor does not affect others?",
+    "Implement a simple **actor framework** in C++ using `std::thread` and a thread-safe message queue (`std::mutex` + `std::condition_variable`). Each actor should have a `mailbox` (queue of `std::variant` messages), a processing loop, and a `send()` method. Compare your implementation's overhead with Erlang's *300-byte* process footprint -- what are the fundamental reasons for the difference?",
+    "You have a pipeline: **SensorActor** -> **AggregatorActor** -> **StorageActor**. The sensor produces 10,000 messages/sec, the aggregator batches them into groups of 100, and the storage actor writes to disk at 50 batches/sec. Identify where *backpressure* will build up, propose **two different mitigation strategies** (one using bounded mailboxes, one using demand-based flow control), and explain the trade-offs.",
+    "Compare the **let-it-crash** philosophy with traditional `try-catch` error handling by writing the same feature -- a *database connection pool actor* -- both ways. In the defensive version, handle every possible failure inline. In the let-it-crash version, use a supervisor with `one_for_one` strategy. Which version is simpler? Which recovers faster from a corrupted connection state?",
+    "Given a distributed actor system spanning **three data centers**, design a `UserSessionActor` that maintains login state. Address these concerns: (1) How does **location transparency** help or hinder your design? (2) What happens during a *network partition* between data centers? (3) How would you use **Akka Persistence** or Erlang's `mnesia` to ensure session state survives node failures?"
+  ],
 };

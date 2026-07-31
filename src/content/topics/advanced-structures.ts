@@ -23,170 +23,205 @@ export const advancedStructures: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Segment Tree with range sum query and point update",
-      source: `class SegmentTree:
-    """Segment tree for range sum queries and point updates."""
+      source: `#include <iostream>
+#include <vector>
+using namespace std;
 
-    def __init__(self, data: list[int]):
-        self.n = len(data)
-        self.tree = [0] * (4 * self.n)
-        if self.n > 0:
-            self._build(data, 1, 0, self.n - 1)
+class SegmentTree {
+    int n;
+    vector<int> tree;
 
-    def _build(self, data, node, start, end):
-        if start == end:
-            self.tree[node] = data[start]
-        else:
-            mid = (start + end) // 2
-            self._build(data, 2 * node, start, mid)
-            self._build(data, 2 * node + 1, mid + 1, end)
-            self.tree[node] = self.tree[2 * node] + self.tree[2 * node + 1]
+    void build(const vector<int>& data, int node, int start, int end) {
+        if (start == end) {
+            tree[node] = data[start];
+        } else {
+            int mid = (start + end) / 2;
+            build(data, 2 * node, start, mid);
+            build(data, 2 * node + 1, mid + 1, end);
+            tree[node] = tree[2 * node] + tree[2 * node + 1];
+        }
+    }
 
-    def update(self, idx: int, val: int):
-        """Set data[idx] = val."""
-        self._update(1, 0, self.n - 1, idx, val)
+    void updateHelper(int node, int start, int end, int idx, int val) {
+        if (start == end) {
+            tree[node] = val;
+        } else {
+            int mid = (start + end) / 2;
+            if (idx <= mid)
+                updateHelper(2 * node, start, mid, idx, val);
+            else
+                updateHelper(2 * node + 1, mid + 1, end, idx, val);
+            tree[node] = tree[2 * node] + tree[2 * node + 1];
+        }
+    }
 
-    def _update(self, node, start, end, idx, val):
-        if start == end:
-            self.tree[node] = val
-        else:
-            mid = (start + end) // 2
-            if idx <= mid:
-                self._update(2 * node, start, mid, idx, val)
-            else:
-                self._update(2 * node + 1, mid + 1, end, idx, val)
-            self.tree[node] = self.tree[2 * node] + self.tree[2 * node + 1]
+    int queryHelper(int node, int start, int end, int l, int r) {
+        if (r < start || end < l)
+            return 0;  // identity for sum
+        if (l <= start && end <= r)
+            return tree[node];
+        int mid = (start + end) / 2;
+        int leftSum = queryHelper(2 * node, start, mid, l, r);
+        int rightSum = queryHelper(2 * node + 1, mid + 1, end, l, r);
+        return leftSum + rightSum;
+    }
 
-    def query(self, l: int, r: int) -> int:
-        """Return sum of data[l..r] inclusive."""
-        return self._query(1, 0, self.n - 1, l, r)
+public:
+    SegmentTree(const vector<int>& data) : n(data.size()), tree(4 * data.size(), 0) {
+        if (n > 0)
+            build(data, 1, 0, n - 1);
+    }
 
-    def _query(self, node, start, end, l, r) -> int:
-        if r < start or end < l:
-            return 0  # identity for sum
-        if l <= start and end <= r:
-            return self.tree[node]
-        mid = (start + end) // 2
-        left_sum = self._query(2 * node, start, mid, l, r)
-        right_sum = self._query(2 * node + 1, mid + 1, end, l, r)
-        return left_sum + right_sum
+    // Set data[idx] = val
+    void update(int idx, int val) {
+        updateHelper(1, 0, n - 1, idx, val);
+    }
 
+    // Return sum of data[l..r] inclusive
+    int query(int l, int r) {
+        return queryHelper(1, 0, n - 1, l, r);
+    }
+};
 
-# Usage
-data = [1, 3, 5, 7, 9, 11]
-st = SegmentTree(data)
-print(st.query(1, 3))  # 3 + 5 + 7 = 15
-st.update(2, 10)        # data becomes [1, 3, 10, 7, 9, 11]
-print(st.query(1, 3))  # 3 + 10 + 7 = 20`,
+int main() {
+    vector<int> data = {1, 3, 5, 7, 9, 11};
+    SegmentTree st(data);
+    cout << st.query(1, 3) << endl;  // 3 + 5 + 7 = 15
+    st.update(2, 10);                 // data becomes [1, 3, 10, 7, 9, 11]
+    cout << st.query(1, 3) << endl;  // 3 + 10 + 7 = 20
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Fenwick Tree (Binary Indexed Tree) for prefix sums",
-      source: `class FenwickTree:
-    """Binary Indexed Tree for prefix sum queries and point updates.
+      source: `#include <iostream>
+#include <vector>
+using namespace std;
 
-    Uses 1-based indexing internally. The key insight is that
-    i & (-i) isolates the lowest set bit of i, which determines
-    the range of indices each position is responsible for.
-    """
+class FenwickTree {
+    int n;
+    vector<int> tree;
 
-    def __init__(self, n: int):
-        self.n = n
-        self.tree = [0] * (n + 1)
+public:
+    // Construct an empty Fenwick tree of size n
+    FenwickTree(int n) : n(n), tree(n + 1, 0) {}
 
-    @classmethod
-    def from_array(cls, data: list[int]) -> "FenwickTree":
-        """Build a Fenwick tree from an existing array in O(n)."""
-        ft = cls(len(data))
-        for i, val in enumerate(data):
-            ft.tree[i + 1] = val
-        for i in range(1, ft.n + 1):
-            parent = i + (i & -i)
-            if parent <= ft.n:
-                ft.tree[parent] += ft.tree[i]
-        return ft
+    // Build a Fenwick tree from an existing array in O(n)
+    static FenwickTree fromArray(const vector<int>& data) {
+        FenwickTree ft(data.size());
+        for (int i = 0; i < (int)data.size(); i++)
+            ft.tree[i + 1] = data[i];
+        for (int i = 1; i <= ft.n; i++) {
+            int parent = i + (i & -i);
+            if (parent <= ft.n)
+                ft.tree[parent] += ft.tree[i];
+        }
+        return ft;
+    }
 
-    def update(self, i: int, delta: int):
-        """Add delta to element at 1-based index i."""
-        while i <= self.n:
-            self.tree[i] += delta
-            i += i & (-i)  # move to next responsible ancestor
+    // Add delta to element at 1-based index i
+    void update(int i, int delta) {
+        while (i <= n) {
+            tree[i] += delta;
+            i += i & (-i);  // move to next responsible ancestor
+        }
+    }
 
-    def prefix_sum(self, i: int) -> int:
-        """Return sum of elements [1..i] (1-based)."""
-        total = 0
-        while i > 0:
-            total += self.tree[i]
-            i -= i & (-i)  # strip lowest set bit
-        return total
+    // Return sum of elements [1..i] (1-based)
+    int prefixSum(int i) {
+        int total = 0;
+        while (i > 0) {
+            total += tree[i];
+            i -= i & (-i);  // strip lowest set bit
+        }
+        return total;
+    }
 
-    def range_sum(self, l: int, r: int) -> int:
-        """Return sum of elements [l..r] (1-based, inclusive)."""
-        return self.prefix_sum(r) - self.prefix_sum(l - 1)
+    // Return sum of elements [l..r] (1-based, inclusive)
+    int rangeSum(int l, int r) {
+        return prefixSum(r) - prefixSum(l - 1);
+    }
+};
 
-
-# Usage
-data = [1, 3, 5, 7, 9, 11]
-ft = FenwickTree.from_array(data)
-print(ft.range_sum(2, 4))  # 3 + 5 + 7 = 15
-ft.update(3, 5)            # data[3] becomes 5+5=10
-print(ft.range_sum(2, 4))  # 3 + 10 + 7 = 20`,
+int main() {
+    vector<int> data = {1, 3, 5, 7, 9, 11};
+    FenwickTree ft = FenwickTree::fromArray(data);
+    cout << ft.rangeSum(2, 4) << endl;  // 3 + 5 + 7 = 15
+    ft.update(3, 5);                     // data[3] becomes 5+5=10
+    cout << ft.rangeSum(2, 4) << endl;  // 3 + 10 + 7 = 20
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Union-Find (Disjoint Set Union) with path compression and union by rank",
-      source: `class UnionFind:
-    """Disjoint Set Union with path compression and union by rank.
+      source: `#include <iostream>
+#include <vector>
+#include <utility>
+using namespace std;
 
-    Amortized O(alpha(n)) per operation, where alpha is the
-    inverse Ackermann function (effectively constant).
-    """
+class UnionFind {
+    vector<int> parent;
+    vector<int> rnk;  // "rank" is a reserved name in some contexts
+    int setCount;
 
-    def __init__(self, n: int):
-        self.parent = list(range(n))
-        self.rank = [0] * n
-        self.set_count = n  # number of disjoint sets
+public:
+    UnionFind(int n) : parent(n), rnk(n, 0), setCount(n) {
+        for (int i = 0; i < n; i++)
+            parent[i] = i;
+    }
 
-    def find(self, x: int) -> int:
-        """Find the root of x with full path compression."""
-        if self.parent[x] != x:
-            self.parent[x] = self.find(self.parent[x])  # path compression
-        return self.parent[x]
+    // Find the root of x with full path compression
+    int find(int x) {
+        if (parent[x] != x)
+            parent[x] = find(parent[x]);  // path compression
+        return parent[x];
+    }
 
-    def union(self, x: int, y: int) -> bool:
-        """Merge sets containing x and y. Returns False if already same set."""
-        rx, ry = self.find(x), self.find(y)
-        if rx == ry:
-            return False
-        # Union by rank: attach shorter tree under taller tree
-        if self.rank[rx] < self.rank[ry]:
-            rx, ry = ry, rx
-        self.parent[ry] = rx
-        if self.rank[rx] == self.rank[ry]:
-            self.rank[rx] += 1
-        self.set_count -= 1
-        return True
+    // Merge sets containing x and y. Returns false if already same set.
+    bool unite(int x, int y) {
+        int rx = find(x), ry = find(y);
+        if (rx == ry)
+            return false;
+        // Union by rank: attach shorter tree under taller tree
+        if (rnk[rx] < rnk[ry])
+            swap(rx, ry);
+        parent[ry] = rx;
+        if (rnk[rx] == rnk[ry])
+            rnk[rx]++;
+        setCount--;
+        return true;
+    }
 
-    def connected(self, x: int, y: int) -> bool:
-        """Check if x and y are in the same set."""
-        return self.find(x) == self.find(y)
+    // Check if x and y are in the same set
+    bool connected(int x, int y) {
+        return find(x) == find(y);
+    }
 
+    int getSetCount() const { return setCount; }
+};
 
-# Usage: detect if adding an edge creates a cycle
-edges = [(0, 1), (1, 2), (2, 3), (3, 1)]  # last edge creates cycle
-uf = UnionFind(4)
-for u, v in edges:
-    if not uf.union(u, v):
-        print(f"Edge ({u}, {v}) creates a cycle!")
-    else:
-        print(f"Edge ({u}, {v}) merged sets. Sets remaining: {uf.set_count}")
-
-# Output:
-# Edge (0, 1) merged sets. Sets remaining: 3
-# Edge (1, 2) merged sets. Sets remaining: 2
-# Edge (2, 3) merged sets. Sets remaining: 1
-# Edge (3, 1) creates a cycle!`,
+int main() {
+    // Usage: detect if adding an edge creates a cycle
+    vector<pair<int,int>> edges = {{0,1}, {1,2}, {2,3}, {3,1}};  // last edge creates cycle
+    UnionFind uf(4);
+    for (auto& [u, v] : edges) {
+        if (!uf.unite(u, v))
+            cout << "Edge (" << u << ", " << v << ") creates a cycle!" << endl;
+        else
+            cout << "Edge (" << u << ", " << v << ") merged sets. Sets remaining: "
+                 << uf.getSetCount() << endl;
+    }
+    // Output:
+    // Edge (0, 1) merged sets. Sets remaining: 3
+    // Edge (1, 2) merged sets. Sets remaining: 2
+    // Edge (2, 3) merged sets. Sets remaining: 1
+    // Edge (3, 1) creates a cycle!
+    return 0;
+}`,
     },
   ],
   diagrams: [

@@ -22,84 +22,128 @@ export const amortizedAnalysis: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Dynamic array with amortized O(1) append — tracking resize costs",
-      source: `class DynamicArray:
-    """Demonstrates amortized O(1) append with capacity doubling."""
-    def __init__(self):
-        self._data = [None] * 1   # initial capacity = 1
-        self._size = 0
-        self._capacity = 1
-        self.total_cost = 0       # track total work for analysis
+      source: `#include <iostream>
+#include <stdexcept>
+#include <iomanip>
 
-    def append(self, value):
-        if self._size == self._capacity:
-            self._resize(2 * self._capacity)  # double the capacity
-        self._data[self._size] = value
-        self._size += 1
-        self.total_cost += 1      # O(1) for the insertion itself
+// Demonstrates amortized O(1) append with capacity doubling.
+class DynamicArray {
+public:
+    DynamicArray()
+        : data_(new int[1]), size_(0), capacity_(1), total_cost_(0) {}
 
-    def _resize(self, new_cap):
-        new_data = [None] * new_cap
-        for i in range(self._size):       # copy all existing elements
-            new_data[i] = self._data[i]
-        self.total_cost += self._size     # O(n) copy cost
-        self._data = new_data
-        self._capacity = new_cap
+    ~DynamicArray() { delete[] data_; }
 
-    def __len__(self):
-        return self._size
+    void append(int value) {
+        if (size_ == capacity_) {
+            resize(2 * capacity_);  // double the capacity
+        }
+        data_[size_] = value;
+        ++size_;
+        ++total_cost_;              // O(1) for the insertion itself
+    }
 
-    def __getitem__(self, idx):
-        if 0 <= idx < self._size:
-            return self._data[idx]
-        raise IndexError("index out of range")
+    std::size_t size() const { return size_; }
+    long long totalCost() const { return total_cost_; }
 
-# Demonstration: n appends, total cost < 3n => amortized O(1)
-arr = DynamicArray()
-for i in range(1000):
-    arr.append(i)
-print(f"Size: {len(arr)}, Total cost: {arr.total_cost}")
-print(f"Amortized cost per append: {arr.total_cost / len(arr):.2f}")
-# Output: Amortized cost per append is ~3.00 or less`,
+    int operator[](std::size_t idx) const {
+        if (idx < size_) return data_[idx];
+        throw std::out_of_range("index out of range");
+    }
+
+private:
+    void resize(std::size_t new_cap) {
+        int* new_data = new int[new_cap];
+        for (std::size_t i = 0; i < size_; ++i) {  // copy all existing elements
+            new_data[i] = data_[i];
+        }
+        total_cost_ += static_cast<long long>(size_); // O(n) copy cost
+        delete[] data_;
+        data_ = new_data;
+        capacity_ = new_cap;
+    }
+
+    int* data_;
+    std::size_t size_;
+    std::size_t capacity_;
+    long long total_cost_;
+};
+
+// Demonstration: n appends, total cost < 3n => amortized O(1)
+int main() {
+    DynamicArray arr;
+    for (int i = 0; i < 1000; ++i) {
+        arr.append(i);
+    }
+    std::cout << "Size: " << arr.size()
+              << ", Total cost: " << arr.totalCost() << "\\n";
+    std::cout << std::fixed << std::setprecision(2)
+              << "Amortized cost per append: "
+              << static_cast<double>(arr.totalCost()) / arr.size() << "\\n";
+    // Output: Amortized cost per append is ~3.00 or less
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Binary counter increment — amortized O(1) per increment",
-      source: `class BinaryCounter:
-    """k-bit binary counter. Increment flips bits; amortized O(1) per increment."""
-    def __init__(self, k=32):
-        self.bits = [0] * k
-        self.k = k
-        self.total_flips = 0
+      source: `#include <iostream>
+#include <vector>
+#include <iomanip>
+#include <cstdint>
 
-    def increment(self):
-        carry = 0
-        for i in range(self.k):
-            if i == 0:
-                val = self.bits[i] + 1
-            else:
-                val = self.bits[i] + carry
-            self.bits[i] = val % 2
-            carry = val // 2
-            self.total_flips += 1
-            if carry == 0:
-                break       # no more carries to propagate
+// k-bit binary counter. Increment flips bits; amortized O(1) per increment.
+class BinaryCounter {
+public:
+    explicit BinaryCounter(int k = 32)
+        : bits_(k, 0), k_(k), total_flips_(0) {}
 
-    def value(self):
-        return sum(b * (2 ** i) for i, b in enumerate(self.bits))
+    void increment() {
+        int carry = 0;
+        for (int i = 0; i < k_; ++i) {
+            int val = bits_[i] + (i == 0 ? 1 : carry);
+            bits_[i] = val % 2;
+            carry = val / 2;
+            ++total_flips_;
+            if (carry == 0) break;  // no more carries to propagate
+        }
+    }
 
-# Aggregate method: bit 0 flips every increment (n times),
-# bit 1 flips every 2nd (n/2 times), bit 2 every 4th (n/4), ...
-# Total flips = n + n/2 + n/4 + ... < 2n => O(1) amortized
-counter = BinaryCounter()
-n = 1000
-for _ in range(n):
-    counter.increment()
-print(f"Value: {counter.value()}")
-print(f"Total flips: {counter.total_flips}")
-print(f"Amortized flips per increment: {counter.total_flips / n:.2f}")
-# Output: ~2.00 flips per increment on average`,
+    long long value() const {
+        long long result = 0;
+        for (int i = 0; i < k_; ++i) {
+            if (bits_[i]) result += (1LL << i);
+        }
+        return result;
+    }
+
+    long long totalFlips() const { return total_flips_; }
+
+private:
+    std::vector<int> bits_;
+    int k_;
+    long long total_flips_;
+};
+
+// Aggregate method: bit 0 flips every increment (n times),
+// bit 1 flips every 2nd (n/2 times), bit 2 every 4th (n/4), ...
+// Total flips = n + n/2 + n/4 + ... < 2n => O(1) amortized
+int main() {
+    BinaryCounter counter;
+    const int n = 1000;
+    for (int i = 0; i < n; ++i) {
+        counter.increment();
+    }
+    std::cout << "Value: " << counter.value() << "\\n";
+    std::cout << "Total flips: " << counter.totalFlips() << "\\n";
+    std::cout << std::fixed << std::setprecision(2)
+              << "Amortized flips per increment: "
+              << static_cast<double>(counter.totalFlips()) / n << "\\n";
+    // Output: ~2.00 flips per increment on average
+    return 0;
+}`,
     },
   ],
   diagrams: [

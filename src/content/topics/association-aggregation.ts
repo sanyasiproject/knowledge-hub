@@ -174,90 +174,124 @@ class Order {
 }`,
     },
     {
-      language: "python",
-      caption: "Python with explicit lifecycle management and weak references",
-      source: `import weakref
-from dataclasses import dataclass, field
+      language: "cpp",
+      caption: "C++ with explicit lifecycle management: raw pointers for association, shared_ptr for aggregation, unique_ptr/value for composition",
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <memory>
+#include <algorithm>
+#include <numeric>
 
-# --- Association: Library uses-a Book (books exist independently) ---
-@dataclass
-class Book:
-    isbn: str
-    title: str
+// --- Association: Library uses-a Book (books exist independently) ---
+struct Book {
+    std::string isbn;
+    std::string title;
+};
 
-class Library:
-    def __init__(self, name: str) -> None:
-        self.name = name
-        self._catalogue: list[Book] = []   # association — no ownership
+class Library {
+public:
+    explicit Library(std::string name) : name_(std::move(name)) {}
 
-    def add_book(self, book: Book) -> None:
-        self._catalogue.append(book)
+    // Association — Library does not own Books (raw pointer, non-owning)
+    void addBook(Book* book) { catalogue_.push_back(book); }
 
-    def remove_book(self, isbn: str) -> None:
-        self._catalogue = [b for b in self._catalogue if b.isbn != isbn]
+    void removeBook(const std::string& isbn) {
+        catalogue_.erase(
+            std::remove_if(catalogue_.begin(), catalogue_.end(),
+                [&](const Book* b) { return b->isbn == isbn; }),
+            catalogue_.end());
+    }
 
-
-# --- Aggregation: University has Professors (professors outlive the uni) ---
-@dataclass
-class Professor:
-    employee_id: str
-    name: str
-    # weak back-reference avoids preventing GC of the university
-    _university: "weakref.ref[University] | None" = field(
-        default=None, repr=False
-    )
-
-    @property
-    def university(self) -> "University | None":
-        return self._university() if self._university else None
-
-class University:
-    def __init__(self, name: str) -> None:
-        self.name = name
-        self._faculty: list[Professor] = []
-
-    def hire(self, prof: Professor) -> None:
-        prof._university = weakref.ref(self)
-        self._faculty.append(prof)
-
-    def close(self) -> None:
-        # Professors survive — clear references, don't delete objects
-        for prof in self._faculty:
-            prof._university = None
-        self._faculty.clear()
+private:
+    std::string name_;
+    std::vector<Book*> catalogue_;  // non-owning pointers
+};
 
 
-# --- Composition: Invoice owns InvoiceLines ---
-@dataclass(frozen=True)
-class InvoiceLine:
-    \"\"\"Immutable value object — meaningless outside its Invoice.\"\"\"
-    description: str
-    quantity: int
-    unit_price_cents: int
+// --- Aggregation: University has Professors (professors outlive the uni) ---
+class University;  // forward declaration
 
-    @property
-    def subtotal_cents(self) -> int:
-        return self.quantity * self.unit_price_cents
+class Professor {
+public:
+    Professor(std::string id, std::string name)
+        : employee_id_(std::move(id)), name_(std::move(name)) {}
 
-class Invoice:
-    def __init__(self, invoice_id: str, raw_lines: list[dict]) -> None:
-        self.invoice_id = invoice_id
-        # Lines are created here — the Invoice exclusively owns them
-        self._lines: tuple[InvoiceLine, ...] = tuple(
-            InvoiceLine(**data) for data in raw_lines
-        )
+    // Weak back-reference avoids preventing destruction of the university
+    void setUniversity(std::weak_ptr<University> uni) { university_ = uni; }
+    std::shared_ptr<University> university() const { return university_.lock(); }
 
-    @property
-    def total_cents(self) -> int:
-        return sum(line.subtotal_cents for line in self._lines)
+private:
+    std::string employee_id_;
+    std::string name_;
+    std::weak_ptr<University> university_;
+};
 
-    @property
-    def lines(self) -> tuple[InvoiceLine, ...]:
-        return self._lines   # tuple is immutable — cannot be mutated externally
+class University : public std::enable_shared_from_this<University> {
+public:
+    explicit University(std::string name) : name_(std::move(name)) {}
 
-    def __del__(self) -> None:
-        # When Invoice is collected, its lines become unreachable
-        pass`,
+    void hire(std::shared_ptr<Professor> prof) {
+        prof->setUniversity(weak_from_this());
+        faculty_.push_back(prof);
+    }
+
+    void close() {
+        // Professors survive — clear references, don't delete objects
+        for (auto& prof : faculty_) {
+            prof->setUniversity(std::weak_ptr<University>{});
+        }
+        faculty_.clear();
+    }
+
+private:
+    std::string name_;
+    std::vector<std::shared_ptr<Professor>> faculty_;  // shared ownership
+};
+
+
+// --- Composition: Invoice owns InvoiceLines ---
+// Immutable value object — meaningless outside its Invoice.
+struct InvoiceLine {
+    const std::string description;
+    const int quantity;
+    const int unit_price_cents;
+
+    int subtotalCents() const { return quantity * unit_price_cents; }
+};
+
+class Invoice {
+public:
+    Invoice(std::string invoice_id,
+            const std::vector<InvoiceLine>& raw_lines)
+        : invoice_id_(std::move(invoice_id))
+    {
+        // Lines are created here — the Invoice exclusively owns them
+        for (const auto& line : raw_lines) {
+            lines_.push_back(
+                std::make_unique<InvoiceLine>(line));
+        }
+    }
+
+    int totalCents() const {
+        return std::accumulate(lines_.begin(), lines_.end(), 0,
+            [](int sum, const auto& line) {
+                return sum + line->subtotalCents();
+            });
+    }
+
+    // Expose const view only — external code cannot mutate or share lines
+    const std::vector<std::unique_ptr<InvoiceLine>>& lines() const {
+        return lines_;
+    }
+
+    // When Invoice is destroyed, its unique_ptr lines are automatically deleted
+    ~Invoice() = default;
+
+private:
+    std::string invoice_id_;
+    std::vector<std::unique_ptr<InvoiceLine>> lines_;  // exclusive ownership
+};`,
     },
     {
       language: "cpp",

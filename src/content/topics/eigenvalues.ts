@@ -22,68 +22,106 @@ export const eigenvalues: TopicContent = {
   ],
   code: [
     {
-      language: "python",
-      caption: "Finding eigenvalues and eigenvectors, and using diagonalization",
-      source: `import numpy as np
+      language: "cpp",
+      caption: "Finding eigenvalues and eigenvectors, and using diagonalization with Eigen",
+      source: `#include <iostream>
+#include <Eigen/Dense>
+#include <cmath>
 
-A = np.array([[4, 1],
-              [2, 3]])
+int main() {
+    Eigen::Matrix2d A;
+    A << 4, 1,
+         2, 3;
 
-# Compute eigenvalues and eigenvectors
-eigenvalues, eigenvectors = np.linalg.eig(A)
-print("Eigenvalues:", eigenvalues)     # [5, 2]
-print("Eigenvectors (columns):\\n", eigenvectors)
+    // Compute eigenvalues and eigenvectors
+    Eigen::EigenSolver<Eigen::Matrix2d> solver(A);
+    auto eigenvalues = solver.eigenvalues().real();
+    auto eigenvectors = solver.eigenvectors().real();
+    std::cout << "Eigenvalues: " << eigenvalues.transpose() << "\\n";
+    std::cout << "Eigenvectors (columns):\\n" << eigenvectors << "\\n";
 
-# Verify: A @ v = lambda * v
-for i in range(len(eigenvalues)):
-    v = eigenvectors[:, i]
-    lam = eigenvalues[i]
-    print(f"A @ v{i} ≈ λ{i} * v{i}:", np.allclose(A @ v, lam * v))
+    // Verify: A * v = lambda * v
+    for (int i = 0; i < 2; ++i) {
+        Eigen::Vector2d v = eigenvectors.col(i);
+        double lam = eigenvalues(i);
+        bool close = (A * v - lam * v).norm() < 1e-10;
+        std::cout << "A * v" << i << " = lam" << i << " * v" << i
+                  << ": " << (close ? "true" : "false") << "\\n";
+    }
 
-# Diagonalization: A = P D P^{-1}
-P = eigenvectors
-D = np.diag(eigenvalues)
-P_inv = np.linalg.inv(P)
-A_reconstructed = P @ D @ P_inv
-print("Reconstruction matches:", np.allclose(A, A_reconstructed))
+    // Diagonalization: A = P D P^{-1}
+    Eigen::Matrix2d P = eigenvectors;
+    Eigen::Matrix2d D = eigenvalues.asDiagonal();
+    Eigen::Matrix2d P_inv = P.inverse();
+    Eigen::Matrix2d A_reconstructed = P * D * P_inv;
+    bool matches = (A - A_reconstructed).norm() < 1e-10;
+    std::cout << "Reconstruction matches: " << (matches ? "true" : "false") << "\\n";
 
-# Fast matrix power via diagonalization: A^10
-A_10 = P @ np.diag(eigenvalues**10) @ P_inv
-print("A^10 via diagonalization:\\n", A_10)`,
+    // Fast matrix power via diagonalization: A^10
+    Eigen::Vector2d ev10;
+    ev10 << std::pow(eigenvalues(0), 10), std::pow(eigenvalues(1), 10);
+    Eigen::Matrix2d A_10 = P * ev10.asDiagonal() * P_inv;
+    std::cout << "A^10 via diagonalization:\\n" << A_10 << "\\n";
+
+    return 0;
+}`,
     },
     {
-      language: "python",
-      caption: "PCA via eigendecomposition of the covariance matrix",
-      source: `import numpy as np
+      language: "cpp",
+      caption: "PCA via eigendecomposition of the covariance matrix with Eigen",
+      source: `#include <iostream>
+#include <iomanip>
+#include <Eigen/Dense>
+#include <random>
 
-# Generate sample data: 100 points in 3-D
-np.random.seed(42)
-X = np.random.randn(100, 3) @ np.array([[3, 1, 0],
-                                          [1, 2, 0.5],
-                                          [0, 0.5, 1]])
+int main() {
+    // Generate sample data: 100 points in 3-D
+    std::mt19937 rng(42);
+    std::normal_distribution<double> dist(0.0, 1.0);
 
-# Step 1: Center the data
-X_centered = X - X.mean(axis=0)
+    Eigen::MatrixXd raw(100, 3);
+    for (int i = 0; i < 100; ++i)
+        for (int j = 0; j < 3; ++j)
+            raw(i, j) = dist(rng);
 
-# Step 2: Compute covariance matrix
-cov = (X_centered.T @ X_centered) / (len(X) - 1)
+    Eigen::Matrix3d transform;
+    transform << 3, 1, 0,
+                 1, 2, 0.5,
+                 0, 0.5, 1;
+    Eigen::MatrixXd X = raw * transform;
 
-# Step 3: Eigendecomposition
-eigenvalues, eigenvectors = np.linalg.eigh(cov)  # eigh for symmetric
+    // Step 1: Center the data
+    Eigen::RowVector3d mean = X.colwise().mean();
+    Eigen::MatrixXd X_centered = X.rowwise() - mean;
 
-# Step 4: Sort by descending eigenvalue
-idx = np.argsort(eigenvalues)[::-1]
-eigenvalues = eigenvalues[idx]
-eigenvectors = eigenvectors[:, idx]
+    // Step 2: Compute covariance matrix
+    Eigen::Matrix3d cov =
+        (X_centered.transpose() * X_centered) / (X.rows() - 1);
 
-# Step 5: Project onto top-2 principal components
-W = eigenvectors[:, :2]         # top-2 eigenvectors
-X_pca = X_centered @ W         # projected data (100 × 2)
+    // Step 3: Eigendecomposition (SelfAdjointEigenSolver for symmetric)
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(cov);
+    Eigen::Vector3d eigenvalues = solver.eigenvalues();
+    Eigen::Matrix3d eigenvectors = solver.eigenvectors();
 
-# Variance explained
-total_var = eigenvalues.sum()
-for i, ev in enumerate(eigenvalues):
-    print(f"PC{i+1}: variance = {ev:.2f} ({100*ev/total_var:.1f}%)")`,
+    // Step 4: Sort by descending eigenvalue
+    // Eigen returns in ascending order, so reverse
+    Eigen::Vector3d sorted_vals = eigenvalues.reverse();
+    Eigen::Matrix3d sorted_vecs = eigenvectors.rowwise().reverse();
+
+    // Step 5: Project onto top-2 principal components
+    Eigen::MatrixXd W = sorted_vecs.leftCols(2);  // top-2 eigenvectors
+    Eigen::MatrixXd X_pca = X_centered * W;        // projected (100 x 2)
+
+    // Variance explained
+    double total_var = sorted_vals.sum();
+    for (int i = 0; i < 3; ++i) {
+        std::cout << "PC" << i + 1 << ": variance = "
+                  << std::fixed << std::setprecision(2) << sorted_vals(i)
+                  << " (" << std::setprecision(1)
+                  << 100.0 * sorted_vals(i) / total_var << "%)\\n";
+    }
+    return 0;
+}`,
     },
   ],
   diagrams: [

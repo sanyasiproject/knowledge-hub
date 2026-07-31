@@ -193,102 +193,107 @@ const query = new QueryBuilder()
 // => SELECT id, name, email FROM users WHERE active = true ORDER BY name ASC LIMIT 20 OFFSET 40`,
     },
     {
-      language: "python",
-      caption: "Python Builder using dataclass and fluent API",
-      source: `from dataclasses import dataclass, field
-from typing import Self
+      language: "cpp",
+      caption: "C++ Builder using fluent API for an immutable EmailMessage",
+      source: `#include <string>
+#include <vector>
+#include <stdexcept>
 
+// Immutable email message -- constructed via Builder
+class EmailMessage {
+public:
+    const std::string& sender() const { return sender_; }
+    const std::vector<std::string>& recipients() const { return recipients_; }
+    const std::string& subject() const { return subject_; }
+    const std::string& body() const { return body_; }
+    const std::vector<std::string>& cc() const { return cc_; }
+    const std::vector<std::string>& bcc() const { return bcc_; }
+    const std::vector<std::string>& attachments() const { return attachments_; }
+    bool is_html() const { return is_html_; }
+    const std::string& priority() const { return priority_; }
 
-@dataclass(frozen=True)
-class EmailMessage:
-    """Immutable email message -- constructed via Builder."""
-    sender: str
-    recipients: tuple[str, ...]
-    subject: str
-    body: str
-    cc: tuple[str, ...] = ()
-    bcc: tuple[str, ...] = ()
-    attachments: tuple[str, ...] = ()
-    is_html: bool = False
-    priority: str = "normal"
+    class Builder {
+    public:
+        explicit Builder(std::string sender) : sender_(std::move(sender)) {}
 
+        Builder& to(const std::string& recipient) {
+            recipients_.push_back(recipient);
+            return *this;
+        }
+        Builder& subject(std::string s) { subject_ = std::move(s); return *this; }
+        Builder& body(std::string b) { body_ = std::move(b); return *this; }
+        Builder& html_body(std::string html) {
+            body_ = std::move(html);
+            is_html_ = true;
+            return *this;
+        }
+        Builder& cc(const std::string& addr) { cc_.push_back(addr); return *this; }
+        Builder& bcc(const std::string& addr) { bcc_.push_back(addr); return *this; }
+        Builder& attach(const std::string& path) {
+            attachments_.push_back(path);
+            return *this;
+        }
+        Builder& priority(std::string level) {
+            if (level != "low" && level != "normal" && level != "high")
+                throw std::invalid_argument("Invalid priority: " + level);
+            priority_ = std::move(level);
+            return *this;
+        }
 
-class EmailBuilder:
-    def __init__(self, sender: str) -> None:
-        self._sender = sender
-        self._recipients: list[str] = []
-        self._subject = ""
-        self._body = ""
-        self._cc: list[str] = []
-        self._bcc: list[str] = []
-        self._attachments: list[str] = []
-        self._is_html = False
-        self._priority = "normal"
+        EmailMessage build() const {
+            if (recipients_.empty())
+                throw std::invalid_argument("At least one recipient is required");
+            if (subject_.empty())
+                throw std::invalid_argument("Subject is required");
+            return EmailMessage(sender_, recipients_, subject_, body_,
+                                cc_, bcc_, attachments_, is_html_, priority_);
+        }
 
-    def to(self, *recipients: str) -> Self:
-        self._recipients.extend(recipients)
-        return self
+    private:
+        std::string sender_;
+        std::vector<std::string> recipients_;
+        std::string subject_;
+        std::string body_;
+        std::vector<std::string> cc_;
+        std::vector<std::string> bcc_;
+        std::vector<std::string> attachments_;
+        bool is_html_ = false;
+        std::string priority_ = "normal";
+    };
 
-    def subject(self, subject: str) -> Self:
-        self._subject = subject
-        return self
+private:
+    EmailMessage(std::string sender, std::vector<std::string> recipients,
+                 std::string subject, std::string body,
+                 std::vector<std::string> cc, std::vector<std::string> bcc,
+                 std::vector<std::string> attachments, bool is_html,
+                 std::string priority)
+        : sender_(std::move(sender)), recipients_(std::move(recipients)),
+          subject_(std::move(subject)), body_(std::move(body)),
+          cc_(std::move(cc)), bcc_(std::move(bcc)),
+          attachments_(std::move(attachments)), is_html_(is_html),
+          priority_(std::move(priority)) {}
 
-    def body(self, body: str) -> Self:
-        self._body = body
-        return self
+    std::string sender_;
+    std::vector<std::string> recipients_;
+    std::string subject_;
+    std::string body_;
+    std::vector<std::string> cc_;
+    std::vector<std::string> bcc_;
+    std::vector<std::string> attachments_;
+    bool is_html_;
+    std::string priority_;
+};
 
-    def html_body(self, html: str) -> Self:
-        self._body = html
-        self._is_html = True
-        return self
-
-    def cc(self, *addresses: str) -> Self:
-        self._cc.extend(addresses)
-        return self
-
-    def bcc(self, *addresses: str) -> Self:
-        self._bcc.extend(addresses)
-        return self
-
-    def attach(self, *file_paths: str) -> Self:
-        self._attachments.extend(file_paths)
-        return self
-
-    def priority(self, level: str) -> Self:
-        if level not in ("low", "normal", "high"):
-            raise ValueError(f"Invalid priority: {level}")
-        self._priority = level
-        return self
-
-    def build(self) -> EmailMessage:
-        if not self._recipients:
-            raise ValueError("At least one recipient is required")
-        if not self._subject:
-            raise ValueError("Subject is required")
-        return EmailMessage(
-            sender=self._sender,
-            recipients=tuple(self._recipients),
-            subject=self._subject,
-            body=self._body,
-            cc=tuple(self._cc),
-            bcc=tuple(self._bcc),
-            attachments=tuple(self._attachments),
-            is_html=self._is_html,
-            priority=self._priority,
-        )
-
-
-# Usage
-email = (
-    EmailBuilder("noreply@example.com")
-    .to("alice@example.com", "bob@example.com")
-    .subject("Weekly Report")
-    .html_body("<h1>Report</h1><p>All systems operational.</p>")
-    .cc("manager@example.com")
-    .attach("/reports/weekly.pdf")
-    .priority("high")
-    .build()
-)`,
+// Usage
+// auto email = EmailMessage::Builder("noreply@example.com")
+//     .to("alice@example.com")
+//     .to("bob@example.com")
+//     .subject("Weekly Report")
+//     .html_body("<h1>Report</h1><p>All systems operational.</p>")
+//     .cc("manager@example.com")
+//     .attach("/reports/weekly.pdf")
+//     .priority("high")
+//     .build();`,
     },
   ],
   diagrams: [

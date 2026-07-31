@@ -208,4 +208,481 @@ A common pattern is to start with prompting, move to RAG if context is needed, a
       definition: "Learning soft prompt embeddings prepended to the input via backpropagation rather than manual prompt engineering.",
     },
   ],
+
+  deepDive: [
+    `## The Evolution from Full Fine-Tuning to Parameter-Efficient Methods
+
+The early days of transfer learning relied on **full fine-tuning**: take a pretrained model, unfreeze every parameter, and train on your downstream dataset. This worked well for *BERT-scale* models (110M--340M parameters), where a single GPU could comfortably hold the model, optimizer states, and gradients. But as models scaled to **billions and hundreds of billions** of parameters, full fine-tuning became impractical for most practitioners. A single training run for a 70B model can require **8x A100 80GB GPUs** just to fit in memory, and producing a separate full-weight checkpoint per task is prohibitively expensive in storage and serving costs.
+
+This pressure catalyzed the **parameter-efficient fine-tuning (PEFT)** revolution. Methods like *LoRA*, *prefix tuning*, *adapters*, and *prompt tuning* recognized a key insight: the *weight updates* during fine-tuning are typically **low-rank** -- they occupy a small subspace of the full parameter space. By constraining updates to this subspace, PEFT methods reduce trainable parameters by **100--10,000x** while matching or approaching full fine-tuning quality. This shift has **democratized LLM customization**: researchers and startups can now fine-tune a 70B model on a *single consumer GPU* using QLoRA, and enterprises can maintain dozens of task-specific adapters that share one base model deployment. The barrier to entry dropped from \`$10,000+ GPU clusters\` to a \`$1,000 single-GPU setup\`.`,
+
+    `## LoRA's Rank Decomposition: The Mathematics
+
+At its core, LoRA exploits the hypothesis that weight updates during fine-tuning have **low intrinsic rank**. For a pretrained weight matrix **W0** of dimension *d x d*, the fine-tuned weight is expressed as:
+
+\`W = W0 + delta_W = W0 + B * A\`
+
+where **B** is a \`d x r\` matrix, **A** is a \`r x d\` matrix, and the rank \`r << d\` (typically *r = 8 to 64* while *d = 4096 to 8192*). The product **B * A** yields a \`d x d\` update matrix, but it is constrained to rank *r*, meaning it lives in an *r-dimensional subspace*.
+
+**Initialization** is critical: **A** is initialized with a *random Gaussian* distribution, and **B** is initialized to **zero**. This ensures that at the start of training, \`delta_W = B * A = 0\`, so the model begins from the exact pretrained behavior. A scaling factor \`alpha / r\` is applied to the update, where **alpha** is a hyperparameter controlling the magnitude of adaptation.
+
+During the **forward pass**, the output is computed as \`h = W0 * x + (alpha / r) * B * A * x\`. During **backpropagation**, gradients flow through both the frozen \`W0\` path (but *no parameter updates* are applied to W0) and the trainable \`B * A\` path. Only **A** and **B** receive gradient updates, and only their optimizer states (momentum, variance in *AdamW*) are stored. For a layer with a \`4096 x 4096\` weight matrix, full fine-tuning requires storing **16.7M** parameters and their optimizer states; with LoRA at *r = 16*, you store only \`4096 * 16 + 16 * 4096 = 131,072\` trainable parameters -- a **128x reduction**.`,
+
+    `## Practical Considerations for Fine-Tuning Success
+
+**Hyperparameter tuning** is essential. The **learning rate** for LoRA is typically higher than full fine-tuning -- values of \`1e-4\` to \`3e-4\` work well, compared to \`1e-5\` to \`5e-5\` for full fine-tuning. The **rank** *r* controls expressiveness: start with *r = 8* for simple tasks (style transfer, formatting) and increase to *r = 32--64* for complex domain adaptation. The **alpha** parameter scales the update magnitude; a common heuristic is \`alpha = 2 * r\`. **Target modules** determine which layers receive LoRA adapters -- applying to all linear layers (\`q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj\`) generally outperforms targeting only attention layers, at the cost of more trainable parameters.
+
+**Data formatting** must match the model's expected template exactly. A mismatch between training format and inference format is the *most common source of degraded performance*. Use the model's native chat template (accessible via \`tokenizer.chat_template\`), ensure proper **BOS/EOS token** handling, and mask *instruction/system tokens* from the loss computation so the model only learns to generate responses. Validate formatting by decoding a few tokenized examples and inspecting them visually.
+
+**Evaluation strategies** should go beyond loss curves. Use **task-specific benchmarks** (e.g., accuracy on classification, ROUGE for summarization), **human evaluation** for open-ended generation quality, and **regression testing** on general capabilities to detect catastrophic forgetting. Track the \`training loss vs. validation loss\` gap to detect overfitting -- if the gap widens after 1--2 epochs, stop training. For production deployments, A/B test the fine-tuned model against the base model with prompting to ensure the fine-tuning investment yields measurable improvements.`,
+  ],
+
+  code: [
+    {
+      language: "cpp",
+      caption: "LoRA fine-tuning concept with LibTorch (PyTorch C++ API)",
+      source: `#include <torch/torch.h>
+#include <iostream>
+#include <string>
+#include <vector>
+
+// LoRA adapter layer: W_new = W_frozen + (alpha/r) * B @ A
+struct LoRALinearImpl : torch::nn::Module {
+    LoRALinearImpl(int64_t in_features, int64_t out_features,
+                   int64_t rank = 16, double alpha = 32.0,
+                   double dropout = 0.05)
+        : rank_(rank), scale_(alpha / rank),
+          frozen_(register_module("frozen",
+              torch::nn::Linear(in_features, out_features))),
+          lora_A_(register_parameter("lora_A",
+              torch::randn({rank, in_features}) * 0.01)),
+          lora_B_(register_parameter("lora_B",
+              torch::zeros({out_features, rank}))),
+          dropout_(register_module("dropout",
+              torch::nn::Dropout(dropout)))
+    {
+        // Freeze the original weight -- no gradient updates
+        frozen_->weight.set_requires_grad(false);
+        if (frozen_->bias.defined())
+            frozen_->bias.set_requires_grad(false);
+    }
+
+    torch::Tensor forward(torch::Tensor x) {
+        auto base_out = frozen_->forward(x);
+        // LoRA path: x -> A -> B -> scale
+        auto lora_out = dropout_->forward(x);
+        lora_out = torch::matmul(lora_out, lora_A_.t());  // (batch, rank)
+        lora_out = torch::matmul(lora_out, lora_B_.t());  // (batch, out)
+        return base_out + scale_ * lora_out;
+    }
+
+    int64_t rank_;
+    double scale_;
+    torch::nn::Linear frozen_{nullptr};
+    torch::Tensor lora_A_, lora_B_;
+    torch::nn::Dropout dropout_{nullptr};
+};
+TORCH_MODULE(LoRALinear);
+
+void print_trainable_parameters(const torch::nn::Module& model) {
+    int64_t total = 0, trainable = 0;
+    for (const auto& p : model.parameters()) {
+        total += p.numel();
+        if (p.requires_grad()) trainable += p.numel();
+    }
+    std::cout << "trainable params: " << trainable
+              << " || all params: " << total
+              << " || " << (100.0 * trainable / total) << "%\\n";
+}
+
+// Example training loop sketch
+void train_lora() {
+    auto device = torch::kCUDA;
+    // Replace a frozen linear with a LoRA-augmented version
+    LoRALinear layer(4096, 4096, /*rank=*/16, /*alpha=*/32.0);
+    layer->to(device);
+
+    print_trainable_parameters(*layer);
+    // Only lora_A and lora_B are trainable (~131K params vs 16.7M frozen)
+
+    torch::optim::AdamW optimizer(
+        layer->parameters(), torch::optim::AdamWOptions(2e-4));
+
+    // Training loop (simplified)
+    for (int epoch = 0; epoch < 3; ++epoch) {
+        auto input = torch::randn({4, 2048, 4096}, device);
+        auto target = torch::randn({4, 2048, 4096}, device);
+        auto output = layer->forward(input);
+        auto loss = torch::mse_loss(output, target);
+        optimizer.zero_grad();
+        loss.backward();
+        optimizer.step();
+        std::cout << "Epoch " << epoch << " loss: "
+                  << loss.item<float>() << "\\n";
+    }
+
+    // Save only the LoRA adapter weights (~small file)
+    torch::save({layer->lora_A_, layer->lora_B_},
+                "lora-adapter.pt");
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "QLoRA concept with 4-bit quantization and LoRA adapters in LibTorch",
+      source: `#include <torch/torch.h>
+#include <iostream>
+#include <cstdint>
+
+// Simulated NF4 quantization: pack fp16 weights into 4-bit representation
+struct QuantizedLinearImpl : torch::nn::Module {
+    QuantizedLinearImpl(int64_t in_features, int64_t out_features)
+        : in_(in_features), out_(out_features)
+    {
+        // Store quantized weights as uint8 (two 4-bit values per byte)
+        int64_t packed_size = (in_features * out_features + 1) / 2;
+        quantized_weight_ = register_buffer(
+            "quantized_weight", torch::zeros({packed_size}, torch::kUInt8));
+        // Quantization scale and zero-point per group (group_size=64)
+        int64_t n_groups = (in_features * out_features + 63) / 64;
+        scales_ = register_buffer(
+            "scales", torch::ones({n_groups}, torch::kBFloat16));
+        // Double quantization: quantize the scales themselves
+        meta_scales_ = register_buffer(
+            "meta_scales", torch::ones({(n_groups + 255) / 256}, torch::kFloat32));
+    }
+
+    // Dequantize on-the-fly during forward pass
+    torch::Tensor forward(torch::Tensor x) {
+        // In practice: dequantize 4-bit -> bf16, compute matmul
+        // Simplified: return a placeholder showing the concept
+        auto weight = dequantize();
+        return torch::matmul(x, weight.t());
+    }
+
+    torch::Tensor dequantize() {
+        // Reconstruct fp16 weights from 4-bit storage + scales
+        // (implementation omitted -- uses NF4 lookup table)
+        return torch::zeros({out_, in_}, torch::kBFloat16);
+    }
+
+    int64_t in_, out_;
+    torch::Tensor quantized_weight_, scales_, meta_scales_;
+};
+TORCH_MODULE(QuantizedLinear);
+
+// QLoRA: frozen 4-bit base + trainable LoRA adapters in full precision
+struct QLoRALinearImpl : torch::nn::Module {
+    QLoRALinearImpl(int64_t in_f, int64_t out_f,
+                    int64_t rank = 64, double alpha = 128.0)
+        : scale_(alpha / rank),
+          base_(register_module("base", QuantizedLinear(in_f, out_f))),
+          lora_A_(register_parameter("lora_A",
+              torch::randn({rank, in_f}) * 0.01)),
+          lora_B_(register_parameter("lora_B",
+              torch::zeros({out_f, rank})))
+    {
+        // Freeze all base parameters -- only LoRA trains
+        for (auto& p : base_->parameters())
+            p.set_requires_grad(false);
+        for (auto& b : base_->buffers())
+            b.set_requires_grad(false);
+    }
+
+    torch::Tensor forward(torch::Tensor x) {
+        auto base_out = base_->forward(x);             // 4-bit path
+        auto lora_out = torch::matmul(x, lora_A_.t()); // full precision
+        lora_out = torch::matmul(lora_out, lora_B_.t());
+        return base_out + scale_ * lora_out;
+    }
+
+    double scale_;
+    QuantizedLinear base_{nullptr};
+    torch::Tensor lora_A_, lora_B_;
+};
+TORCH_MODULE(QLoRALinear);
+
+// Training sketch
+void train_qlora() {
+    // 70B model in 4-bit fits ~35GB; LoRA adapters add ~200MB
+    QLoRALinear layer(4096, 4096, /*rank=*/64, /*alpha=*/128.0);
+
+    // Only lora_A and lora_B require gradients
+    std::vector<torch::Tensor> trainable;
+    for (auto& p : layer->parameters())
+        if (p.requires_grad()) trainable.push_back(p);
+
+    // Use AdamW with gradient checkpointing for memory savings
+    torch::optim::AdamW optimizer(trainable,
+        torch::optim::AdamWOptions(1e-4));
+
+    std::cout << "Trainable LoRA params: "
+              << trainable[0].numel() + trainable[1].numel() << "\\n";
+
+    // Save adapter only -- 4-bit base model is NOT saved
+    // torch::save({layer->lora_A_, layer->lora_B_},
+    //             "qlora-adapter.pt");
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "Data preparation: formatting examples into ChatML and Alpaca formats",
+      source: `#include <iostream>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <stdexcept>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
+
+struct RawExample {
+    std::string instruction;
+    std::string input;   // optional
+    std::string output;
+};
+
+// Format a single example in Alpaca/Stanford format
+//   ### Instruction: ...
+//   ### Input: ... (optional)
+//   ### Response: ...
+json format_alpaca(const std::string& instruction,
+                   const std::string& input_text,
+                   const std::string& output) {
+    std::string text;
+    text += "### Instruction:\\n" + instruction + "\\n\\n";
+    if (!input_text.empty())
+        text += "### Input:\\n" + input_text + "\\n\\n";
+    text += "### Response:\\n" + output;
+    return {{"text", text}};
+}
+
+// Format a single example in ChatML format
+//   <|im_start|>system\\n...\\n<|im_end|>
+//   <|im_start|>user\\n...\\n<|im_end|>
+//   <|im_start|>assistant\\n...\\n<|im_end|>
+json format_chatml(const std::string& system_prompt,
+                   const std::string& user_message,
+                   const std::string& assistant_response) {
+    std::string text;
+    text += "<|im_start|>system\\n" + system_prompt + "<|im_end|>\\n";
+    text += "<|im_start|>user\\n" + user_message + "<|im_end|>\\n";
+    text += "<|im_start|>assistant\\n" + assistant_response + "<|im_end|>";
+    return {{"text", text}};
+}
+
+// Convert raw examples to fine-tuning format and save as JSONL
+void prepare_dataset(
+    const std::vector<RawExample>& raw_data,
+    const std::string& output_path,
+    const std::string& fmt = "chatml",
+    const std::string& system_prompt = "You are a helpful assistant.")
+{
+    std::vector<json> formatted;
+    int skipped = 0;
+
+    for (const auto& ex : raw_data) {
+        // Validate required fields
+        if (ex.instruction.empty() || ex.output.empty()) {
+            ++skipped;
+            continue;
+        }
+
+        json entry;
+        if (fmt == "alpaca") {
+            entry = format_alpaca(ex.instruction, ex.input, ex.output);
+        } else if (fmt == "chatml") {
+            std::string user_msg = ex.instruction;
+            if (!ex.input.empty())
+                user_msg += "\\n\\nContext: " + ex.input;
+            entry = format_chatml(system_prompt, user_msg, ex.output);
+        } else {
+            throw std::invalid_argument(
+                "Unknown format: " + fmt + ". Use 'chatml' or 'alpaca'.");
+        }
+        formatted.push_back(entry);
+    }
+
+    // Write as JSONL
+    std::ofstream out(output_path);
+    for (const auto& entry : formatted)
+        out << entry.dump() << "\\n";
+
+    std::cout << "Wrote " << formatted.size()
+              << " examples to " << output_path << "\\n";
+    if (skipped)
+        std::cout << "Skipped " << skipped
+                  << " examples with missing fields\\n";
+}
+
+int main() {
+    std::vector<RawExample> raw_examples = {
+        {"Summarize the following article.",
+         "The Federal Reserve raised interest rates by 25 basis points...",
+         "The Fed increased rates by 0.25%, signaling continued inflation concerns."},
+        {"Write a C++ function to reverse a string.",
+         "",
+         "std::string reverse(std::string s) {\\n"
+         "    std::reverse(s.begin(), s.end());\\n"
+         "    return s;\\n}"},
+        {"Classify the sentiment of this review.",
+         "The product arrived damaged and customer service was unhelpful.",
+         "Negative"},
+    };
+
+    prepare_dataset(raw_examples, "train_chatml.jsonl", "chatml");
+    prepare_dataset(raw_examples, "train_alpaca.jsonl", "alpaca");
+    return 0;
+}`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "Fine-Tuning Decision Tree",
+      kind: "flow",
+      caption: "Choosing the right fine-tuning method based on resources, data, and requirements",
+      mermaid: `flowchart TD
+    A["Start: Need to customize LLM behavior"] --> B{"Do you have task-specific\\ntraining data?"}
+    B -->|"No"| C["Use prompt engineering\\nor few-shot prompting"]
+    B -->|"Yes"| D{"Is the task knowledge-intensive\\nrequiring external context?"}
+    D -->|"Yes"| E["Use RAG\\n(Retrieval-Augmented Generation)"]
+    D -->|"No"| F{"How much GPU memory\\nis available?"}
+    F -->|"Multiple GPUs\\n(160GB+ VRAM)"| G{"Do you have 10k+\\nhigh-quality examples?"}
+    G -->|"Yes"| H["Full Fine-Tuning\\n- Maximum quality\\n- All params updated"]
+    G -->|"No"| I["LoRA Fine-Tuning\\n- Less overfitting risk\\n- Fewer params to train"]
+    F -->|"Single GPU\\n(24-80GB VRAM)"| I
+    F -->|"Consumer GPU\\n(8-24GB VRAM)"| J["QLoRA Fine-Tuning\\n- 4-bit quantized base\\n- LoRA adapters in fp16"]
+    F -->|"Minimal resources\\nor API-only"| K{"Does the provider\\noffer fine-tuning API?"}
+    K -->|"Yes"| L["API-based Fine-Tuning\\n(OpenAI, Anthropic, etc.)"]
+    K -->|"No"| C
+    H --> M["Evaluate on held-out test set"]
+    I --> M
+    J --> M
+    L --> M
+    M --> N{"Performance meets\\nrequirements?"}
+    N -->|"Yes"| O["Deploy fine-tuned model"]
+    N -->|"No"| P["Iterate: adjust data,\\nhyperparams, or method"]
+    P --> F`,
+    },
+    {
+      title: "LoRA Weight Injection in Transformer Layers",
+      kind: "architecture",
+      caption: "How LoRA adapters are injected alongside frozen pretrained weights in each transformer layer",
+      mermaid: `flowchart LR
+    subgraph Input
+        X["Input\\nActivation\\nx"]
+    end
+
+    subgraph FrozenPath["Frozen Pretrained Path"]
+        W0["Pretrained Weight\\nW0 (d x d)\\n❄️ Frozen"]
+    end
+
+    subgraph LoRAPath["LoRA Adapter Path (Trainable)"]
+        A_mat["Down-Project\\nA (r x d)\\n🔥 Trainable"]
+        B_mat["Up-Project\\nB (d x r)\\n🔥 Trainable"]
+        Scale["Scale by\\nα / r"]
+    end
+
+    subgraph Output
+        Sum["Element-wise\\nAddition (+)"]
+        H["Output\\nActivation\\nh"]
+    end
+
+    X --> W0
+    W0 -->|"W0 · x"| Sum
+
+    X --> A_mat
+    A_mat -->|"r-dim vector"| B_mat
+    B_mat -->|"B·A·x"| Scale
+    Scale -->|"(α/r)·B·A·x"| Sum
+
+    Sum -->|"h = W0·x + (α/r)·B·A·x"| H
+
+    subgraph TransformerBlock["Full Transformer Block"]
+        direction TB
+        QProj["Q Projection\\n+ LoRA"]
+        KProj["K Projection\\n+ LoRA"]
+        VProj["V Projection\\n+ LoRA"]
+        OProj["O Projection\\n+ LoRA"]
+        Attn["Multi-Head\\nAttention"]
+        FFN1["Gate/Up Projection\\n+ LoRA"]
+        FFN2["Down Projection\\n+ LoRA"]
+        LN1["LayerNorm"]
+        LN2["LayerNorm"]
+
+        LN1 --> QProj & KProj & VProj
+        QProj & KProj & VProj --> Attn
+        Attn --> OProj
+        OProj --> LN2
+        LN2 --> FFN1
+        FFN1 --> FFN2
+    end`,
+    },
+  ],
+
+  comparison: {
+    columns: ["Method", "Trainable Params", "Memory Required", "Quality", "Use Case"],
+    rows: [
+      [
+        "Full Fine-Tuning",
+        "**100%** of model params (e.g., 7B for a 7B model)",
+        "**Very High** -- 4x model size (model + optimizer + gradients); 7B model needs ~120GB VRAM",
+        "**Highest** -- all parameters adapt to the task fully",
+        "Large datasets (50k+), *significant domain shift* from pretraining, maximum quality required",
+      ],
+      [
+        "LoRA",
+        "**0.1--1%** of model params (e.g., ~13M for a 7B model at r=16)",
+        "**Moderate** -- base model in fp16 + small adapter states; 7B model needs ~16GB VRAM",
+        "**Near full FT** -- comparable on most tasks, slight gap on extreme distribution shifts",
+        "Most fine-tuning scenarios; *single-GPU training*, multi-task deployment with adapter swapping",
+      ],
+      [
+        "QLoRA",
+        "**0.1--1%** of model params (same as LoRA)",
+        "**Low** -- base model in *4-bit* + adapter in fp16; 7B model needs ~6GB, 70B needs ~35GB",
+        "**Near LoRA** -- slight quantization noise, mitigated by NF4 and double quantization",
+        "*Consumer GPU* fine-tuning, very large models (70B+) on limited hardware",
+      ],
+      [
+        "Prefix Tuning",
+        "**<0.1%** -- only prefix vectors per layer (e.g., ~300K params)",
+        "**Low** -- base model frozen, tiny trainable overhead",
+        "**Good** -- competitive on NLU tasks, can lag on complex generation",
+        "Lightweight adaptation for *classification and NLU*, multi-tenant serving with per-user prefixes",
+      ],
+      [
+        "Prompt Tuning",
+        "**<0.01%** -- only soft prompt embeddings (e.g., ~20K params)",
+        "**Minimal** -- base model frozen, negligible adapter memory",
+        "**Moderate** -- improves with model scale, weaker on small models (<10B)",
+        "Extremely *parameter-efficient* adaptation, scales best with very large models (100B+)",
+      ],
+    ],
+  },
+
+  exercises: [
+    "You have a **7B parameter model** and a dataset of *5,000 customer support conversations*. Your GPU has **24GB VRAM**. Choose between full fine-tuning, LoRA, and QLoRA. Justify your choice considering memory constraints, dataset size, and expected quality. What `r` (rank) and `alpha` values would you start with?",
+    "A fine-tuned model performs well on your *training set* but poorly on new inputs. The **training loss** is `0.05` while the **validation loss** is `1.8`. Diagnose the problem, list *three concrete steps* to fix it, and explain how you would use LoRA's `lora_dropout` parameter as part of the solution.",
+    "You need to deploy a *single base model* that serves **four different tasks**: summarization, sentiment analysis, code generation, and translation. Design an architecture using **LoRA adapters** that supports this. Explain how adapter *merging vs. swapping* works and what the trade-offs are for inference latency.",
+    "Write the configuration for fine-tuning a model where you apply LoRA to *only the attention layers* (`q_proj`, `v_proj`) vs. *all linear layers*. Compare the expected **trainable parameter count**, **training time**, and **quality** for a 7B model with `r=16`. When would targeting fewer modules be preferable?",
+    "Your training data contains examples in **Alpaca format**, but the base model expects **ChatML format**. Describe what will go wrong if you train without fixing the format mismatch. Write a Python function to convert between the two formats, handling edge cases like *empty input fields* and *multi-turn conversations*.",
+  ],
+
+  cheatSheet: [
+    "**LoRA formula**: `W = W0 + (alpha/r) * B @ A` where B is `d x r`, A is `r x d`, and W0 is *frozen*. Initialize **B = 0** so the model starts from pretrained behavior.",
+    "**Learning rate guide**: Full FT uses `1e-5` to `5e-5`; LoRA/QLoRA uses `1e-4` to `3e-4`. LoRA tolerates *higher LR* because fewer parameters means less risk of catastrophic updates.",
+    "**Rank selection**: Start with `r=8` for *style/format tasks*, `r=16-32` for *domain adaptation*, `r=64` for *complex reasoning*. Set `alpha = 2 * r` as default.",
+    "**QLoRA memory formula**: ~`model_params * 0.5 bytes` (4-bit) + `LoRA params * 4 bytes` (fp16 + optimizer). A *70B model* fits in ~35GB with QLoRA vs. ~280GB with full FT.",
+    "**Target modules**: Applying LoRA to `all-linear` layers (attention + MLP) gives **~5% better results** than attention-only, at the cost of ~3x more trainable params.",
+    "**Data quality checklist**: Deduplicate, verify format matches `tokenizer.chat_template`, mask instruction tokens from loss, hold out 10% for validation, and *decode + inspect* 5 tokenized examples before training.",
+  ],
+
+  revisionNotes: [
+    "Fine-tuning weight updates are **low-rank** in practice -- LoRA exploits this by decomposing `delta_W` into two small matrices `B (d x r)` and `A (r x d)`, reducing trainable parameters by **100--1000x** while preserving quality.",
+    "**QLoRA** enables fine-tuning *70B+ models on a single GPU* by combining **4-bit NF4 quantization** of the base model with LoRA adapters trained in full precision, plus *paged optimizers* and *double quantization*.",
+    "**Data quality > data quantity** for fine-tuning. A curated set of *1,000--10,000 well-formatted examples* typically outperforms a noisy 100K dataset. Always match the model's *exact chat template* and mask non-response tokens from the loss.",
+    "Use **prompting first**, then **RAG** for knowledge-intensive tasks, and only fine-tune when those approaches fall short. Fine-tuning is best for *consistent style/format*, *latency reduction* (replacing prompt chains), and *specialized domain adaptation*.",
+    "**Evaluation must be multi-dimensional**: track `training vs. validation loss` for overfitting, use *task-specific metrics* (accuracy, ROUGE, etc.), run *regression tests* on general capabilities, and A/B test against the prompted baseline before deploying.",
+  ],
 };

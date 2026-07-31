@@ -82,56 +82,88 @@ EVAL "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEY
 # Returns 1 if released, 0 if lock was already held by someone else`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Redlock algorithm implementation outline",
-      source: `import time
-import uuid
-import redis
+      source: `// Redlock using redis-plus-plus (sw::redis)
+#include <sw/redis++/redis++.h>
+#include <vector>
+#include <string>
+#include <chrono>
+#include <random>
+#include <optional>
+#include <iostream>
 
-class Redlock:
-    def __init__(self, nodes: list[redis.Redis]):
-        self.nodes = nodes
-        self.quorum = len(nodes) // 2 + 1
-        self.clock_drift_factor = 0.01
+// Generate a UUID-like random token
+std::string generate_token() {
+    static thread_local std::mt19937 rng{std::random_device{}()};
+    std::uniform_int_distribution<uint64_t> dist;
+    char buf[37];
+    uint64_t a = dist(rng), b = dist(rng);
+    snprintf(buf, sizeof(buf), "%08x-%04x-%04x-%04x-%012llx",
+             (uint32_t)(a >> 32), (uint16_t)(a >> 16), (uint16_t)a,
+             (uint16_t)(b >> 48), (unsigned long long)(b & 0xFFFFFFFFFFFF));
+    return buf;
+}
 
-    def acquire(self, resource: str, ttl_ms: int) -> str | None:
-        token = str(uuid.uuid4())
-        start = time.monotonic()
-        acquired = 0
+class Redlock {
+    std::vector<sw::redis::Redis> nodes_;
+    int quorum_;
+    double clock_drift_factor_ = 0.01;
 
-        for node in self.nodes:
-            try:
-                if node.set(resource, token, nx=True, px=ttl_ms):
-                    acquired += 1
-            except redis.RedisError:
-                pass
+    static constexpr const char* RELEASE_SCRIPT =
+        "if redis.call('GET', KEYS[1]) == ARGV[1] then "
+        "  return redis.call('DEL', KEYS[1]) "
+        "end "
+        "return 0";
 
-        elapsed_ms = (time.monotonic() - start) * 1000
-        drift = ttl_ms * self.clock_drift_factor + 2  # ms
-        validity = ttl_ms - elapsed_ms - drift
+public:
+    explicit Redlock(std::vector<sw::redis::Redis> nodes)
+        : nodes_(std::move(nodes)),
+          quorum_(static_cast<int>(nodes_.size()) / 2 + 1) {}
 
-        if acquired >= self.quorum and validity > 0:
-            return token  # Lock acquired
+    std::optional<std::string> acquire(const std::string& resource,
+                                       int ttl_ms) {
+        std::string token = generate_token();
+        auto start = std::chrono::steady_clock::now();
+        int acquired = 0;
 
-        # Failed — release all
-        self._release_all(resource, token)
-        return None
+        for (auto& node : nodes_) {
+            try {
+                if (node.set(resource, token,
+                             std::chrono::milliseconds(ttl_ms),
+                             sw::redis::UpdateType::NOT_EXIST)) {
+                    ++acquired;
+                }
+            } catch (const sw::redis::Error&) { /* skip failed node */ }
+        }
 
-    def release(self, resource: str, token: str):
-        self._release_all(resource, token)
+        auto elapsed_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count();
+        double drift = ttl_ms * clock_drift_factor_ + 2.0;
+        double validity = ttl_ms - elapsed_ms - drift;
 
-    def _release_all(self, resource: str, token: str):
-        script = """
-        if redis.call('GET', KEYS[1]) == ARGV[1] then
-            return redis.call('DEL', KEYS[1])
-        end
-        return 0
-        """
-        for node in self.nodes:
-            try:
-                node.eval(script, 1, resource, token)
-            except redis.RedisError:
-                pass`,
+        if (acquired >= quorum_ && validity > 0)
+            return token;  // Lock acquired
+
+        release_all(resource, token);
+        return std::nullopt;
+    }
+
+    void release(const std::string& resource, const std::string& token) {
+        release_all(resource, token);
+    }
+
+private:
+    void release_all(const std::string& resource,
+                     const std::string& token) {
+        for (auto& node : nodes_) {
+            try {
+                node.eval<long long>(RELEASE_SCRIPT,
+                    {resource}, {token});
+            } catch (const sw::redis::Error&) { /* skip */ }
+        }
+    }
+};`,
     },
     {
       language: "redis",
@@ -156,83 +188,128 @@ PUBSUB CHANNELS "notifications:*"
 PUBSUB NUMSUB notifications:user42`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Leaderboard with sorted sets",
-      source: `import redis
+      source: `// Using redis-plus-plus (sw::redis)
+#include <sw/redis++/redis++.h>
+#include <iostream>
+#include <string>
+#include <vector>
 
-r = redis.Redis(decode_responses=True)
-LB = "leaderboard:weekly"
+int main() {
+    auto redis = sw::redis::Redis("tcp://127.0.0.1:6379");
+    const std::string LB = "leaderboard:weekly";
 
-# Add/update scores
-r.zadd(LB, {"alice": 1500, "bob": 1200, "charlie": 1800})
+    // Add/update scores
+    redis.zadd(LB, {{"alice", 1500}, {"bob", 1200}, {"charlie", 1800}});
 
-# Increment score atomically
-r.zincrby(LB, 50, "bob")  # bob -> 1250
+    // Increment score atomically
+    redis.zincrby(LB, 50, "bob");  // bob -> 1250
 
-# Top 10 with scores
-top10 = r.zrevrange(LB, 0, 9, withscores=True)
-for rank, (player, score) in enumerate(top10, 1):
-    print(f"#{rank} {player}: {score}")
+    // Top 10 with scores (zrevrange returns pairs in descending order)
+    std::vector<std::pair<std::string, double>> top10;
+    redis.zrevrange(LB, 0, 9, std::back_inserter(top10));
+    int rank = 1;
+    for (const auto& [player, score] : top10) {
+        std::cout << "#" << rank++ << " " << player
+                  << ": " << score << std::endl;
+    }
 
-# Get player's rank (0-based from top)
-rank = r.zrevrank(LB, "alice")  # 1 (second place)
+    // Get player's rank (0-based from top)
+    auto alice_rank = redis.zrevrank(LB, "alice");  // 1 (second place)
+    if (alice_rank) std::cout << "Alice rank: " << *alice_rank << std::endl;
 
-# Players ranked 50-60 (paginated)
-page = r.zrevrange(LB, 49, 59, withscores=True)
+    // Players ranked 50-60 (paginated)
+    std::vector<std::pair<std::string, double>> page;
+    redis.zrevrange(LB, 49, 59, std::back_inserter(page));
 
-# Players within a score range
-bracket = r.zrangebyscore(LB, 1300, 1600, withscores=True)
+    // Players within a score range
+    std::vector<std::pair<std::string, double>> bracket;
+    sw::redis::BoundedInterval<double> interval(1300, 1600,
+        sw::redis::BoundType::CLOSED);
+    redis.zrangebyscore(LB, interval, std::back_inserter(bracket));
 
-# Total players
-total = r.zcard(LB)
+    // Total players
+    long long total = redis.zcard(LB);
+    std::cout << "Total players: " << total << std::endl;
 
-# Remove inactive player
-r.zrem(LB, "inactive_player")`,
+    // Remove inactive player
+    redis.zrem(LB, "inactive_player");
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Session management with Redis hashes",
-      source: `import redis
-import secrets
-import json
-import time
+      source: `// Using redis-plus-plus (sw::redis)
+#include <sw/redis++/redis++.h>
+#include <random>
+#include <string>
+#include <unordered_map>
+#include <chrono>
+#include <optional>
+#include <iostream>
 
-r = redis.Redis(decode_responses=True)
-SESSION_TTL = 3600  # 1 hour
+const int SESSION_TTL = 3600; // 1 hour
 
-def create_session(user_id: str, metadata: dict) -> str:
-    session_id = secrets.token_urlsafe(32)
-    key = f"session:{session_id}"
-    r.hset(key, mapping={
-        "user_id": user_id,
-        "created_at": str(time.time()),
-        "ip": metadata.get("ip", ""),
-        "user_agent": metadata.get("user_agent", ""),
-    })
-    r.expire(key, SESSION_TTL)
-    return session_id
+// Generate a cryptographically random session token
+std::string generate_session_id() {
+    static constexpr char charset[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<size_t> dist(0, sizeof(charset) - 2);
+    std::string token(43, '\\0'); // ~32 bytes encoded
+    for (auto& c : token) c = charset[dist(gen)];
+    return token;
+}
 
-def get_session(session_id: str) -> dict | None:
-    key = f"session:{session_id}"
-    data = r.hgetall(key)
-    if not data:
-        return None
-    # Refresh TTL on access (sliding expiration)
-    r.expire(key, SESSION_TTL)
-    return data
+std::string create_session(sw::redis::Redis& redis,
+                           const std::string& user_id,
+                           const std::unordered_map<std::string, std::string>& metadata) {
+    std::string session_id = generate_session_id();
+    std::string key = "session:" + session_id;
 
-def destroy_session(session_id: str):
-    r.delete(f"session:{session_id}")
+    auto now = std::to_string(
+        std::chrono::system_clock::now().time_since_epoch().count());
+    std::unordered_map<std::string, std::string> fields = {
+        {"user_id",    user_id},
+        {"created_at", now},
+        {"ip",         metadata.count("ip") ? metadata.at("ip") : ""},
+        {"user_agent", metadata.count("user_agent") ? metadata.at("user_agent") : ""},
+    };
+    redis.hmset(key, fields.begin(), fields.end());
+    redis.expire(key, std::chrono::seconds(SESSION_TTL));
+    return session_id;
+}
 
-def count_active_sessions() -> int:
-    count = 0
-    cursor = 0
-    while True:
-        cursor, keys = r.scan(cursor, match="session:*", count=100)
-        count += len(keys)
-        if cursor == 0:
-            break
-    return count`,
+std::optional<std::unordered_map<std::string, std::string>>
+get_session(sw::redis::Redis& redis, const std::string& session_id) {
+    std::string key = "session:" + session_id;
+    std::unordered_map<std::string, std::string> data;
+    redis.hgetall(key, std::inserter(data, data.end()));
+    if (data.empty()) return std::nullopt;
+    // Refresh TTL on access (sliding expiration)
+    redis.expire(key, std::chrono::seconds(SESSION_TTL));
+    return data;
+}
+
+void destroy_session(sw::redis::Redis& redis,
+                     const std::string& session_id) {
+    redis.del("session:" + session_id);
+}
+
+int count_active_sessions(sw::redis::Redis& redis) {
+    int count = 0;
+    long long cursor = 0;
+    do {
+        std::vector<std::string> keys;
+        cursor = redis.scan(cursor, "session:*", 100,
+                            std::back_inserter(keys));
+        count += static_cast<int>(keys.size());
+    } while (cursor != 0);
+    return count;
+}`,
     },
   ],
   diagrams: [
@@ -409,5 +486,12 @@ def count_active_sessions() -> int:
     { term: "Sliding window", definition: "Rate limiting approach that tracks individual request timestamps for a smooth, continuous window rather than fixed time boundaries." },
     { term: "Consumer group", definition: "Redis Streams feature that distributes messages among multiple consumers with tracking, acknowledgment, and failure recovery." },
     { term: "Lua scripting", definition: "Embedded scripting in Redis that runs atomically (no interleaving with other commands), essential for multi-step atomic patterns." },
+  ],
+  exercises: [
+    "Implement a **sliding window rate limiter** using a sorted set and a Lua script. Test it with 200 requests per second against a limit of 100 requests per 60-second window. Verify that requests are rejected *smoothly* across the window boundary, unlike a fixed-window counter. Measure the **memory overhead** per user compared to a simple `INCR`-based approach.",
+    "Write a **distributed lock** using `SET key value NX EX`. Deliberately introduce a bug: release the lock with plain `DEL` instead of the Lua check-and-delete script. Demonstrate the race condition by running two concurrent clients where one is slow -- show that the slow client **incorrectly releases** the fast client's lock. Then fix it with the Lua script.",
+    "Build a **Pub/Sub-based cache invalidation** system: one publisher writes to a Redis key and publishes an invalidation message on a channel; multiple subscriber processes listen and evict their local cache. Then disconnect a subscriber, publish a message, and reconnect -- confirm that the subscriber *missed* the message. Rewrite the system using **Streams with consumer groups** to guarantee delivery.",
+    "Design a **multi-criteria leaderboard** (e.g., rank by score, then by timestamp for ties). Encode both values into a single sorted set score using the formula `score * 1e10 + timestamp`. Insert 500 players and verify that players with the same score are correctly ordered by *earliest achievement*. What are the precision limitations of this encoding?",
+    "Implement a **session management system** using Redis hashes with both *sliding expiration* (extend TTL on each access) and *absolute timeout* (force logout after 8 hours regardless of activity). Write a load test that creates 10,000 sessions and verify that `SCAN` can enumerate them without blocking other clients, unlike `KEYS`.",
   ],
 };

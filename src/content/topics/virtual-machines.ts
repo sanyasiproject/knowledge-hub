@@ -44,31 +44,42 @@ public class Add {
 //      3: ireturn        // return int on top of stack`,
     },
     {
-      language: "python",
-      caption: "Inspecting CPython bytecode with the dis module",
-      source: `import dis
+      language: "cpp",
+      caption: "Inspecting compiler-generated assembly for a simple function (GCC/Clang)",
+      source: `#include <cstdint>
+#include <iostream>
 
-def factorial(n):
-    if n <= 1:
-        return 1
-    return n * factorial(n - 1)
+int factorial(int n) {
+    if (n <= 1) return 1;
+    return n * factorial(n - 1);
+}
 
-dis.dis(factorial)
-# Output (CPython 3.12):
-#   2   0 LOAD_FAST                0 (n)
-#       2 LOAD_CONST               1 (1)
-#       4 COMPARE_OP               1 (<=)
-#       6 POP_JUMP_FORWARD_IF_FALSE 2 (to 12)
-#   3   8 LOAD_CONST               1 (1)
-#      10 RETURN_VALUE
-#   4  12 LOAD_FAST                0 (n)
-#      14 LOAD_GLOBAL              0 (factorial)
-#      16 LOAD_FAST                0 (n)
-#      18 LOAD_CONST               1 (1)
-#      20 BINARY_OP               10 (-)
-#      22 CALL                     1
-#      24 BINARY_OP                5 (*)
-#      26 RETURN_VALUE`,
+// Compile with: g++ -S -O0 -masm=intel factorial.cpp
+// Selected output from factorial.s (x86-64, GCC, unoptimized):
+//
+// factorial(int):
+//   push    rbp                    ; save base pointer
+//   mov     rbp, rsp               ; set up stack frame
+//   sub     rsp, 16                ; allocate local space
+//   mov     DWORD PTR [rbp-4], edi ; store param n
+//   cmp     DWORD PTR [rbp-4], 1   ; n <= 1?
+//   jg      .L2                    ; if n > 1, skip to recursive case
+//   mov     eax, 1                 ; return 1
+//   jmp     .L3
+// .L2:
+//   mov     eax, DWORD PTR [rbp-4] ; load n
+//   sub     eax, 1                 ; n - 1
+//   mov     edi, eax               ; pass (n-1) as argument
+//   call    factorial(int)         ; recursive call
+//   imul    eax, DWORD PTR [rbp-4] ; result = n * factorial(n-1)
+// .L3:
+//   leave                          ; restore stack frame
+//   ret                            ; return eax
+
+int main() {
+    std::cout << factorial(5) << std::endl;  // prints 120
+    return 0;
+}`,
     },
     {
       language: "csharp",

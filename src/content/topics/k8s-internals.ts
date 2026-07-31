@@ -142,6 +142,199 @@ export const k8sInternals: TopicContent = {
       back: "A policy engine using validating admission webhooks to enforce custom policies (written in Rego) on Kubernetes resources.",
     },
   ],
+  deepDive: [
+    "**etcd** is the *single source of truth* for all cluster state, and understanding its internals is essential for debugging and operating Kubernetes at scale. Every write goes through the **Raft consensus protocol**: the elected leader appends log entries and replicates them to a quorum of followers before committing. This means write latency is bounded by the *slowest quorum member*, making network latency between etcd nodes critical. The **MVCC model** assigns a monotonically increasing *revision number* to every key mutation, allowing the `watch` API to stream changes from any point in history. However, old revisions accumulate and must be **compacted** periodically (default: every 5 minutes) to reclaim storage. After compaction, a **defragmentation** pass reclaims freed pages in the boltdb backend. Operators should monitor `etcd_mvcc_db_total_size_in_bytes`, `etcd_server_slow_apply_total`, and `etcd_disk_wal_fsync_duration_seconds` to detect performance degradation before it cascades into API server timeouts.",
+    "The **informer and controller pattern** is the beating heart of Kubernetes extensibility. When a controller process starts, the `SharedInformerFactory` creates one *reflector* per resource type, which performs an initial `List` call (populating the **DeltaFIFO** queue) followed by a long-running `Watch`. Events flow from `DeltaFIFO` into the **Indexer** (a thread-safe, indexed in-memory store) and then fan out to registered **ResourceEventHandlers**. These handlers should *never block* -- they simply compute an object key (`namespace/name`) and push it onto a **rate-limited work queue** (`workqueue.RateLimitingInterface`). Worker goroutines then dequeue keys, look up the full object from the Indexer (an *O(1)* cache read, not an API call), and execute the reconciliation logic. If reconciliation fails, the key is **re-enqueued with exponential backoff** (default: 5ms base, 1000s max). The periodic **resync** (e.g., every 30s) re-delivers all cached objects as *Update* events, ensuring eventual consistency even if watch events were lost.",
+    "**Admission webhooks** form the last programmatic checkpoint before an object is persisted to etcd, and their design has significant *availability implications*. A `MutatingWebhookConfiguration` with `failurePolicy: Fail` and a broad `rules` match (e.g., all `pods` in all namespaces) becomes a **cluster-wide dependency** -- if the webhook endpoint is unavailable, *no pods can be created*. Best practices include: scoping `rules` narrowly with `objectSelector` or `namespaceSelector`, excluding the `kube-system` namespace, setting reasonable `timeoutSeconds` (default 10, recommend 5), and using `reinvocationPolicy: IfNeeded` when multiple mutating webhooks interact. **Validating Admission Policies** (KEP-3488, GA in 1.30) offer an in-process alternative using *CEL expressions* evaluated by the API server itself, eliminating the network hop and availability risk of external webhooks for common validation scenarios like requiring labels or enforcing resource quotas.",
+  ],
+  code: [
+    {
+      language: "yaml",
+      caption: "CRD definition for a custom **PostgresCluster** resource with *status subresource* and *printer columns*",
+      source: `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: postgresclusters.db.example.com
+spec:
+  group: db.example.com
+  names:
+    kind: PostgresCluster
+    plural: postgresclusters
+    singular: postgrescluster
+    shortNames: [pg]
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      subresources:
+        status: {}          # enables /status subresource
+      additionalPrinterColumns:
+        - name: Replicas
+          type: integer
+          jsonPath: .spec.replicas
+        - name: Status
+          type: string
+          jsonPath: .status.phase
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                replicas:
+                  type: integer
+                  minimum: 1
+                version:
+                  type: string
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string`,
+    },
+    {
+      language: "yaml",
+      caption: "**ValidatingWebhookConfiguration** scoped to Deployments with a *namespace selector*",
+      source: `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: require-resource-limits
+webhooks:
+  - name: limits.policy.example.com
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    timeoutSeconds: 5
+    failurePolicy: Fail
+    namespaceSelector:
+      matchExpressions:
+        - key: environment
+          operator: In
+          values: [production, staging]
+    rules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        resources: ["deployments"]
+        operations: [CREATE, UPDATE]
+    clientConfig:
+      service:
+        name: webhook-service
+        namespace: policy-system
+        path: /validate-resource-limits
+      caBundle: <base64-encoded-CA>`,
+    },
+    {
+      language: "bash",
+      caption: "Useful **kubectl** commands for inspecting *etcd state*, *CRDs*, and *admission webhooks*",
+      source: `# Check etcd cluster health (requires etcdctl)
+ETCDCTL_API=3 etcdctl --endpoints=https://127.0.0.1:2379 \\
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \\
+  --cert=/etc/kubernetes/pki/etcd/server.crt \\
+  --key=/etc/kubernetes/pki/etcd/server.key \\
+  endpoint health --cluster
+
+# List all CRDs and their versions
+kubectl get crd -o custom-columns=\\
+  NAME:.metadata.name,\\
+  GROUP:.spec.group,\\
+  VERSION:.spec.versions[0].name,\\
+  SCOPE:.spec.scope
+
+# Inspect a specific CRD's schema
+kubectl get crd postgresclusters.db.example.com -o jsonpath='{.spec.versions[0].schema.openAPIV3Schema}' | jq .
+
+# List all admission webhooks
+kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations
+
+# Test webhook dry-run (see if admission rejects)
+kubectl apply --dry-run=server -f deployment.yaml
+
+# Watch informer-style events on Deployments
+kubectl get deployments --watch -o wide`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Kubernetes Controller Reconciliation Loop",
+      kind: "flow",
+      caption: "Shows how **informers**, *work queues*, and the **reconciliation loop** interact from etcd watch through to state correction",
+      mermaid: `flowchart LR
+  A["etcd\n(Watch API)"] -->|gRPC stream| B["API Server"]
+  B -->|Watch events| C["Reflector\n(List + Watch)"]
+  C -->|Add/Update/Delete| D["DeltaFIFO"]
+  D -->|Sync| E["Indexer\n(Local Cache)"]
+  D -->|Events| F["Event Handlers\n(AddFunc, UpdateFunc,\nDeleteFunc)"]
+  F -->|Enqueue key\nnamespace/name| G["Work Queue\n(Rate-Limited)"]
+  G -->|Dequeue| H["Worker\nGoroutine"]
+  H -->|Read from cache| E
+  H -->|Compare desired\nvs actual state| I{"State\nMatches?"}
+  I -->|No| J["Reconcile\n(Create/Update/Delete\nresources)"]
+  I -->|Yes| K["Done\n(No action)"]
+  J -->|Success| K
+  J -->|Failure| G`,
+    },
+    {
+      title: "Admission Webhook Request Flow",
+      kind: "sequence",
+      caption: "Sequence of *authentication*, *authorization*, *mutation*, and *validation* before an object is persisted to **etcd**",
+      mermaid: `sequenceDiagram
+  participant Client as kubectl / API Client
+  participant API as API Server
+  participant AuthN as Authentication
+  participant AuthZ as Authorization
+  participant MW as Mutating Webhooks
+  participant VW as Validating Webhooks
+  participant ETCD as etcd
+
+  Client->>API: Create Deployment
+  API->>AuthN: Authenticate request
+  AuthN-->>API: Identity confirmed
+  API->>AuthZ: Authorize (RBAC)
+  AuthZ-->>API: Allowed
+  API->>MW: Mutating Admission
+  MW-->>API: Modified object (e.g., sidecar injected)
+  API->>VW: Validating Admission
+  VW-->>API: Accepted
+  API->>ETCD: Persist object
+  ETCD-->>API: Stored (revision N)
+  API-->>Client: 201 Created`,
+    },
+  ],
+  comparison: {
+    columns: ["Feature", "CRD", "Aggregated API Server", "Admission Webhook"],
+    rows: [
+      ["**Complexity**", "*Low* -- declarative YAML", "*High* -- custom Go server", "*Medium* -- HTTP endpoint"],
+      ["**Storage**", "etcd (automatic)", "Custom backend possible", "N/A (intercepts requests)"],
+      ["**Validation**", "OpenAPI v3 schema + CEL", "Arbitrary Go code", "Arbitrary logic in handler"],
+      ["**Use case**", "New resource types", "Complex APIs, custom storage", "Policy enforcement, mutation"],
+      ["**RBAC support**", "Automatic", "Manual registration", "N/A (acts on existing resources)"],
+      ["**Availability risk**", "*None* (built into API server)", "*Moderate* (extra server)", "*High* if `failurePolicy: Fail`"],
+      ["**Examples**", "`Certificate`, `VirtualService`", "Metrics API, custom catalogs", "OPA Gatekeeper, Istio injection"],
+    ],
+  },
+  exercises: [
+    "**Build a custom controller**: Write a controller in Go (or using a framework like *Kubebuilder*) that watches `ConfigMap` objects with a specific label and creates a corresponding `Secret` with base64-encoded data. Implement proper *error handling* with work queue requeue and *exponential backoff*.",
+    "**Create and validate a CRD**: Define a CRD for a `BackupSchedule` resource with fields for `schedule` (cron expression), `targetDatabase`, and `retentionDays`. Add **OpenAPI v3 validation** with `minimum`, `pattern`, and `required` constraints. Verify that `kubectl apply` rejects invalid manifests.",
+    "**Implement a mutating webhook**: Build a webhook that automatically injects a `sidecar` container into any Pod created in namespaces labeled `inject-sidecar: \"true\"`. Test with `kubectl apply --dry-run=server` and verify the mutated Pod spec includes the sidecar.",
+    "**etcd disaster recovery drill**: Take an *etcd snapshot* using `etcdctl snapshot save`, simulate data loss by deleting a namespace, then restore the snapshot with `etcdctl snapshot restore`. Document the **RPO** (data since last snapshot) and **RTO** (time to restore) you observed.",
+    "**Debug an informer cache inconsistency**: Create a scenario where a controller reads stale data from its informer cache (e.g., by disabling resync). Observe the behavior, then fix it by configuring an appropriate `resyncPeriod` and adding a *resourceVersion* check in the reconcile loop.",
+  ],
+  cheatSheet: [
+    "**etcd key format**: `/registry/<resource>/<namespace>/<name>` -- use `etcdctl get /registry/ --prefix --keys-only` to browse stored objects",
+    "**CRD short names**: Define `shortNames` in the CRD spec so `kubectl get pg` works instead of `kubectl get postgresclusters`",
+    "**Webhook dry-run**: `kubectl apply --dry-run=server -f manifest.yaml` triggers admission webhooks without persisting, ideal for testing policies",
+    "**Informer resync**: Set `resyncPeriod` to 0 to disable periodic resync (rely solely on watch events) or to 30s-5m for controllers that need periodic re-evaluation",
+    "**Controller rate limiting**: Default work queue uses *exponential backoff* (5ms base, 1000s max) -- override with `workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(time.Second, 5*time.Minute))`",
+    "**CRD status subresource**: Always enable `.subresources.status` so that status updates do not trigger spec validation and can use a separate RBAC verb (`/status`)",
+  ],
+  revisionNotes: [
+    "**etcd** uses *Raft consensus* for leader election and log replication; writes require a quorum. The **MVCC model** tracks revisions, and the `watch` API streams changes from any revision -- this is the foundation of the informer pattern.",
+    "**Informers** perform `List` + `Watch`, maintain a local **Indexer** cache, and deliver events to handlers that enqueue keys into a **rate-limited work queue**. `SharedInformerFactory` ensures *one informer per resource type* per process.",
+    "**CRDs** declaratively extend the API server with new resource types, providing automatic *CRUD endpoints*, *RBAC*, *etcd storage*, and *kubectl integration*. **Operators** combine CRDs with custom controllers to encode domain-specific operational logic.",
+    "**Admission webhooks** intercept requests after AuthN/AuthZ but before persistence. *Mutating* webhooks modify objects (run first); *validating* webhooks accept/reject (run second). `failurePolicy: Fail` makes the webhook a cluster-wide dependency -- scope narrowly and set low `timeoutSeconds`.",
+    "**Validating Admission Policies** (GA in K8s 1.30) use *CEL expressions* evaluated in-process by the API server, eliminating the network hop and availability risk of external webhooks for common validation use cases.",
+  ],
   glossary: [
     {
       term: "Informer",

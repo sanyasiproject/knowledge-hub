@@ -75,48 +75,66 @@ function calculateRefundAmount(items: LineItem[], customer: Customer): number {
 // business concepts that happen to share a calculation step today.`
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "YAGNI violation: building a generic framework for a simple need",
-      source: `# YAGNI VIOLATION: Building an elaborate plugin system for one use case
+      source: `// YAGNI VIOLATION: Building an elaborate plugin system for one use case
 
-class PluginRegistry:
-    """Generic plugin registry with lifecycle hooks, priorities, and dependencies."""
-    def __init__(self):
-        self._plugins = {}
-        self._hooks = {}
-        self._priorities = {}
+#include <string>
+#include <map>
+#include <vector>
+#include <functional>
+#include <any>
+#include <memory>
 
-    def register(self, name, plugin, priority=0, depends_on=None):
-        self._plugins[name] = plugin
-        self._priorities[name] = priority
-        # ... topological sort for dependencies
-        # ... lifecycle management
-        # ... hot-reload support
-        # ... plugin versioning
-        # 200 lines of framework code for... one plugin.
+class PluginRegistry {
+    // Generic plugin registry with lifecycle hooks, priorities, and dependencies.
+    struct PluginEntry {
+        std::any plugin;
+        int priority;
+        std::vector<std::string> dependencies;
+    };
+    std::map<std::string, PluginEntry> plugins_;
+    std::map<std::string, std::vector<std::function<void()>>> hooks_;
 
-    def execute_hook(self, hook_name, *args, **kwargs):
-        # Complex dispatch with error handling, retries, timeouts...
-        pass
+public:
+    void register_plugin(const std::string& name, std::any plugin,
+                         int priority = 0,
+                         std::vector<std::string> depends_on = {}) {
+        plugins_[name] = {std::move(plugin), priority, std::move(depends_on)};
+        // ... topological sort for dependencies
+        // ... lifecycle management
+        // ... hot-reload support
+        // ... plugin versioning
+        // 200 lines of framework code for... one plugin.
+    }
 
-# All of this to support ONE discount calculator.
-# registry.register("discount", DiscountPlugin())
+    void execute_hook(const std::string& hook_name) {
+        // Complex dispatch with error handling, retries, timeouts...
+    }
+};
 
-# --- KISS/YAGNI APPLIED: Just write what you need ---
+// All of this to support ONE discount calculator.
+// registry.register_plugin("discount", DiscountPlugin{});
 
-def apply_discount(order: Order) -> float:
-    """Simple discount logic. Will refactor if/when more discount types emerge."""
-    if order.total > 100:
-        return order.total * 0.1  # 10% discount over $100
-    return 0.0
+// --- KISS/YAGNI APPLIED: Just write what you need ---
 
-# When (if!) you need multiple discount strategies, THEN introduce a list:
-# discount_strategies: list[Callable[[Order], float]] = [
-#     volume_discount,
-#     loyalty_discount,
-#     seasonal_discount,
-# ]
-# total_discount = sum(strategy(order) for strategy in discount_strategies)`
+struct Order { double total; };
+
+double apply_discount(const Order& order) {
+    // Simple discount logic. Will refactor if/when more discount types emerge.
+    if (order.total > 100.0)
+        return order.total * 0.1;  // 10% discount over $100
+    return 0.0;
+}
+
+// When (if!) you need multiple discount strategies, THEN introduce a list:
+// std::vector<std::function<double(const Order&)>> strategies = {
+//     volume_discount,
+//     loyalty_discount,
+//     seasonal_discount,
+// };
+// double total = 0.0;
+// for (auto& strategy : strategies) total += strategy(order);`
     },
     {
       language: "java",

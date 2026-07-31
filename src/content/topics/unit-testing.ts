@@ -168,50 +168,71 @@ describe('UserService', () => {
 });`,
     },
     {
-      language: "python",
-      caption: "pytest unit tests with fixtures and parametrize",
-      source: `import pytest
-from decimal import Decimal
-from inventory import InventoryManager, InsufficientStockError
+      language: "cpp",
+      caption: "Google Test unit tests with fixtures and parameterized tests",
+      source: `#include <gtest/gtest.h>
+#include <stdexcept>
+#include <tuple>
+#include "InventoryManager.h"  // InventoryManager, InsufficientStockError
 
-@pytest.fixture
-def inventory():
-    """Fresh inventory manager for each test."""
-    mgr = InventoryManager()
-    mgr.add_product("SKU-001", "Widget", quantity=100, price=Decimal("9.99"))
-    mgr.add_product("SKU-002", "Gadget", quantity=5, price=Decimal("49.99"))
-    return mgr
+// Test fixture — fresh inventory for each test
+class InventoryManagerTest : public ::testing::Test {
+protected:
+    InventoryManager inventory;
 
-class TestInventoryManager:
-    def test_add_product_increases_count(self, inventory):
-        assert inventory.product_count() == 2
-        inventory.add_product("SKU-003", "Doohickey", quantity=10, price=Decimal("4.99"))
-        assert inventory.product_count() == 3
+    void SetUp() override {
+        inventory.addProduct("SKU-001", "Widget", 100, 9.99);
+        inventory.addProduct("SKU-002", "Gadget", 5, 49.99);
+    }
+};
 
-    def test_reserve_stock_decrements_available(self, inventory):
-        inventory.reserve("SKU-001", quantity=10)
-        assert inventory.available("SKU-001") == 90
+TEST_F(InventoryManagerTest, AddProductIncreasesCount) {
+    EXPECT_EQ(inventory.productCount(), 2);
+    inventory.addProduct("SKU-003", "Doohickey", 10, 4.99);
+    EXPECT_EQ(inventory.productCount(), 3);
+}
 
-    def test_reserve_insufficient_stock_raises(self, inventory):
-        with pytest.raises(InsufficientStockError, match="only 5 available"):
-            inventory.reserve("SKU-002", quantity=10)
+TEST_F(InventoryManagerTest, ReserveStockDecrementsAvailable) {
+    inventory.reserve("SKU-001", 10);
+    EXPECT_EQ(inventory.available("SKU-001"), 90);
+}
 
-    @pytest.mark.parametrize("quantity,expected_total", [
-        (1, Decimal("9.99")),
-        (10, Decimal("99.90")),
-        (0, Decimal("0.00")),
-    ])
-    def test_calculate_order_total(self, inventory, quantity, expected_total):
-        total = inventory.calculate_total("SKU-001", quantity)
-        assert total == expected_total
+TEST_F(InventoryManagerTest, ReserveInsufficientStockThrows) {
+    EXPECT_THROW({
+        inventory.reserve("SKU-002", 10);
+    }, InsufficientStockError);
+}
 
-    def test_reserve_nonexistent_sku_raises(self, inventory):
-        with pytest.raises(KeyError):
-            inventory.reserve("SKU-999", quantity=1)
+// Parameterized test for order totals
+class OrderTotalTest
+    : public InventoryManagerTest,
+      public ::testing::WithParamInterface<std::tuple<int, double>> {};
 
-    def test_add_duplicate_sku_updates_quantity(self, inventory):
-        inventory.add_product("SKU-001", "Widget", quantity=50, price=Decimal("9.99"))
-        assert inventory.available("SKU-001") == 150`,
+TEST_P(OrderTotalTest, CalculatesCorrectTotal) {
+    auto [quantity, expectedTotal] = GetParam();
+    double total = inventory.calculateTotal("SKU-001", quantity);
+    EXPECT_NEAR(total, expectedTotal, 0.01);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    VariousQuantities, OrderTotalTest,
+    ::testing::Values(
+        std::make_tuple(1,  9.99),
+        std::make_tuple(10, 99.90),
+        std::make_tuple(0,  0.00)
+    )
+);
+
+TEST_F(InventoryManagerTest, ReserveNonexistentSkuThrows) {
+    EXPECT_THROW({
+        inventory.reserve("SKU-999", 1);
+    }, std::out_of_range);
+}
+
+TEST_F(InventoryManagerTest, AddDuplicateSkuUpdatesQuantity) {
+    inventory.addProduct("SKU-001", "Widget", 50, 9.99);
+    EXPECT_EQ(inventory.available("SKU-001"), 150);
+}`,
     },
   ],
   diagrams: [

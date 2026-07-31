@@ -151,4 +151,213 @@ export const azureStorage: TopicContent = {
         "A VNET feature that routes traffic to Azure Storage over the Azure backbone network, restricting storage access to specific subnets while the storage account retains its public IP.",
     },
   ],
+  deepDive: [
+    "**Azure Blob Storage** operates on a *three-layer architecture*: the **front-end layer** (FE) handles authentication and request routing, the **partition layer** manages the *namespace* and maps blob names to storage locations, and the **stream layer** (DFS) persists data as *extents* across multiple disks. Each storage account is assigned to a **storage stamp** — a cluster of ~10-20 racks with *fault domains*. The **partition layer** maintains a *range-partitioned index* (the **Object Table**) that maps `(AccountName, ContainerName, BlobName)` to the blob's extent locations. Block blobs are composed of **committed block lists** — each `Put Block` uploads a block (up to *4000 MiB* with `2022-11-02` API) identified by a *base64 block ID*, and `Put Block List` atomically commits the blob. The partition layer uses a **Paxos-based replication** protocol within the stamp to ensure *strong consistency* for all writes. *Append blobs* use a **single-writer append** pattern where new blocks are appended sequentially — ideal for `log aggregation` and `audit trails`. The **partition server** handles *load balancing* by splitting hot partitions (a process called **partition splitting**) when a range receives disproportionate traffic, and merging cold partitions to reduce overhead.",
+    "**Storage redundancy** relies on two distinct replication mechanisms: *synchronous intra-region* replication and *asynchronous cross-region* replication. For **LRS**, all three replicas are written *synchronously* within a single storage stamp before the write is acknowledged — the **RPO is zero** and the **RTO** depends on hardware recovery (typically *minutes*). **ZRS** extends this by writing *synchronously* across **three availability zones** — each zone is an independent datacenter with its own power, cooling, and networking — achieving `RPO = 0` with an **RTO of ~12 hours** in a zone failure scenario. For **GRS** and **GZRS**, the primary region commits writes synchronously (LRS or ZRS respectively), then *asynchronously* replicates to the **secondary region** using a **background geo-replication process**. The `RPO for geo-replication is typically under 15 minutes` (no SLA guarantee). During a **customer-initiated failover** (`az storage account failover`), the secondary becomes primary — the **RTO is approximately 1 hour**, but *any writes not yet replicated are lost*. With **RA-GRS** / **RA-GZRS**, the secondary endpoint (`accountname-secondary.blob.core.windows.net`) serves *read-only* requests with **eventual consistency** — the `Last-Sync-Time` property indicates how far behind the secondary is.",
+    "**Azure Files** supports two protocols with distinct negotiation and performance characteristics. **SMB** (Server Message Block) uses `port 445` and negotiates the highest mutually supported dialect — Azure Files supports **SMB 3.0** and **SMB 3.1.1** with *AES-128-GCM* and *AES-256-GCM* encryption. For **Premium file shares**, performance scales with provisioned share size: each GiB provisions *1 IOPS* (baseline) + **burst up to 10,000 IOPS** using a *credit bucket model*. Enable `SMB Multichannel` on Premium shares to aggregate bandwidth across **up to 4 NIC channels**, increasing throughput from ~100 MB/s to over *400 MB/s* for a single client. **NFS 4.1** is supported *only on Premium file shares* and requires a **VNET** (no public internet access) — NFS shares use `nconnect` mount option (up to **16 connections**) for parallelism. Performance tuning tips: use `max_read_ahead_kb=16384` for sequential workloads, set `rsize=1048576,wsize=1048576` for large I/O sizes, and enable **metadata caching** with `actimeo=30`. For *latency-sensitive workloads*, co-locate compute in the **same availability zone** as the Premium file share and use **Accelerated Networking** on the VM to reduce round-trip time to *sub-millisecond* levels."
+  ],
+  code: [
+    {
+      language: "bash",
+      caption: "Create a storage account with GZRS redundancy and enforce HTTPS-only access",
+      source: `# Create a resource group
+az group create \\
+  --name rg-storage-prod \\
+  --location eastus2
+
+# Create a storage account with GZRS redundancy
+az storage account create \\
+  --name stproddata2024 \\
+  --resource-group rg-storage-prod \\
+  --location eastus2 \\
+  --sku Standard_GZRS \\
+  --kind StorageV2 \\
+  --access-tier Hot \\
+  --min-tls-version TLS1_2 \\
+  --https-only true \\
+  --allow-blob-public-access false
+
+# Enable blob soft delete with 30-day retention
+az storage blob service-properties delete-policy update \\
+  --account-name stproddata2024 \\
+  --enable true \\
+  --days-retained 30`,
+    },
+    {
+      language: "json",
+      caption: "Lifecycle management policy: transition blobs from Hot to Cool after 30 days, to Archive after 180 days, and delete after 365 days",
+      source: `{
+  "rules": [
+    {
+      "enabled": true,
+      "name": "lifecycle-tiering-rule",
+      "type": "Lifecycle",
+      "definition": {
+        "actions": {
+          "baseBlob": {
+            "tierToCool": {
+              "daysAfterModificationGreaterThan": 30
+            },
+            "tierToArchive": {
+              "daysAfterModificationGreaterThan": 180
+            },
+            "delete": {
+              "daysAfterModificationGreaterThan": 365
+            }
+          },
+          "snapshot": {
+            "delete": {
+              "daysAfterCreationGreaterThan": 90
+            }
+          }
+        },
+        "filters": {
+          "blobTypes": ["blockBlob"],
+          "prefixMatch": ["data/", "logs/", "backups/"]
+        }
+      }
+    }
+  ]
+}`,
+    },
+    {
+      language: "bash",
+      caption: "Set up a private endpoint for a storage account to restrict access to a VNET",
+      source: `# Create a private endpoint for blob storage
+az network private-endpoint create \\
+  --name pe-stproddata-blob \\
+  --resource-group rg-storage-prod \\
+  --vnet-name vnet-prod \\
+  --subnet snet-private-endpoints \\
+  --private-connection-resource-id $(az storage account show \\
+    --name stproddata2024 \\
+    --resource-group rg-storage-prod \\
+    --query id -o tsv) \\
+  --group-id blob \\
+  --connection-name conn-stproddata-blob
+
+# Create a private DNS zone for blob storage
+az network private-dns zone create \\
+  --resource-group rg-storage-prod \\
+  --name privatelink.blob.core.windows.net
+
+# Link DNS zone to VNET
+az network private-dns zone vnet-link create \\
+  --resource-group rg-storage-prod \\
+  --zone-name privatelink.blob.core.windows.net \\
+  --name link-vnet-prod \\
+  --virtual-network vnet-prod \\
+  --registration-enabled false
+
+# Create DNS zone group for automatic DNS record management
+az network private-endpoint dns-zone-group create \\
+  --resource-group rg-storage-prod \\
+  --endpoint-name pe-stproddata-blob \\
+  --name default \\
+  --private-dns-zone privatelink.blob.core.windows.net \\
+  --zone-name blob`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Blob Lifecycle Management Flow",
+      kind: "flow",
+      caption: "Automated blob tier transitions and deletion based on lifecycle management policy rules",
+      mermaid: `flowchart LR
+    A["Blob Created\\n(Hot Tier)"] -->|"30 days after\\nlast modified"| B["Cool Tier"]
+    B -->|"180 days after\\nlast modified"| C["Archive Tier"]
+    C -->|"365 days after\\nlast modified"| D["Deleted"]
+    B -->|"Rehydrate\\n(on access)"| A
+    C -->|"Standard: up to 15h\\nHigh priority: under 1h"| B
+    A -->|"Snapshot created"| E["Snapshot"]
+    E -->|"90 days after\\ncreation"| D`,
+    },
+    {
+      title: "Storage Redundancy Architecture",
+      kind: "architecture",
+      caption: "Comparison of LRS, ZRS, GRS, and GZRS replication across datacenters and regions",
+      mermaid: `graph TD
+    subgraph "Primary Region"
+        subgraph "Availability Zone 1"
+            LRS1["Replica 1"]
+        end
+        subgraph "Availability Zone 2"
+            ZRS2["Replica 2"]
+        end
+        subgraph "Availability Zone 3"
+            ZRS3["Replica 3"]
+        end
+    end
+    subgraph "Secondary Region (Geo)"
+        subgraph "Single Datacenter"
+            GRS1["Replica 4"]
+            GRS2["Replica 5"]
+            GRS3["Replica 6"]
+        end
+    end
+    LRS1 -->|"Synchronous\\n(ZRS/GZRS)"| ZRS2
+    LRS1 -->|"Synchronous\\n(ZRS/GZRS)"| ZRS3
+    LRS1 -->|"Asynchronous\\n(GRS/GZRS)\\nRPO < 15 min"| GRS1
+    GRS1 --- GRS2
+    GRS1 --- GRS3`,
+    },
+    {
+      title: "Storage Access Control Decision Flow",
+      kind: "flow",
+      caption: "Decision flow for determining how a storage request is authenticated and authorized",
+      mermaid: `flowchart TD
+    A["Incoming Storage Request"] --> B{"Anonymous\\naccess enabled?"}
+    B -->|"Yes (public container)"| C["Allow read\\n(no auth needed)"]
+    B -->|"No"| D{"Auth method?"}
+    D -->|"Entra ID Token"| E{"RBAC role\\nassigned?"}
+    E -->|"Yes"| F["Authorize via\\nRBAC policy"]
+    E -->|"No"| G["403 Forbidden"]
+    D -->|"SAS Token"| H{"Token valid?\\n(time, IP, perms)"}
+    H -->|"Yes"| I["Authorize via\\nSAS permissions"]
+    H -->|"No / Expired"| G
+    D -->|"Account Key"| J["Full access\\n(all operations)"]
+    F --> K{"Network rules\\npassed?"}
+    I --> K
+    J --> K
+    K -->|"Yes"| L["Request Processed"]
+    K -->|"No"| M["403 Firewall Block"]`,
+    },
+  ],
+  comparison: {
+    columns: ["Feature", "LRS", "ZRS", "GRS / RA-GRS", "GZRS / RA-GZRS"],
+    rows: [
+      ["**Replication scope**", "Single datacenter", "Three availability zones", "Two regions (LRS + LRS)", "Two regions (ZRS + LRS)"],
+      ["**Durability (annual)**", "*11 nines* (99.999999999%)", "*12 nines* (99.9999999999%)", "*16 nines* (99.99999999999999%)", "*16 nines* (99.99999999999999%)"],
+      ["**Availability SLA (read)**", "99.9%", "99.9%", "99.99% (RA-GRS)", "99.99% (RA-GZRS)"],
+      ["**Protects against**", "Disk/rack failure", "Datacenter failure", "Regional disaster", "Datacenter + regional disaster"],
+      ["**Write consistency**", "*Synchronous* (3 local copies)", "*Synchronous* (3 zone copies)", "*Sync* primary + *async* secondary", "*Sync* primary (ZRS) + *async* secondary"],
+      ["**RPO**", "`0` (local)", "`0` (zonal)", "`< 15 minutes` (geo)", "`< 15 minutes` (geo)"],
+      ["**RTO (failover)**", "Minutes (hardware)", "~12 hours (zone)", "~1 hour (customer-initiated)", "~1 hour (customer-initiated)"],
+      ["**Secondary read access**", "N/A", "N/A", "Yes (RA-GRS)", "Yes (RA-GZRS)"],
+      ["**Relative cost**", "*Lowest*", "*Moderate*", "*Higher*", "*Highest*"],
+      ["**Best for**", "Dev/test, non-critical data", "High availability in-region", "Disaster recovery", "Maximum durability + availability"],
+    ],
+  },
+  exercises: [
+    "**Lab 1 — Blob Lifecycle Automation:** Create a storage account with `az storage account create --sku Standard_LRS`. Upload 10+ blobs to a container using `az storage blob upload-batch`. Apply a lifecycle management policy that transitions blobs to *Cool* after 7 days and *Archive* after 14 days. Verify the policy with `az storage account management-policy show` and monitor tier transitions in the **Azure Portal > Storage account > Lifecycle management** blade.",
+    "**Lab 2 — Private Endpoint Networking:** Deploy a VNET with two subnets (`workload` and `private-endpoints`). Create a storage account and configure a **private endpoint** for the `blob` sub-resource. Set up a **Private DNS Zone** (`privatelink.blob.core.windows.net`) linked to the VNET. From a VM in the workload subnet, verify `nslookup <account>.blob.core.windows.net` resolves to the *private IP*. Disable public network access and confirm external requests are blocked.",
+    "**Lab 3 — Geo-Redundancy Failover Drill:** Create a **GRS** storage account and upload critical test data. Enable **RA-GRS** and read from the `accountname-secondary.blob.core.windows.net` endpoint. Check the `Last-Sync-Time` header to observe replication lag. Initiate a **customer-managed failover** with `az storage account failover` and measure the *RTO*. After failover, verify the account is now **LRS** in the (former) secondary region and re-enable geo-redundancy.",
+    "**Lab 4 — Azure Files with SMB Multichannel:** Create a **Premium file share** (FileStorage account kind, `Premium_LRS` SKU). Enable **SMB Multichannel** via `az storage account file-service-properties update --enable-smb-multichannel`. Mount the share from a Windows VM with multiple NICs and run `robocopy` to benchmark throughput. Compare single-channel vs. multichannel performance using *perfmon* counters for `SMB Client Shares\\Avg. Bytes/Read`.",
+    "**Lab 5 — Immutable Storage for Compliance:** Create a blob container and enable a **time-based retention policy** with a 30-day retention period using `az storage container immutability-policy create`. Upload a blob and attempt to *delete* or *overwrite* it — observe the `409 Conflict` error. Lock the policy (irreversible) and verify that even a *storage account owner* cannot shorten the retention period. Add a **legal hold** tag and confirm it prevents deletion independently of the retention policy.",
+  ],
+  cheatSheet: [
+    "Create storage account: `az storage account create --name <name> --resource-group <rg> --sku Standard_ZRS --kind StorageV2`",
+    "Upload blob: `az storage blob upload --account-name <acct> --container-name <ctr> --name <blob> --file <local-path> --tier Hot`",
+    "Set lifecycle policy: `az storage account management-policy create --account-name <acct> --resource-group <rg> --policy @policy.json`",
+    "Initiate failover: `az storage account failover --name <acct> --resource-group <rg> --yes` (converts to *LRS* in secondary region)",
+    "Generate SAS token: `az storage blob generate-sas --account-name <acct> --container-name <ctr> --name <blob> --permissions r --expiry 2024-12-31T23:59Z --https-only`",
+    "Check geo-replication lag: `az storage account show --name <acct> --query geoReplicationStats` (shows `lastSyncTime` and replication status)",
+  ],
+  revisionNotes: [
+    "**Redundancy hierarchy**: *LRS* (11 nines, single DC) < *ZRS* (12 nines, 3 zones) < *GRS/RA-GRS* (16 nines, 2 regions with LRS) <= *GZRS/RA-GZRS* (16 nines, ZRS primary + LRS secondary). Geo-replication is *asynchronous* with `RPO < 15 minutes`.",
+    "**Access tiers and retention minimums**: *Hot* = no minimum, *Cool* = **30-day** minimum retention, *Archive* = **180-day** minimum retention. Archive rehydration: `standard priority` up to 15 hours, `high priority` under 1 hour. Only **block blobs** support tiering.",
+    "**Security best practices**: Use *Entra ID RBAC* over shared keys. Enforce `--https-only true` and `--min-tls-version TLS1_2`. Use **private endpoints** (private IP in VNET) over service endpoints (public IP with route optimization). Enable `az storage account keys renew` on a regular rotation schedule.",
+    "**Managed Disk performance**: Effective IOPS = `min(disk IOPS limit, VM IOPS limit)`. *Premium SSD* IOPS scales with disk size (P-series). *Ultra Disks* allow independent provisioning of IOPS (up to `160,000`) and throughput (up to `4,000 MB/s`). Enable **ReadOnly host caching** for read-heavy workloads on Premium SSD.",
+    "**Azure Files protocols**: *SMB 3.x* on port `445` — works cross-platform, supports encryption in transit. *NFS 4.1* — **Premium shares only**, requires VNET (no public access), use `nconnect=16` for parallelism. Enable **SMB Multichannel** on Premium for up to *4x throughput* improvement.",
+  ],
 };

@@ -298,7 +298,7 @@ DELETE /_pit
   diagrams: [
     {
       title: "Bool Query Clause Types",
-      kind: "structure",
+      kind: "architecture",
       caption: "The bool query has four clause types: must (AND + scored), should (OR + scored, min_should_match), filter (AND + unscored + cached), must_not (NOT + unscored + cached). Scored clauses contribute to _score; unscored clauses use bitset caching for performance."
     },
     {
@@ -308,7 +308,7 @@ DELETE /_pit
     },
     {
       title: "Aggregation Nesting Structure",
-      kind: "structure",
+      kind: "architecture",
       caption: "Bucket aggregations (date_histogram, terms) create groups. Metric aggregations (sum, avg, cardinality) compute values within each bucket. Pipeline aggregations (cumulative_sum, derivative) operate on other aggregation outputs. Buckets can nest other buckets and metrics."
     }
   ],
@@ -488,6 +488,13 @@ DELETE /_pit
     "collapse: deduplicate results by field value. inner_hits for additional results per group."
   ],
 
+  exercises: [
+    "Build a **product search query** using a `bool` query that combines: a `multi_match` on `name^3`, `description`, and `brand` in `must` (scored), a `term` filter for `status: active` and a `range` filter for `price` between 50 and 500 in `filter` (unscored), and a `must_not` clause excluding out-of-stock items. Explain *why* the status and price constraints belong in `filter` context rather than `must`.",
+    "Write a **nested aggregation** query that produces a monthly revenue dashboard for the last year: a `date_histogram` on `order_date` with `calendar_interval: month`, nested `sum` aggregation on `total_amount`, a `cardinality` aggregation on `customer_id`, and a `cumulative_sum` pipeline aggregation. Set `size: 0` to skip hits.",
+    "Implement a **function_score** query for an e-commerce search that combines BM25 text relevance with: a `field_value_factor` boost on `sales_count` (using `log1p` modifier), a `gauss` decay on `created_at` (favor recent products, scale of 30 days), and a conditional `weight` boost of 3x for `sponsored: true` items. Set `score_mode: sum` and `boost_mode: multiply`.",
+    "Your search results page needs to go beyond 10,000 results. Implement **deep pagination** using `search_after` with a Point in Time (PIT): open a PIT with `POST /products/_pit?keep_alive=5m`, perform the first search with a sort on `[price, _shard_doc]`, then use the last hit's sort values for the next page. Write all three requests and the PIT cleanup.",
+    "A user reports that searching for `'Running Shoes'` on a `keyword` field returns no results, while the same search on a `text` field works. Use the `POST /_analyze` API to demonstrate *why* this happens by showing the tokens produced for both field types. Then fix the query by choosing the correct query type (`term` vs `match`) for each field.",
+  ],
   resources: [
     { label: "Elasticsearch Query DSL Reference", kind: "docs", note: "Official reference for all query types, aggregations, and scoring functions" },
     { label: "Elasticsearch: The Definitive Guide - Search chapter", kind: "book", note: "Comprehensive tutorial on full-text search, bool queries, and relevance tuning" },

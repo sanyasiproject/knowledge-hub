@@ -83,4 +83,332 @@ export const hrFundamentals: TopicContent = {
     { term: "Notice Period", definition: "The time required between accepting a new offer and starting, based on contractual obligations to the current employer." },
     { term: "Green Flag", definition: "Positive signals in a screening: genuine enthusiasm, specific company knowledge, clear goals, and thoughtful questions." },
   ],
+
+  deepDive: [
+    "## What HR Screeners Actually Evaluate Behind the Scenes\n\nMost candidates treat the HR screening as a formality — a quick chat before the 'real' interviews begin. This is a costly mistake. The screener's internal evaluation form typically covers six dimensions, each scored on a scale: **communication clarity** (can this person articulate thoughts concisely and coherently?), **motivation and intent** (are they running away from something or genuinely attracted to this opportunity?), **role alignment** (do their skills and experience match what the hiring manager needs?), **cultural compatibility** (will they thrive in our environment or clash with existing team dynamics?), **compensation alignment** (are their expectations within our approved band, and is there room for negotiation?), and **logistical feasibility** (notice period, location, visa status, availability).\n\nBeyond these explicit criteria, experienced screeners pick up on subtler signals. They note your **energy and enthusiasm** — not performative excitement, but genuine curiosity about the role. They observe whether you ask clarifying questions or simply accept vague descriptions. They register how you handle unexpected questions or moments of uncertainty: do you freeze, ramble, or thoughtfully say 'That is a great question — let me think about that for a moment'? They also pay attention to **self-awareness**: candidates who can honestly discuss their weaknesses and growth areas without excessive self-deprecation or deflection score higher on maturity.\n\nThe screener's written summary is often the single document that determines whether you enter the technical loop. A lukewarm summary — 'candidate seems qualified but lacked enthusiasm' — can quietly end your candidacy even if your resume is stellar. Conversely, a strong summary — 'excellent communicator, deeply researched our product, clear about career goals' — can compensate for minor gaps in experience.",
+    "## How to Stand Out in the First Five Minutes\n\nScreeners conduct dozens of calls per week. Most blend together. The candidates who stand out share a common trait: **specificity**. Instead of saying 'I am excited about your company,' they say 'I read your CTO's blog post about migrating from a monolith to microservices, and the approach to strangler fig pattern migration resonated with challenges I faced at my current company.' Instead of 'I want to grow as an engineer,' they say 'I want to move from being a strong individual contributor to leading a team of 3-5 engineers on a product with real-time constraints.'\n\nThe first five minutes typically follow a pattern: the screener introduces the company and role, then asks you to walk through your background. Your response here sets the tone for the entire call. A **well-structured walkthrough** covers: (1) your current role and key accomplishments in 2-3 sentences, (2) a brief career arc showing progression and intentionality, (3) a clear bridge to why this specific role interests you. Total time: 90 seconds to 2 minutes. Rehearse this until it flows naturally.\n\nAnother differentiator is **asking smart questions early**. Most candidates save questions for the end when the screener asks 'Do you have any questions?' But candidates who ask a thoughtful clarifying question mid-conversation — 'You mentioned the team is scaling rapidly. Is the team currently more focused on building new features or improving reliability of existing systems?' — demonstrate active listening and genuine engagement. This transforms the call from an interrogation into a conversation, which is exactly what screeners prefer.",
+    "## The Hidden Dynamics of Salary Negotiation in HR Screens\n\nThe salary discussion during HR screening is more nuanced than most candidates realize. Internally, the screener has access to the **approved compensation band** for the role — a range with a floor, midpoint, and ceiling. Their goal is not to lowball you but to assess whether there is a realistic overlap between your expectations and the band. If your number falls within the band, the conversation moves forward smoothly. If you are above the ceiling, the screener must decide whether to flag you as 'out of range' (which often ends the process) or escalate to the hiring manager with a note that the candidate is strong but expensive.\n\nSeveral strategies work well here. First, **anchor with market data**: 'Based on my research on levels.fyi and conversations with peers at similar companies, the market range for this level in this location is X to Y.' This signals professionalism and makes your number feel objective rather than arbitrary. Second, **express flexibility around total compensation**: 'I am looking at the total package — base, equity, bonuses, and benefits — so I am open to different structures that reach that range.' This gives the company room to construct a creative offer. Third, **avoid premature commitment**: if the screener pushes for a single number, respond with 'I would prefer to understand the full scope of the role and the team before narrowing my range. Can you share the band the company has in mind for this position?' In many jurisdictions, companies are legally required to share this information, and asking demonstrates sophistication.\n\nThe worst outcome is not naming a high number — it is naming a number that is wildly misaligned in either direction. Too low, and you signal that you are either underqualified or uninformed about market rates. Too high without justification, and you risk being screened out before demonstrating your value. Research is your greatest leverage."
+  ],
+
+  code: [
+    {
+      language: "cpp",
+      caption: "Code review collaboration -- demonstrating team communication skills in a technical context",
+      source: `// Scenario: You are reviewing a colleague's pull request.
+// This demonstrates the communication and collaboration skills
+// HR screens evaluate: constructive feedback, teaching, empathy.
+
+// ORIGINAL CODE (submitted in PR):
+class UserService {
+public:
+  User* getUser(int id) {
+    for (int i = 0; i < users.size(); i++) {
+      if (users[i].id == id) {
+        return &users[i];  // Returning pointer to internal vector element
+      }
+    }
+    return nullptr;  // Caller must check for null
+  }
+private:
+  std::vector<User> users;
+};
+
+// CODE REVIEW COMMENT (constructive, not dismissive):
+// "Nice clean logic! Two suggestions to make this safer:
+//  1. Returning a pointer to a vector element is risky -- if the
+//     vector resizes, the pointer becomes dangling. Consider
+//     returning std::optional<User> or an index.
+//  2. We could use std::find_if for clarity.
+//  Happy to pair on this if helpful!"
+
+// SUGGESTED IMPROVEMENT (offered, not demanded):
+#include <optional>
+#include <algorithm>
+
+class UserService {
+public:
+  std::optional<User> getUser(int id) const {
+    auto it = std::find_if(users_.begin(), users_.end(),
+      [id](const User& u) { return u.id == id; });
+    if (it != users_.end()) {
+      return *it;  // Returns a copy -- safe even if vector changes
+    }
+    return std::nullopt;  // Explicit "not found" without null pointers
+  }
+
+  // For performance-critical paths, return an index
+  std::optional<size_t> findUserIndex(int id) const {
+    for (size_t i = 0; i < users_.size(); ++i) {
+      if (users_[i].id == id) return i;
+    }
+    return std::nullopt;
+  }
+
+private:
+  std::vector<User> users_;
+};
+
+// This review style builds trust: acknowledge what is good,
+// explain WHY a change matters (not just what to change),
+// and offer to help. This is what HR means by "collaboration."`,
+    },
+    {
+      language: "cpp",
+      caption: "Writing self-documenting code -- showing communication clarity through code",
+      source: `// HR screens assess communication clarity. In engineering,
+// self-documenting code IS communication. This example shows
+// how naming, structure, and comments convey intent.
+
+// POOR COMMUNICATION (unclear intent):
+int calc(int a, int b, int c) {
+  int x = a * b;
+  if (c > 0) x -= c;
+  if (x < 0) x = 0;
+  return x;
+}
+
+// CLEAR COMMUNICATION (self-documenting):
+#include <algorithm>
+
+struct BillingInput {
+  int hoursWorked;
+  int hourlyRate;     // in cents to avoid floating-point issues
+  int discountCents;  // pre-negotiated discount amount
+};
+
+struct BillingResult {
+  int grossAmountCents;
+  int discountApplied;
+  int netAmountCents;
+};
+
+// Calculate the net billing amount after applying any negotiated discount.
+// The minimum charge is zero (we never charge a negative amount).
+BillingResult calculateBilling(const BillingInput& input) {
+  int gross = input.hoursWorked * input.hourlyRate;
+
+  // Apply discount only if one was negotiated
+  int discount = (input.discountCents > 0)
+    ? std::min(input.discountCents, gross)  // discount cannot exceed gross
+    : 0;
+
+  int net = gross - discount;
+
+  return BillingResult{
+    .grossAmountCents = gross,
+    .discountApplied = discount,
+    .netAmountCents = net
+  };
+}
+
+// When an interviewer asks "How do you communicate with your team?",
+// code like this IS your answer. Every name, every structure choice,
+// every comment is a communication decision.`,
+    },
+    {
+      language: "cpp",
+      caption: "Pair programming pattern -- demonstrating collaborative problem-solving",
+      source: `// Pair programming is a concrete example of collaboration.
+// This shows a debugging session structure that mirrors how
+// strong teams work together.
+
+#include <iostream>
+#include <vector>
+#include <cassert>
+#include <string>
+
+// The bug: users report that search results are wrong.
+// Navigator (your pair) suggests: "Let us add assertions to
+// narrow down where the logic diverges from expectations."
+
+class SearchEngine {
+  std::vector<std::string> documents_;
+
+public:
+  void addDocument(const std::string& doc) {
+    documents_.push_back(doc);
+  }
+
+  // Driver writes the code, Navigator reviews in real-time
+  std::vector<int> search(const std::string& query) const {
+    std::vector<int> results;
+    std::string lowerQuery = toLower(query);
+
+    for (size_t i = 0; i < documents_.size(); ++i) {
+      std::string lowerDoc = toLower(documents_[i]);
+
+      // Navigator: "Add a debug trace here so we can see
+      // what the comparison actually looks like"
+      #ifdef DEBUG
+      std::cerr << "Comparing: '" << lowerQuery
+                << "' in '" << lowerDoc << "'" << std::endl;
+      #endif
+
+      if (lowerDoc.find(lowerQuery) != std::string::npos) {
+        results.push_back(static_cast<int>(i));
+      }
+    }
+    return results;
+  }
+
+private:
+  // Navigator spots the bug: original toLower only handled A-Z,
+  // missed locale-specific characters
+  static std::string toLower(const std::string& s) {
+    std::string result = s;
+    for (char& c : result) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return result;
+  }
+};
+
+// Test case that exposed the bug (written together):
+void testSearchCaseInsensitive() {
+  SearchEngine engine;
+  engine.addDocument("Meeting Notes: Q4 Planning");
+  engine.addDocument("Budget Report for 2024");
+
+  auto results = engine.search("meeting");
+  assert(results.size() == 1 && results[0] == 0);
+
+  results = engine.search("BUDGET");
+  assert(results.size() == 1 && results[0] == 1);
+
+  std::cout << "All search tests passed." << std::endl;
+}
+
+// The pair programming story: "We found and fixed the bug in
+// 20 minutes that I had spent 2 hours on alone. The navigator
+// caught the character encoding issue immediately."`,
+    },
+  ],
+  comparison: {
+    columns: ["Dimension", "Phone Screen", "Video Screen", "In-Person HR", "Panel HR"],
+    rows: [
+      ["Format", "Audio-only call, often mobile or landline", "Video call via Zoom, Teams, or Google Meet", "Face-to-face at office or neutral location", "Multiple HR/team members interview simultaneously"],
+      ["Typical Duration", "20-30 minutes", "30-45 minutes", "45-60 minutes", "60-90 minutes"],
+      ["Evaluation Focus", "Basic qualification match, communication clarity, salary alignment", "All phone screen criteria plus body language, presentation, and visual engagement", "Deeper culture fit, in-person presence, office environment reaction", "Consensus-based evaluation across multiple perspectives and dimensions"],
+      ["Preparation Needed", "Quiet environment, resume nearby, company research notes", "All phone prep plus professional background, good lighting, stable internet, camera-ready appearance", "All video prep plus professional attire, directions to office, punctuality buffer", "Research all panelists, prepare for varied question styles, practice pivoting between interviewers"],
+      ["Common Pitfalls", "Distracted environment, multitasking, monotone delivery without visual feedback cues", "Poor lighting, background distractions, looking at self instead of camera, technical issues", "Arriving late, inappropriate attire, poor interaction with receptionist or other staff", "Focusing on one panelist while ignoring others, inconsistent answers across questions, fatigue"],
+      ["Candidate Control", "High — you control your physical environment and can reference notes freely", "Moderate — notes are usable but less natural; environment and appearance visible", "Lower — you are in their environment and under continuous observation", "Lowest — multiple evaluators observe from different angles simultaneously"],
+      ["Follow-Up Protocol", "Thank-you email within 24 hours to recruiter", "Thank-you email referencing specific discussion points", "Thank-you email to interviewer and note to any staff who helped", "Individual thank-you emails to each panelist referencing their specific questions"],
+    ],
+  },
+
+  exercises: [
+    "**Elevator Pitch Draft**: You are interviewing for a senior software engineer role at a fintech startup that processes real-time payments across Southeast Asia. The company has 200 employees, recently raised a Series C, and values ownership and speed. Draft a 60-second elevator pitch that covers your career arc, your most relevant accomplishment, and a specific reason this company interests you. Record yourself delivering it and evaluate: Did you stay under 90 seconds? Did you mention the company specifically, or could this pitch work for any company?",
+    "**Salary Negotiation Roleplay**: A recruiter asks: 'What are your salary expectations for this role?' The role is a Staff Engineer position at a mid-stage startup in Bangalore. Research the market rate on levels.fyi and Glassdoor, then write out your response verbatim. Include how you would handle these follow-ups: (a) 'That is above our range — can you be more flexible?' (b) 'We do not share our bands. What is your bottom line?' (c) 'We can match that in base but equity would be lower.' Practice delivering each response aloud until it sounds natural, not rehearsed.",
+    "**Red Flag Recovery**: You are on an HR call and accidentally say something negative about your current manager: 'Honestly, my manager does not really support my growth.' The screener pauses. Write out exactly what you would say in the next 15 seconds to recover from this. Then rewrite the original sentiment in a way that is honest but professional. Compare the two versions and identify the specific words or framings that made the difference.",
+    "**Company Research Deep Dive**: Pick a real company you would consider joining. Spend 30 minutes researching them using only publicly available sources: their careers page, engineering blog, recent press releases, Glassdoor reviews, LinkedIn profiles of team members, and any conference talks by their engineers. Then write a 200-word summary that you could naturally weave into an HR screening conversation. The test: would an employee of that company be impressed by your knowledge, or would it sound like you skimmed the Wikipedia page?",
+    "**Question Quality Audit**: Write down the last 5 questions you asked (or would ask) an HR screener at the end of a call. Now evaluate each one: Is it googleable? (If yes, replace it.) Does it show genuine curiosity or just fill silence? Would the answer actually influence your decision to join? Rewrite any weak questions. A strong question example: 'How does the engineering team decide what to work on each quarter — is it top-down from product leadership or bottom-up from engineers?' A weak question example: 'What is the company culture like?'"
+  ],
+
+  revisionNotes: [
+    "The HR screening is a structured evaluation, not a casual chat. Screeners submit written assessments with explicit proceed/reject recommendations that heavily influence your candidacy.",
+    "Specificity is the single most powerful differentiator. Specific company knowledge, specific career goals, and specific examples beat generic enthusiasm every time.",
+    "Your elevator pitch should be 60-90 seconds, cover your career arc and current role highlights, and bridge directly to why this specific role interests you. Rehearse it until it sounds natural.",
+    "Never badmouth your current employer, manager, or colleagues. Frame departures positively around what you are moving toward: growth, scale, ownership, or new challenges.",
+    "Salary discussions require market research (levels.fyi, Glassdoor, Blind). Always give a researched range, express flexibility around total compensation structure, and avoid premature commitment to a single number.",
+    "The first five minutes set the tone. A strong structured walkthrough followed by a smart clarifying question transforms the call from an interrogation into a conversation.",
+    "Send a personalized thank-you email within 24 hours. Reference something specific from the conversation to demonstrate attentiveness and reinforce your interest.",
+    "Prepare 2-3 non-googleable questions that show genuine curiosity about the team, technical challenges, or decision-making processes. The quality of your questions signals the depth of your thinking."
+  ],
+
+  cheatSheet: [
+    "**Before the call**: Research company (mission, products, blog, recent news, tech stack, team size, values). Prepare elevator pitch. Know your salary range from levels.fyi. Have 2-3 smart questions ready.",
+    "**Elevator pitch formula**: [Current role + key accomplishment] → [Career arc showing progression] → [Why THIS company/role specifically]. Keep it 60-90 seconds.",
+    "**'Why are you leaving?' formula**: 'I have learned a lot doing X and Y at [company]. I am now looking to [specific growth goal] and your team's work on [specific thing] aligns with that direction.'",
+    "**Salary response template**: 'Based on my market research for this level and location, I am targeting total compensation in the range of X to Y. I am open to discussing how that breaks down across base, equity, and bonuses.'",
+    "**Red flag avoidance checklist**: No badmouthing employers. No vague answers about motivation. No salary numbers without research. No generic 'I like your company.' No zero questions at the end.",
+    "**Strong question starters**: 'How does the team decide...', 'What does success look like in the first 90 days for...', 'Can you describe the engineering culture around...', 'What is the biggest challenge the team is facing right now...'",
+    "**Post-call checklist**: Send thank-you email within 24 hours. Reference a specific discussion point. Confirm interest and timeline. One follow-up if no response within stated timeframe.",
+    "**Body language (video/in-person)**: Look at the camera (not your own video), maintain a natural posture, nod to show active listening, smile genuinely, avoid fidgeting or multitasking."
+  ],
+
+  resources: [
+    { label: "Cracking the Coding Interview by Gayle Laakmann McDowell", kind: "book", note: "Chapter on behavioral interviews and the interview process pipeline covers HR screening dynamics in depth." },
+    { label: "The 2-Hour Job Search by Steve Dalton", kind: "book", note: "Systematic approach to job searching with excellent frameworks for networking and screening conversations." },
+    { label: "What Color Is Your Parachute? by Richard N. Bolles", kind: "book", note: "Classic career guide with practical advice on self-assessment, salary negotiation, and interview preparation." },
+    { label: "levels.fyi", kind: "docs", note: "Crowdsourced compensation data for tech companies. Essential for salary research before HR screenings." },
+    { label: "Ask a Manager by Alison Green", kind: "article", note: "Long-running blog with practical, nuanced advice on workplace communication, interviewing, and negotiation from a management perspective." },
+  ],
+
+  diagrams: [
+    {
+      title: "HR Screening Process Flow",
+      kind: "flow",
+      caption: "End-to-end flow from application received through HR screening to technical interview handoff, including decision points and feedback loops.",
+      mermaid: `flowchart TD
+    A["**Application Received**"] --> B["**Resume Review**\\n*Qualification check*"]
+    B -->|"*Does not meet*\\n*basic criteria*"| C["Rejection Email"]
+    B -->|"*Meets criteria*"| D["**Schedule HR Screen**\\n*30-45 min call*"]
+    D --> E["**HR Screening Call**"]
+    E --> F["Background & Motivation"]
+    E --> G["Role Alignment"]
+    E --> H["Culture Fit Assessment"]
+    E --> I["Salary Expectations"]
+    E --> J["Logistics & Timeline"]
+    F & G & H & I & J --> K{"**Screener Assessment**"}
+    K -->|"*Green flags:*\\n*Enthusiasm, research,*\\n*clear goals*"| L["**Recommend: Proceed**"]
+    K -->|"*Red flags:*\\n*Badmouthing, vague,*\\n*misaligned salary*"| M["**Recommend: Reject**"]
+    L --> N["**Written Summary**\\n*Submitted to hiring manager*"]
+    M --> N
+    N -->|"*Proceed*"| O["**Technical Interview Loop**"]
+    N -->|"*Reject*"| P["Feedback & Rejection"]`,
+    },
+    {
+      title: "Candidate Evaluation Dimensions",
+      kind: "mindmap",
+      caption: "The six core dimensions HR screeners evaluate: communication, motivation, role alignment, cultural fit, compensation alignment, and logistical feasibility, with sub-criteria for each.",
+      mermaid: `mindmap
+  root(("**HR Screening\\nEvaluation**"))
+    ("**Communication Clarity**")
+      ("*Concise & coherent*")
+      ("*Structured responses*")
+      ("*Active listening*")
+    ("**Motivation & Intent**")
+      ("*Moving toward, not away*")
+      ("*Genuine enthusiasm*")
+      ("*Intrinsic drivers*")
+    ("**Role Alignment**")
+      ("*Skills match*")
+      ("*Experience relevance*")
+      ("*Level appropriateness*")
+    ("**Cultural Compatibility**")
+      ("*Work style fit*")
+      ("*Values alignment*")
+      ("*Team dynamics*")
+    ("**Compensation Alignment**")
+      ("*Within salary band*")
+      ("*Realistic expectations*")
+      ("*Total comp awareness*")
+    ("**Logistical Feasibility**")
+      ("*Notice period*")
+      ("*Location / visa*")
+      ("*Availability*")`,
+    },
+  ],
+
+  animations: [
+    {
+      title: "Preparing for an HR Screening Call",
+      steps: [
+        { label: "Research the company", detail: "Spend 30-45 minutes reviewing the company's website, engineering blog, recent press releases, Glassdoor reviews, and LinkedIn profiles of team members. Note specific projects, technical challenges, and cultural values you can reference in conversation." },
+        { label: "Prepare your elevator pitch", detail: "Draft a 60-90 second walkthrough of your career: current role and key accomplishments, career arc showing intentional progression, and a clear bridge to why this specific role excites you. Practice aloud until it flows naturally without sounding rehearsed." },
+        { label: "Research salary benchmarks", detail: "Look up compensation data on levels.fyi, Glassdoor, and Blind for the target role, level, and location. Determine your target range (not a single number) and prepare language for discussing total compensation including base, equity, and bonuses." },
+        { label: "Prepare your narrative answers", detail: "Write and rehearse answers for the big three: 'Why are you leaving?', 'Why this company?', and 'What are your salary expectations?' Frame departures positively around growth. Use specific company knowledge. Anchor salary in market data." },
+        { label: "Draft your questions", detail: "Prepare 2-3 thoughtful, non-googleable questions about the team, role, technical challenges, or engineering culture. Good questions demonstrate depth of thinking and genuine curiosity. Test each question: would an insider find it insightful?" },
+        { label: "Set up your environment", detail: "For phone: quiet room, resume and notes visible, water nearby. For video: professional background, good lighting (face the light source), stable internet, camera at eye level. Test your tech 15 minutes before the call." },
+        { label: "Execute and follow up", detail: "During the call: listen actively, take brief notes, ask your prepared questions naturally (not all at once at the end). After: send a personalized thank-you email within 24 hours referencing a specific point from the conversation. Confirm your interest and reiterate your timeline." },
+      ],
+    },
+  ],
+
+  followUps: [
+    "Technical interview preparation strategies and common formats (system design, coding, behavioral)",
+    "Salary negotiation tactics for the offer stage: countering, leveraging competing offers, and evaluating total compensation",
+    "Building a personal career narrative that connects your experiences into a compelling growth story",
+    "Understanding company culture signals: how to read engineering blogs, Glassdoor reviews, and team structures to assess fit before applying",
+  ],
 };

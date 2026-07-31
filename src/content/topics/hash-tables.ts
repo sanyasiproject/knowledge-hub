@@ -23,197 +23,253 @@ export const hashTables: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Basic hash table with separate chaining",
-      source: `class HashTable:
-    """Hash table using separate chaining for collision resolution."""
+      source: `#include <functional>
+#include <iostream>
+#include <list>
+#include <string>
+#include <utility>
+#include <vector>
 
-    def __init__(self, capacity: int = 16, load_factor_threshold: float = 0.75):
-        self.capacity = capacity
-        self.size = 0
-        self.threshold = load_factor_threshold
-        self.buckets: list[list[tuple]] = [[] for _ in range(capacity)]
+template <typename K, typename V>
+class HashTable {
+    // Hash table using separate chaining for collision resolution.
+    using Bucket = std::list<std::pair<K, V>>;
 
-    def _hash(self, key) -> int:
-        return hash(key) % self.capacity
+    std::vector<Bucket> buckets_;
+    size_t size_ = 0;
+    double threshold_ = 0.75;
+    std::hash<K> hasher_;
 
-    def put(self, key, value) -> None:
-        idx = self._hash(key)
-        bucket = self.buckets[idx]
-        for i, (k, v) in enumerate(bucket):
-            if k == key:
-                bucket[i] = (key, value)  # Update existing
-                return
-        bucket.append((key, value))
-        self.size += 1
-        if self.size / self.capacity > self.threshold:
-            self._resize()
+    size_t index(const K& key) const {
+        return hasher_(key) % buckets_.size();
+    }
 
-    def get(self, key, default=None):
-        idx = self._hash(key)
-        for k, v in self.buckets[idx]:
-            if k == key:
-                return v
-        return default
+    void resize() {
+        auto old = std::move(buckets_);
+        buckets_.assign(old.size() * 2, Bucket{});
+        size_ = 0;
+        for (auto& bucket : old)
+            for (auto& [k, v] : bucket)
+                put(k, v);
+    }
 
-    def delete(self, key) -> bool:
-        idx = self._hash(key)
-        bucket = self.buckets[idx]
-        for i, (k, v) in enumerate(bucket):
-            if k == key:
-                bucket.pop(i)
-                self.size -= 1
-                return True
-        return False
+public:
+    explicit HashTable(size_t capacity = 16)
+        : buckets_(capacity) {}
 
-    def _resize(self) -> None:
-        old_buckets = self.buckets
-        self.capacity *= 2
-        self.buckets = [[] for _ in range(self.capacity)]
-        self.size = 0
-        for bucket in old_buckets:
-            for key, value in bucket:
-                self.put(key, value)
+    void put(const K& key, const V& value) {
+        size_t idx = index(key);
+        for (auto& [k, v] : buckets_[idx]) {
+            if (k == key) { v = value; return; } // Update existing
+        }
+        buckets_[idx].emplace_back(key, value);
+        ++size_;
+        if (load_factor() > threshold_) resize();
+    }
 
-    @property
-    def load_factor(self) -> float:
-        return self.size / self.capacity`,
+    const V* get(const K& key) const {
+        size_t idx = index(key);
+        for (auto& [k, v] : buckets_[idx])
+            if (k == key) return &v;
+        return nullptr;
+    }
+
+    bool remove(const K& key) {
+        size_t idx = index(key);
+        auto& bucket = buckets_[idx];
+        for (auto it = bucket.begin(); it != bucket.end(); ++it) {
+            if (it->first == key) {
+                bucket.erase(it);
+                --size_;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    double load_factor() const {
+        return static_cast<double>(size_) / buckets_.size();
+    }
+
+    size_t size() const { return size_; }
+};
+
+// Usage
+// HashTable<std::string, int> ht;
+// ht.put("alice", 42);
+// if (auto* val = ht.get("alice")) std::cout << *val;
+// ht.remove("alice");`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Open addressing with linear probing and Robin Hood optimization",
-      source: `class RobinHoodHashTable:
-    """Open-addressing hash table with Robin Hood hashing.
+      source: `#include <functional>
+#include <iostream>
+#include <optional>
+#include <string>
+#include <vector>
 
-    On insert, if the new key has traveled farther from its home slot
-    than the current occupant, they swap -- reducing probe-length variance.
-    """
+template <typename K, typename V>
+class RobinHoodHashTable {
+    // Open-addressing hash table with Robin Hood hashing.
+    // On insert, if the new key has traveled farther from its home slot
+    // than the current occupant, they swap -- reducing probe-length variance.
 
-    EMPTY = object()
-    DELETED = object()
+    enum class State { EMPTY, OCCUPIED, DELETED };
 
-    def __init__(self, capacity: int = 16):
-        self.capacity = capacity
-        self.size = 0
-        self.keys = [self.EMPTY] * capacity
-        self.values = [None] * capacity
+    struct Slot {
+        K key{};
+        V value{};
+        State state = State::EMPTY;
+    };
 
-    def _hash(self, key) -> int:
-        return hash(key) % self.capacity
+    std::vector<Slot> slots_;
+    size_t size_ = 0;
+    std::hash<K> hasher_;
 
-    def _probe_distance(self, home: int, current: int) -> int:
-        return (current - home) % self.capacity
+    size_t hash_index(const K& key) const { return hasher_(key) % slots_.size(); }
 
-    def put(self, key, value) -> None:
-        if self.size / self.capacity > 0.7:
-            self._resize()
+    size_t probe_distance(size_t home, size_t current) const {
+        return (current + slots_.size() - home) % slots_.size();
+    }
 
-        idx = self._hash(key)
-        dist = 0
-        while True:
-            if self.keys[idx] is self.EMPTY or self.keys[idx] is self.DELETED:
-                self.keys[idx] = key
-                self.values[idx] = value
-                self.size += 1
-                return
-            if self.keys[idx] == key:
-                self.values[idx] = value  # Update
-                return
-            # Robin Hood: steal from the rich (low probe distance)
-            existing_dist = self._probe_distance(
-                self._hash(self.keys[idx]), idx
-            )
-            if dist > existing_dist:
-                # Swap and continue inserting the displaced entry
-                self.keys[idx], key = key, self.keys[idx]
-                self.values[idx], value = value, self.values[idx]
-                dist = existing_dist
-            idx = (idx + 1) % self.capacity
-            dist += 1
+    void resize() {
+        auto old = std::move(slots_);
+        slots_.assign(old.size() * 2, Slot{});
+        size_ = 0;
+        for (auto& s : old)
+            if (s.state == State::OCCUPIED)
+                put(s.key, s.value);
+    }
 
-    def get(self, key, default=None):
-        idx = self._hash(key)
-        dist = 0
-        while True:
-            if self.keys[idx] is self.EMPTY:
-                return default
-            if self.keys[idx] == key:
-                return self.values[idx]
-            existing_dist = self._probe_distance(
-                self._hash(self.keys[idx]), idx
-            )
-            if dist > existing_dist:
-                return default  # Key would have been placed here
-            idx = (idx + 1) % self.capacity
-            dist += 1
+public:
+    explicit RobinHoodHashTable(size_t capacity = 16)
+        : slots_(capacity) {}
 
-    def _resize(self) -> None:
-        old_keys, old_values = self.keys, self.values
-        self.capacity *= 2
-        self.keys = [self.EMPTY] * self.capacity
-        self.values = [None] * self.capacity
-        self.size = 0
-        for k, v in zip(old_keys, old_values):
-            if k is not self.EMPTY and k is not self.DELETED:
-                self.put(k, v)`,
+    void put(K key, V value) {
+        if (static_cast<double>(size_) / slots_.size() > 0.7)
+            resize();
+
+        size_t idx = hash_index(key);
+        size_t dist = 0;
+        while (true) {
+            if (slots_[idx].state != State::OCCUPIED) {
+                slots_[idx] = {key, value, State::OCCUPIED};
+                ++size_;
+                return;
+            }
+            if (slots_[idx].key == key) {
+                slots_[idx].value = value; // Update
+                return;
+            }
+            // Robin Hood: steal from the rich (low probe distance)
+            size_t existing_dist = probe_distance(
+                hash_index(slots_[idx].key), idx);
+            if (dist > existing_dist) {
+                std::swap(key, slots_[idx].key);
+                std::swap(value, slots_[idx].value);
+                dist = existing_dist;
+            }
+            idx = (idx + 1) % slots_.size();
+            ++dist;
+        }
+    }
+
+    std::optional<V> get(const K& key) const {
+        size_t idx = hash_index(key);
+        size_t dist = 0;
+        while (true) {
+            if (slots_[idx].state == State::EMPTY)
+                return std::nullopt;
+            if (slots_[idx].state == State::OCCUPIED && slots_[idx].key == key)
+                return slots_[idx].value;
+            size_t existing_dist = probe_distance(
+                hash_index(slots_[idx].key), idx);
+            if (dist > existing_dist)
+                return std::nullopt; // Key would have been placed here
+            idx = (idx + 1) % slots_.size();
+            ++dist;
+        }
+    }
+
+    size_t size() const { return size_; }
+};
+
+// Usage:
+// RobinHoodHashTable<std::string, int> ht;
+// ht.put("alice", 42);
+// auto val = ht.get("alice"); // std::optional<int>{42}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Consistent hashing ring with virtual nodes",
-      source: `import hashlib
-import bisect
+      source: `#include <functional>
+#include <iostream>
+#include <map>
+#include <string>
+#include <unordered_set>
 
-class ConsistentHashRing:
-    """Consistent hashing ring for distributing keys across nodes.
+class ConsistentHashRing {
+    // Consistent hashing ring for distributing keys across nodes.
+    // Each physical node is mapped to multiple virtual nodes (replicas)
+    // spread around the ring to improve load balance.
 
-    Each physical node is mapped to multiple virtual nodes (replicas)
-    spread around the ring to improve load balance.
-    """
+    int replicas_;
+    std::map<size_t, std::string> ring_;      // sorted hash -> node_id
+    std::unordered_set<std::string> nodes_;
+    std::hash<std::string> hasher_;
 
-    def __init__(self, replicas: int = 150):
-        self.replicas = replicas
-        self.ring: list[int] = []          # Sorted hash positions
-        self.ring_map: dict[int, str] = {} # hash_position -> node_id
-        self.nodes: set[str] = set()
+    size_t hash_key(const std::string& key) const {
+        // Combine multiple rounds for better distribution
+        size_t h = hasher_(key);
+        h ^= (h >> 16);
+        return h;
+    }
 
-    def _hash(self, key: str) -> int:
-        digest = hashlib.md5(key.encode()).hexdigest()
-        return int(digest, 16)
+public:
+    explicit ConsistentHashRing(int replicas = 150)
+        : replicas_(replicas) {}
 
-    def add_node(self, node_id: str) -> None:
-        self.nodes.add(node_id)
-        for i in range(self.replicas):
-            virtual_key = f"{node_id}:vn{i}"
-            h = self._hash(virtual_key)
-            self.ring_map[h] = node_id
-            bisect.insort(self.ring, h)
+    void add_node(const std::string& node_id) {
+        nodes_.insert(node_id);
+        for (int i = 0; i < replicas_; ++i) {
+            std::string virtual_key = node_id + ":vn" + std::to_string(i);
+            size_t h = hash_key(virtual_key);
+            ring_[h] = node_id;
+        }
+    }
 
-    def remove_node(self, node_id: str) -> None:
-        self.nodes.discard(node_id)
-        for i in range(self.replicas):
-            virtual_key = f"{node_id}:vn{i}"
-            h = self._hash(virtual_key)
-            del self.ring_map[h]
-            self.ring.remove(h)
+    void remove_node(const std::string& node_id) {
+        nodes_.erase(node_id);
+        for (int i = 0; i < replicas_; ++i) {
+            std::string virtual_key = node_id + ":vn" + std::to_string(i);
+            size_t h = hash_key(virtual_key);
+            ring_.erase(h);
+        }
+    }
 
-    def get_node(self, key: str) -> str | None:
-        if not self.ring:
-            return None
-        h = self._hash(key)
-        # Find the first ring position >= h (clockwise walk)
-        idx = bisect.bisect_left(self.ring, h)
-        if idx == len(self.ring):
-            idx = 0  # Wrap around to the first node
-        return self.ring_map[self.ring[idx]]
+    // Find the node responsible for a key (clockwise walk).
+    std::string get_node(const std::string& key) const {
+        if (ring_.empty()) return "";
+        size_t h = hash_key(key);
+        // lower_bound gives the first position >= h
+        auto it = ring_.lower_bound(h);
+        if (it == ring_.end())
+            it = ring_.begin(); // wrap around
+        return it->second;
+    }
+};
 
-# Usage:
-# ring = ConsistentHashRing(replicas=150)
-# ring.add_node("cache-server-1")
-# ring.add_node("cache-server-2")
-# ring.add_node("cache-server-3")
-# print(ring.get_node("user:42"))     # -> "cache-server-2"
-# print(ring.get_node("session:abc")) # -> "cache-server-1"
-# ring.remove_node("cache-server-2")  # Only ~1/3 keys remap`,
+// Usage:
+// ConsistentHashRing ring(150);
+// ring.add_node("cache-server-1");
+// ring.add_node("cache-server-2");
+// ring.add_node("cache-server-3");
+// std::cout << ring.get_node("user:42")     << "\\n";
+// std::cout << ring.get_node("session:abc") << "\\n";
+// ring.remove_node("cache-server-2"); // Only ~1/3 keys remap`,
     },
   ],
   diagrams: [

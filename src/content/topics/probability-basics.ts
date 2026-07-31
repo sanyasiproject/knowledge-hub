@@ -22,62 +22,113 @@ export const probabilityBasics: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Simulating distributions and verifying the Central Limit Theorem",
-      source: `import random
-import math
+      source: `#include <iostream>
+#include <random>
+#include <vector>
+#include <cmath>
+#include <numeric>
+#include <iomanip>
 
-# Simulate binomial distribution: n trials, probability p
-def binomial_sample(n: int, p: float) -> int:
-    return sum(1 for _ in range(n) if random.random() < p)
+// Simulate binomial distribution: n trials, probability p
+int binomialSample(int n, double p, std::mt19937& rng) {
+    std::bernoulli_distribution dist(p);
+    int count = 0;
+    for (int i = 0; i < n; ++i) {
+        if (dist(rng)) ++count;
+    }
+    return count;
+}
 
-# Simulate and verify mean/variance of Binomial(100, 0.3)
-n, p = 100, 0.3
-samples = [binomial_sample(n, p) for _ in range(10000)]
-sample_mean = sum(samples) / len(samples)
-sample_var = sum((x - sample_mean) ** 2 for x in samples) / len(samples)
-print(f"Binomial({n},{p}): mean={sample_mean:.2f} (expected {n*p}), "
-      f"var={sample_var:.2f} (expected {n*p*(1-p):.1f})")
+int main() {
+    std::mt19937 rng(42);  // Seeded for reproducibility
 
-# Central Limit Theorem: sample means of Exponential(lambda=2)
-# converge to Normal regardless of the skewed original distribution
-lam = 2.0
-true_mean = 1 / lam  # 0.5
-sample_sizes = [1, 5, 30, 100]
-for size in sample_sizes:
-    means = [sum(random.expovariate(lam) for _ in range(size)) / size
-             for _ in range(5000)]
-    avg = sum(means) / len(means)
-    std = math.sqrt(sum((m - avg)**2 for m in means) / len(means))
-    print(f"n={size:3d}: sample_mean_avg={avg:.4f}, std={std:.4f}")`,
+    // Simulate and verify mean/variance of Binomial(100, 0.3)
+    const int n = 100;
+    const double p = 0.3;
+    const int numSamples = 10000;
+    std::vector<int> samples(numSamples);
+    for (auto& s : samples) s = binomialSample(n, p, rng);
+
+    double sampleMean = std::accumulate(samples.begin(), samples.end(), 0.0) / numSamples;
+    double sampleVar = 0.0;
+    for (int x : samples) sampleVar += (x - sampleMean) * (x - sampleMean);
+    sampleVar /= numSamples;
+
+    std::cout << std::fixed << std::setprecision(2);
+    std::cout << "Binomial(" << n << "," << p << "): mean=" << sampleMean
+              << " (expected " << n * p << "), var=" << sampleVar
+              << " (expected " << n * p * (1 - p) << ")" << std::endl;
+
+    // Central Limit Theorem: sample means of Exponential(lambda=2)
+    const double lam = 2.0;
+    std::exponential_distribution<double> expDist(lam);
+    std::vector<int> sampleSizes = {1, 5, 30, 100};
+
+    for (int size : sampleSizes) {
+        std::vector<double> means(5000);
+        for (auto& m : means) {
+            double sum = 0.0;
+            for (int i = 0; i < size; ++i) sum += expDist(rng);
+            m = sum / size;
+        }
+        double avg = std::accumulate(means.begin(), means.end(), 0.0) / means.size();
+        double stddev = 0.0;
+        for (double m : means) stddev += (m - avg) * (m - avg);
+        stddev = std::sqrt(stddev / means.size());
+
+        std::cout << std::setprecision(4);
+        std::cout << "n=" << std::setw(3) << size
+                  << ": sample_mean_avg=" << avg
+                  << ", std=" << stddev << std::endl;
+    }
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Computing conditional probability and Bayes' theorem",
-      source: `# P(A|B) = P(A and B) / P(B)
-# Example: Drawing cards from a standard 52-card deck
-# A = second card is a king, B = first card is a king
-# P(B) = 4/52, P(A and B) = 4/52 * 3/51
+      source: `#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <random>
+#include <iomanip>
+#include <numeric>
 
-p_b = 4 / 52
-p_a_and_b = (4 / 52) * (3 / 51)
-p_a_given_b = p_a_and_b / p_b
-print(f"P(2nd king | 1st king) = {p_a_given_b:.4f}")  # 3/51 ≈ 0.0588
+int main() {
+    // P(A|B) = P(A and B) / P(B)
+    // Drawing cards from a standard 52-card deck
+    // A = second card is a king, B = first card is a king
+    double pB = 4.0 / 52;
+    double pAandB = (4.0 / 52) * (3.0 / 51);
+    double pAgivenB = pAandB / pB;
+    std::cout << std::fixed << std::setprecision(4);
+    std::cout << "P(2nd king | 1st king) = " << pAgivenB << std::endl;
 
-# Simulation to verify
-import random
-deck = list(range(52))  # 0-3 are kings
-trials, hits = 100000, 0
-first_king_count = 0
-for _ in range(trials):
-    random.shuffle(deck)
-    if deck[0] < 4:  # first card is a king
-        first_king_count += 1
-        if deck[1] < 4:  # second card is also a king
-            hits += 1
+    // Simulation to verify
+    std::mt19937 rng(42);
+    std::vector<int> deck(52);
+    std::iota(deck.begin(), deck.end(), 0);  // 0-3 are kings
 
-simulated = hits / first_king_count if first_king_count else 0
-print(f"Simulated P(2nd king | 1st king) = {simulated:.4f}")`,
+    const int trials = 100000;
+    int hits = 0, firstKingCount = 0;
+
+    for (int t = 0; t < trials; ++t) {
+        std::shuffle(deck.begin(), deck.end(), rng);
+        if (deck[0] < 4) {           // first card is a king
+            ++firstKingCount;
+            if (deck[1] < 4) {       // second card is also a king
+                ++hits;
+            }
+        }
+    }
+
+    double simulated = firstKingCount > 0
+        ? static_cast<double>(hits) / firstKingCount : 0.0;
+    std::cout << "Simulated P(2nd king | 1st king) = " << simulated << std::endl;
+    return 0;
+}`,
     },
   ],
   diagrams: [

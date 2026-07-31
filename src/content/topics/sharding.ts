@@ -189,6 +189,405 @@ Operations spanning multiple shards are the primary source of complexity:
       back: "A database middleware for MySQL that manages shard routing, schema changes, and online resharding, originally built at YouTube.",
     },
   ],
+  deepDive: [
+    `## Consistent Hashing and Virtual Nodes
+
+**Consistent hashing** is the backbone of modern hash-based sharding, solving the catastrophic data migration problem that arises with naive \`hash(key) % N\` when *N* changes. In a consistent hashing ring, both **shard nodes** and **data keys** are mapped onto the same circular hash space (typically \`0\` to \`2^32 - 1\`). Each key is assigned to the *first node encountered* when walking clockwise from the key's position on the ring. When a node is added or removed, only the keys in the adjacent arc are remapped — roughly \`1/N\` of the total data — rather than the majority of keys as in modular hashing. However, raw consistent hashing can produce **uneven partitions** because nodes are placed at arbitrary points on the ring. **Virtual nodes** (vnodes) fix this: each physical node is represented by *many* points (e.g., 150-256 tokens) scattered across the ring, which statistically smooths out the distribution. Apache Cassandra, Amazon DynamoDB, and Riak all rely on vnodes. The trade-off is a larger routing table (\`numPhysicalNodes * vnodesFactor\` entries), but this table is small enough to fit entirely in memory on any modern machine.`,
+
+    `## Shard-Aware Application Architecture
+
+Building applications on top of a sharded data store requires **shard-aware routing** at the application layer unless an intermediate proxy (like *Vitess*, *ProxySQL*, or *mongos*) handles it transparently. The application must compute the target shard from the shard key embedded in every query and route the request to the correct connection pool. This introduces several architectural concerns: **connection fan-out** (the app must maintain connection pools to every shard, consuming file descriptors and memory), **retry semantics** (failures on one shard should not block queries to healthy shards), and **result aggregation** (scatter-gather queries must merge, sort, and paginate results from multiple shards in the application layer). A common pattern is a *shard router* service that encapsulates the hashing logic and connection management behind a clean API, so that domain services remain shard-unaware. In microservice architectures, the router can be a **sidecar proxy** or a **shared library**. Care must be taken to keep the shard map in sync across all instances — stale maps cause misdirected queries, leading to empty results or writes to the wrong shard.`,
+
+    `## Operational Challenges: Monitoring, Hotspots, and Failure Domains
+
+Running a sharded cluster in production demands **per-shard observability**. Each shard must be monitored independently for disk usage, query latency percentiles (\`p50\`, \`p95\`, \`p99\`), replication lag, connection count, and lock contention. A shard that is 80% full while others are at 40% signals an **imbalanced shard key** or organic data skew. **Hotspot detection** requires tracking write and read rates per shard and, ideally, per key-range within a shard. Google Cloud Spanner, for example, automatically *splits* hot ranges without manual intervention. For self-managed systems, tooling must detect hotspots and trigger resharding workflows. **Failure domain isolation** is another critical concern: if all shards share the same physical rack, a single power or network failure takes down the entire system. Best practice is to spread shards across *availability zones* or *racks* and to maintain **at least one replica per shard** in a different failure domain. Backup strategies must also be shard-aware — restoring a single shard from backup while others remain live introduces consistency windows that must be accounted for in the application's data contract.`,
+  ],
+
+  code: [
+    {
+      language: "cpp",
+      caption: "Consistent Hashing Ring with Virtual Nodes in C++",
+      source: `#include <map>
+#include <string>
+#include <functional>
+#include <vector>
+#include <stdexcept>
+
+class ConsistentHashRing {
+private:
+    // Sorted map: hash-position -> physical node name
+    std::map<size_t, std::string> ring_;
+    int vnodes_per_node_;
+    std::hash<std::string> hasher_;
+
+public:
+    explicit ConsistentHashRing(int vnodes_per_node = 150)
+        : vnodes_per_node_(vnodes_per_node) {}
+
+    // Add a physical node with its virtual nodes
+    void addNode(const std::string& node) {
+        for (int i = 0; i < vnodes_per_node_; ++i) {
+            std::string vnode_key = node + "#vnode" + std::to_string(i);
+            size_t hash_val = hasher_(vnode_key);
+            ring_[hash_val] = node;
+        }
+    }
+
+    // Remove a physical node and all its virtual nodes
+    void removeNode(const std::string& node) {
+        for (int i = 0; i < vnodes_per_node_; ++i) {
+            std::string vnode_key = node + "#vnode" + std::to_string(i);
+            size_t hash_val = hasher_(vnode_key);
+            ring_.erase(hash_val);
+        }
+    }
+
+    // Route a key to the appropriate shard node
+    std::string getNode(const std::string& key) const {
+        if (ring_.empty()) {
+            throw std::runtime_error("Hash ring is empty");
+        }
+        size_t hash_val = hasher_(key);
+        // Find the first node at or after this hash position
+        auto it = ring_.lower_bound(hash_val);
+        // Wrap around to the beginning if past the last node
+        if (it == ring_.end()) {
+            it = ring_.begin();
+        }
+        return it->second;
+    }
+
+    size_t nodeCount() const {
+        // Unique physical nodes
+        std::set<std::string> nodes;
+        for (const auto& [_, node] : ring_) {
+            nodes.insert(node);
+        }
+        return nodes.size();
+    }
+};
+
+// Usage:
+// ConsistentHashRing ring(150);
+// ring.addNode("shard-01.db.internal");
+// ring.addNode("shard-02.db.internal");
+// ring.addNode("shard-03.db.internal");
+// std::string target = ring.getNode("user:48291");
+// // target == "shard-02.db.internal" (deterministic)`,
+    },
+    {
+      language: "cpp",
+      caption: "Shard Router: routing queries by shard key hash in C++",
+      source: `#include <string>
+#include <vector>
+#include <functional>
+#include <iostream>
+
+struct ShardConfig {
+    std::string host;
+    int port;
+    std::string db_name;
+};
+
+class ShardRouter {
+private:
+    std::vector<ShardConfig> shards_;
+    std::hash<std::string> hasher_;
+
+public:
+    explicit ShardRouter(std::vector<ShardConfig> shards)
+        : shards_(std::move(shards)) {}
+
+    // Determine which shard owns a given key
+    const ShardConfig& resolve(const std::string& shard_key) const {
+        size_t hash_val = hasher_(shard_key);
+        size_t shard_index = hash_val % shards_.size();
+        return shards_[shard_index];
+    }
+
+    // Scatter-gather: run a query across ALL shards
+    // Returns results from each shard for client-side merge
+    template <typename QueryFn>
+    std::vector<std::string> scatterGather(QueryFn query_fn) const {
+        std::vector<std::string> results;
+        results.reserve(shards_.size());
+        for (const auto& shard : shards_) {
+            // In production, these would run in parallel threads
+            results.push_back(query_fn(shard));
+        }
+        return results;
+    }
+};
+
+// Usage:
+// ShardRouter router({
+//     {"shard1.db.internal", 5432, "app_shard_0"},
+//     {"shard2.db.internal", 5432, "app_shard_1"},
+//     {"shard3.db.internal", 5432, "app_shard_2"},
+//     {"shard4.db.internal", 5432, "app_shard_3"},
+// });
+// auto& target = router.resolve("user:98321");
+// std::cout << "Route to: " << target.host << std::endl;`,
+    },
+    {
+      language: "javascript",
+      caption: "MongoDB Sharded Cluster Configuration",
+      source: `// ---- MongoDB Sharding Setup Commands ----
+
+// 1. Start config server replica set (stores shard metadata)
+// mongod --configsvr --replSet configRS --port 27019 --dbpath /data/configdb
+
+// 2. Start shard replica sets
+// mongod --shardsvr --replSet shard01RS --port 27018 --dbpath /data/shard01
+// mongod --shardsvr --replSet shard02RS --port 27020 --dbpath /data/shard02
+
+// 3. Start mongos router (application connects here)
+// mongos --configdb configRS/cfg1:27019,cfg2:27019,cfg3:27019 --port 27017
+
+// 4. Connect to mongos and configure sharding:
+
+// Add shards to the cluster
+sh.addShard("shard01RS/shard01a:27018,shard01b:27018");
+sh.addShard("shard02RS/shard02a:27020,shard02b:27020");
+
+// Enable sharding on the database
+sh.enableSharding("ecommerce");
+
+// Shard the 'orders' collection using HASHED shard key
+// Hashed keys provide even distribution across shards
+sh.shardCollection("ecommerce.orders", { userId: "hashed" });
+
+// Shard the 'products' collection using RANGE shard key
+// Range keys support efficient range queries on the key
+sh.shardCollection("ecommerce.products", { category: 1, _id: 1 });
+
+// Check shard distribution status
+db.orders.getShardDistribution();
+
+// View chunk distribution across shards
+use config;
+db.chunks.aggregate([
+  { $match: { ns: "ecommerce.orders" } },
+  { $group: { _id: "$shard", count: { $sum: 1 } } },
+  { $sort: { count: -1 } }
+]);
+
+// Pre-split chunks for known high-cardinality ranges
+// (avoids initial hotspot on a single shard)
+sh.splitAt("ecommerce.products", { category: "electronics", _id: MinKey });
+sh.splitAt("ecommerce.products", { category: "clothing", _id: MinKey });
+
+// Set chunk size (default 128 MB, lower for faster balancing)
+use config;
+db.settings.updateOne(
+  { _id: "chunksize" },
+  { $set: { value: 64 } },
+  { upsert: true }
+);
+
+// Monitor the balancer
+sh.isBalancerRunning();
+sh.getBalancerState();`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "Consistent Hashing Ring with Virtual Nodes",
+      kind: "architecture",
+      caption: "Keys and virtual nodes are mapped onto a circular hash space. Each key is assigned to the next node clockwise on the ring.",
+      mermaid: `graph TD
+    subgraph HashRing["Hash Ring (0 to 2^32)"]
+        direction TB
+        K1["🔑 Key: user:101<br/>hash=0x1A3F"]
+        K2["🔑 Key: user:204<br/>hash=0x5B2C"]
+        K3["🔑 Key: user:389<br/>hash=0xA7E1"]
+        K4["🔑 Key: order:772<br/>hash=0xD4F0"]
+
+        V1A["Shard-A vnode#0<br/>pos=0x0F00"]
+        V1B["Shard-A vnode#1<br/>pos=0x7200"]
+        V2A["Shard-B vnode#0<br/>pos=0x3100"]
+        V2B["Shard-B vnode#1<br/>pos=0x9E00"]
+        V3A["Shard-C vnode#0<br/>pos=0x5F00"]
+        V3B["Shard-C vnode#1<br/>pos=0xC800"]
+    end
+
+    K1 -->|"routes to"| V1A
+    K2 -->|"routes to"| V3A
+    K3 -->|"routes to"| V2B
+    K4 -->|"routes to"| V3B
+
+    V1A --- PA["Physical: Shard-A"]
+    V1B --- PA
+    V2A --- PB["Physical: Shard-B"]
+    V2B --- PB
+    V3A --- PC["Physical: Shard-C"]
+    V3B --- PC
+
+    style PA fill:#2d6a4f,color:#fff
+    style PB fill:#1b4965,color:#fff
+    style PC fill:#7b2d8e,color:#fff`,
+    },
+    {
+      title: "Sharded Query Routing Flow",
+      kind: "flow",
+      caption: "Application queries are routed through a shard router, which directs single-shard queries directly and performs scatter-gather for cross-shard queries.",
+      mermaid: `flowchart TD
+    App["Application Layer"] --> Router["Shard Router / Proxy"]
+
+    Router -->|"Has shard key?"| Decision{Route Decision}
+
+    Decision -->|"Yes: single-shard"| Compute["Compute target shard<br/>hash(key) % N"]
+    Decision -->|"No: scatter-gather"| Scatter["Fan out to ALL shards"]
+
+    Compute --> S1["Shard 1"]
+    Compute --> S2["Shard 2"]
+    Compute --> S3["Shard 3"]
+
+    Scatter --> S1
+    Scatter --> S2
+    Scatter --> S3
+
+    S1 --> Merge["Merge / Aggregate<br/>Results"]
+    S2 --> Merge
+    S3 --> Merge
+
+    Merge --> App
+
+    style Router fill:#e76f51,color:#fff
+    style Decision fill:#f4a261,color:#000
+    style Merge fill:#2a9d8f,color:#fff`,
+    },
+    {
+      title: "MongoDB Sharded Cluster Architecture",
+      kind: "architecture",
+      caption: "A MongoDB sharded cluster consists of mongos routers, config servers storing metadata, and shard replica sets holding the data.",
+      mermaid: `graph TB
+    subgraph Clients["Client Applications"]
+        C1["App Server 1"]
+        C2["App Server 2"]
+        C3["App Server 3"]
+    end
+
+    subgraph Routers["mongos Routers"]
+        M1["mongos :27017"]
+        M2["mongos :27017"]
+    end
+
+    subgraph ConfigServers["Config Server Replica Set"]
+        CF1["Config 1"]
+        CF2["Config 2"]
+        CF3["Config 3"]
+    end
+
+    subgraph Shard1["Shard 1 Replica Set"]
+        S1P["Primary"]
+        S1S1["Secondary"]
+        S1S2["Secondary"]
+    end
+
+    subgraph Shard2["Shard 2 Replica Set"]
+        S2P["Primary"]
+        S2S1["Secondary"]
+        S2S2["Secondary"]
+    end
+
+    subgraph Shard3["Shard 3 Replica Set"]
+        S3P["Primary"]
+        S3S1["Secondary"]
+        S3S2["Secondary"]
+    end
+
+    C1 & C2 & C3 --> M1 & M2
+    M1 & M2 --> ConfigServers
+    M1 & M2 --> Shard1 & Shard2 & Shard3
+
+    style Routers fill:#e63946,color:#fff
+    style ConfigServers fill:#457b9d,color:#fff
+    style Shard1 fill:#2a9d8f,color:#fff
+    style Shard2 fill:#2a9d8f,color:#fff
+    style Shard3 fill:#2a9d8f,color:#fff`,
+    },
+  ],
+
+  comparison: {
+    columns: [
+      "Aspect",
+      "Range-Based Sharding",
+      "Hash-Based Sharding",
+      "Directory-Based Sharding",
+    ],
+    rows: [
+      [
+        "**Distribution method**",
+        "Contiguous value ranges of the shard key",
+        "Hash function applied to the shard key, modulo shard count",
+        "Explicit lookup table mapping each key to a shard",
+      ],
+      [
+        "**Data distribution**",
+        "Can be *uneven* if key values are skewed",
+        "**Even** across shards by design",
+        "Depends on how entries are assigned; can be tuned manually",
+      ],
+      [
+        "**Range query support**",
+        "**Excellent** — co-located data within ranges",
+        "*Poor* — requires scatter-gather across all shards",
+        "*Moderate* — depends on how ranges are mapped in the directory",
+      ],
+      [
+        "**Hotspot risk**",
+        "**High** — monotonic keys (timestamps, auto-increment) cause all writes to one shard",
+        "**Low** — hash function disperses keys uniformly",
+        "**Low** — can manually rebalance by reassigning directory entries",
+      ],
+      [
+        "**Resharding complexity**",
+        "Splitting a range requires data migration and boundary updates",
+        "Adding a shard remaps ~`1/N` keys (with consistent hashing) or *all* keys (naive mod)",
+        "**Simplest** — update the directory entries, then migrate data",
+      ],
+      [
+        "**Operational overhead**",
+        "Low metadata; boundary list is small",
+        "Low metadata; hash function is stateless",
+        "**High** — directory must be highly available, cached, and kept in sync",
+      ],
+      [
+        "**Best suited for**",
+        "Time-series with uniform write rates; lexicographic scans",
+        "User-centric workloads needing even write distribution",
+        "Multi-tenant SaaS with per-tenant shard placement needs",
+      ],
+    ],
+  },
+
+  exercises: [
+    "**Design a shard key** for a social media platform where the primary queries are: (a) fetch a user's posts, (b) fetch a user's timeline (posts from followed users), and (c) search posts by hashtag. Discuss the trade-offs of sharding by `userId` vs. `postId` vs. a compound key. Which queries become cross-shard, and how would you mitigate that?",
+    "**Implement a minimal consistent hashing ring** in your language of choice. Support `addNode(nodeId)`, `removeNode(nodeId)`, and `getNode(key)`. Write tests that verify: (1) adding a 4th node to a 3-node ring moves approximately 25% of 10,000 test keys, and (2) removing a node redistributes only that node's keys to its clockwise neighbor.",
+    "**Capacity planning exercise**: You have a 4-shard PostgreSQL cluster. Each shard can hold 500 GB and handle 5,000 write TPS. Your data is growing at 50 GB/month and writes are increasing 10% monthly. Calculate when you will need to reshard to 8 shards, and describe the migration strategy you would use (dual-write, logical sharding, or Vitess-style online resharding).",
+    "**Cross-shard query optimization**: Given an e-commerce database sharded by `userId`, design an efficient way to answer the query *\"top 10 best-selling products this week\"* without scanning all shards on every request. Consider denormalization, materialized views, or a separate analytics pipeline. Sketch the data flow and explain the consistency guarantees.",
+    "**Failure scenario analysis**: In a 5-shard cluster with no replicas, one shard's disk fails. Describe the impact on the system (which queries fail, which succeed), the recovery steps, and the architectural changes you would recommend to prevent this from being a catastrophic event.",
+  ],
+
+  cheatSheet: [
+    "**Shard key selection rule of thumb**: pick a field with *high cardinality*, *even distribution*, and that appears in **most queries** — the trifecta is `userId`/`tenantId` for user-centric apps.",
+    "**Consistent hashing formula**: position on ring = `hash(nodeId + \"#vnode\" + i)` for `i` in `[0, vnodes_per_node)`. Keys route to the *first node clockwise* from `hash(key)`.",
+    "**Logical sharding shortcut**: start with 256+ logical shards mapped to fewer physical nodes. Resharding = reassigning mappings, *not* recomputing boundaries or migrating all data.",
+    "**Cross-shard query cost**: scatter-gather latency = `max(shard_latencies)` + merge overhead. Avoid by co-locating related data and denormalizing for common access patterns.",
+    "**MongoDB sharding commands**: `sh.enableSharding(\"db\")`, `sh.shardCollection(\"db.col\", { key: \"hashed\" })`, `sh.status()` to inspect chunk distribution.",
+    "**Hotspot detection signal**: if one shard's write TPS is >2x the average, investigate the shard key distribution — likely a low-cardinality or monotonic key problem.",
+  ],
+
+  revisionNotes: [
+    "Sharding enables **horizontal write scaling** by partitioning data across multiple database instances. It is a last resort after indexing, caching, query optimization, and read replicas have been exhausted.",
+    "The three core strategies are **range-based** (efficient range queries, hotspot risk), **hash-based** (even distribution, no range queries), and **directory-based** (flexible placement, operational overhead from the lookup service).",
+    "**Shard key selection** is the single most impactful design decision: choose a key with high cardinality, even distribution, and alignment with the dominant query patterns. Changing the shard key later requires a full data migration.",
+    "**Consistent hashing with virtual nodes** minimizes data movement during resharding — adding a node moves only ~`1/N` of keys. **Logical sharding** (many logical shards mapped to fewer physical nodes) further simplifies resharding to a metadata-only operation.",
+    "**Cross-shard operations** (scatter-gather queries, distributed transactions) are the primary source of complexity. Mitigate by co-locating related entities, denormalizing, and separating analytical workloads into a replicated read store (CQRS pattern).",
+  ],
+
   glossary: [
     {
       term: "Sharding",

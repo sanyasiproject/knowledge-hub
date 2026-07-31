@@ -78,57 +78,89 @@ public enum AppConfig {
 // AppConfig.INSTANCE.get("db.host", "localhost");`,
     },
     {
-      language: "python",
-      caption: "Python singletons: module-level instance and __new__ override",
-      source: `# Approach 1: Module-level singleton (Pythonic way)
-# config.py
-class _AppConfig:
-    def __init__(self):
-        self._settings: dict[str, str] = {}
-        self._loaded = False
+      language: "cpp",
+      caption: "C++ singletons: Meyer's singleton and thread-safe lazy initialization",
+      source: `// Approach 1: Meyer's Singleton (recommended in modern C++)
+// Thread-safe since C++11 — static local initialization is guaranteed
+// to be thread-safe by the standard (magic statics).
+#include <string>
+#include <unordered_map>
+#include <fstream>
+#include <iostream>
+#include <mutex>
 
-    def load(self, path: str = "config.yaml") -> None:
-        import yaml
-        with open(path) as f:
-            self._settings = yaml.safe_load(f)
-        self._loaded = True
+class AppConfig {
+public:
+    // Meyer's Singleton: local static, constructed on first call
+    static AppConfig& instance() {
+        static AppConfig config;
+        return config;
+    }
 
-    def get(self, key: str, default: str | None = None) -> str | None:
-        return self._settings.get(key, default)
+    void load(const std::string& path = "config.yaml") {
+        // Simplified: load key=value pairs from a file
+        std::ifstream file(path);
+        std::string line;
+        while (std::getline(file, line)) {
+            auto pos = line.find('=');
+            if (pos != std::string::npos)
+                settings_[line.substr(0, pos)] = line.substr(pos + 1);
+        }
+        loaded_ = true;
+    }
 
-# The module-level instance IS the singleton
-config = _AppConfig()
+    std::string get(const std::string& key,
+                    const std::string& default_val = "") const {
+        auto it = settings_.find(key);
+        return it != settings_.end() ? it->second : default_val;
+    }
 
-# Usage from other modules:
-# from config import config
-# config.load()
-# db_host = config.get("db_host", "localhost")
+    // Delete copy/move to enforce single instance
+    AppConfig(const AppConfig&) = delete;
+    AppConfig& operator=(const AppConfig&) = delete;
+
+private:
+    AppConfig() = default;
+    std::unordered_map<std::string, std::string> settings_;
+    bool loaded_ = false;
+};
+
+// Usage:
+// AppConfig::instance().load();
+// auto db_host = AppConfig::instance().get("db_host", "localhost");
 
 
-# Approach 2: __new__ override for class-level singleton
-class Logger:
-    _instance: "Logger | None" = None
+// Approach 2: Explicit double-checked locking (pre-C++11 style,
+// shown for educational comparison — prefer Meyer's singleton above)
+class Logger {
+public:
+    static Logger& instance() {
+        // C++11 guarantees this is thread-safe (magic statics)
+        static Logger logger;
+        return logger;
+    }
 
-    def __new__(cls) -> "Logger":
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
+    void log(const std::string& message) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        log_file_ << message << "\\n";
+        log_file_.flush();
+    }
 
-    def __init__(self) -> None:
-        if self._initialized:
-            return
-        self._initialized = True
-        self._log_file = open("app.log", "a")
+    Logger(const Logger&) = delete;
+    Logger& operator=(const Logger&) = delete;
 
-    def log(self, message: str) -> None:
-        self._log_file.write(f"{message}\\n")
-        self._log_file.flush()
+private:
+    Logger() : log_file_("app.log", std::ios::app) {}
+    ~Logger() { if (log_file_.is_open()) log_file_.close(); }
 
-# Both variables reference the exact same object
-logger1 = Logger()
-logger2 = Logger()
-assert logger1 is logger2  # True`,
+    std::ofstream log_file_;
+    std::mutex mutex_;
+};
+
+// Both references point to the exact same object
+// auto& logger1 = Logger::instance();
+// auto& logger2 = Logger::instance();
+// assert(&logger1 == &logger2);  // true`,
     },
     {
       language: "typescript",

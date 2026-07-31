@@ -200,95 +200,151 @@ func main() {
 }`,
     },
     {
-      language: "python",
-      caption: "Race condition in Python despite the GIL, and threading.Lock fix",
-      source: `import threading
+      language: "cpp",
+      caption: "Race condition with std::thread and fixes using std::mutex and std::atomic",
+      source: `#include <iostream>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <vector>
 
-# The GIL does NOT prevent all race conditions.
-# It only ensures bytecode instructions are atomic,
-# but compound operations like += are multiple bytecodes.
+// BROKEN: unsynchronized read-modify-write
+class BrokenCounter {
+public:
+    int count = 0;
+    void increment() {
+        // Not atomic: load count, add 1, store count
+        // Threads can interleave between these steps
+        count++;
+    }
+};
 
-class BrokenCounter:
-    def __init__(self):
-        self.count = 0
+// FIXED with mutex
+class MutexCounter {
+public:
+    int count = 0;
+    void increment() {
+        std::lock_guard<std::mutex> lock(mtx_);
+        count++;
+    }
+private:
+    std::mutex mtx_;
+};
 
-    def increment(self):
-        # This compiles to: LOAD count, ADD 1, STORE count
-        # The GIL can release between any of these steps
-        self.count += 1
+// FIXED with atomic
+class AtomicCounter {
+public:
+    std::atomic<int> count{0};
+    void increment() {
+        count.fetch_add(1, std::memory_order_relaxed);
+    }
+};
 
-class FixedCounter:
-    def __init__(self):
-        self.count = 0
-        self._lock = threading.Lock()
+template <typename Counter>
+void testCounter(const std::string& label) {
+    Counter counter;
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 10; ++i) {
+        threads.emplace_back([&counter]() {
+            for (int j = 0; j < 100'000; ++j) {
+                counter.increment();
+            }
+        });
+    }
+    for (auto& t : threads) t.join();
+    std::cout << label << ": expected=1000000, actual="
+              << counter.count << std::endl;
+}
 
-    def increment(self):
-        with self._lock:
-            self.count += 1
-
-def test_counter(counter_class, label):
-    counter = counter_class()
-    threads = []
-    for _ in range(10):
-        t = threading.Thread(
-            target=lambda: [counter.increment() for _ in range(100_000)]
-        )
-        threads.append(t)
-        t.start()
-    for t in threads:
-        t.join()
-    print(f"{label}: expected=1000000, actual={counter.count}")
-
-test_counter(BrokenCounter, "Broken")
-test_counter(FixedCounter, "Fixed")`,
+int main() {
+    testCounter<BrokenCounter>("Broken");
+    testCounter<MutexCounter>("Mutex");
+    testCounter<AtomicCounter>("Atomic");
+    return 0;
+}`,
     },
     {
-      language: "python",
-      caption: "Singleton pattern race condition and double-checked locking",
-      source: `import threading
+      language: "cpp",
+      caption: "Singleton pattern race condition and double-checked locking in C++",
+      source: `#include <iostream>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <vector>
+#include <set>
 
-class BrokenSingleton:
-    """Race condition: two threads can both see _instance as None."""
-    _instance = None
+// BROKEN: race condition -- two threads can both see instance_ as nullptr
+class BrokenSingleton {
+public:
+    static BrokenSingleton* getInstance() {
+        if (instance_ == nullptr) {       // Thread A checks: nullptr
+            // Thread B also checks: nullptr (context switch)
+            instance_ = new BrokenSingleton();  // Both create instances
+        }
+        return instance_;
+    }
+    std::string data = "initialized";
+private:
+    BrokenSingleton() = default;
+    static BrokenSingleton* instance_;
+};
+BrokenSingleton* BrokenSingleton::instance_ = nullptr;
 
-    @classmethod
-    def get_instance(cls):
-        if cls._instance is None:          # Thread A checks: None
-            # Thread B also checks: None  (context switch)
-            cls._instance = cls()          # Both create instances
-        return cls._instance
+// FIXED: double-checked locking with std::atomic and std::mutex
+class FixedSingleton {
+public:
+    static FixedSingleton* getInstance() {
+        auto* p = instance_.load(std::memory_order_acquire);
+        if (p == nullptr) {                          // First check (no lock)
+            std::lock_guard<std::mutex> lock(mtx_);  // Acquire lock
+            p = instance_.load(std::memory_order_relaxed);
+            if (p == nullptr) {                      // Second check (with lock)
+                p = new FixedSingleton();
+                instance_.store(p, std::memory_order_release);
+            }
+        }
+        return p;
+    }
+    std::string data = "initialized";
+private:
+    FixedSingleton() = default;
+    static std::atomic<FixedSingleton*> instance_;
+    static std::mutex mtx_;
+};
+std::atomic<FixedSingleton*> FixedSingleton::instance_{nullptr};
+std::mutex FixedSingleton::mtx_;
 
-class FixedSingleton:
-    """Double-checked locking pattern with a lock."""
-    _instance = None
-    _lock = threading.Lock()
+// BEST: use C++11 static local (Meyers' Singleton, thread-safe by standard)
+class MeyersSingleton {
+public:
+    static MeyersSingleton& getInstance() {
+        static MeyersSingleton instance;  // Thread-safe in C++11+
+        return instance;
+    }
+    std::string data = "initialized";
+private:
+    MeyersSingleton() = default;
+};
 
-    @classmethod
-    def get_instance(cls):
-        if cls._instance is None:          # First check (no lock)
-            with cls._lock:                # Acquire lock
-                if cls._instance is None:  # Second check (with lock)
-                    cls._instance = cls()
-        return cls._instance
+// Verify thread safety
+int main() {
+    std::vector<FixedSingleton*> instances;
+    std::mutex vecMtx;
+    std::vector<std::thread> threads;
 
-    def __init__(self):
-        self.data = "initialized"
+    for (int i = 0; i < 100; ++i) {
+        threads.emplace_back([&]() {
+            auto* inst = FixedSingleton::getInstance();
+            std::lock_guard<std::mutex> lock(vecMtx);
+            instances.push_back(inst);
+        });
+    }
+    for (auto& t : threads) t.join();
 
-# Verify thread safety
-instances = []
-
-def create_instance():
-    inst = FixedSingleton.get_instance()
-    instances.append(id(inst))
-
-threads = [threading.Thread(target=create_instance) for _ in range(100)]
-for t in threads:
-    t.start()
-for t in threads:
-    t.join()
-
-unique_ids = set(instances)
-print(f"Unique instances: {len(unique_ids)}")  # Should be 1`,
+    std::set<FixedSingleton*> unique(instances.begin(), instances.end());
+    std::cout << "Unique instances: " << unique.size() << std::endl;  // Should be 1
+    return 0;
+}`,
     },
   ],
 
@@ -713,5 +769,12 @@ print(f"Unique instances: {len(unique_ids)}")  # Should be 1`,
       definition:
         "A compile-time instrumentation tool that detects data races at runtime by tracking memory accesses and synchronization events using vector clocks.",
     },
+  ],
+  exercises: [
+    "Write a C++ program where two threads perform `counter++` on a shared `int` (not `std::atomic`) 100,000 times each. Compile with `-fsanitize=thread` and observe the **ThreadSanitizer** report. Fix the race using (a) `std::mutex`, (b) `std::atomic<int>`, and (c) `std::atomic` with `fetch_add`. Verify that TSan no longer reports any issues.",
+    "Identify the **TOCTOU vulnerability** in this pseudocode: `if (file_exists(path)) { data = read_file(path); }`. Construct a concrete attack scenario where an attacker exploits the race window using a **symlink swap**. Then rewrite the code using `open()` with `O_NOFOLLOW` to eliminate the vulnerability.",
+    "A banking application has a `withdraw(account, amount)` function that checks `if (balance >= amount)` and then does `balance -= amount`. Two threads call `withdraw(acc, 80)` concurrently on an account with `balance = 100`. Trace the **interleaving** that allows both withdrawals to succeed (overdraft). Fix the race using (a) a database `SELECT ... FOR UPDATE`, and (b) **optimistic concurrency control** with a version column.",
+    "In Python, demonstrate that `counter += 1` is *not atomic* despite the GIL. Write a test with 10 threads each incrementing 100,000 times, showing the final count is less than 1,000,000. Then explain: at the *bytecode level* (`dis.dis`), which instructions does `+=` compile to, and between which instructions can the GIL release?",
+    "Design a **thread-safe lazy singleton** in Java using three different approaches: (a) `enum`-based, (b) **initialization-on-demand holder** idiom, and (c) **double-checked locking** with `volatile`. For approach (c), explain exactly what goes wrong *without* the `volatile` keyword -- which Java Memory Model guarantee is violated?",
   ],
 };

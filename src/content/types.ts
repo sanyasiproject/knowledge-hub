@@ -44,9 +44,9 @@ export interface GlossaryEntry {
 
 export interface DiagramSpec {
   title: string;
-  /** A simple mermaid-style description we render as a labelled placeholder. */
   kind: "architecture" | "flow" | "sequence" | "state" | "mindmap" | "network";
   caption?: string;
+  mermaid?: string;
 }
 
 export interface AnimationSpec {

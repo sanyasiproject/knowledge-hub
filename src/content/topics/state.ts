@@ -214,67 +214,88 @@ class DispensingState implements VendingState {
 }`
     },
     {
-      language: "python",
-      caption: "State pattern with Python enum-based state machine (data-driven approach)",
-      source: `from enum import Enum, auto
-from dataclasses import dataclass
-from typing import Callable, Dict, Tuple, Optional
+      language: "cpp",
+      caption: "State pattern with C++ enum-based state machine (data-driven approach)",
+      source: `#include <iostream>
+#include <string>
+#include <map>
+#include <functional>
+#include <stdexcept>
+#include <utility>
 
-class OrderStatus(Enum):
-    PENDING = auto()
-    CONFIRMED = auto()
-    SHIPPED = auto()
-    DELIVERED = auto()
-    CANCELLED = auto()
+enum class OrderStatus { PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED };
 
-@dataclass
-class Order:
-    id: str
-    status: OrderStatus = OrderStatus.PENDING
+const char* status_name(OrderStatus s) {
+    switch (s) {
+        case OrderStatus::PENDING:   return "PENDING";
+        case OrderStatus::CONFIRMED: return "CONFIRMED";
+        case OrderStatus::SHIPPED:   return "SHIPPED";
+        case OrderStatus::DELIVERED: return "DELIVERED";
+        case OrderStatus::CANCELLED: return "CANCELLED";
+    }
+    return "UNKNOWN";
+}
 
-    # Transition table: (current_state, action) -> (next_state, side_effect)
-    _transitions: Dict[Tuple[OrderStatus, str], Tuple[OrderStatus, Optional[Callable]]] = None
+// Transition key: (current_state, action)
+using TransitionKey = std::pair<OrderStatus, std::string>;
 
-    def __post_init__(self):
-        self._transitions = {
-            (OrderStatus.PENDING, "confirm"):   (OrderStatus.CONFIRMED, self._on_confirm),
-            (OrderStatus.PENDING, "cancel"):    (OrderStatus.CANCELLED, self._on_cancel),
-            (OrderStatus.CONFIRMED, "ship"):    (OrderStatus.SHIPPED, self._on_ship),
-            (OrderStatus.CONFIRMED, "cancel"):  (OrderStatus.CANCELLED, self._on_cancel),
-            (OrderStatus.SHIPPED, "deliver"):   (OrderStatus.DELIVERED, self._on_deliver),
+struct TransitionKeyHash {
+    size_t operator()(const TransitionKey& k) const {
+        return std::hash<int>()(static_cast<int>(k.first))
+             ^ (std::hash<std::string>()(k.second) << 1);
+    }
+};
+
+class Order {
+    std::string id_;
+    OrderStatus status_ = OrderStatus::PENDING;
+
+    // Transition table: (current_state, action) -> (next_state, side_effect)
+    using TransitionMap = std::map<TransitionKey, std::pair<OrderStatus, std::function<void()>>>;
+    TransitionMap transitions_;
+
+    void build_transitions() {
+        transitions_[{OrderStatus::PENDING, "confirm"}]  = {OrderStatus::CONFIRMED, [this]{ on_confirm(); }};
+        transitions_[{OrderStatus::PENDING, "cancel"}]   = {OrderStatus::CANCELLED, [this]{ on_cancel(); }};
+        transitions_[{OrderStatus::CONFIRMED, "ship"}]   = {OrderStatus::SHIPPED,   [this]{ on_ship(); }};
+        transitions_[{OrderStatus::CONFIRMED, "cancel"}] = {OrderStatus::CANCELLED, [this]{ on_cancel(); }};
+        transitions_[{OrderStatus::SHIPPED, "deliver"}]  = {OrderStatus::DELIVERED,  [this]{ on_deliver(); }};
+    }
+
+    void on_confirm() { std::cout << "  -> Sending confirmation email for order " << id_ << "\\n"; }
+    void on_ship()    { std::cout << "  -> Generating tracking number for order " << id_ << "\\n"; }
+    void on_deliver() { std::cout << "  -> Recording delivery timestamp for order " << id_ << "\\n"; }
+    void on_cancel()  { std::cout << "  -> Processing refund for order " << id_ << "\\n"; }
+
+public:
+    explicit Order(std::string id) : id_(std::move(id)) {
+        build_transitions();
+    }
+
+    void apply(const std::string& action) {
+        TransitionKey key{status_, action};
+        auto it = transitions_.find(key);
+        if (it == transitions_.end()) {
+            throw std::invalid_argument(
+                "Invalid action '" + action + "' for order in state '"
+                + status_name(status_) + "'");
         }
+        auto& [next_status, side_effect] = it->second;
+        std::cout << "Order " << id_ << ": " << status_name(status_)
+                  << " --[" << action << "]--> " << status_name(next_status) << "\\n";
+        status_ = next_status;
+        if (side_effect) side_effect();
+    }
+};
 
-    def apply(self, action: str) -> None:
-        key = (self.status, action)
-        if key not in self._transitions:
-            raise ValueError(
-                f"Invalid action '{action}' for order in state '{self.status.name}'"
-            )
-        next_status, side_effect = self._transitions[key]
-        print(f"Order {self.id}: {self.status.name} --[{action}]--> {next_status.name}")
-        self.status = next_status
-        if side_effect:
-            side_effect()
-
-    def _on_confirm(self):
-        print(f"  -> Sending confirmation email for order {self.id}")
-
-    def _on_ship(self):
-        print(f"  -> Generating tracking number for order {self.id}")
-
-    def _on_deliver(self):
-        print(f"  -> Recording delivery timestamp for order {self.id}")
-
-    def _on_cancel(self):
-        print(f"  -> Processing refund for order {self.id}")
-
-
-# Usage
-order = Order(id="ORD-42")
-order.apply("confirm")   # PENDING -> CONFIRMED
-order.apply("ship")      # CONFIRMED -> SHIPPED
-order.apply("deliver")   # SHIPPED -> DELIVERED
-# order.apply("cancel")  # raises ValueError -- cannot cancel delivered order`
+// Usage
+int main() {
+    Order order("ORD-42");
+    order.apply("confirm");   // PENDING -> CONFIRMED
+    order.apply("ship");      // CONFIRMED -> SHIPPED
+    order.apply("deliver");   // SHIPPED -> DELIVERED
+    // order.apply("cancel"); // throws invalid_argument -- cannot cancel delivered order
+}`
     }
   ],
   diagrams: [

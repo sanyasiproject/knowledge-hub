@@ -97,6 +97,242 @@ export const cloudCost: TopicContent = {
     { front: "Unit economics", back: "Tracking cost per business transaction (per user, per API call, per order) rather than total spend. Connects cloud costs to business value and reveals efficiency trends." }
   ],
 
+  deepDive: [
+    "## FinOps Framework: Inform, Optimize, Operate\n\n**FinOps (Cloud Financial Operations)** is a cultural practice bringing financial accountability to cloud spending through three iterative phases. **Inform** establishes visibility: implement cost allocation tags (mandatory tags: team, project, environment, cost-center), configure AWS Cost Explorer with granular hourly data, deploy S3 Cost and Usage Reports (CUR) to a data lake for custom analysis, and set up AWS Budgets with SNS alerts at 50%, 80%, and 100% thresholds. **Optimize** reduces waste: right-size instances using AWS Compute Optimizer recommendations (analyzes 14 days of CloudWatch metrics), purchase Savings Plans based on Coverage and Utilization reports, eliminate idle resources (unattached EBS volumes, unused Elastic IPs, idle load balancers), and implement S3 lifecycle policies. **Operate** embeds cost awareness into engineering culture: integrate cost data into CI/CD (Infracost for Terraform PRs), create team-level dashboards showing unit economics (cost per transaction, cost per user), conduct monthly FinOps reviews comparing budgets to actuals, and implement showback/chargeback models to create spending accountability.",
+    "## Reserved Instances vs Savings Plans: Commitment Strategy\n\n**Reserved Instances (RIs)** commit to a specific instance family, region, OS, and tenancy for 1 or 3 years. **Standard RIs** offer up to 72% discount but cannot change instance family (can change size within family). **Convertible RIs** offer up to 66% discount and allow changing instance family, OS, and tenancy — providing flexibility for evolving architectures. **Savings Plans** are the modern alternative: **Compute Savings Plans** commit to a $/hour spend applicable across EC2, Fargate, and Lambda in any region — maximum flexibility at up to 66% discount. **EC2 Instance Savings Plans** lock to an instance family in a region for up to 72% discount (matching Standard RI savings). Strategy: analyze 90 days of usage with Cost Explorer Recommendations. Cover steady-state baseline with 3-year No Upfront Compute Savings Plans (best balance of commitment and flexibility), add 1-year EC2 Instance Savings Plans for predictable workloads, and use on-demand/spot for variable capacity.",
+    "## Spot Instances: Architecture for Interruption Tolerance\n\n**Spot instances** offer up to 90% discount by using AWS's spare EC2 capacity, but can be reclaimed with a **2-minute interruption notice**. Successful spot architectures require **interruption tolerance** through specific patterns. **Diversification** across multiple instance types and AZs reduces interruption probability: use `capacity-optimized` allocation strategy in ASGs with 10+ instance type overrides. **Stateless design** ensures any instance can be terminated without data loss — externalize state to S3, DynamoDB, or ElastiCache. **Checkpointing** for long-running jobs (ML training, batch processing) saves progress to S3 periodically, enabling resume on a new instance. **Mixed instances policies** in ASGs combine a base of on-demand instances (for minimum capacity guarantee) with spot instances for elastic scaling. **Spot placement score** API predicts which Region/AZ combinations have the highest spot capacity for your instance types. For containers, **Fargate Spot** provides the same model for ECS tasks. For EKS, **Karpenter** with spot provisioner handles instance selection and interruption handling automatically."
+  ],
+
+  code: [
+    {
+      language: "hcl",
+      caption: "Terraform: enforce cost allocation tags with AWS Config",
+      source: `# Require mandatory cost allocation tags on all resources
+resource "aws_config_config_rule" "required_tags" {
+  name = "required-cost-allocation-tags"
+
+  source {
+    owner             = "AWS"
+    source_identifier = "REQUIRED_TAGS"
+  }
+
+  input_parameters = jsonencode({
+    tag1Key   = "team"
+    tag1Value = ""
+    tag2Key   = "project"
+    tag2Value = ""
+    tag3Key   = "environment"
+    tag3Value = "dev,staging,prod"
+    tag4Key   = "cost-center"
+    tag4Value = ""
+  })
+
+  scope {
+    compliance_resource_types = [
+      "AWS::EC2::Instance",
+      "AWS::RDS::DBInstance",
+      "AWS::S3::Bucket",
+      "AWS::Lambda::Function",
+      "AWS::ECS::Service",
+      "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    ]
+  }
+}
+
+# Budget alert for team spending
+resource "aws_budgets_budget" "team_monthly" {
+  name         = "team-platform-monthly"
+  budget_type  = "COST"
+  limit_amount = "10000"
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
+
+  cost_filter {
+    name   = "TagKeyValue"
+    values = ["user:team\$platform"]
+  }
+
+  notification {
+    comparison_operator       = "GREATER_THAN"
+    threshold                 = 80
+    threshold_type            = "PERCENTAGE"
+    notification_type         = "ACTUAL"
+    subscriber_sns_topic_arns = [aws_sns_topic.budget_alerts.arn]
+  }
+
+  notification {
+    comparison_operator       = "GREATER_THAN"
+    threshold                 = 100
+    threshold_type            = "PERCENTAGE"
+    notification_type         = "FORECASTED"
+    subscriber_sns_topic_arns = [aws_sns_topic.budget_alerts.arn]
+  }
+}`
+    },
+    {
+      language: "bash",
+      caption: "AWS CLI: identify cloud waste and optimization opportunities",
+      source: `# Find unattached EBS volumes (wasted storage cost)
+aws ec2 describe-volumes \\
+  --filters "Name=status,Values=available" \\
+  --query 'Volumes[].{ID:VolumeId,Size:Size,Type:VolumeType,Created:CreateTime}' \\
+  --output table
+
+# Find unused Elastic IPs ($3.65/month each when unattached)
+aws ec2 describe-addresses \\
+  --query 'Addresses[?AssociationId==null].{IP:PublicIp,AllocId:AllocationId}' \\
+  --output table
+
+# Find idle load balancers (no healthy targets)
+aws elbv2 describe-load-balancers \\
+  --query 'LoadBalancers[].LoadBalancerArn' --output text | \\
+  tr '\\t' '\\n' | while read arn; do
+    targets=$(aws elbv2 describe-target-health \\
+      --target-group-arn "$arn" 2>/dev/null \\
+      --query 'length(TargetHealthDescriptions[?TargetHealth.State==\`healthy\`])')
+    if [ "$targets" = "0" ]; then
+      echo "IDLE: $arn"
+    fi
+  done
+
+# Get Compute Optimizer recommendations for right-sizing
+aws compute-optimizer get-ec2-instance-recommendations \\
+  --query 'instanceRecommendations[?finding==\`OVER_PROVISIONED\`].{
+    Instance:instanceArn,
+    Current:currentInstanceType,
+    Recommended:recommendationOptions[0].instanceType,
+    MonthlySavings:recommendationOptions[0].estimatedMonthlySavings.value
+  }' --output table
+
+# Check Savings Plan utilization
+aws ce get-savings-plans-utilization \\
+  --time-period Start=$(date -d '30 days ago' +%Y-%m-%d),End=$(date +%Y-%m-%d) \\
+  --query 'Total.{Utilization:UtilizationPercentage,Savings:NetSavings}'`
+    },
+    {
+      language: "yaml",
+      caption: "Infracost config: cost estimation in CI/CD pipeline",
+      source: `# .infracost.yml - cost estimation for Terraform changes
+version: 0.1
+projects:
+  - path: terraform/environments/prod
+    name: production
+    terraform_var_files:
+      - terraform.tfvars
+    usage_file: infracost-usage.yml
+
+# GitHub Actions workflow for PR cost comments
+# .github/workflows/infracost.yml
+name: Infracost
+on: [pull_request]
+jobs:
+  infracost:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v3
+        with:
+          api-key: \${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Generate cost diff
+        run: |
+          infracost diff \\
+            --path=terraform/environments/prod \\
+            --format=json \\
+            --compare-to=infracost-base.json \\
+            --out-file=/tmp/infracost-diff.json
+
+      - name: Post PR comment
+        run: |
+          infracost comment github \\
+            --path=/tmp/infracost-diff.json \\
+            --repo=\${{ github.repository }} \\
+            --pull-request=\${{ github.event.pull_request.number }} \\
+            --github-token=\${{ secrets.GITHUB_TOKEN }} \\
+            --behavior=update`
+    }
+  ],
+
+  comparison: {
+    columns: ["Pricing Model", "Discount", "Commitment", "Flexibility", "Best For"],
+    rows: [
+      ["On-Demand", "0% (baseline)", "None", "Full — start/stop anytime", "Unpredictable workloads, short-term, development"],
+      ["Savings Plan (Compute)", "Up to 66%", "1 or 3 year $/hr", "Any EC2, Fargate, Lambda, any region", "Steady-state compute with evolving architecture"],
+      ["Savings Plan (EC2 Instance)", "Up to 72%", "1 or 3 year $/hr", "Specific instance family + region, any size/OS", "Predictable EC2 workloads in known regions"],
+      ["Reserved Instance (Standard)", "Up to 72%", "1 or 3 year", "Specific family, region, OS, tenancy; can change size", "Stable, well-understood EC2 workloads"],
+      ["Reserved Instance (Convertible)", "Up to 66%", "1 or 3 year", "Can change family, OS, tenancy", "Long-term commitment with architecture uncertainty"],
+      ["Spot Instance", "Up to 90%", "None (can be interrupted)", "Multiple types recommended", "Fault-tolerant batch, CI/CD, stateless workers"],
+      ["Fargate Spot", "Up to 70%", "None (can be interrupted)", "ECS tasks only", "Fault-tolerant containerized workloads"],
+      ["Lambda", "Pay per ms", "None (or Savings Plan)", "Automatic scaling", "Event-driven, intermittent workloads"]
+    ]
+  },
+
+  exercises: [
+    "Your company spends $150,000/month on AWS. Cost Explorer shows: 40% EC2 ($60K), 20% RDS ($30K), 15% S3 ($22.5K), 10% data transfer ($15K), 15% other. Design a 6-month FinOps optimization plan targeting a 30% cost reduction. Specify: Savings Plan purchases (amount, type, term), EC2 right-sizing candidates, S3 lifecycle optimization, data transfer reduction strategies (VPC endpoints, CloudFront), and the team structure and review cadence.",
+    "A data processing pipeline runs 200 c5.2xlarge instances for 8 hours daily (batch jobs). During the remaining 16 hours, only 10 instances handle real-time ingestion. Design a cost-optimized architecture using: Spot instances with fallback to on-demand for batch processing, Savings Plans or RIs for the 10-instance baseline, Auto Scaling schedules for the daily pattern, and instance type diversification for spot availability. Calculate the monthly cost for each option.",
+    "Implement a tagging strategy and showback model for an organization with 5 teams across 3 environments. Define: the mandatory tag schema, an AWS Config rule to enforce tagging, a Cost and Usage Report pipeline to Athena for analysis, per-team dashboards in QuickSight, and budget alerts at team and project levels. Write the Terraform for the Config rule and budget resources.",
+    "Your S3 storage costs are $45,000/month across 200 TB. S3 Storage Lens shows: 60% of data is in Standard (never accessed after 30 days), 25% is in Standard-IA (accessed quarterly), 15% is in Glacier (compliant archives). Design a lifecycle optimization strategy using Intelligent-Tiering vs manual lifecycle rules. Calculate exact monthly savings for each approach.",
+    "A startup's AWS bill grew from $5K to $50K over 6 months without proportional revenue growth. Conduct a cost investigation: identify the top 5 cost optimization opportunities using Cost Explorer data (EC2 right-sizing, unused resources, missing Savings Plans, S3 lifecycle, data transfer). Create an Infracost integration for the Terraform-based infrastructure to prevent future cost surprises in PRs."
+  ],
+
+  cheatSheet: [
+    "**Top 5 AWS cost leaks**: unattached EBS volumes, idle load balancers, unused Elastic IPs, over-provisioned instances, missing S3 lifecycle policies — check monthly",
+    "**Savings Plan coverage**: aim for 70-80% coverage of steady-state compute. Over-committing wastes money on unused commitments; under-committing pays too much on-demand",
+    "**Right-sizing signals**: sustained CPU < 40% = likely over-provisioned. Use Compute Optimizer (14-day analysis) or CloudWatch metrics to identify candidates",
+    "**Data transfer costs**: inter-AZ = $0.01/GB, internet egress = $0.09/GB (first 10 TB). Use VPC endpoints ($0.01/GB) for S3/DynamoDB, CloudFront for edge caching, same-AZ placement where possible",
+    "**Graviton instances**: 20-40% cheaper than x86 equivalents with equal or better performance. Switch M5 to M7g, C5 to C7g, R5 to R7g — most workloads require zero code changes",
+    "**Cost Explorer tips**: enable hourly granularity, filter by usage type for data transfer analysis, use the Reservation Utilization report to check commitment efficiency",
+    "**Spot best practices**: diversify across 10+ instance types and all AZs, use capacity-optimized allocation, handle 2-minute interruption notice via instance metadata or EventBridge",
+    "**Quick wins checklist**: delete unattached EBS volumes, release unused EIPs, stop dev/staging instances at night (Instance Scheduler), enable S3 Intelligent-Tiering, review NAT Gateway data processing charges"
+  ],
+
+  revisionNotes: [
+    "AWS charges separately for compute, storage, data transfer, and API requests. Data transfer is the most commonly overlooked cost — especially NAT Gateway processing ($0.045/GB) and inter-AZ traffic ($0.01/GB each way)",
+    "Savings Plans apply automatically to the highest on-demand cost first, maximizing savings without manual assignment. They are region-specific (EC2 Instance SP) or region-flexible (Compute SP)",
+    "S3 storage class differences matter at scale: Standard ($0.023/GB) vs Intelligent-Tiering (same + $0.0025/1000 objects monitoring) vs Infrequent Access ($0.0125/GB + $0.01/GB retrieval). Model your access patterns before choosing",
+    "Spot interruption rates vary by instance type and AZ. AWS publishes the Spot Placement Score API and Spot Instance Advisor to help select combinations with lowest interruption probability",
+    "Cost allocation tags must be activated in the Billing console before they appear in Cost Explorer and CUR. Only tags activated as cost allocation tags are available for cost analysis — regular resource tags are not",
+    "AWS Free Tier has three types: 12-month free (new accounts: 750 hrs t2.micro), always free (Lambda 1M requests, DynamoDB 25 GB), and trials (SageMaker 250 hrs). Monitor usage to avoid surprise charges",
+    "Reserved Instance Marketplace lets you sell unused Standard RIs (not Convertible) to other AWS customers. This provides an exit strategy for commitments that no longer match your needs",
+    "Unit economics (cost per transaction, cost per user) are more meaningful than raw cloud spend. A growing bill is healthy if the cost per unit is decreasing — this is what FinOps optimizes for"
+  ],
+
+  resources: [
+    { label: "FinOps Foundation — Cloud Financial Management Framework", kind: "docs", note: "The industry-standard framework for cloud cost management: principles, personas, phases, and maturity model" },
+    { label: "AWS Well-Architected — Cost Optimization Pillar", kind: "docs", note: "Official AWS guidance on cost-aware architectures: expenditure awareness, cost-effective resources, matching supply and demand" },
+    { label: "Last Week in AWS Newsletter by Corey Quinn", kind: "article", note: "Weekly newsletter covering AWS pricing changes, billing surprises, and cost optimization strategies with real-world analysis" },
+    { label: "Infracost — Cloud Cost Estimates for Terraform", kind: "repo", note: "Open-source tool that shows cost impact of Terraform changes in pull requests — essential for shift-left cost management" },
+    { label: "AWS re:Invent — Cost Optimization at Scale (FIN301)", kind: "video", note: "Enterprise-scale FinOps practices: organizational strategies, commitment management, and automated cost governance" }
+  ],
+
+  diagrams: [
+    {
+      title: "AWS Cost Optimization Decision Tree",
+      kind: "flow" as const,
+      caption: "Decision flow for optimizing compute costs: right-sizing first, then commitment selection (Savings Plans vs RIs vs Spot), then architectural optimization"
+    },
+    {
+      title: "FinOps Lifecycle",
+      kind: "flow" as const,
+      caption: "Iterative FinOps cycle: Inform (visibility, tagging, allocation) to Optimize (right-size, commit, eliminate waste) to Operate (governance, culture, automation)"
+    }
+  ],
+
+  animations: [
+    {
+      title: "EC2 Right-Sizing and Commitment Strategy",
+      steps: [
+        { label: "Analyze current usage", detail: "Enable AWS Compute Optimizer and review 14 days of CloudWatch metrics. Identify instances with sustained CPU < 40% or memory < 50% as over-provisioned. Current fleet: 50 m5.2xlarge instances running 24/7 at average 35% CPU." },
+        { label: "Right-size instances", detail: "Compute Optimizer recommends m5.xlarge (50% smaller) for 30 instances. Test in staging with load simulation. After validation, resize in production during maintenance window. Monthly savings: 30 instances x $0.192/hr savings x 730 hrs = $4,205/month." },
+        { label: "Identify commitment candidates", detail: "After right-sizing, the fleet is 20 m5.2xlarge + 30 m5.xlarge running 24/7 (steady state). Cost Explorer Savings Plans recommendations suggest $15/hr Compute Savings Plan commitment covering 80% of steady-state compute." },
+        { label: "Purchase Savings Plans", detail: "Buy 3-year No Upfront Compute Savings Plan at $15/hr. This covers 80% of the compute baseline with ~60% discount. Remaining 20% stays on-demand for flexibility. Annual commitment savings: ~$78,000 compared to full on-demand pricing." },
+        { label: "Implement Spot for variable workloads", detail: "Batch processing jobs (10 instances, 8 hrs/day) migrate to Spot with capacity-optimized allocation and 10 instance type overrides. Monthly savings: ~70% off on-demand for batch compute. Auto Scaling handles interruptions by launching replacement instances." },
+        { label: "Continuous optimization", detail: "Set up monthly FinOps review: check Savings Plan utilization (target > 90%), review Compute Optimizer for new right-sizing opportunities, audit for idle resources, and track unit economics (cost per API call trending downward quarter over quarter)." }
+      ]
+    }
+  ],
+
   glossary: [
     { term: "FinOps", definition: "Cloud Financial Operations — framework for managing cloud costs through collaboration, visibility, optimization, and governance." },
     { term: "Reserved Instance", definition: "Capacity commitment (1 or 3 years) to a specific instance configuration in exchange for significant discounts over on-demand pricing." },

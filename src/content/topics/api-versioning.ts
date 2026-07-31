@@ -324,6 +324,85 @@ function isNonBreakingChange(change: string): boolean {
 }`,
     },
   ],
+  diagrams: [
+    {
+      title: "API Version Routing Architecture",
+      kind: "architecture",
+      caption: "How an **API gateway** routes requests to *versioned backend services* based on the version identifier in the URL path or request header.",
+      mermaid: `graph TD
+    Client["**Client**<br/>*sends request*"]
+    GW["**API Gateway**<br/>*version detection*"]
+    V1["**v1 Service**<br/>*legacy handlers*"]
+    V2["**v2 Service**<br/>*current handlers*"]
+    V3["**v3 Service**<br/>*latest handlers*"]
+    Transform["**Transformer Layer**<br/>*request/response mapping*"]
+    BizLogic["**Shared Business Logic**<br/>*single source of truth*"]
+
+    Client -->|"/api/v1/users<br/>or Api-Version: 1"| GW
+    Client -->|"/api/v2/users<br/>or Api-Version: 2"| GW
+    Client -->|"/api/v3/users<br/>or Api-Version: 3"| GW
+    GW --> V1
+    GW --> V2
+    GW --> V3
+    V1 --> Transform
+    V2 --> Transform
+    V3 --> BizLogic
+    Transform --> BizLogic`
+    },
+    {
+      title: "API Deprecation Lifecycle",
+      kind: "state",
+      caption: "State transitions of an API version from **active** through **deprecated** to **sunset**, with the *HTTP headers* emitted at each stage.",
+      mermaid: `stateDiagram-v2
+    [*] --> Active
+    Active --> Deprecated: Announce deprecation<br/>Add Deprecation header
+    Deprecated --> SunsetWarning: Set Sunset header<br/>Publish migration guide
+    SunsetWarning --> Sunset: Sunset date reached<br/>Return 410 Gone
+    Sunset --> [*]
+
+    state Active {
+        [*] --> Serving
+        Serving --> Serving: Normal responses<br/>No special headers
+    }
+
+    state Deprecated {
+        [*] --> DepServing
+        DepServing --> DepServing: Deprecation: true<br/>Link to migration docs
+    }
+
+    state SunsetWarning {
+        [*] --> WarnServing
+        WarnServing --> WarnServing: Sunset date header<br/>Warning: 299 header
+    }`
+    },
+    {
+      title: "Version Negotiation Flow",
+      kind: "sequence",
+      caption: "Sequence diagram showing how a client request flows through **version detection**, *transformer middleware*, and handler selection using the header-based versioning pattern.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant MW as Version Middleware
+    participant T as Transformer
+    participant H as Current Handler (v3)
+    participant DB as Database
+
+    C->>MW: POST /api/users<br/>Api-Version: 1
+    MW->>MW: Detect version = 1<br/>Add deprecation headers
+    MW->>H: Forward request<br/>(version context attached)
+    H->>DB: Query users
+    DB-->>H: User records
+    H->>T: v3 response object
+    T->>T: Transform v3 → v1 format<br/>nested name → fullName
+    T-->>C: v1 response shape<br/>+ Sunset & Deprecation headers`
+    },
+  ],
+  exercises: [
+    "**Implement a version transformer chain:** Build an Express middleware that maintains a chain of *reversible transformation functions* (one per version). Given a request for `v1`, the response passes through transforms `v3→v2` and `v2→v1` before being sent. Test by creating a `/api/users` endpoint where v3 returns `{ name: { first, last } }` and v1 should return `{ fullName }`. Verify that adding a new v4 only requires one new transform.",
+    "**Build a deprecation dashboard:** Create a Node.js service that reads `Sunset` and `Deprecation` headers from a list of API endpoints, then displays a **dashboard** showing which versions are *active*, *deprecated*, or *approaching sunset*. Include a countdown timer for each deprecated version and alert when a sunset date is within 30 days.",
+    "**Design a breaking change detector:** Write a CLI tool in Node.js that takes two OpenAPI (Swagger) spec files and compares them to detect **breaking changes** (removed endpoints, renamed fields, changed types, removed required-to-optional transitions). Output a report classifying each change as *breaking* or *non-breaking* with migration suggestions.",
+    "**Implement date-based versioning a la Stripe:** Build an Express API that uses `date-based version headers` (e.g., `Api-Version: 2024-06-15`). Maintain a registry of version transforms keyed by date. The server should apply all transforms between the client's version date and the current date. Include an API key table that pins each key to a default version date.",
+    "**Version-aware integration tests:** Write a test suite using `supertest` that validates the *same business scenario* (create user, fetch user, update user) against three API versions simultaneously. Each test should assert the correct **response shape** for its version and verify that `Deprecation` headers appear on old versions but not on the current one.",
+  ],
   comparison: {
     columns: ["Strategy", "Visibility", "Caching", "REST Purity", "Migration Effort"],
     rows: [

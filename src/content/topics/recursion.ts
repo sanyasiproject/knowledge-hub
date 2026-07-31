@@ -128,79 +128,97 @@ function sumToTrampoline(n: number, acc: number = 0): Thunk<number> | number {
 const bigSum = trampoline(() => sumToTrampoline(1_000_000));`
     },
     {
-      language: "python",
-      caption: "Python recursion -- merge sort, permutations, and decorator-based memoization",
-      source: `import sys
-from functools import lru_cache
-from typing import List
+      language: "cpp",
+      caption: "C++ recursion -- merge sort, permutations, and memoization with unordered_map",
+      source: `#include <iostream>
+#include <vector>
+#include <unordered_map>
+#include <string>
 
-# Increase recursion limit cautiously (default is 1000)
-# sys.setrecursionlimit(5000)
+// --- Merge sort: divide and conquer ---
+std::vector<int> merge(const std::vector<int>& left,
+                       const std::vector<int>& right) {
+    std::vector<int> result;
+    result.reserve(left.size() + right.size());
+    size_t i = 0, j = 0;
+    while (i < left.size() && j < right.size()) {
+        if (left[i] <= right[j]) {
+            result.push_back(left[i++]);
+        } else {
+            result.push_back(right[j++]);
+        }
+    }
+    result.insert(result.end(), left.begin() + i, left.end());
+    result.insert(result.end(), right.begin() + j, right.end());
+    return result;
+}
 
-# --- Merge sort: divide and conquer ---
-def merge_sort(arr: List[int]) -> List[int]:
-    if len(arr) <= 1:                   # base case
-        return arr
+std::vector<int> mergeSort(std::vector<int> arr) {
+    if (arr.size() <= 1) return arr;    // base case
 
-    mid = len(arr) // 2
-    left = merge_sort(arr[:mid])        # divide
-    right = merge_sort(arr[mid:])       # divide
-    return merge(left, right)           # conquer / combine
+    size_t mid = arr.size() / 2;
+    std::vector<int> left(arr.begin(), arr.begin() + mid);    // divide
+    std::vector<int> right(arr.begin() + mid, arr.end());     // divide
+    return merge(mergeSort(left), mergeSort(right));           // combine
+}
 
-def merge(left: List[int], right: List[int]) -> List[int]:
-    result = []
-    i = j = 0
-    while i < len(left) and j < len(right):
-        if left[i] <= right[j]:
-            result.append(left[i])
-            i += 1
-        else:
-            result.append(right[j])
-            j += 1
-    result.extend(left[i:])
-    result.extend(right[j:])
-    return result
+// --- Permutations via backtracking ---
+std::vector<std::vector<int>> permutations(std::vector<int> items) {
+    if (items.size() <= 1) return {items};  // base case
 
-# --- Permutations via backtracking ---
-def permutations(items: List[int]) -> List[List[int]]:
-    if len(items) <= 1:                 # base case
-        return [items[:]]
+    std::vector<std::vector<int>> result;
+    for (size_t i = 0; i < items.size(); ++i) {
+        std::vector<int> rest;
+        for (size_t j = 0; j < items.size(); ++j) {
+            if (j != i) rest.push_back(items[j]);
+        }
+        for (auto& perm : permutations(rest)) {
+            perm.insert(perm.begin(), items[i]);
+            result.push_back(std::move(perm));
+        }
+    }
+    return result;
+}
 
-    result = []
-    for i in range(len(items)):
-        rest = items[:i] + items[i+1:]
-        for perm in permutations(rest):
-            result.append([items[i]] + perm)
-    return result
+// --- Memoization with std::unordered_map ---
+std::unordered_map<int, long long> fibCache;
 
-# --- Memoization with @lru_cache ---
-@lru_cache(maxsize=None)
-def fib(n: int) -> int:
-    if n <= 0:
-        return 0
-    if n == 1:
-        return 1
-    return fib(n - 1) + fib(n - 2)
+long long fib(int n) {
+    if (n <= 0) return 0;
+    if (n == 1) return 1;
+    auto it = fibCache.find(n);
+    if (it != fibCache.end()) return it->second;
+    long long result = fib(n - 1) + fib(n - 2);
+    fibCache[n] = result;
+    return result;
+}
 
-# --- Mutual recursion: even/odd ---
-def is_even(n: int) -> bool:
-    if n == 0:
-        return True
-    return is_odd(n - 1)
+// --- Mutual recursion: even/odd ---
+bool isOdd(int n);  // forward declaration
 
-def is_odd(n: int) -> bool:
-    if n == 0:
-        return False
-    return is_even(n - 1)
+bool isEven(int n) {
+    if (n == 0) return true;
+    return isOdd(n - 1);
+}
 
-# --- Tower of Hanoi ---
-def hanoi(n: int, source: str, target: str, auxiliary: str) -> None:
-    if n == 1:
-        print(f"Move disk 1 from {source} to {target}")
-        return
-    hanoi(n - 1, source, auxiliary, target)
-    print(f"Move disk {n} from {source} to {target}")
-    hanoi(n - 1, auxiliary, target, source)`
+bool isOdd(int n) {
+    if (n == 0) return false;
+    return isEven(n - 1);
+}
+
+// --- Tower of Hanoi ---
+void hanoi(int n, const std::string& source,
+           const std::string& target, const std::string& auxiliary) {
+    if (n == 1) {
+        std::cout << "Move disk 1 from " << source
+                  << " to " << target << std::endl;
+        return;
+    }
+    hanoi(n - 1, source, auxiliary, target);
+    std::cout << "Move disk " << n << " from " << source
+              << " to " << target << std::endl;
+    hanoi(n - 1, auxiliary, target, source);
+}`
     },
     {
       language: "haskell",
@@ -475,5 +493,12 @@ ackermann m n = ackermann (m - 1) (ackermann m (n - 1))`
     { term: "Tree Recursion", definition: "Recursion where each function invocation makes multiple recursive calls, producing a branching call tree. Common in Fibonacci, combinatorics, and divide-and-conquer." },
     { term: "Mutual Recursion", definition: "A pattern where two or more functions are defined in terms of each other, forming a cycle of recursive calls." },
     { term: "Trampolining", definition: "A technique for achieving stack-safe recursion without TCO by returning thunks (deferred computations) that a loop repeatedly invokes until a final value is produced." }
+  ],
+  exercises: [
+    "Implement **merge sort** recursively in C++. Identify the **base case**, **divide step**, and **combine step**. Trace the full call tree for the input `[5, 2, 8, 1, 9, 3]`. Then analyze the time complexity using the **Master Theorem**: what are the values of *a*, *b*, and *d*?",
+    "Write a naive recursive `fib(n)` function and count the total number of function calls for `fib(6)`. Draw the **recursion tree** and circle the overlapping subproblems. Then add **memoization** using a `std::unordered_map` and verify that the call count drops from exponential to linear.",
+    "Convert the recursive `factorial(n)` function into a **tail-recursive** version using an accumulator parameter. Show both versions side by side. Then explain: if you run `factorial(1000000)` in Python (which lacks TCO), what happens? Implement a **trampoline** in Python to make it stack-safe.",
+    "Implement a recursive **subset generator**: given a set `{1, 2, 3}`, produce all `2^n` subsets. Trace the recursion tree, identifying how each recursive call either *includes* or *excludes* the current element. What is the time complexity, and can memoization help here? Why or why not?",
+    "Write a recursive solution to the **N-Queens problem** using backtracking. For `N=4`, trace the algorithm step by step: show which squares are tried, when conflicts are detected, and when the algorithm *backtracks*. Explain why proper **state restoration** (undoing the queen placement) is critical for correctness.",
   ],
 };

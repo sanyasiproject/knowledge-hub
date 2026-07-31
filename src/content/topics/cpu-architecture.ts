@@ -22,93 +22,129 @@ export const cpuArchitecture: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Simulating a basic fetch-decode-execute cycle",
-      source: `class SimpleCPU:
-    """A minimal CPU simulator demonstrating the fetch-decode-execute cycle."""
+      source: `#include <array>
+#include <vector>
+#include <cstdint>
+#include <cstdio>
 
-    def __init__(self, program: list[int]):
-        self.memory = program + [0] * (256 - len(program))
-        self.registers = [0] * 4  # R0-R3
-        self.pc = 0               # Program counter
-        self.halted = False
+// A minimal CPU simulator demonstrating the fetch-decode-execute cycle.
+class SimpleCPU {
+public:
+    explicit SimpleCPU(const std::vector<uint16_t>& program) {
+        memory_.fill(0);
+        for (size_t i = 0; i < program.size(); ++i)
+            memory_[i] = program[i];
+    }
 
-    def fetch(self) -> int:
-        instruction = self.memory[self.pc]
-        self.pc += 1
-        return instruction
+    uint16_t fetch() {
+        return memory_[pc_++];
+    }
 
-    def decode(self, instruction: int) -> tuple[int, int, int, int]:
-        opcode = (instruction >> 12) & 0xF
-        rd = (instruction >> 8) & 0xF
-        rs1 = (instruction >> 4) & 0xF
-        rs2 = instruction & 0xF
-        return opcode, rd, rs1, rs2
+    struct Decoded { int opcode, rd, rs1, rs2; };
 
-    def execute(self, opcode, rd, rs1, rs2):
-        if opcode == 0x0:    # HALT
-            self.halted = True
-        elif opcode == 0x1:  # ADD rd, rs1, rs2
-            self.registers[rd] = self.registers[rs1] + self.registers[rs2]
-        elif opcode == 0x2:  # SUB rd, rs1, rs2
-            self.registers[rd] = self.registers[rs1] - self.registers[rs2]
-        elif opcode == 0x3:  # LOAD rd, immediate (rs1 = immediate value)
-            self.registers[rd] = rs1
-        elif opcode == 0x4:  # MUL rd, rs1, rs2
-            self.registers[rd] = self.registers[rs1] * self.registers[rs2]
+    Decoded decode(uint16_t instruction) {
+        return {
+            (instruction >> 12) & 0xF,
+            (instruction >> 8)  & 0xF,
+            (instruction >> 4)  & 0xF,
+             instruction        & 0xF
+        };
+    }
 
-    def run(self):
-        while not self.halted and self.pc < len(self.memory):
-            instruction = self.fetch()
-            opcode, rd, rs1, rs2 = self.decode(instruction)
-            self.execute(opcode, rd, rs1, rs2)
-            print(f"PC={self.pc:3d} | Op={opcode:#x} | Regs={self.registers}")
+    void execute(const Decoded& d) {
+        switch (d.opcode) {
+            case 0x0: halted_ = true; break;                                  // HALT
+            case 0x1: regs_[d.rd] = regs_[d.rs1] + regs_[d.rs2]; break;      // ADD
+            case 0x2: regs_[d.rd] = regs_[d.rs1] - regs_[d.rs2]; break;      // SUB
+            case 0x3: regs_[d.rd] = d.rs1; break;                            // LOAD imm
+            case 0x4: regs_[d.rd] = regs_[d.rs1] * regs_[d.rs2]; break;      // MUL
+        }
+    }
 
-# Program: R0=5, R1=3, R2 = R0+R1, R3 = R0*R1, HALT
-program = [
-    0x3050,  # LOAD R0, 5
-    0x3130,  # LOAD R1, 3
-    0x1201,  # ADD R2, R0, R1
-    0x4301,  # MUL R3, R0, R1
-    0x0000,  # HALT
-]
-cpu = SimpleCPU(program)
-cpu.run()`,
+    void run() {
+        while (!halted_ && pc_ < memory_.size()) {
+            uint16_t instr = fetch();
+            auto d = decode(instr);
+            execute(d);
+            std::printf("PC=%3d | Op=0x%x | Regs=[%d, %d, %d, %d]\\n",
+                        pc_, d.opcode, regs_[0], regs_[1], regs_[2], regs_[3]);
+        }
+    }
+
+private:
+    std::array<uint16_t, 256> memory_{};
+    std::array<int, 4> regs_{};  // R0-R3
+    int pc_ = 0;
+    bool halted_ = false;
+};
+
+int main() {
+    // Program: R0=5, R1=3, R2 = R0+R1, R3 = R0*R1, HALT
+    std::vector<uint16_t> program = {
+        0x3050,  // LOAD R0, 5
+        0x3130,  // LOAD R1, 3
+        0x1201,  // ADD R2, R0, R1
+        0x4301,  // MUL R3, R0, R1
+        0x0000,  // HALT
+    };
+    SimpleCPU cpu(program);
+    cpu.run();
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Pipeline hazard detection simulator",
-      source: `from dataclasses import dataclass
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <algorithm>
 
-@dataclass
-class Instruction:
-    name: str
-    dest: str | None     # Destination register
-    src: list[str]       # Source registers
+struct Instruction {
+    std::string name;
+    std::string dest;               // Destination register (empty if none)
+    std::vector<std::string> src;   // Source registers
+};
 
-def detect_data_hazards(pipeline: list[Instruction]) -> list[str]:
-    """Detect RAW (read-after-write) data hazards in an instruction sequence."""
-    hazards = []
-    for i in range(1, len(pipeline)):
-        for j in range(max(0, i - 2), i):  # Check 2 preceding instructions
-            if pipeline[j].dest and pipeline[j].dest in pipeline[i].src:
-                distance = i - j
-                hazard_type = "needs stall" if distance == 1 else "forwarding possible"
-                hazards.append(
-                    f"RAW hazard: {pipeline[i].name} reads {pipeline[j].dest} "
-                    f"written by {pipeline[j].name} ({distance} cycle{'s' if distance > 1 else ''} apart, {hazard_type})"
-                )
-    return hazards
+// Detect RAW (read-after-write) data hazards in an instruction sequence.
+std::vector<std::string> detectDataHazards(const std::vector<Instruction>& pipeline) {
+    std::vector<std::string> hazards;
+    for (size_t i = 1; i < pipeline.size(); ++i) {
+        for (size_t j = (i >= 2 ? i - 2 : 0); j < i; ++j) {
+            if (pipeline[j].dest.empty()) continue;
+            for (const auto& src : pipeline[i].src) {
+                if (src == pipeline[j].dest) {
+                    int distance = static_cast<int>(i - j);
+                    std::string hazardType = (distance == 1)
+                        ? "needs stall" : "forwarding possible";
+                    hazards.push_back(
+                        "RAW hazard: " + pipeline[i].name + " reads "
+                        + pipeline[j].dest + " written by " + pipeline[j].name
+                        + " (" + std::to_string(distance) + " cycle"
+                        + (distance > 1 ? "s" : "") + " apart, "
+                        + hazardType + ")");
+                }
+            }
+        }
+    }
+    return hazards;
+}
 
-instructions = [
-    Instruction("ADD R1, R2, R3", "R1", ["R2", "R3"]),
-    Instruction("SUB R4, R1, R5", "R4", ["R1", "R5"]),  # RAW on R1 (1 apart)
-    Instruction("AND R6, R1, R4", "R6", ["R1", "R4"]),  # RAW on R1 (2) and R4 (1)
-    Instruction("OR  R7, R6, R2", "R7", ["R6", "R2"]),  # RAW on R6 (1)
-]
+int main() {
+    std::vector<Instruction> instructions = {
+        {"ADD R1, R2, R3", "R1", {"R2", "R3"}},
+        {"SUB R4, R1, R5", "R4", {"R1", "R5"}},  // RAW on R1 (1 apart)
+        {"AND R6, R1, R4", "R6", {"R1", "R4"}},  // RAW on R1 (2) and R4 (1)
+        {"OR  R7, R6, R2", "R7", {"R6", "R2"}},  // RAW on R6 (1)
+    };
 
-for h in detect_data_hazards(instructions):
-    print(h)`,
+    for (const auto& h : detectDataHazards(instructions)) {
+        std::cout << h << "\\n";
+    }
+    return 0;
+}`,
     },
   ],
   diagrams: [

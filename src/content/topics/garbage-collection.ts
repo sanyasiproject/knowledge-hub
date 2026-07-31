@@ -26,34 +26,63 @@ export const garbageCollection: TopicContent = {
   ],
   code: [
     {
-      language: "python",
-      caption: "Reference counting and cycle detection in CPython",
-      source: `import sys
-import gc
+      language: "cpp",
+      caption: "Reference counting with shared_ptr and breaking cycles with weak_ptr",
+      source: `#include <iostream>
+#include <memory>
 
-# Reference counting
-a = [1, 2, 3]
-print(sys.getrefcount(a))  # 2 (a + getrefcount's temporary ref)
+struct Node {
+    std::string name;
+    // Using shared_ptr creates a reference cycle
+    // std::shared_ptr<Node> ref;  // BAD: causes cycle leak
 
-b = a                       # refcount -> 3
-del a                       # refcount -> 2
-del b                       # refcount -> 1 (only getrefcount's ref)
-                            # -> 0 when getrefcount returns -> freed
+    // Using weak_ptr breaks the cycle
+    std::weak_ptr<Node> ref;
 
-# Cycle: reference counting alone can't free these
-class Node:
-    def __init__(self):
-        self.ref = None
+    Node(const std::string& n) : name(n) {
+        std::cout << "  Node " << name << " created\\n";
+    }
+    ~Node() {
+        std::cout << "  Node " << name << " destroyed\\n";
+    }
+};
 
-x = Node()
-y = Node()
-x.ref = y
-y.ref = x    # cycle: x -> y -> x
-del x, y     # refcount of both is 1 (not 0), not freed!
+int main() {
+    // --- shared_ptr reference counting ---
+    std::cout << "=== Reference counting with shared_ptr ===\\n";
+    {
+        auto a = std::make_shared<int>(42);
+        std::cout << "refcount after creation: " << a.use_count() << "\\n"; // 1
 
-# CPython's cycle detector handles this
-gc.collect()  # forces cycle detection; frees x and y
-print(gc.get_stats())  # shows collection statistics per generation`,
+        auto b = a;  // copy -> refcount increments
+        std::cout << "refcount after copy:     " << b.use_count() << "\\n"; // 2
+
+        b.reset();   // b releases -> refcount decrements
+        std::cout << "refcount after b.reset:  " << a.use_count() << "\\n"; // 1
+    }
+    // a goes out of scope -> refcount 0 -> freed automatically
+
+    // --- Cycle demonstration with weak_ptr (safe) ---
+    std::cout << "\\n=== Breaking cycles with weak_ptr ===\\n";
+    {
+        auto x = std::make_shared<Node>("X");
+        auto y = std::make_shared<Node>("Y");
+        std::cout << "x refcount: " << x.use_count() << "\\n"; // 1
+
+        x->ref = y;  // weak_ptr: does NOT increase refcount
+        y->ref = x;  // weak_ptr: does NOT increase refcount
+        std::cout << "x refcount after cycle: " << x.use_count() << "\\n"; // still 1
+
+        // To use a weak_ptr, lock() it to get a temporary shared_ptr
+        if (auto locked = x->ref.lock()) {
+            std::cout << "x->ref points to: " << locked->name << "\\n";
+        }
+    }
+    // Both nodes destroyed: weak_ptr does not prevent cleanup
+    std::cout << "Both nodes freed (no leak)\\n";
+
+    return 0;
+}`,
     },
     {
       language: "java",

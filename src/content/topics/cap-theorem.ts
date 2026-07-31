@@ -21,47 +21,68 @@ export const capTheorem: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Simulating CP vs AP behavior during a network partition",
-      source: `# CP System: Refuses to serve reads when partition is detected
-class CPStore:
-    def __init__(self):
-        self.data = {}
-        self.can_reach_replicas = True
+      source: `#include <string>
+#include <unordered_map>
+#include <vector>
+#include <optional>
+#include <stdexcept>
+#include <utility>
 
-    def write(self, key, value):
-        if not self.can_reach_replicas:
-            raise Exception("Write rejected: cannot confirm replication (CP)")
-        self.data[key] = value
-        # In reality: replicate to majority before acknowledging
+// CP System: Refuses to serve reads when partition is detected
+class CPStore {
+public:
+    bool can_reach_replicas = true;
 
-    def read(self, key):
-        if not self.can_reach_replicas:
-            raise Exception("Read rejected: cannot confirm consistency (CP)")
-        return self.data.get(key)
+    void write(const std::string& key, const std::string& value) {
+        if (!can_reach_replicas)
+            throw std::runtime_error("Write rejected: cannot confirm replication (CP)");
+        data_[key] = value;
+        // In reality: replicate to majority before acknowledging
+    }
 
+    std::optional<std::string> read(const std::string& key) const {
+        if (!can_reach_replicas)
+            throw std::runtime_error("Read rejected: cannot confirm consistency (CP)");
+        auto it = data_.find(key);
+        if (it != data_.end()) return it->second;
+        return std::nullopt;
+    }
 
-# AP System: Always serves requests, may return stale data
-class APStore:
-    def __init__(self):
-        self.data = {}
-        self.pending_sync = []
+private:
+    std::unordered_map<std::string, std::string> data_;
+};
 
-    def write(self, key, value):
-        self.data[key] = value
-        self.pending_sync.append((key, value))
-        # Accept write locally, sync later when partition heals
+// AP System: Always serves requests, may return stale data
+class APStore {
+public:
+    void write(const std::string& key, const std::string& value) {
+        data_[key] = value;
+        pending_sync_.emplace_back(key, value);
+        // Accept write locally, sync later when partition heals
+    }
 
-    def read(self, key):
-        # Always returns a response, even if it might be stale
-        return self.data.get(key, None)
+    std::optional<std::string> read(const std::string& key) const {
+        // Always returns a response, even if it might be stale
+        auto it = data_.find(key);
+        if (it != data_.end()) return it->second;
+        return std::nullopt;
+    }
 
-    def heal_partition(self, remote_store):
-        # Conflict resolution after partition heals
-        for key, value in self.pending_sync:
-            # Last-writer-wins, vector clocks, or app-specific merge
-            remote_store.data[key] = value
-        self.pending_sync.clear()`,
+    void heal_partition(APStore& remote_store) {
+        // Conflict resolution after partition heals
+        for (const auto& [key, value] : pending_sync_) {
+            // Last-writer-wins, vector clocks, or app-specific merge
+            remote_store.data_[key] = value;
+        }
+        pending_sync_.clear();
+    }
+
+private:
+    std::unordered_map<std::string, std::string> data_;
+    std::vector<std::pair<std::string, std::string>> pending_sync_;
+};`,
     },
     {
       language: "bash",

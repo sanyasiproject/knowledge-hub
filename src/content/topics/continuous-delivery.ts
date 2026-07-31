@@ -122,4 +122,279 @@ export const continuousDelivery: TopicContent = {
     { term: "Smoke Test", definition: "A quick validation that critical functionality works after a deployment, typically covering startup, authentication, and key API endpoints." },
     { term: "DORA Metrics", definition: "Four metrics (deployment frequency, lead time, change failure rate, MTTR) that measure software delivery and operational performance." },
   ],
+
+  deepDive: [
+    "**Pipeline architecture** is the backbone of any CD system. Teams practicing **trunk-based development** commit directly to `main` (or a single shared branch) with short-lived feature branches lasting hours, not days — this minimizes merge conflicts and keeps the pipeline flowing. In contrast, **feature branching** models like *Gitflow* create longer-lived branches that can drift from trunk, increasing integration risk. Regardless of branching model, every pipeline should produce **immutable artifacts** stored in an *artifact registry* (e.g., `Docker Hub`, `JFrog Artifactory`, `AWS ECR`). **Environment promotion** strategies dictate how artifacts move from `dev` to `staging` to `production` — this can be sequential gating with manual approvals, or fully automated promotion based on test results. **GitOps** takes this further: the desired state of every environment is declared in a *Git repository*, and a reconciliation controller (like `ArgoCD` or `Flux`) continuously syncs the cluster to match. This makes Git the **single source of truth** for both application code *and* infrastructure state, providing an auditable history of every change.",
+
+    "**Advanced deployment strategies** go beyond simple rolling updates. A **canary release** routes a small percentage (e.g., *5%*) of production traffic to the new version while monitoring key metrics — **error rate**, **latency p99**, and **saturation**. Tools like `Flagger` and `Argo Rollouts` automate *progressive delivery*: they define a `Canary` custom resource that specifies the traffic-shifting schedule (e.g., *5% → 10% → 25% → 50% → 100%*), the **analysis queries** (Prometheus, Datadog, CloudWatch), and the **rollback threshold**. If metrics breach the threshold at any step, the controller **automatically rolls back** to the stable version — no human intervention required. **Blue-green deployments** maintain two identical production environments; traffic switches atomically via load balancer or DNS, enabling instant rollback by flipping back. **Traffic shifting** can also be managed at the *service mesh* layer (e.g., `Istio` `VirtualService` weights), giving fine-grained control over which users or requests hit the new version — enabling *dark launches*, *A/B tests*, and *shadow traffic* patterns.",
+
+    "**CD in regulated environments** (finance, healthcare, government) requires reconciling *speed* with **compliance**. The key principle is **compliance as code**: encode regulatory requirements as automated pipeline checks rather than manual checklists. Every pipeline run generates a comprehensive **audit trail** — who triggered the build, what commit was deployed, which tests passed, who approved the release, and when it reached production. **Separation of duties** is enforced structurally: developers cannot approve their own changes, and the pipeline uses *distinct service accounts* for build, deploy, and production access. Traditional **Change Advisory Boards (CABs)** that meet weekly to review changes are replaced by **automated governance** — policy-as-code tools like `Open Policy Agent (OPA)` validate that deployments meet compliance rules *before* they execute. Pre-approved *standard changes* (fully tested, low-risk deployments through the pipeline) can bypass CAB entirely, while *emergency changes* follow a streamlined fast-track process with post-hoc review. This approach satisfies auditors while maintaining deployment velocity.",
+  ],
+
+  code: [
+    {
+      language: "yaml",
+      caption: "GitHub Actions CD pipeline — build, test, and deploy to Kubernetes",
+      source: `name: CD Pipeline
+on:
+  push:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: \${{ github.repository }}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run unit tests
+        run: npm ci && npm test
+      - name: Build Docker image
+        run: |
+          docker build -t \${{ env.REGISTRY }}/\${{ env.IMAGE_NAME }}:\${{ github.sha }} .
+      - name: Push to registry
+        run: |
+          echo "\${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u \${{ github.actor }} --password-stdin
+          docker push \${{ env.REGISTRY }}/\${{ env.IMAGE_NAME }}:\${{ github.sha }}
+
+  deploy-staging:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to staging
+        run: |
+          kubectl set image deployment/myapp \\
+            myapp=\${{ env.REGISTRY }}/\${{ env.IMAGE_NAME }}:\${{ github.sha }} \\
+            --namespace=staging
+      - name: Run smoke tests
+        run: npm run test:smoke -- --target=https://staging.example.com
+
+  deploy-production:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    environment: production    # requires manual approval
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to production
+        run: |
+          kubectl set image deployment/myapp \\
+            myapp=\${{ env.REGISTRY }}/\${{ env.IMAGE_NAME }}:\${{ github.sha }} \\
+            --namespace=production
+      - name: Verify health
+        run: |
+          kubectl rollout status deployment/myapp --namespace=production --timeout=300s`,
+    },
+    {
+      language: "yaml",
+      caption: "Kubernetes rolling deployment manifest with health checks and resource limits",
+      source: `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp
+  labels:
+    app: myapp
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          # add 1 extra pod during update
+      maxUnavailable: 0    # never drop below desired count
+  selector:
+    matchLabels:
+      app: myapp
+  template:
+    metadata:
+      labels:
+        app: myapp
+    spec:
+      containers:
+        - name: myapp
+          image: ghcr.io/org/myapp:BUILD_SHA
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: myapp-secrets
+                  key: database-url
+      terminationGracePeriodSeconds: 30   # connection draining`,
+    },
+    {
+      language: "sql",
+      caption: "Flyway-style expand-and-contract database migration (versioned, forward-only)",
+      source: `-- V3__expand_add_email_column.sql
+-- EXPAND phase: add new column without removing old ones
+-- Old code continues to work with 'username' column
+
+ALTER TABLE users ADD COLUMN email VARCHAR(255);
+
+-- Backfill from existing data (run in batches for large tables)
+UPDATE users SET email = username || '@legacy.example.com'
+  WHERE email IS NULL;
+
+-- Add index for the new column
+CREATE INDEX idx_users_email ON users(email);
+
+------------------------------------------------------------
+-- V4__contract_drop_username.sql  (deployed AFTER code migration)
+-- CONTRACT phase: remove old column once all code uses 'email'
+-- Only run this AFTER verifying no queries reference 'username'
+
+-- Safety check: ensure no NULL emails exist
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM users WHERE email IS NULL) THEN
+    RAISE EXCEPTION 'Cannot contract: NULL emails still exist';
+  END IF;
+END $$;
+
+ALTER TABLE users DROP COLUMN username;
+
+-- Each migration file is checksummed by Flyway to prevent tampering
+-- Migrations are applied in version order and never modified after execution`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "CD Pipeline Flow — Commit to Production",
+      kind: "flow",
+      caption: "End-to-end continuous delivery pipeline showing gates, artifact promotion, and environment progression",
+      mermaid: `flowchart LR
+  A[Developer Commit] --> B[Build & Unit Tests]
+  B --> C{Tests Pass?}
+  C -- No --> D[Notify & Fix]
+  C -- Yes --> E[Build Immutable Artifact]
+  E --> F[Push to Artifact Registry]
+  F --> G[Deploy to Dev]
+  G --> H[Integration Tests]
+  H --> I{Tests Pass?}
+  I -- No --> D
+  I -- Yes --> J[Deploy to Staging]
+  J --> K[Smoke Tests & QA]
+  K --> L{Approved?}
+  L -- No --> D
+  L -- Yes --> M[Deploy to Production]
+  M --> N[Health Checks]
+  N --> O{Healthy?}
+  O -- No --> P[Automatic Rollback]
+  O -- Yes --> Q[Monitor & Observe]`,
+    },
+    {
+      title: "Blue-Green and Canary Deployment Architecture",
+      kind: "architecture",
+      caption: "Blue-green uses atomic traffic switching; canary gradually shifts traffic percentage to the new version",
+      mermaid: `flowchart TB
+  subgraph Blue-Green Deployment
+    LB1[Load Balancer] --> BG_SWITCH{Traffic Switch}
+    BG_SWITCH -- "100%" --> BLUE[Blue Environment\nv1.2 - Current]
+    BG_SWITCH -. "0% → 100%" .-> GREEN[Green Environment\nv1.3 - New]
+    BLUE --> DB1[(Shared Database)]
+    GREEN --> DB1
+  end
+
+  subgraph Canary Deployment
+    LB2[Load Balancer] --> SPLIT{Traffic Split}
+    SPLIT -- "95%" --> STABLE[Stable Pool\nv1.2]
+    SPLIT -- "5%" --> CANARY[Canary Pool\nv1.3]
+    STABLE --> DB2[(Shared Database)]
+    CANARY --> DB2
+    CANARY --> METRICS[Metrics Analysis]
+    METRICS -- "OK" --> PROMOTE[Promote Canary\n5% → 25% → 100%]
+    METRICS -- "Degraded" --> ROLLBACK[Rollback to Stable]
+  end`,
+    },
+    {
+      title: "Expand-and-Contract Database Migration Sequence",
+      kind: "sequence",
+      caption: "Three-phase migration ensuring backward compatibility at every step",
+      mermaid: `sequenceDiagram
+  participant Dev as Developer
+  participant Pipeline as CD Pipeline
+  participant App_v1 as App v1 (Old Code)
+  participant App_v2 as App v2 (Dual-Write)
+  participant App_v3 as App v3 (New Code)
+  participant DB as Database
+
+  Note over Dev,DB: Phase 1 — EXPAND
+  Dev->>Pipeline: Deploy migration V3 (add column)
+  Pipeline->>DB: ALTER TABLE ADD COLUMN email
+  Pipeline->>DB: Backfill email from username
+  Dev->>Pipeline: Deploy App v2 (writes to both columns)
+  Pipeline->>App_v2: Deploy dual-write code
+  App_v2->>DB: INSERT INTO users (username, email, ...)
+
+  Note over Dev,DB: Phase 2 — MIGRATE
+  App_v2->>DB: Verify all rows have email populated
+  App_v2->>DB: Read from email column (primary)
+
+  Note over Dev,DB: Phase 3 — CONTRACT
+  Dev->>Pipeline: Deploy App v3 (uses email only)
+  Pipeline->>App_v3: Deploy new code
+  Dev->>Pipeline: Deploy migration V4 (drop username)
+  Pipeline->>DB: ALTER TABLE DROP COLUMN username
+  App_v3->>DB: Queries use email column only`,
+    },
+  ],
+
+  comparison: {
+    columns: ["**Strategy**", "**Downtime**", "**Rollback Speed**", "**Resource Cost**", "**Complexity**", "**Best For**"],
+    rows: [
+      ["**Rolling Update**", "*Zero* (gradual)", "*Minutes* — redeploy old version", "*Low* — 1 extra pod at a time", "*Low*", "Stateless services with good health checks"],
+      ["**Blue-Green**", "*Zero* (atomic switch)", "*Seconds* — flip load balancer", "*High* — 2x infrastructure", "*Medium*", "Critical services needing instant rollback"],
+      ["**Canary**", "*Zero* (gradual shift)", "*Seconds* — route back to stable", "*Medium* — small canary pool", "*High*", "High-traffic services needing metric validation"],
+      ["**Recreate**", "*Yes* — all pods replaced", "*Minutes* — redeploy old version", "*Low* — no parallel run", "*Low*", "Dev/test environments or stateful singletons"],
+      ["**Feature Flags**", "*Zero* (toggle in config)", "*Instant* — disable flag", "*None* — same deployment", "*Medium*", "Decoupling deploy from release; A/B testing"],
+    ],
+  },
+
+  exercises: [
+    "**Build a CD pipeline from scratch**: Set up a `GitHub Actions` or `GitLab CI` pipeline that builds a Docker image on every commit to `main`, pushes it to a container registry, deploys to a *staging* environment, runs smoke tests, and then requires **manual approval** before deploying to production. Measure your **lead time for changes** from commit to production.",
+    "**Implement blue-green deployments**: Using `Kubernetes` (or `Docker Compose` for simplicity), create two identical environments (*blue* and *green*). Write a script that deploys the new version to the inactive environment, runs health checks, and then switches the `Service` or load balancer to point to the new environment. Practice **rolling back** by switching back to the previous environment.",
+    "**Practice expand-and-contract database migrations**: Using `Flyway` or plain SQL scripts, implement a schema change that renames a column using the *three-phase approach*: (1) add the new column and backfill, (2) deploy code that writes to both, (3) drop the old column. Verify that the application works correctly at **every intermediate step**.",
+    "**Measure and improve DORA metrics**: Instrument your pipeline to track the *four DORA metrics*: `deployment frequency`, `lead time for changes`, `change failure rate`, and `mean time to recovery`. Set up a **dashboard** (Grafana, Datadog, or a spreadsheet) and identify which metric is your bottleneck. Implement one improvement and measure its impact over two weeks.",
+    "**Implement canary releases with automated rollback**: Deploy a canary version that receives *10%* of traffic. Set up **metric-based analysis** (error rate < 1%, p99 latency < 500ms) using `Prometheus` or `CloudWatch`. Configure automatic rollback if metrics breach thresholds. Test by deploying a deliberately broken version and verifying the system **self-heals**.",
+  ],
+
+  cheatSheet: [
+    "**CD vs Continuous Deployment**: CD = every commit is *deployable* (manual release); Continuous Deployment = every commit is *deployed* (automated release). CD is the prerequisite.",
+    "**Immutable Artifacts**: Build once, deploy everywhere. Tag with `git SHA`, never `latest`. Store in a registry (`ECR`, `GCR`, `Artifactory`). Inject config via **env vars** or `ConfigMaps`.",
+    "**Deployment Strategies**: `Rolling` = gradual, low cost; `Blue-Green` = instant rollback, 2x cost; `Canary` = metric-driven, medium cost; `Feature Flags` = decouple deploy from release.",
+    "**Expand-and-Contract**: (1) *Expand* — add new column, backfill data; (2) *Migrate* — deploy dual-write code, verify; (3) *Contract* — drop old column. **Never** rename/drop in the same deploy as code changes.",
+    "**DORA Metrics**: `Deployment Frequency` (how often), `Lead Time` (commit → prod), `Change Failure Rate` (% causing incidents), `MTTR` (time to recover). Elite: multiple deploys/day, <1hr lead time, <15% failure rate, <1hr recovery.",
+    "**Rollback Checklist**: (1) Is the database migration backward-compatible? (2) Can the previous artifact be redeployed? (3) Are feature flags in place for risky changes? (4) Is connection draining configured? (5) Are health checks reliable?",
+  ],
+
+  revisionNotes: [
+    "**Continuous Delivery** keeps every commit *deployable* with a **manual release gate**, while **Continuous Deployment** automates the final step. The pipeline is the **only** path to production — it builds **immutable artifacts**, runs tests, and promotes through environments. Key enablers: `trunk-based development`, `artifact registries`, and `GitOps` for declarative environment state.",
+    "**Deployment strategies** trade off between *rollback speed*, *resource cost*, and *complexity*. **Blue-green** gives instant rollback via load balancer switch but requires **2x infrastructure**. **Canary** progressively shifts traffic with automated metric analysis (use `Flagger` or `Argo Rollouts`). **Rolling updates** are the simplest but rollback requires a full redeployment. **Feature flags** decouple deployment from release entirely.",
+    "**Database migrations** are the hardest part of CD because they are *stateful* and difficult to reverse. The **expand-and-contract** pattern is essential: add new schema → deploy dual-write code → backfill → deploy new-only code → drop old schema. Each step must be **backward-compatible**. Use versioned, forward-only migration tools (`Flyway`, `Liquibase`) with checksums.",
+    "**DORA metrics** are the standard for measuring CD maturity: *deployment frequency*, *lead time for changes*, *change failure rate*, and *MTTR*. In **regulated environments**, encode compliance as code — automated policy checks (`OPA`), audit trails, separation of duties enforced by pipeline roles, and pre-approved standard changes replace manual **CAB** reviews.",
+    "**Rollback** is a first-class concern: blue-green flips the LB, canary routes back to stable, feature flags toggle off, and redeployment pushes the previous artifact. **Database rollback** is avoided by ensuring every migration is backward-compatible — the old code version must work with the new schema during the transition window.",
+  ],
 };

@@ -22,53 +22,139 @@ export const statisticsBasics: TopicContent = {
   ],
   code: [
     {
-      language: "python",
-      caption: "Descriptive statistics and hypothesis testing with scipy",
-      source: `import numpy as np
-from scipy import stats
+      language: "cpp",
+      caption: "Descriptive statistics and hypothesis testing in C++",
+      source: `#include <iostream>
+#include <vector>
+#include <cmath>
+#include <algorithm>
+#include <numeric>
+#include <iomanip>
 
-# Descriptive statistics
-data = np.array([23, 25, 28, 30, 32, 35, 37, 40, 42, 150])
-print(f"Mean:   {np.mean(data):.2f}")      # 44.20 (outlier inflates)
-print(f"Median: {np.median(data):.2f}")    # 33.50 (robust)
-print(f"Std:    {np.std(data, ddof=1):.2f}")  # sample std dev
-print(f"Q1:     {np.percentile(data, 25):.2f}")
-print(f"Q3:     {np.percentile(data, 75):.2f}")
-print(f"IQR:    {np.percentile(data, 75) - np.percentile(data, 25):.2f}")
+double mean(const std::vector<double>& v) {
+    return std::accumulate(v.begin(), v.end(), 0.0) / v.size();
+}
 
-# One-sample t-test: is the mean significantly different from 35?
-t_stat, p_value = stats.ttest_1samp(data, 35)
-print(f"\\nt-statistic: {t_stat:.4f}, p-value: {p_value:.4f}")
-alpha = 0.05
-if p_value < alpha:
-    print("Reject H0: mean is significantly different from 35")
-else:
-    print("Fail to reject H0: no significant difference from 35")
+double median(std::vector<double> v) {
+    std::sort(v.begin(), v.end());
+    size_t n = v.size();
+    return (n % 2 == 0) ? (v[n/2 - 1] + v[n/2]) / 2.0 : v[n/2];
+}
 
-# 95% confidence interval for the mean
-se = stats.sem(data)
-ci = stats.t.interval(0.95, df=len(data)-1, loc=np.mean(data), scale=se)
-print(f"95% CI for mean: ({ci[0]:.2f}, {ci[1]:.2f})")`,
+double sample_std(const std::vector<double>& v) {
+    double m = mean(v);
+    double sum_sq = 0;
+    for (double x : v) sum_sq += (x - m) * (x - m);
+    return std::sqrt(sum_sq / (v.size() - 1));  // Bessel's correction
+}
+
+double percentile(std::vector<double> v, double p) {
+    std::sort(v.begin(), v.end());
+    double idx = p / 100.0 * (v.size() - 1);
+    size_t lo = static_cast<size_t>(idx);
+    double frac = idx - lo;
+    if (lo + 1 < v.size()) return v[lo] * (1 - frac) + v[lo + 1] * frac;
+    return v[lo];
+}
+
+// Approximate two-tailed p-value from t-distribution using normal approx
+// (for a real application, use a stats library or lookup table)
+double t_to_p_approx(double t_stat, int df) {
+    // Simple approximation; adequate for demonstration
+    double x = std::abs(t_stat);
+    double p = std::exp(-0.5 * x * x) * (0.4 / (1.0 + 0.3 * x));
+    return 2.0 * p;  // two-tailed
+}
+
+int main() {
+    std::vector<double> data = {23, 25, 28, 30, 32, 35, 37, 40, 42, 150};
+    int n = data.size();
+
+    // Descriptive statistics
+    std::cout << std::fixed << std::setprecision(2);
+    std::cout << "Mean:   " << mean(data) << "\\n";      // 44.20 (outlier inflates)
+    std::cout << "Median: " << median(data) << "\\n";    // 33.50 (robust)
+    std::cout << "Std:    " << sample_std(data) << "\\n"; // sample std dev
+    std::cout << "Q1:     " << percentile(data, 25) << "\\n";
+    std::cout << "Q3:     " << percentile(data, 75) << "\\n";
+    std::cout << "IQR:    " << percentile(data, 75) - percentile(data, 25) << "\\n";
+
+    // One-sample t-test: is the mean significantly different from 35?
+    double mu_0 = 35.0;
+    double m = mean(data);
+    double s = sample_std(data);
+    double se = s / std::sqrt(n);
+    double t_stat = (m - mu_0) / se;
+    double p_value = t_to_p_approx(t_stat, n - 1);
+
+    std::cout << std::setprecision(4);
+    std::cout << "\\nt-statistic: " << t_stat << ", p-value: " << p_value << "\\n";
+    double alpha = 0.05;
+    if (p_value < alpha)
+        std::cout << "Reject H0: mean is significantly different from 35\\n";
+    else
+        std::cout << "Fail to reject H0: no significant difference from 35\\n";
+
+    // 95% confidence interval for the mean (using t critical value ~ 2.262 for df=9)
+    double t_crit = 2.262;  // t(0.025, df=9)
+    double ci_lo = m - t_crit * se;
+    double ci_hi = m + t_crit * se;
+    std::cout << std::setprecision(2);
+    std::cout << "95% CI for mean: (" << ci_lo << ", " << ci_hi << ")\\n";
+}`,
     },
     {
-      language: "python",
-      caption: "Correlation and simple linear regression",
-      source: `import numpy as np
-from scipy import stats
+      language: "cpp",
+      caption: "Correlation and simple linear regression in C++",
+      source: `#include <iostream>
+#include <vector>
+#include <cmath>
+#include <numeric>
+#include <iomanip>
 
-# Sample data: hours studied vs exam score
-hours = np.array([1, 2, 3, 4, 5, 6, 7, 8])
-scores = np.array([52, 58, 65, 70, 74, 80, 85, 90])
+int main() {
+    // Sample data: hours studied vs exam score
+    std::vector<double> hours  = {1, 2, 3, 4, 5, 6, 7, 8};
+    std::vector<double> scores = {52, 58, 65, 70, 74, 80, 85, 90};
+    int n = hours.size();
 
-# Pearson correlation
-r, p_val = stats.pearsonr(hours, scores)
-print(f"Pearson r = {r:.4f}, p-value = {p_val:.6f}")
+    // Compute means
+    double mean_x = std::accumulate(hours.begin(), hours.end(), 0.0) / n;
+    double mean_y = std::accumulate(scores.begin(), scores.end(), 0.0) / n;
 
-# Simple linear regression: score = beta0 + beta1 * hours
-slope, intercept, r_value, p_value, std_err = stats.linregress(hours, scores)
-print(f"Regression: score = {intercept:.2f} + {slope:.2f} * hours")
-print(f"R-squared: {r_value**2:.4f}")
-print(f"Prediction for 10 hours: {intercept + slope * 10:.1f}")`,
+    // Compute covariance and standard deviations
+    double cov_xy = 0, var_x = 0, var_y = 0;
+    for (int i = 0; i < n; ++i) {
+        double dx = hours[i] - mean_x;
+        double dy = scores[i] - mean_y;
+        cov_xy += dx * dy;
+        var_x  += dx * dx;
+        var_y  += dy * dy;
+    }
+
+    // Pearson correlation: r = Cov(X,Y) / (SD(X) * SD(Y))
+    double r = cov_xy / std::sqrt(var_x * var_y);
+
+    // Approximate p-value for r (using t-distribution transformation)
+    double t_stat = r * std::sqrt((n - 2) / (1.0 - r * r));
+    // For large |t| this is effectively 0; shown for completeness
+    std::cout << std::fixed;
+    std::cout << "Pearson r = " << std::setprecision(4) << r << "\\n";
+
+    // Simple linear regression: score = beta0 + beta1 * hours
+    // beta1 = Cov(X,Y) / Var(X),  beta0 = mean_y - beta1 * mean_x
+    double slope     = cov_xy / var_x;
+    double intercept = mean_y - slope * mean_x;
+    double r_squared = r * r;
+
+    std::cout << std::setprecision(2);
+    std::cout << "Regression: score = " << intercept << " + "
+              << slope << " * hours\\n";
+    std::cout << std::setprecision(4);
+    std::cout << "R-squared: " << r_squared << "\\n";
+    std::cout << std::setprecision(1);
+    std::cout << "Prediction for 10 hours: " << intercept + slope * 10 << "\\n";
+}`,
     },
   ],
   diagrams: [

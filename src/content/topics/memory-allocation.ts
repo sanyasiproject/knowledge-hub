@@ -149,60 +149,99 @@ int buddy_of(int index, int order) {
 }`,
     },
     {
-      language: "python",
-      caption: "Arena (bump) allocator pattern",
-      source: `class Arena:
-    """Simple bump allocator / memory pool.
+      language: "cpp",
+      caption: "Arena (bump) allocator pattern in C++",
+      source: `// Simple bump allocator / memory pool.
+// Allocations are O(1) pointer bumps.
+// Individual frees are no-ops -- the entire arena is freed at once.
+// Ideal for request-scoped or phase-scoped allocations.
 
-    Allocations are O(1) pointer bumps.
-    Individual frees are no-ops -- the entire arena is freed at once.
-    Ideal for request-scoped or phase-scoped allocations.
-    """
-    def __init__(self, capacity: int):
-        self.buffer = bytearray(capacity)
-        self.offset = 0
-        self.capacity = capacity
-        self.alloc_count = 0
+#include <iostream>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <stdexcept>
+#include <new>
 
-    def alloc(self, size: int, align: int = 8) -> memoryview:
-        """Allocate 'size' bytes with given alignment."""
-        # Align the offset
-        aligned = (self.offset + align - 1) & ~(align - 1)
-        if aligned + size > self.capacity:
-            raise MemoryError(f"Arena exhausted: need {aligned + size}, have {self.capacity}")
+class Arena {
+public:
+    explicit Arena(size_t capacity)
+        : capacity_(capacity), offset_(0), alloc_count_(0) {
+        buffer_ = static_cast<char*>(std::malloc(capacity));
+        if (!buffer_) throw std::bad_alloc();
+    }
 
-        result = memoryview(self.buffer)[aligned:aligned + size]
-        self.offset = aligned + size
-        self.alloc_count += 1
-        return result
+    ~Arena() { std::free(buffer_); }
 
-    def reset(self):
-        """Free all allocations at once -- O(1)."""
-        self.offset = 0
-        self.alloc_count = 0
+    // Non-copyable, movable
+    Arena(const Arena&) = delete;
+    Arena& operator=(const Arena&) = delete;
 
-    @property
-    def used(self) -> int:
-        return self.offset
+    // Allocate 'size' bytes with given alignment (default 8)
+    void* alloc(size_t size, size_t align = 8) {
+        // Align the offset up to the next multiple of 'align'
+        size_t aligned = (offset_ + align - 1) & ~(align - 1);
+        if (aligned + size > capacity_) {
+            throw std::runtime_error("Arena exhausted");
+        }
+        void* ptr = buffer_ + aligned;
+        offset_ = aligned + size;
+        ++alloc_count_;
+        return ptr;
+    }
 
-    @property
-    def remaining(self) -> int:
-        return self.capacity - self.offset
+    // Typed allocation helper
+    template <typename T>
+    T* alloc_typed(size_t count = 1) {
+        return static_cast<T*>(alloc(sizeof(T) * count, alignof(T)));
+    }
 
-# Usage: web server request handling
-arena = Arena(1024 * 1024)  # 1 MB pool
+    // Free all allocations at once -- O(1)
+    void reset() {
+        offset_ = 0;
+        alloc_count_ = 0;
+    }
 
-for request_num in range(1000):
-    # Process request -- all allocations from the arena
-    header_buf = arena.alloc(256)
-    body_buf = arena.alloc(4096)
-    temp_buf = arena.alloc(512)
-    # ... process request ...
+    size_t used()      const { return offset_; }
+    size_t remaining() const { return capacity_ - offset_; }
+    size_t capacity()  const { return capacity_; }
+    int alloc_count()  const { return alloc_count_; }
 
-    # Reset arena for next request -- instant, no fragmentation
-    arena.reset()
+private:
+    char*  buffer_;
+    size_t capacity_;
+    size_t offset_;
+    int    alloc_count_;
+};
 
-print(f"Arena capacity: {arena.capacity}, final used: {arena.used}")`,
+int main() {
+    // 1 MB arena pool
+    Arena arena(1024 * 1024);
+
+    // Simulate web server request handling
+    for (int request = 0; request < 1000; ++request) {
+        // Process request -- all allocations from the arena
+        char*   header_buf = static_cast<char*>(arena.alloc(256));
+        char*   body_buf   = static_cast<char*>(arena.alloc(4096));
+        char*   temp_buf   = static_cast<char*>(arena.alloc(512));
+
+        // Use typed allocation for structured data
+        double* metrics = arena.alloc_typed<double>(10);
+
+        // ... process request using these buffers ...
+        header_buf[0] = 'H';
+        body_buf[0]   = 'B';
+        metrics[0]    = 3.14;
+
+        // Reset arena for next request -- instant, no fragmentation
+        arena.reset();
+    }
+
+    std::cout << "Arena capacity: " << arena.capacity()
+              << ", final used: " << arena.used() << std::endl;
+
+    return 0;
+}`,
     },
   ],
   diagrams: [

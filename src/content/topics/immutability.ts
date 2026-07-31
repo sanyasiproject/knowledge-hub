@@ -162,78 +162,104 @@ public final class HttpRequest {
 }`,
     },
     {
-      language: "python",
-      caption: "Frozen dataclasses, tuples, and immutable patterns",
-      source: `from dataclasses import dataclass, replace
-from typing import Tuple, FrozenSet
+      language: "cpp",
+      caption: "Immutable structs, const correctness, and copy-on-write patterns",
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <tuple>
+#include <memory>
+#include <set>
 
-# Mutable vs immutable built-in types
-mutable_list = [1, 2, 3]
-mutable_list.append(4)       # mutates in place
+// --- Mutable vs immutable ---
+// std::vector is mutable by default
+std::vector<int> mutable_vec = {1, 2, 3};
+mutable_vec.push_back(4);  // mutates in place
 
-immutable_tuple = (1, 2, 3)
-# immutable_tuple[0] = 99   # TypeError: tuples are immutable
+// std::tuple is immutable once constructed
+auto immutable_tuple = std::make_tuple(1, 2, 3);
+// std::get<0>(immutable_tuple) = 99;  // compiles, but const tuple would prevent it
+const auto frozen_tuple = std::make_tuple(1, 2, 3);
+// std::get<0>(frozen_tuple) = 99;  // ERROR: const prevents modification
 
-# Frozen dataclass: true immutability
-@dataclass(frozen=True)
-class Point:
-    x: float
-    y: float
+// --- Immutable struct: all fields const, return new instances ---
+struct Point {
+    const double x;
+    const double y;
 
-    def translate(self, dx: float, dy: float) -> "Point":
-        # Can't do self.x += dx — frozen!
-        return replace(self, x=self.x + dx, y=self.y + dy)  # returns new Point
+    Point(double x, double y) : x(x), y(y) {}
 
-p1 = Point(1.0, 2.0)
-p2 = p1.translate(3.0, 4.0)  # p1 unchanged, p2 is (4.0, 6.0)
+    // Cannot mutate fields -- return a new Point instead
+    Point translate(double dx, double dy) const {
+        return Point(x + dx, y + dy);
+    }
 
-# Frozen dataclasses are hashable (can be dict keys, set members)
-point_set: FrozenSet[Point] = frozenset({p1, p2})
+    bool operator<(const Point& other) const {
+        return std::tie(x, y) < std::tie(other.x, other.y);
+    }
 
-# Named tuples: lightweight immutable records
-from collections import namedtuple
-Color = namedtuple("Color", ["r", "g", "b"])
-red = Color(255, 0, 0)
-# red.r = 200  # AttributeError: can't set attributes
+    bool operator==(const Point& other) const {
+        return x == other.x && y == other.y;
+    }
+};
 
-# Immutable update patterns
-@dataclass(frozen=True)
-class AppState:
-    user: str
-    count: int
-    items: Tuple[str, ...]
+Point p1(1.0, 2.0);
+Point p2 = p1.translate(3.0, 4.0);  // p1 unchanged, p2 is (4.0, 6.0)
 
-    def increment(self) -> "AppState":
-        return replace(self, count=self.count + 1)
+// Immutable structs can be used in sets (like frozen dataclasses)
+std::set<Point> point_set = {p1, p2};
 
-    def add_item(self, item: str) -> "AppState":
-        return replace(self, items=self.items + (item,))
+// --- Immutable update patterns ---
+struct AppState {
+    const std::string user;
+    const int count;
+    const std::vector<std::string> items;
 
-state = AppState(user="alice", count=0, items=())
-state = state.increment().add_item("task1")
-# Each call returns a new AppState; original is unchanged
+    AppState(std::string user, int count, std::vector<std::string> items)
+        : user(std::move(user)), count(count), items(std::move(items)) {}
 
-# Copy-on-write with __copy__
-import copy
+    AppState increment() const {
+        return AppState(user, count + 1, items);
+    }
 
-class CowList:
-    """Copy-on-write list wrapper."""
-    def __init__(self, data=None):
-        self._data = data or []
-        self._shared = False
+    AppState add_item(const std::string& item) const {
+        auto new_items = items;  // copy
+        new_items.push_back(item);
+        return AppState(user, count, std::move(new_items));
+    }
+};
 
-    def share(self) -> "CowList":
-        self._shared = True
-        other = CowList.__new__(CowList)
-        other._data = self._data  # same reference
-        other._shared = True
-        return other
+AppState state("alice", 0, {});
+auto new_state = state.increment().add_item("task1");
+// state.count is still 0; new_state.count is 1
 
-    def append(self, value):
-        if self._shared:
-            self._data = list(self._data)  # copy on write
-            self._shared = False
-        self._data.append(value)`,
+// --- Copy-on-write using shared_ptr ---
+template <typename T>
+class CowVector {
+    std::shared_ptr<std::vector<T>> data_;
+
+public:
+    CowVector() : data_(std::make_shared<std::vector<T>>()) {}
+    CowVector(std::initializer_list<T> init)
+        : data_(std::make_shared<std::vector<T>>(init)) {}
+
+    // Read access: no copy needed
+    const T& operator[](size_t i) const { return (*data_)[i]; }
+    size_t size() const { return data_->size(); }
+
+    // Write access: copy only if shared (use_count > 1)
+    void push_back(const T& value) {
+        if (data_.use_count() > 1) {
+            data_ = std::make_shared<std::vector<T>>(*data_);  // copy on write
+        }
+        data_->push_back(value);
+    }
+};
+
+CowVector<int> a = {1, 2, 3};
+CowVector<int> b = a;       // shared -- no copy
+b.push_back(4);             // triggers copy-on-write for b only
+// a still has {1, 2, 3}; b has {1, 2, 3, 4}`,
     },
     {
       language: "clojure",

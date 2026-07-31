@@ -132,6 +132,309 @@ export const linuxPerformance: TopicContent = {
       back: "The kernel ring buffer — hardware errors, OOM killer events, filesystem errors, device driver messages. Check with dmesg -T for human-readable timestamps.",
     },
   ],
+  deepDive: [
+    "## Understanding CPU Scheduling and Latency\n\nPerformance analysis begins with understanding *where* time is spent. A process can consume CPU time in **user mode** (`%us` -- executing application code), **system mode** (`%sy` -- executing kernel code on behalf of the process), or be idle waiting for **I/O** (`%wa` -- CPU is idle but the process is blocked on disk/network). The `mpstat -P ALL 1` command reveals per-core breakdowns, which is critical for diagnosing *single-threaded bottlenecks* that saturate one core while others sit idle. The **CFS scheduler** introduces *scheduling latency* -- the delay between a process becoming runnable and actually getting CPU time. Under heavy load, this latency increases as more tasks compete. `perf sched latency` measures this directly. For latency-sensitive workloads like databases, **CPU pinning** (`taskset -c 0,1 cmd`) and **isolcpus** (kernel parameter to reserve cores) can dramatically reduce jitter by eliminating context-switch overhead. The `turbostat` tool monitors CPU frequency scaling, which affects throughput when **governors** like `ondemand` reduce clock speed during low utilization periods.",
+
+    "## Memory Performance: Page Cache, Swap, and the OOM Killer\n\nLinux aggressively uses free RAM as a **page cache** to buffer file I/O -- this is why `free -m` shows very little \"free\" memory on a healthy system. The `available` column (added in kernel 3.14) shows memory that *can be reclaimed* under pressure, which is the correct metric for capacity planning. When physical memory runs low, the kernel's **kswapd** daemon starts reclaiming pages by evicting clean page cache entries and swapping out *anonymous pages* (heap, stack) to the swap device. The `vmstat 1` columns `si`/`so` (swap in/out) directly indicate this pressure. Excessive swapping causes **thrashing** -- the system spends more time moving pages than doing useful work. The **OOM killer** (`/proc/sys/vm/oom_kill`) is the last resort: it selects a process to terminate based on `oom_score` (influenced by memory usage and `oom_score_adj`). Tuning `vm.swappiness` (0-200, default 60) controls how aggressively the kernel swaps: lower values prefer evicting page cache, higher values prefer swapping anonymous pages. For database servers, setting `vm.swappiness=1` and using **huge pages** (`vm.nr_hugepages`) can reduce TLB misses and improve memory access latency by *orders of magnitude*.",
+
+    "## eBPF and Modern Observability\n\n**eBPF** (extended Berkeley Packet Filter) has revolutionized Linux performance analysis by allowing *safe, sandboxed programs* to run inside the kernel without modifying kernel code or loading kernel modules. Tools built on eBPF -- packaged in **BCC** (BPF Compiler Collection) and **bpftrace** -- can instrument virtually any kernel or user-space function with negligible overhead. Key eBPF-based tools include: `execsnoop` (traces all new process executions), `opensnoop` (traces file opens), `biolatency` (histograms of block I/O latency), `tcplife` (traces TCP connection lifetimes with throughput), `runqlat` (measures CPU scheduler run-queue latency), and `funccount` (counts function calls per second). Unlike `strace`, which intercepts syscalls via `ptrace` with *10-100x overhead*, eBPF hooks directly into kernel tracepoints or kprobes with overhead typically under **1%**. The `bpftrace` one-liner language enables ad-hoc analysis: `bpftrace -e 'tracepoint:syscalls:sys_enter_read { @[comm] = count(); }'` counts read syscalls by process name in real time. For production observability at scale, eBPF powers tools like **Cilium** (networking), **Falco** (security), and **Pixie** (application monitoring) -- making it the *most important* advancement in Linux performance tooling since `perf`."
+  ],
+  code: [
+    {
+      language: "bash",
+      caption: "Comprehensive system performance triage workflow",
+      source: `# === Step 1: Quick system overview ===
+uptime                    # load averages (1, 5, 15 min)
+free -m                   # memory: total, used, free, available
+df -hT                    # disk space by filesystem
+
+# === Step 2: CPU analysis ===
+mpstat -P ALL 1 5         # per-core utilization (5 samples)
+# Look for: one core at 100% (single-threaded bottleneck)
+#           high %sys (kernel overhead)
+#           high %iowait (disk bottleneck masquerading as CPU)
+
+# === Step 3: Memory pressure ===
+vmstat 1 5                # r=runqueue, si/so=swap activity
+# si/so > 0 means active swapping = memory pressure
+cat /proc/meminfo | grep -E 'MemAvailable|SwapFree|Dirty|Writeback'
+
+# === Step 4: Disk I/O ===
+iostat -xz 1 5            # per-device: await, %util, r/s, w/s
+# await > 10ms on SSD = problem; %util near 100% = saturated
+iotop -ao                 # accumulated I/O per process
+
+# === Step 5: Network ===
+sar -n DEV 1 5            # per-interface throughput
+ss -tunapO                # active TCP/UDP connections with PIDs
+
+# === Step 6: Process-level drill-down ===
+pidstat -u -d -r 1 5      # per-process CPU, disk, memory stats
+# Find the culprit process, then:
+strace -cp <pid> -e trace=read,write   # syscall summary
+perf top -p <pid>                       # live function profiling`
+    },
+    {
+      language: "cpp",
+      caption: "C++ system calls for performance measurement: clock_gettime, getrusage, mmap",
+      source: `#include <sys/resource.h>
+#include <sys/mman.h>
+#include <time.h>
+#include <iostream>
+#include <cstring>
+
+// High-resolution timing using clock_gettime()
+double measure_elapsed() {
+    struct timespec start, end;
+
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    // --- Work to measure ---
+    volatile long sum = 0;
+    for (long i = 0; i < 100000000L; ++i) sum += i;
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    double elapsed = (end.tv_sec - start.tv_sec)
+                   + (end.tv_nsec - start.tv_nsec) / 1e9;
+    std::cout << "Elapsed: " << elapsed << " seconds\\n";
+    return elapsed;
+}
+
+// Query process resource usage via getrusage()
+void print_resource_usage() {
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+
+    std::cout << "User CPU time:   " << usage.ru_utime.tv_sec
+              << "." << usage.ru_utime.tv_usec << "s\\n"
+              << "System CPU time: " << usage.ru_stime.tv_sec
+              << "." << usage.ru_stime.tv_usec << "s\\n"
+              << "Max RSS:         " << usage.ru_maxrss << " KB\\n"
+              << "Page faults (minor): " << usage.ru_minflt << "\\n"
+              << "Page faults (major): " << usage.ru_majflt << "\\n"
+              << "Context switches (vol):   " << usage.ru_nvcsw << "\\n"
+              << "Context switches (invol): " << usage.ru_nivcsw << "\\n";
+}
+
+// Memory-mapped file I/O for high-performance reads
+void mmap_file_read(const char* path) {
+    FILE* f = fopen(path, "r");
+    if (!f) { perror("fopen"); return; }
+    fseek(f, 0, SEEK_END);
+    size_t size = ftell(f);
+    fclose(f);
+
+    int fd = open(path, O_RDONLY);
+    void* addr = mmap(nullptr, size, PROT_READ,
+                      MAP_PRIVATE, fd, 0);
+    if (addr == MAP_FAILED) { perror("mmap"); return; }
+
+    // Advise kernel on access pattern
+    madvise(addr, size, MADV_SEQUENTIAL);
+
+    // Process the mapped data (zero-copy)
+    const char* data = static_cast<const char*>(addr);
+    size_t newlines = 0;
+    for (size_t i = 0; i < size; ++i)
+        if (data[i] == '\\n') ++newlines;
+
+    std::cout << "Lines: " << newlines << "\\n";
+
+    munmap(addr, size);
+    close(fd);
+}
+
+int main() {
+    measure_elapsed();
+    print_resource_usage();
+    mmap_file_read("/var/log/syslog");
+    return 0;
+}`
+    },
+    {
+      language: "bash",
+      caption: "eBPF and perf profiling for production analysis",
+      source: `# === perf CPU profiling workflow ===
+# Record CPU profile with call graphs for 30 seconds
+sudo perf record -g -p $(pgrep myapp) -- sleep 30
+sudo perf report --stdio         # text report of hotspots
+sudo perf report                 # interactive TUI
+
+# Generate a flame graph
+sudo perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
+
+# Quick stats: cycles, instructions, cache misses
+sudo perf stat -d -p $(pgrep myapp) -- sleep 10
+
+# === eBPF/BCC tools ===
+# Trace all new process executions system-wide
+sudo execsnoop-bpfcc
+
+# Histogram of block I/O latency
+sudo biolatency-bpfcc -D 10      # 10-second summary by disk
+
+# Trace file opens with latency
+sudo opensnoop-bpfcc -d 5        # 5-second trace
+
+# CPU run-queue latency histogram
+sudo runqlat-bpfcc 10 1          # 10-second summary
+
+# === bpftrace one-liners ===
+# Count syscalls by process
+sudo bpftrace -e 'tracepoint:raw_syscalls:sys_enter { @[comm] = count(); }'
+
+# Trace read() latency by process
+sudo bpftrace -e '
+  tracepoint:syscalls:sys_enter_read { @start[tid] = nsecs; }
+  tracepoint:syscalls:sys_exit_read /@start[tid]/ {
+    @us[comm] = hist((nsecs - @start[tid]) / 1000);
+    delete(@start[tid]);
+  }'`
+    }
+  ],
+  diagrams: [
+    {
+      title: "USE Method Diagnostic Flowchart",
+      kind: "flow",
+      caption: "Systematic approach to diagnosing performance bottlenecks using the USE method across all resources",
+      mermaid: `flowchart TD
+    START["Performance Issue Detected"] --> CPU_CHECK{"CPU"}
+    CPU_CHECK --> CPU_U["Utilization<br/>mpstat -P ALL 1"]
+    CPU_CHECK --> CPU_S["Saturation<br/>vmstat r column"]
+    CPU_CHECK --> CPU_E["Errors<br/>perf stat"]
+
+    START --> MEM_CHECK{"Memory"}
+    MEM_CHECK --> MEM_U["Utilization<br/>free -m, available"]
+    MEM_CHECK --> MEM_S["Saturation<br/>vmstat si/so, swap"]
+    MEM_CHECK --> MEM_E["Errors<br/>dmesg OOM kills"]
+
+    START --> DISK_CHECK{"Disk I/O"}
+    DISK_CHECK --> DISK_U["Utilization<br/>iostat %util"]
+    DISK_CHECK --> DISK_S["Saturation<br/>iostat avgqu-sz"]
+    DISK_CHECK --> DISK_E["Errors<br/>dmesg I/O errors"]
+
+    START --> NET_CHECK{"Network"}
+    NET_CHECK --> NET_U["Utilization<br/>sar -n DEV"]
+    NET_CHECK --> NET_S["Saturation<br/>netstat -s drops"]
+    NET_CHECK --> NET_E["Errors<br/>ifconfig errors"]
+
+    CPU_U --> RESULT["Identify Bottleneck"]
+    CPU_S --> RESULT
+    MEM_U --> RESULT
+    MEM_S --> RESULT
+    DISK_U --> RESULT
+    DISK_S --> RESULT
+    NET_U --> RESULT`
+    },
+    {
+      title: "Linux Performance Tool Landscape",
+      kind: "mindmap",
+      caption: "Overview of Linux performance tools organized by the resource they observe",
+      mermaid: `mindmap
+  root["Linux Performance Tools"]
+    CPU
+      top / htop
+      mpstat
+      perf stat / record
+      turbostat
+      pidstat -u
+    Memory
+      free -m
+      vmstat
+      slabtop
+      pmap
+      valgrind
+    Disk I/O
+      iostat -xz
+      iotop
+      blktrace
+      biolatency
+      fio
+    Network
+      sar -n DEV
+      ss / netstat
+      tcpdump
+      iperf3
+      tcplife
+    Tracing
+      strace
+      perf trace
+      bpftrace
+      ftrace
+      execsnoop
+    Profiling
+      perf record
+      flame graphs
+      cachegrind
+      gprof
+      oprofile`
+    },
+    {
+      title: "Performance Triage Sequence",
+      kind: "sequence",
+      caption: "Step-by-step diagnostic workflow from symptom detection to root cause identification",
+      mermaid: `sequenceDiagram
+    participant Eng as Engineer
+    participant SYS as System Overview
+    participant CPU as CPU Analysis
+    participant MEM as Memory Analysis
+    participant IO as Disk I/O Analysis
+    participant PROC as Process Drill-down
+
+    Eng->>SYS: uptime, free -m, df -h
+    SYS-->>Eng: Load=12.0 (4 cores), Swap active
+
+    Eng->>CPU: mpstat -P ALL 1
+    CPU-->>Eng: Core 0 at 98%, others idle
+
+    Eng->>MEM: vmstat 1 (si/so columns)
+    MEM-->>Eng: so=5000 KB/s (swapping out)
+
+    Eng->>IO: iostat -xz 1
+    IO-->>Eng: sda await=85ms, %util=99%
+
+    Eng->>PROC: pidstat -u -d -r 1
+    PROC-->>Eng: PID 3456 (java) 95% CPU, 4GB RSS
+
+    Note over Eng: Root cause: Java process<br/>with memory leak causing<br/>swap thrashing and disk saturation`
+    }
+  ],
+  comparison: {
+    columns: ["Tool", "What It Measures", "Overhead", "Best For", "Key Flags"],
+    rows: [
+      ["`top` / `htop`", "Per-process CPU, memory, state", "**Low** (~1%)", "Quick interactive triage", "`1` per-core, `M` mem sort, `P` CPU sort"],
+      ["`vmstat`", "System-wide CPU, memory, swap, I/O", "**Negligible**", "Detecting swap pressure and CPU saturation", "`vmstat 1` for per-second sampling"],
+      ["`iostat`", "Per-device disk I/O throughput and latency", "**Negligible**", "Identifying I/O bottleneck device", "`-xz 1` for extended stats, active devices"],
+      ["`mpstat`", "Per-CPU core utilization breakdown", "**Negligible**", "Finding single-threaded bottlenecks", "`-P ALL 1` for all cores per second"],
+      ["`strace`", "System calls made by a process", "**Very high** (10-100x)", "Debugging hangs, permission errors, file access", "`-c` summary, `-e trace=` filter, `-f` follow forks"],
+      ["`perf`", "CPU cycles, cache misses, function hotspots", "**Very low** (<5%)", "CPU profiling, flame graph generation", "`record -g`, `stat -d`, `top -p`"],
+      ["`sar`", "Historical CPU, memory, network, disk stats", "**Negligible**", "Trend analysis over hours/days", "`-n DEV` network, `-r` memory, `-u` CPU"],
+      ["`bpftrace`", "Kernel/user tracepoints, kprobes, uprobes", "**Very low** (<1%)", "Custom production tracing", "One-liner and script modes"]
+    ]
+  },
+  exercises: [
+    "**Full USE Audit**: Run `mpstat`, `vmstat`, `iostat`, `sar -n DEV`, and `dmesg` on a running server. For each resource (CPU, memory, disk, network), document the **utilization**, **saturation**, and **error** metrics. Identify which resource, if any, is the bottleneck. Write a one-paragraph diagnosis.",
+    "**Flame Graph Workshop**: Run a CPU-intensive workload (e.g., `stress-ng --cpu 4 --timeout 30s`). Use `perf record -g -a -- sleep 10` to capture a profile. Generate a flame graph with `perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg`. Open the SVG and identify the hottest code path. Explain what the *x-axis width* represents.",
+    "**Swap Pressure Simulation**: On a test VM, allocate memory with `stress-ng --vm 2 --vm-bytes 80%` while monitoring with `vmstat 1`. Observe the `si`/`so` columns, `free` changes, and `wa%` increase. Set `vm.swappiness=1` and repeat -- document how behavior changes. Check `dmesg` for OOM killer activity.",
+    "**strace vs perf Comparison**: Write a Python script that reads a large file line-by-line. Profile it with both `strace -c` (syscall summary) and `perf stat -d` (hardware counters). Compare the overhead by timing the profiled vs. unprofiled runs. Explain when you would choose each tool.",
+    "**eBPF Live Tracing**: Install `bcc-tools` and run `execsnoop` while performing normal system activity (opening terminals, running commands). Then use `biolatency` during a `dd if=/dev/zero of=/tmp/test bs=1M count=1000` write. Interpret the latency histogram and explain the distribution shape for sequential vs. random I/O."
+  ],
+  cheatSheet: [
+    "`uptime` -- load averages; compare to core count (`nproc`). Load/cores > 1.0 = **queuing**. Check `mpstat` to distinguish CPU-bound vs. I/O-bound load.",
+    "`vmstat 1` -- `r` = run queue (CPU demand), `b` = blocked on I/O, `si/so` = **swap activity** (memory pressure), `us/sy/wa/id` = CPU breakdown",
+    "`iostat -xz 1` -- `await` = I/O latency in ms, `%util` = device busy %, `r/s` + `w/s` = IOPS. **SSD**: await > 5ms is suspect; **HDD**: await > 20ms",
+    "`perf record -g -p <pid> -- sleep 30` then `perf report` -- CPU profile with call graphs. Pipe through `stackcollapse-perf.pl | flamegraph.pl` for **flame graphs**",
+    "`strace -c -p <pid>` -- syscall summary (count + time). Use `-e trace=network` for net issues, `-e trace=file` for file issues. **Warning**: 10-100x overhead",
+    "`free -m` -- check `available` column (not `free`). `available` = reclaimable page cache + truly free. If available is low and `vmstat si/so > 0`, add RAM or reduce workload."
+  ],
+  revisionNotes: [
+    "**Load average** includes both *runnable* (R) and *uninterruptible sleep* (D) processes on Linux. Compare to core count: load/cores > 1.0 means queuing. High load with low CPU utilization usually means **I/O saturation**, not CPU saturation -- check `iostat` and `vmstat wa%`.",
+    "The **USE method** (Utilization, Saturation, Errors) is a systematic checklist applied to *each physical resource*: CPU, memory, disk, network. It prevents guessing by ensuring no resource is overlooked. Complement with the **RED method** (Rate, Errors, Duration) for application-level service metrics.",
+    "`perf` uses **hardware performance counters** with sampling-based profiling at <5% overhead, making it safe for production. `strace` intercepts *every* syscall via `ptrace` with 10-100x overhead -- use it for debugging, not monitoring. **eBPF** (via bpftrace/BCC) offers <1% overhead tracing of arbitrary kernel and user-space functions.",
+    "The **page cache** uses free RAM to buffer file I/O -- this is *normal* and beneficial. The `available` column in `free -m` shows reclaimable memory. Active **swapping** (`vmstat si/so > 0`) indicates real memory pressure. Tune `vm.swappiness` (lower = prefer evicting cache, higher = prefer swapping anonymous pages).",
+    "**Flame graphs** visualize profiled stack traces: x-axis width = *cumulative sample count* (time spent), y-axis = call depth. The widest bars are the hottest code paths. Generated from `perf record -g` output via Brendan Gregg's `stackcollapse-perf.pl | flamegraph.pl` pipeline."
+  ],
   glossary: [
     {
       term: "Load average",

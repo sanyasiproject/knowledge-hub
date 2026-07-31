@@ -96,89 +96,156 @@ class OrderServiceTest {
 }`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption:
-        "Spy and Fake in Python — testing a user registration flow",
-      source: `"""
-Demonstrates a Fake (in-memory repository) and a Spy (recording calls).
-"""
-from dataclasses import dataclass, field
-from unittest.mock import MagicMock, call
+        "Spy and Fake in C++ — testing a user registration flow",
+      source: `// Demonstrates a Fake (in-memory repository) and a Spy (recording calls).
 
-# --- Production interfaces and code ---
-@dataclass
-class User:
-    email: str
-    name: str
-    hashed_password: str = ""
+#include <cassert>
+#include <iostream>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
-class UserRepository:
-    """Abstract interface — production uses PostgreSQL."""
-    def save(self, user: User) -> None: ...
-    def find_by_email(self, email: str) -> User | None: ...
+// --- Production interfaces and code ---
 
-class WelcomeEmailSender:
-    def send(self, to: str, name: str) -> None: ...
+struct User {
+    std::string email;
+    std::string name;
+    std::string hashed_password;
+};
 
-class UserRegistrationService:
-    def __init__(self, repo: UserRepository, emailer: WelcomeEmailSender):
-        self.repo = repo
-        self.emailer = emailer
+class UserRepository {
+public:
+    virtual ~UserRepository() = default;
+    virtual void save(const User& user) = 0;
+    virtual std::optional<User> find_by_email(const std::string& email) = 0;
+};
 
-    def register(self, email: str, name: str, password: str) -> User:
-        if self.repo.find_by_email(email):
-            raise ValueError(f"Email {email} already registered")
-        user = User(email=email, name=name, hashed_password=self._hash(password))
-        self.repo.save(user)
-        self.emailer.send(to=email, name=name)
-        return user
+class WelcomeEmailSender {
+public:
+    virtual ~WelcomeEmailSender() = default;
+    virtual void send(const std::string& to, const std::string& name) = 0;
+};
 
-    def _hash(self, pw: str) -> str:
-        return f"hashed_{pw}"  # simplified for demo
+class UserRegistrationService {
+public:
+    UserRegistrationService(std::unique_ptr<UserRepository> repo,
+                            std::unique_ptr<WelcomeEmailSender> emailer)
+        : repo_(std::move(repo)), emailer_(std::move(emailer)) {}
 
-# --- FAKE: in-memory repository with real behavior ---
-class FakeUserRepository(UserRepository):
-    def __init__(self):
-        self._users: dict[str, User] = {}
+    User register_user(const std::string& email, const std::string& name,
+                       const std::string& password) {
+        if (repo_->find_by_email(email).has_value()) {
+            throw std::runtime_error("Email " + email + " already registered");
+        }
+        User user{email, name, hash(password)};
+        repo_->save(user);
+        emailer_->send(email, name);
+        return user;
+    }
 
-    def save(self, user: User) -> None:
-        self._users[user.email] = user
+private:
+    std::string hash(const std::string& pw) const {
+        return "hashed_" + pw;  // simplified for demo
+    }
 
-    def find_by_email(self, email: str) -> User | None:
-        return self._users.get(email)
+    std::unique_ptr<UserRepository> repo_;
+    std::unique_ptr<WelcomeEmailSender> emailer_;
+};
 
-# --- Tests ---
-def test_register_saves_user_and_sends_email():
-    fake_repo = FakeUserRepository()
+// --- FAKE: in-memory repository with real behavior ---
 
-    # SPY: records how send() was called, using MagicMock
-    spy_emailer = MagicMock(spec=WelcomeEmailSender)
+class FakeUserRepository : public UserRepository {
+public:
+    void save(const User& user) override {
+        users_[user.email] = user;
+    }
 
-    service = UserRegistrationService(fake_repo, spy_emailer)
-    user = service.register("bob@test.com", "Bob", "s3cret")
+    std::optional<User> find_by_email(const std::string& email) override {
+        auto it = users_.find(email);
+        if (it != users_.end()) return it->second;
+        return std::nullopt;
+    }
 
-    # State assertion against the fake
-    assert fake_repo.find_by_email("bob@test.com") is not None
-    assert fake_repo.find_by_email("bob@test.com").name == "Bob"
+private:
+    std::unordered_map<std::string, User> users_;
+};
 
-    # Spy assertion: check recorded calls
-    spy_emailer.send.assert_called_once_with(to="bob@test.com", name="Bob")
+// --- SPY: records how send() was called ---
 
-def test_register_rejects_duplicate_email():
-    fake_repo = FakeUserRepository()
-    fake_repo.save(User(email="bob@test.com", name="Bob"))
+struct EmailCall {
+    std::string to;
+    std::string name;
+};
 
-    spy_emailer = MagicMock(spec=WelcomeEmailSender)
-    service = UserRegistrationService(fake_repo, spy_emailer)
+class SpyWelcomeEmailSender : public WelcomeEmailSender {
+public:
+    void send(const std::string& to, const std::string& name) override {
+        calls.push_back({to, name});
+    }
 
-    try:
-        service.register("bob@test.com", "Bob", "s3cret")
-        assert False, "Should have raised ValueError"
-    except ValueError:
-        pass
+    std::vector<EmailCall> calls;
+};
 
-    # Spy assertion: email should NOT have been sent
-    spy_emailer.send.assert_not_called()`,
+// --- Tests ---
+
+void test_register_saves_user_and_sends_email() {
+    auto fake_repo = std::make_unique<FakeUserRepository>();
+    auto spy_emailer = std::make_unique<SpyWelcomeEmailSender>();
+
+    // Keep raw pointers for assertions (ownership transfers to service)
+    auto* repo_ptr = fake_repo.get();
+    auto* emailer_ptr = spy_emailer.get();
+
+    UserRegistrationService service(std::move(fake_repo), std::move(spy_emailer));
+    User user = service.register_user("bob@test.com", "Bob", "s3cret");
+
+    // State assertion against the fake
+    auto found = repo_ptr->find_by_email("bob@test.com");
+    assert(found.has_value());
+    assert(found->name == "Bob");
+
+    // Spy assertion: check recorded calls
+    assert(emailer_ptr->calls.size() == 1);
+    assert(emailer_ptr->calls[0].to == "bob@test.com");
+    assert(emailer_ptr->calls[0].name == "Bob");
+
+    std::cout << "PASSED: test_register_saves_user_and_sends_email\\n";
+}
+
+void test_register_rejects_duplicate_email() {
+    auto fake_repo = std::make_unique<FakeUserRepository>();
+    fake_repo->save({"bob@test.com", "Bob", ""});
+
+    auto spy_emailer = std::make_unique<SpyWelcomeEmailSender>();
+    auto* emailer_ptr = spy_emailer.get();
+
+    UserRegistrationService service(std::move(fake_repo), std::move(spy_emailer));
+
+    bool threw = false;
+    try {
+        service.register_user("bob@test.com", "Bob", "s3cret");
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    assert(threw && "Should have thrown runtime_error");
+
+    // Spy assertion: email should NOT have been sent
+    assert(emailer_ptr->calls.empty());
+
+    std::cout << "PASSED: test_register_rejects_duplicate_email\\n";
+}
+
+int main() {
+    test_register_saves_user_and_sends_email();
+    test_register_rejects_duplicate_email();
+    std::cout << "All tests passed.\\n";
+    return 0;
+}`,
     },
     {
       language: "typescript",

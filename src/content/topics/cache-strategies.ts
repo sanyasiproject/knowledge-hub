@@ -414,4 +414,12 @@ async function warmCache(): Promise<void> {
     { term: "Cache Pollution", definition: "When infrequently accessed data occupies cache space, reducing hit rates for actually hot data." },
     { term: "Stale-While-Revalidate", definition: "A pattern (from HTTP caching) where a stale cached value is served immediately while a fresh value is fetched in the background." },
   ],
+
+  exercises: [
+    "You are building a **social media feed service** with a 100:1 read-to-write ratio. Each user's feed is computed from the posts of users they follow. Design the caching layer: should you use *cache-aside*, *read-through*, or *refresh-ahead*? How do you handle **cache invalidation** when a followed user publishes a new post? What happens when a user unfollows someone -- does the cache need to be invalidated or rebuilt?",
+    "Implement a **write-behind cache** in C++ that buffers writes in an `std::unordered_map` and flushes to a simulated database (a separate map) every 5 seconds using a background `std::thread`. Demonstrate **write coalescing**: if key `\"user:42\"` is updated 10 times between flushes, only 1 database write should occur. What data is lost if the program crashes between flushes?",
+    "Design a **multi-tier caching architecture** (L1 in-process + L2 Redis + database) for a product catalog service handling 50,000 requests/sec. Specify the *TTL* for each tier, the *eviction policy* (LRU, LFU, or random), and the *consistency strategy* (write-through to L2, cache-aside for L1). How do you handle a **cache stampede** when the L2 entry expires and 100 requests simultaneously miss L1?",
+    "Compare **cache-aside** and **write-through** for a user session store where sessions are updated on every API request (last-access timestamp, request count). Calculate the *number of Redis operations per request* for each strategy. Which strategy causes more **cache pollution**? Which is more resilient to Redis downtime? Implement both in pseudocode and measure the trade-offs.",
+    "Your team just deployed a new version of the application and the Redis cache was flushed. The database is getting hammered by a **cold cache thundering herd**. Design a **cache warming strategy** that pre-populates the top 10,000 hot keys before routing production traffic to the new instances. Use access logs from the past hour to identify hot keys. How do you ensure the warming process does not itself overload the database?"
+  ],
 };

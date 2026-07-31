@@ -123,59 +123,114 @@ export class CheckoutService {
 }`
     },
     {
-      language: "python",
-      caption: "Middleware pipeline in FastAPI: each middleware handles one cross-cutting concern",
-      source: `import time
-import logging
-from fastapi import FastAPI, Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
+      language: "cpp",
+      caption: "Middleware pipeline: each middleware handles one cross-cutting concern",
+      source: `// Middleware pipeline pattern in C++ (framework-agnostic concept)
+#include <string>
+#include <vector>
+#include <functional>
+#include <chrono>
+#include <iostream>
+#include <random>
+#include <sstream>
+#include <iomanip>
+#include <stdexcept>
 
-logger = logging.getLogger("app")
+// Simplified request/response types
+struct Request {
+    std::string method, path;
+    std::map<std::string, std::string> headers;
+    std::map<std::string, std::string> state;
+};
 
-# Concern 1: Request timing
-class TimingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next) -> Response:
-        start = time.perf_counter()
-        response = await call_next(request)
-        duration_ms = (time.perf_counter() - start) * 1000
-        response.headers["X-Process-Time-Ms"] = f"{duration_ms:.1f}"
-        logger.info(f"{request.method} {request.url.path} -> {response.status_code} in {duration_ms:.1f}ms")
-        return response
+struct Response {
+    int status_code = 200;
+    std::string body;
+    std::map<std::string, std::string> headers;
+};
 
-# Concern 2: Request ID correlation
-import uuid
+// Middleware: a function that wraps the next handler
+using Handler = std::function<Response(Request&)>;
+using Middleware = std::function<Handler(Handler)>;
 
-class CorrelationIdMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next) -> Response:
-        request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
-        request.state.request_id = request_id
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-        return response
+// Concern 1: Request timing
+Middleware timing_middleware() {
+    return [](Handler next) -> Handler {
+        return [next](Request& req) -> Response {
+            auto start = std::chrono::steady_clock::now();
+            auto resp = next(req);
+            double ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - start).count();
+            std::ostringstream oss;
+            oss << std::fixed << std::setprecision(1) << ms;
+            resp.headers["X-Process-Time-Ms"] = oss.str();
+            std::cout << req.method << " " << req.path
+                      << " -> " << resp.status_code
+                      << " in " << oss.str() << "ms" << std::endl;
+            return resp;
+        };
+    };
+}
 
-# Concern 3: Error normalization
-class ErrorHandlingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next) -> Response:
-        try:
-            return await call_next(request)
-        except Exception as exc:
-            logger.exception(f"Unhandled error on {request.url.path}")
-            return Response(
-                content='{"error": "Internal server error"}',
-                status_code=500,
-                media_type="application/json",
-            )
+// Concern 2: Request ID correlation
+Middleware correlation_id_middleware() {
+    return [](Handler next) -> Handler {
+        return [next](Request& req) -> Response {
+            std::string request_id;
+            if (auto it = req.headers.find("X-Request-ID");
+                it != req.headers.end()) {
+                request_id = it->second;
+            } else {
+                // Generate a simple unique ID
+                static std::atomic<uint64_t> counter{0};
+                request_id = "req-" + std::to_string(++counter);
+            }
+            req.state["request_id"] = request_id;
+            auto resp = next(req);
+            resp.headers["X-Request-ID"] = request_id;
+            return resp;
+        };
+    };
+}
 
-# Compose the pipeline -- order matters
-app = FastAPI()
-app.add_middleware(ErrorHandlingMiddleware)   # outermost: catches all errors
-app.add_middleware(CorrelationIdMiddleware)   # adds request ID before processing
-app.add_middleware(TimingMiddleware)          # innermost: times only the handler
+// Concern 3: Error normalization
+Middleware error_handling_middleware() {
+    return [](Handler next) -> Handler {
+        return [next](Request& req) -> Response {
+            try {
+                return next(req);
+            } catch (const std::exception& e) {
+                std::cerr << "Unhandled error on " << req.path
+                          << ": " << e.what() << std::endl;
+                return {500, R"({"error": "Internal server error"})", {}};
+            }
+        };
+    };
+}
 
-@app.get("/orders/{order_id}")
-async def get_order(order_id: int):
-    # Pure business logic -- no logging, error handling, or correlation ID code here
-    return {"order_id": order_id, "status": "shipped"}`
+// Compose middleware into a pipeline -- order matters
+Handler compose(Handler handler, std::vector<Middleware> middlewares) {
+    // Apply in reverse so the first middleware is outermost
+    for (auto it = middlewares.rbegin(); it != middlewares.rend(); ++it)
+        handler = (*it)(handler);
+    return handler;
+}
+
+// Pure business logic handler
+Response get_order(Request& req) {
+    return {200, R"({"order_id": 42, "status": "shipped"})", {}};
+}
+
+int main() {
+    auto pipeline = compose(get_order, {
+        error_handling_middleware(),   // outermost: catches all errors
+        correlation_id_middleware(),   // adds request ID before processing
+        timing_middleware(),           // innermost: times only the handler
+    });
+
+    Request req{"GET", "/orders/42", {}, {}};
+    Response resp = pipeline(req);
+}`
     }
   ],
 

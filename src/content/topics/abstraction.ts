@@ -113,81 +113,91 @@ public class StripePaymentProcessor extends AbstractPaymentProcessor {
 }`
     },
     {
-      language: "python",
-      caption: "Python ABCs, Protocol (structural typing), and duck typing",
-      source: `from abc import ABC, abstractmethod
-from typing import Protocol, runtime_checkable, Iterator
-from dataclasses import dataclass
+      language: "cpp",
+      caption: "C++ pure virtual classes, templates (structural typing), and concepts",
+      source: `#include <iostream>
+#include <string>
+#include <map>
+#include <optional>
+#include <chrono>
+#include <concepts>
 
-# Abstract Base Class -- nominal typing (explicit inheritance required)
-class Repository(ABC):
-    @abstractmethod
-    def find_by_id(self, id: str) -> dict | None:
-        """Find an entity by its ID."""
-        ...
+// Pure virtual class -- nominal typing (explicit inheritance required)
+class Repository {
+public:
+    virtual ~Repository() = default;
 
-    @abstractmethod
-    def save(self, entity: dict) -> None:
-        """Persist an entity."""
-        ...
+    virtual std::optional<std::map<std::string, std::string>>
+        find_by_id(const std::string& id) = 0;
 
-    # Concrete method using abstract methods -- Template Method
-    def upsert(self, entity: dict) -> None:
-        existing = self.find_by_id(entity["id"])
-        if existing:
-            entity["updated_at"] = datetime.now()
-        else:
-            entity["created_at"] = datetime.now()
-        self.save(entity)
+    virtual void save(std::map<std::string, std::string>& entity) = 0;
 
-
-# Protocol -- structural typing (no inheritance needed, duck typing with type hints)
-@runtime_checkable
-class Renderable(Protocol):
-    def render(self) -> str:
-        ...
-
-    def content_type(self) -> str:
-        ...
+    // Concrete method using virtual methods -- Template Method
+    void upsert(std::map<std::string, std::string>& entity) {
+        auto existing = find_by_id(entity["id"]);
+        if (existing) {
+            entity["updated_at"] = "now";
+        } else {
+            entity["created_at"] = "now";
+        }
+        save(entity);
+    }
+};
 
 
-# This class satisfies Renderable WITHOUT inheriting from it
-@dataclass
-class HtmlPage:
-    title: str
-    body: str
-
-    def render(self) -> str:
-        return f"<html><head><title>{self.title}</title></head><body>{self.body}</body></html>"
-
-    def content_type(self) -> str:
-        return "text/html"
+// C++20 Concept -- structural typing (no inheritance needed)
+template <typename T>
+concept Renderable = requires(T t) {
+    { t.render() } -> std::convertible_to<std::string>;
+    { t.content_type() } -> std::convertible_to<std::string>;
+};
 
 
-@dataclass
-class JsonResponse:
-    data: dict
+// This class satisfies Renderable WITHOUT inheriting from anything
+class HtmlPage {
+    std::string title_;
+    std::string body_;
+public:
+    HtmlPage(std::string title, std::string body)
+        : title_(std::move(title)), body_(std::move(body)) {}
 
-    def render(self) -> str:
-        import json
-        return json.dumps(self.data)
+    std::string render() const {
+        return "<html><head><title>" + title_ +
+               "</title></head><body>" + body_ + "</body></html>";
+    }
 
-    def content_type(self) -> str:
-        return "application/json"
-
-
-def send_response(response: Renderable) -> None:
-    """Works with any object that has render() and content_type() methods."""
-    print(f"Content-Type: {response.content_type()}")
-    print(response.render())
+    std::string content_type() const { return "text/html"; }
+};
 
 
-# Both work -- structural typing checks shape, not inheritance
-send_response(HtmlPage("Hello", "<p>World</p>"))
-send_response(JsonResponse({"status": "ok"}))
+class JsonResponse {
+    std::string json_data_;
+public:
+    explicit JsonResponse(std::string data) : json_data_(std::move(data)) {}
 
-# Runtime check also works
-assert isinstance(HtmlPage("", ""), Renderable)  # True`
+    std::string render() const { return json_data_; }
+    std::string content_type() const { return "application/json"; }
+};
+
+
+// Works with any type satisfying the Renderable concept
+template <Renderable R>
+void send_response(const R& response) {
+    std::cout << "Content-Type: " << response.content_type() << "\\n";
+    std::cout << response.render() << "\\n";
+}
+
+
+int main() {
+    // Both work -- concept checks shape, not inheritance
+    send_response(HtmlPage("Hello", "<p>World</p>"));
+    send_response(JsonResponse(R"({"status":"ok"})"));
+
+    // Compile-time check: concept is satisfied
+    static_assert(Renderable<HtmlPage>);
+    static_assert(Renderable<JsonResponse>);
+    return 0;
+}`
     },
     {
       language: "typescript",

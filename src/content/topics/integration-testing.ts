@@ -183,72 +183,95 @@ describe('GET /api/products/:id', () => {
 });`,
     },
     {
-      language: "python",
-      caption: "Python integration test with pytest and testcontainers",
-      source: `import pytest
-from testcontainers.postgres import PostgresContainer
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from fastapi.testclient import TestClient
-from app.main import create_app
-from app.database import Base
-from app.models import User
+      language: "cpp",
+      caption: "C++ integration test with Google Test and libpqxx (PostgreSQL)",
+      source: `#include <gtest/gtest.h>
+#include <pqxx/pqxx>
+#include <nlohmann/json.hpp>
+#include <curl/curl.h>
+#include <string>
+#include <memory>
 
-@pytest.fixture(scope="module")
-def postgres():
-    """Spin up a PostgreSQL container for the test module."""
-    with PostgresContainer("postgres:15-alpine") as pg:
-        yield pg
+using json = nlohmann::json;
 
-@pytest.fixture(scope="module")
-def db_engine(postgres):
-    engine = create_engine(postgres.get_connection_url())
-    Base.metadata.create_all(engine)
-    return engine
+// Helper: perform an HTTP request and return status + body
+struct HttpResponse { long status; std::string body; };
 
-@pytest.fixture
-def db_session(db_engine):
-    """Each test gets a fresh transaction that is rolled back."""
-    connection = db_engine.connect()
-    transaction = connection.begin()
-    session = sessionmaker(bind=connection)()
-    yield session
-    session.close()
-    transaction.rollback()
-    connection.close()
+static size_t write_callback(char* ptr, size_t size, size_t nmemb, std::string* data) {
+    data->append(ptr, size * nmemb);
+    return size * nmemb;
+}
 
-@pytest.fixture
-def client(db_session):
-    app = create_app(session_override=db_session)
-    return TestClient(app)
+HttpResponse http_request(const std::string& method, const std::string& url,
+                          const std::string& body = "") {
+    CURL* curl = curl_easy_init();
+    HttpResponse resp{};
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp.body);
+    if (method == "POST") {
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
+        struct curl_slist* headers = curl_slist_append(nullptr, "Content-Type: application/json");
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    }
+    curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &resp.status);
+    curl_easy_cleanup(curl);
+    return resp;
+}
 
-class TestUserAPI:
-    def test_create_user_persists_to_database(self, client, db_session):
-        response = client.post("/api/users", json={
-            "name": "Alice",
-            "email": "alice@example.com"
-        })
-        assert response.status_code == 201
-        data = response.json()
-        assert data["name"] == "Alice"
+// Test fixture: sets up DB connection and cleans tables between tests
+class UserAPITest : public ::testing::Test {
+protected:
+    static std::unique_ptr<pqxx::connection> db;
+    static const std::string base_url;
 
-        # Verify in database
-        user = db_session.query(User).filter_by(id=data["id"]).first()
-        assert user is not None
-        assert user.email == "alice@example.com"
+    static void SetUpTestSuite() {
+        // Connect to test database (started via Testcontainers or Docker)
+        db = std::make_unique<pqxx::connection>(
+            "host=localhost port=5433 dbname=testdb user=test password=test"
+        );
+    }
 
-    def test_duplicate_email_returns_conflict(self, client):
-        client.post("/api/users", json={
-            "name": "Bob", "email": "bob@example.com"
-        })
-        response = client.post("/api/users", json={
-            "name": "Bob2", "email": "bob@example.com"
-        })
-        assert response.status_code == 409
+    void TearDown() override {
+        // Clean tables between tests (transaction rollback alternative)
+        pqxx::work txn(*db);
+        txn.exec("DELETE FROM users");
+        txn.commit();
+    }
+};
 
-    def test_get_nonexistent_user_returns_404(self, client):
-        response = client.get("/api/users/99999")
-        assert response.status_code == 404`,
+std::unique_ptr<pqxx::connection> UserAPITest::db = nullptr;
+const std::string UserAPITest::base_url = "http://localhost:8080";
+
+TEST_F(UserAPITest, CreateUserPersistsToDatabase) {
+    json payload = {{"name", "Alice"}, {"email", "alice@example.com"}};
+    auto resp = http_request("POST", base_url + "/api/users", payload.dump());
+
+    ASSERT_EQ(resp.status, 201);
+    auto data = json::parse(resp.body);
+    EXPECT_EQ(data["name"], "Alice");
+
+    // Verify in database
+    pqxx::work txn(*db);
+    auto row = txn.exec1("SELECT email FROM users WHERE id = " +
+                         txn.quote(data["id"].get<std::string>()));
+    EXPECT_EQ(row[0].as<std::string>(), "alice@example.com");
+}
+
+TEST_F(UserAPITest, DuplicateEmailReturnsConflict) {
+    json payload = {{"name", "Bob"}, {"email", "bob@example.com"}};
+    http_request("POST", base_url + "/api/users", payload.dump());
+
+    json dup = {{"name", "Bob2"}, {"email", "bob@example.com"}};
+    auto resp = http_request("POST", base_url + "/api/users", dup.dump());
+    EXPECT_EQ(resp.status, 409);
+}
+
+TEST_F(UserAPITest, GetNonexistentUserReturns404) {
+    auto resp = http_request("GET", base_url + "/api/users/99999");
+    EXPECT_EQ(resp.status, 404);
+}`,
     },
   ],
   diagrams: [

@@ -40,38 +40,67 @@ MSET user:1:name "Alice" user:2:name "Bob"
 MGET user:1:name user:2:name      # ["Alice", "Bob"]`
     },
     {
-      language: "python",
-      caption: "DynamoDB key-value operations with boto3",
-      source: `import boto3
+      language: "cpp",
+      caption: "DynamoDB key-value operations with AWS SDK for C++",
+      source: `#include <aws/core/Aws.h>
+#include <aws/dynamodb/DynamoDBClient.h>
+#include <aws/dynamodb/model/PutItemRequest.h>
+#include <aws/dynamodb/model/GetItemRequest.h>
+#include <aws/dynamodb/model/UpdateItemRequest.h>
+#include <iostream>
 
-dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table('Users')
+using namespace Aws::DynamoDB;
+using namespace Aws::DynamoDB::Model;
 
-# Put item
-table.put_item(Item={
-    'user_id': 'u-1001',
-    'name': 'Alice',
-    'email': 'alice@example.com',
-    'plan': 'premium'
-})
+int main() {
+    Aws::SDKOptions options;
+    Aws::InitAPI(options);
+    {
+        DynamoDBClient client;
+        const Aws::String table_name = "Users";
 
-# Get item (strongly consistent)
-response = table.get_item(
-    Key={'user_id': 'u-1001'},
-    ConsistentRead=True
-)
-item = response['Item']
+        // Put item
+        PutItemRequest put_req;
+        put_req.SetTableName(table_name);
+        put_req.AddItem("user_id", AttributeValue().SetS("u-1001"));
+        put_req.AddItem("name",    AttributeValue().SetS("Alice"));
+        put_req.AddItem("email",   AttributeValue().SetS("alice@example.com"));
+        put_req.AddItem("plan",    AttributeValue().SetS("premium"));
+        client.PutItem(put_req);
 
-# Conditional update (optimistic concurrency)
-table.update_item(
-    Key={'user_id': 'u-1001'},
-    UpdateExpression='SET plan = :new_plan',
-    ConditionExpression='plan = :old_plan',
-    ExpressionAttributeValues={
-        ':new_plan': 'enterprise',
-        ':old_plan': 'premium'
+        // Get item (strongly consistent)
+        GetItemRequest get_req;
+        get_req.SetTableName(table_name);
+        get_req.AddKey("user_id", AttributeValue().SetS("u-1001"));
+        get_req.SetConsistentRead(true);
+
+        auto get_result = client.GetItem(get_req);
+        if (get_result.IsSuccess()) {
+            const auto& item = get_result.GetResult().GetItem();
+            std::cout << "Name: " << item.at("name").GetS() << "\\n";
+            std::cout << "Plan: " << item.at("plan").GetS() << "\\n";
+        }
+
+        // Conditional update (optimistic concurrency)
+        UpdateItemRequest update_req;
+        update_req.SetTableName(table_name);
+        update_req.AddKey("user_id", AttributeValue().SetS("u-1001"));
+        update_req.SetUpdateExpression("SET plan = :new_plan");
+        update_req.SetConditionExpression("plan = :old_plan");
+        update_req.AddExpressionAttributeValues(":new_plan",
+            AttributeValue().SetS("enterprise"));
+        update_req.AddExpressionAttributeValues(":old_plan",
+            AttributeValue().SetS("premium"));
+
+        auto update_result = client.UpdateItem(update_req);
+        if (!update_result.IsSuccess()) {
+            std::cerr << "Conditional update failed: "
+                      << update_result.GetError().GetMessage() << "\\n";
+        }
     }
-)`
+    Aws::ShutdownAPI(options);
+    return 0;
+}`
     },
   ],
   diagrams: [

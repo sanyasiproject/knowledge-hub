@@ -23,54 +23,84 @@ export const threadsVsAsync: TopicContent = {
   ],
   code: [
     {
-      language: "python",
-      caption: "Threading vs asyncio — fetching multiple URLs concurrently",
-      source: `import threading
-import asyncio
-import aiohttp
-import requests
-import time
+      language: "cpp",
+      caption: "Threading vs async — fetching multiple URLs concurrently",
+      source: `#include <iostream>
+#include <vector>
+#include <string>
+#include <thread>
+#include <future>
+#include <chrono>
+#include <curl/curl.h>
 
-# --- Thread-based approach ---
-def fetch_sync(url: str, results: list, index: int):
-    """Each thread blocks on network I/O."""
-    resp = requests.get(url, timeout=10)
-    results[index] = len(resp.content)
+// Callback for libcurl
+size_t write_cb(char* ptr, size_t size, size_t nmemb, std::string* data) {
+    data->append(ptr, size * nmemb);
+    return size * nmemb;
+}
 
-def run_threaded(urls: list[str]):
-    results = [None] * len(urls)
-    threads = [
-        threading.Thread(target=fetch_sync, args=(url, results, i))
-        for i, url in enumerate(urls)
-    ]
-    for t in threads:
-        t.start()       # OS thread created per URL
-    for t in threads:
-        t.join()         # Wait for all
-    return results
+size_t fetch_url(const std::string& url) {
+    CURL* curl = curl_easy_init();
+    std::string body;
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    return body.size();
+}
 
-# --- Async approach ---
-async def fetch_async(session: aiohttp.ClientSession, url: str) -> int:
-    """Coroutine suspends at await, no thread blocked."""
-    async with session.get(url) as resp:
-        data = await resp.read()
-        return len(data)
+// --- Thread-based approach ---
+void fetch_sync(const std::string& url, std::vector<size_t>& results, int index) {
+    // Each thread blocks on network I/O
+    results[index] = fetch_url(url);
+}
 
-async def run_async(urls: list[str]):
-    async with aiohttp.ClientSession() as session:
-        tasks = [fetch_async(session, url) for url in urls]
-        return await asyncio.gather(*tasks)  # Concurrent, single thread
+std::vector<size_t> run_threaded(const std::vector<std::string>& urls) {
+    std::vector<size_t> results(urls.size(), 0);
+    std::vector<std::thread> threads;
+    for (size_t i = 0; i < urls.size(); ++i) {
+        threads.emplace_back(fetch_sync, std::cref(urls[i]),
+                             std::ref(results), static_cast<int>(i));
+    }
+    for (auto& t : threads) {
+        t.join();  // Wait for all
+    }
+    return results;
+}
 
-# --- Comparison ---
-urls = ["https://example.com"] * 100
+// --- Async approach using std::async ---
+std::vector<size_t> run_async(const std::vector<std::string>& urls) {
+    std::vector<std::future<size_t>> futures;
+    for (const auto& url : urls) {
+        futures.push_back(std::async(std::launch::async, fetch_url, url));
+    }
+    std::vector<size_t> results;
+    for (auto& f : futures) {
+        results.push_back(f.get());  // Managed by thread pool
+    }
+    return results;
+}
 
-start = time.perf_counter()
-run_threaded(urls)               # 100 OS threads
-print(f"Threaded: {time.perf_counter() - start:.2f}s")
+int main() {
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    std::vector<std::string> urls(100, "https://example.com");
 
-start = time.perf_counter()
-asyncio.run(run_async(urls))     # 1 thread, 100 coroutines
-print(f"Async:    {time.perf_counter() - start:.2f}s")`,
+    auto start = std::chrono::high_resolution_clock::now();
+    run_threaded(urls);  // 100 OS threads
+    auto elapsed = std::chrono::high_resolution_clock::now() - start;
+    std::cout << "Threaded: "
+              << std::chrono::duration<double>(elapsed).count() << "s\\n";
+
+    start = std::chrono::high_resolution_clock::now();
+    run_async(urls);     // std::async with thread pool
+    elapsed = std::chrono::high_resolution_clock::now() - start;
+    std::cout << "Async:    "
+              << std::chrono::duration<double>(elapsed).count() << "s\\n";
+
+    curl_global_cleanup();
+}`,
     },
     {
       language: "java",
@@ -170,45 +200,66 @@ if (!isMainThread) {
 }`,
     },
     {
-      language: "python",
-      caption: "Python asyncio with structured concurrency (TaskGroup, 3.11+)",
-      source: `import asyncio
+      language: "cpp",
+      caption: "Structured concurrency with std::async and semaphore-based backpressure",
+      source: `#include <iostream>
+#include <vector>
+#include <string>
+#include <future>
+#include <thread>
+#include <chrono>
+#include <semaphore>
+#include <nlohmann/json.hpp>
 
-async def fetch_user(user_id: int) -> dict:
-    """Simulates an async I/O call."""
-    await asyncio.sleep(0.1)  # Non-blocking sleep
-    return {"id": user_id, "name": f"User {user_id}"}
+using json = nlohmann::json;
 
-async def fetch_orders(user_id: int) -> list:
-    await asyncio.sleep(0.15)
-    return [{"order": i, "user": user_id} for i in range(3)]
+json fetch_user(int user_id) {
+    // Simulates an async I/O call
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    return {{"id", user_id}, {"name", "User " + std::to_string(user_id)}};
+}
 
-async def get_user_with_orders(user_id: int):
-    """Structured concurrency: child tasks cannot outlive the scope."""
-    async with asyncio.TaskGroup() as tg:
-        user_task = tg.create_task(fetch_user(user_id))
-        orders_task = tg.create_task(fetch_orders(user_id))
-    # Both complete (or both cancelled on error) by this point
-    return {
-        "user": user_task.result(),
-        "orders": orders_task.result(),
+json fetch_orders(int user_id) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    json orders = json::array();
+    for (int i = 0; i < 3; ++i) {
+        orders.push_back({{"order", i}, {"user", user_id}});
+    }
+    return orders;
+}
+
+json get_user_with_orders(int user_id) {
+    // Structured concurrency: both tasks complete before we proceed
+    auto user_future = std::async(std::launch::async, fetch_user, user_id);
+    auto orders_future = std::async(std::launch::async, fetch_orders, user_id);
+
+    // Both futures are awaited when they go out of scope (or via .get())
+    json user = user_future.get();
+    json orders = orders_future.get();
+
+    return {{"user", user}, {"orders", orders}};
+}
+
+int main() {
+    // Process 50 users concurrently with a semaphore for backpressure
+    std::counting_semaphore<10> sem(10);  // Max 10 in-flight at once
+
+    std::vector<std::future<json>> tasks;
+    for (int uid = 0; uid < 50; ++uid) {
+        tasks.push_back(std::async(std::launch::async, [&sem, uid]() {
+            sem.acquire();
+            json result = get_user_with_orders(uid);
+            sem.release();
+            return result;
+        }));
     }
 
-async def main():
-    # Process 50 users concurrently with a semaphore for backpressure
-    sem = asyncio.Semaphore(10)  # Max 10 in-flight at once
-
-    async def bounded(uid: int):
-        async with sem:
-            return await get_user_with_orders(uid)
-
-    async with asyncio.TaskGroup() as tg:
-        tasks = [tg.create_task(bounded(uid)) for uid in range(50)]
-
-    results = [t.result() for t in tasks]
-    print(f"Fetched {len(results)} users with orders")
-
-asyncio.run(main())`,
+    std::vector<json> results;
+    for (auto& t : tasks) {
+        results.push_back(t.get());
+    }
+    std::cout << "Fetched " << results.size() << " users with orders\\n";
+}`,
     },
   ],
   diagrams: [
@@ -581,5 +632,12 @@ asyncio.run(main())`,
       definition:
         "A paradigm where concurrent tasks are lexically scoped: child tasks cannot outlive their parent, errors propagate, and cancellation is automatic. Prevents task leaks.",
     },
+  ],
+  exercises: [
+    "Write a C++ program that fetches 100 URLs using **one OS thread per request** (via `std::thread` and a blocking HTTP library). Measure peak memory usage and total time. Then rewrite it using **`std::async`** with a thread pool of 10 threads. Compare memory consumption, wall-clock time, and thread creation overhead. What is the practical upper limit of concurrent threads on your system before performance degrades?",
+    "Demonstrate the **event loop blocking problem** in Node.js: write an Express server that handles a `/fast` endpoint (returns immediately) and a `/slow` endpoint that computes a CPU-intensive Fibonacci number synchronously. Show that while `/slow` is running, `/fast` is *also blocked*. Fix it by offloading the Fibonacci computation to a **Worker Thread** and verify that `/fast` remains responsive.",
+    "Write a Python program that downloads 50 files using three approaches: (a) **sequential** `requests.get()`, (b) **multithreaded** with `concurrent.futures.ThreadPoolExecutor`, and (c) **async** with `aiohttp` and `asyncio.gather()`. Benchmark all three. Then add a CPU-bound step (e.g., computing a hash of each file) and observe how the GIL affects the threaded approach. Does `multiprocessing` help?",
+    "Implement **structured concurrency** in Python 3.11+ using `asyncio.TaskGroup`. Create a task group that fetches a user profile and their orders concurrently. Then deliberately make one task raise an exception -- verify that the *other task is cancelled* and the exception propagates to the caller. Compare this behavior to using bare `asyncio.create_task()` where orphan tasks can leak.",
+    "If Java 21+ is available, create 100,000 tasks using **platform threads** (`Executors.newFixedThreadPool`) and then using **virtual threads** (`Executors.newVirtualThreadPerTaskExecutor`). Each task should call `Thread.sleep(1000)` to simulate I/O. Measure memory usage and completion time. At what task count do platform threads fail with `OutOfMemoryError` while virtual threads continue to work?",
   ],
 };

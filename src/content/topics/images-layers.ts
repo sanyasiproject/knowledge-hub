@@ -131,6 +131,188 @@ export const imagesLayers: TopicContent = {
       back: "Garbage collection identifies and removes blobs (layers) that are no longer referenced by any manifest. Deleting an image tag or manifest makes its unique layers eligible for collection, freeing storage space.",
     },
   ],
+  deepDive: [
+    `## The OCI Image Specification: Content-Addressable Storage
+
+At its core, a container image is defined by the **OCI (Open Container Initiative) Image Specification**, which standardizes how images are built, stored, and distributed. An image consists of three key artifacts: the **image index** (manifest list), the **image manifest**, and the **image configuration**. The image index maps a tag to platform-specific manifests (enabling multi-architecture images). Each manifest references a configuration blob and an ordered list of layer digests. The configuration is a JSON document containing the execution parameters (entrypoint, env, user) and a history of the Dockerfile instructions that created each layer.
+
+Every blob -- whether a layer tarball or a configuration JSON -- is stored by its **SHA256 content hash** (digest). This content-addressable design enables powerful properties: **deduplication** (identical layers across images are stored once), **integrity verification** (a corrupted blob's hash will not match its digest), and **immutable references** (a digest always points to the same content). When you \`docker pull\`, the client downloads the manifest, computes which layers it already has locally, and only fetches missing ones. This is why pulling an image that shares a base with an already-cached image is fast -- only the unique layers are transferred.`,
+
+    `## Union Filesystems and Copy-on-Write
+
+Container runtimes use **union filesystems** (OverlayFS, overlay2) to present the stacked read-only image layers as a single coherent filesystem. When a container starts, the runtime adds a thin **writable layer** on top of the image layers. This writable layer uses **copy-on-write (CoW)** semantics: reading a file traverses the layer stack from top to bottom until the file is found (efficient for reads). Writing to an existing file **copies it from the lower layer to the writable layer** first, then modifies the copy. This means the original image layers are never modified, and multiple containers can share the same image layers simultaneously.
+
+The CoW mechanism has performance implications: the first write to a large file from a lower layer incurs a copy penalty. For write-heavy workloads (databases, logs), this is why **bind mounts** or **volumes** are preferred over writing to the container layer -- volumes bypass the union filesystem entirely and write directly to the host filesystem. Understanding this distinction is critical for optimizing container performance: application data should always go in volumes, while the container's writable layer should be used only for ephemeral state (temp files, PID files).`,
+
+    `## BuildKit Architecture and Advanced Caching
+
+**BuildKit** is Docker's modern build engine (default since Docker 23.0) and represents a significant leap over the legacy builder. It constructs a **directed acyclic graph (DAG)** of build steps from the Dockerfile, enabling **parallel execution** of independent stages. For example, in a multi-stage build where stage 1 compiles the backend and stage 2 builds the frontend, BuildKit executes both concurrently.
+
+BuildKit introduces several advanced caching mechanisms beyond simple layer caching. **Cache mounts** (\`--mount=type=cache,target=/root/.cache\`) persist package manager caches (pip, npm, apt) across builds without including them in the final image -- this dramatically speeds up dependency installation. **Secret mounts** (\`--mount=type=secret,id=mysecret\`) inject credentials at build time without baking them into any layer. **SSH mounts** (\`--mount=type=ssh\`) forward the host's SSH agent for cloning private repositories during build. BuildKit also supports **remote cache backends** (registry-based, S3, GitHub Actions cache) for sharing build caches across CI machines, which can reduce CI build times from minutes to seconds.`,
+
+    `## Supply Chain Security: Signing, Scanning, and SBOMs
+
+Container image security extends beyond vulnerability scanning to encompass the entire **software supply chain**. **Image signing** with tools like **Cosign** (part of the Sigstore project) creates cryptographic signatures for image digests, allowing consumers to verify that an image was built by a trusted party and has not been tampered with. **Notary v2** and **TUF (The Update Framework)** provide more sophisticated trust models with key rotation, threshold signing, and delegation.
+
+**Vulnerability scanning** (Trivy, Grype, Snyk Container) analyzes each layer of an image, identifying installed packages and matching them against CVE databases. Importantly, scanners check *every layer*, not just the final filesystem view -- a vulnerability in a deleted file still exists in its original layer and could potentially be extracted. This is why multi-stage builds are a security feature: build-time dependencies with vulnerabilities never make it into the production image. **SBOMs (Software Bill of Materials)** in formats like SPDX or CycloneDX provide a machine-readable inventory of all components in an image. Docker BuildKit can generate SBOMs at build time (\`--sbom=true\`), and registries like Harbor can store and query them alongside image manifests.`,
+  ],
+  diagrams: [
+    {
+      title: "Container Image Layer Architecture",
+      kind: "architecture",
+      caption: "How image layers stack to form a container filesystem with copy-on-write",
+      mermaid: `flowchart TB
+    subgraph Image["Container Image (Read-Only)"]
+        direction TB
+        L1["Layer 1: Base OS (Alpine 3.19)\\nsha256:a1b2c3...\\n~5MB"]
+        L2["Layer 2: RUN apk add --no-cache curl\\nsha256:d4e5f6...\\n~2MB"]
+        L3["Layer 3: COPY requirements.txt .\\nsha256:g7h8i9...\\n~1KB"]
+        L4["Layer 4: RUN pip install -r requirements.txt\\nsha256:j0k1l2...\\n~50MB"]
+        L5["Layer 5: COPY . /app\\nsha256:m3n4o5...\\n~5MB"]
+        L1 --> L2 --> L3 --> L4 --> L5
+    end
+
+    subgraph Container["Container Runtime"]
+        CW["Writable Layer (Copy-on-Write)\\nEphemeral, per-container"]
+        L5 --> CW
+    end
+
+    subgraph Storage["Volumes (Bypass CoW)"]
+        V1["Volume: /app/data\\nDirect host filesystem access"]
+    end
+
+    CW -.->|"Bind mount"| V1
+
+    style L1 fill:#3498db,color:#fff
+    style L2 fill:#2980b9,color:#fff
+    style L3 fill:#2471a3,color:#fff
+    style L4 fill:#1f618d,color:#fff
+    style L5 fill:#1a5276,color:#fff
+    style CW fill:#e74c3c,color:#fff
+    style V1 fill:#27ae60,color:#fff`,
+    },
+    {
+      title: "Docker Build Cache Decision Flow",
+      kind: "flow",
+      caption: "How Docker decides whether to use cached layers or rebuild during image build",
+      mermaid: `flowchart TD
+    A["Process Dockerfile Instruction"] --> B{"Instruction type?"}
+    B -->|"RUN"| C{"Instruction text\\nidentical to cache?"}
+    B -->|"COPY / ADD"| D{"Source file\\ncontent hashes match?"}
+    B -->|"ENV, WORKDIR, etc."| E{"Metadata\\nidentical?"}
+
+    C -->|Yes| F["Use cached layer"]
+    C -->|No| G["Rebuild this layer"]
+    D -->|Yes| F
+    D -->|No| G
+    E -->|Yes| F
+    E -->|No| G
+
+    G --> H["INVALIDATE all subsequent layers"]
+    H --> I["Rebuild remaining instructions"]
+
+    F --> J{"More instructions?"}
+    J -->|Yes| A
+    J -->|No| K["Build complete"]
+    I --> K
+
+    style F fill:#27ae60,color:#fff
+    style G fill:#e74c3c,color:#fff
+    style H fill:#c0392b,color:#fff`,
+    },
+    {
+      title: "Multi-Stage Build Pipeline",
+      kind: "flow",
+      caption: "How multi-stage builds separate build dependencies from runtime to minimize image size",
+      mermaid: `flowchart LR
+    subgraph Stage1["Stage 1: Builder (golang:1.22)"]
+        S1A["FROM golang:1.22 AS builder"]
+        S1B["COPY go.mod go.sum ./"]
+        S1C["RUN go mod download"]
+        S1D["COPY . ."]
+        S1E["RUN CGO_ENABLED=0 go build\\n-o /app -ldflags '-s -w'"]
+        S1A --> S1B --> S1C --> S1D --> S1E
+    end
+
+    subgraph Stage2["Stage 2: Runtime (distroless)"]
+        S2A["FROM gcr.io/distroless/static"]
+        S2B["COPY --from=builder /app /app"]
+        S2C["ENTRYPOINT \\['/app'\\]"]
+        S2A --> S2B --> S2C
+    end
+
+    S1E -->|"COPY --from=builder\\nOnly the binary"| S2B
+
+    subgraph Size["Image Size Comparison"]
+        SZ1["Builder stage: ~1.5 GB\\nGo toolchain + source + deps"]
+        SZ2["Final image: ~15 MB\\nBinary + CA certs only"]
+    end
+
+    style Stage1 fill:#e74c3c,color:#fff
+    style Stage2 fill:#27ae60,color:#fff
+    style SZ1 fill:#e74c3c,color:#fff
+    style SZ2 fill:#27ae60,color:#fff`,
+    },
+    {
+      title: "Container Registry Pull Sequence",
+      kind: "sequence",
+      caption: "The protocol flow when pulling an image from a container registry",
+      mermaid: `sequenceDiagram
+    participant Client as Docker Client
+    participant Registry as Container Registry
+    participant Store as Local Store
+
+    Client->>Registry: GET /v2/<name>/manifests/<tag>
+    Registry-->>Client: Image Manifest (JSON)
+    Note over Client: Parse manifest:\\nlayer digests + config digest
+
+    Client->>Store: Check which layers exist locally
+    Store-->>Client: Missing layers list
+
+    loop For each missing layer
+        Client->>Registry: GET /v2/<name>/blobs/<digest>
+        Registry-->>Client: Layer tar.gz
+        Client->>Store: Store layer by digest
+        Note over Store: Verify SHA256 matches digest
+    end
+
+    Client->>Registry: GET /v2/<name>/blobs/<config-digest>
+    Registry-->>Client: Image Config (JSON)
+
+    Client->>Store: Assemble image from layers + config
+    Note over Client: Image ready to run`,
+    },
+  ],
+  exercises: [
+    "**Dockerfile Optimization (Easy):** Given this Dockerfile, identify the caching problems and rewrite it for optimal layer caching:\n```\nFROM node:20\nCOPY . /app\nWORKDIR /app\nRUN npm install\nRUN npm run build\nEXPOSE 3000\nCMD [\"node\", \"dist/index.js\"]\n```\nHint: What changes most frequently -- dependencies or source code?",
+    "**Multi-Stage Build (Medium):** Write a multi-stage Dockerfile for a C++ application that uses CMake. Stage 1 should compile the application using a full GCC image. Stage 2 should produce a minimal runtime image. The final image should be under 20MB. Consider: which libraries does the binary need at runtime? Should you use static or dynamic linking?",
+    "**Layer Analysis (Medium):** An image is 1.2GB. Using `docker image history` or `dive`, you find that a single RUN layer is 800MB because it installs build tools, compiles code, and does not clean up. Rewrite the instruction to reduce this layer's size. What is the difference between cleaning up in the same RUN vs. a subsequent RUN?",
+    "**Registry Security (Hard):** Design a CI/CD pipeline that: (1) builds a container image, (2) scans it for vulnerabilities, (3) signs it with Cosign, (4) pushes it to a private registry, and (5) deploys only signed images. Describe each step and the tools involved. What happens if a vulnerability is found after deployment?",
+    "**Build Context Optimization (Easy):** A developer's Docker build takes 2 minutes to start before any instructions run. The project directory is 5GB (includes `.git`, `node_modules`, test fixtures, and video assets). Write a `.dockerignore` file that reduces the build context to only what is needed, and explain why each exclusion matters.",
+  ],
+  cheatSheet: [
+    "**Layer = Dockerfile instruction output.** RUN, COPY, ADD create filesystem layers. ENV, WORKDIR, EXPOSE modify config metadata only.",
+    "**Cache invalidation cascades.** One changed layer forces ALL subsequent layers to rebuild. Order: least-changing first.",
+    "**Copy deps before source.** `COPY package.json . && npm install` before `COPY . .` -- deps layer is cached when only source changes.",
+    "**Combine RUN + clean in one layer.** `RUN apt-get install -y pkg && apt-get clean && rm -rf /var/lib/apt/lists/*` -- separate RUN for cleanup does NOT reclaim space.",
+    "**Multi-stage = small + secure.** Build in SDK image, copy artifact to distroless/Alpine/scratch. Final image has no build tools.",
+    "**Tag is mutable, digest is immutable.** Pin production deployments by digest (sha256:...) for reproducibility. Use Renovate/Dependabot to update.",
+    "**Use .dockerignore.** Exclude .git, node_modules, *.env, test data, docs. Smaller context = faster builds + no leaked secrets.",
+    "**BuildKit cache mounts.** `RUN --mount=type=cache,target=/root/.cache pip install -r requirements.txt` -- package cache persists across builds without bloating the image.",
+    "**Scan every image.** `trivy image myapp:latest` before pushing. Block deployments with critical/high CVEs.",
+    "**Base image hierarchy:** scratch (0B) < distroless (~2MB) < Alpine (~5MB) < slim (~80MB) < full (~900MB). Use the smallest that works.",
+  ],
+  revisionNotes: [
+    "A container image is an ordered stack of **read-only filesystem layers** (tar archives) identified by SHA256 content hashes, plus a JSON configuration with execution metadata.",
+    "Each Dockerfile instruction that modifies the filesystem (RUN, COPY, ADD) creates a new layer. Metadata instructions (ENV, WORKDIR, EXPOSE) modify only the config JSON.",
+    "**Cache invalidation cascades**: changing one layer forces all subsequent layers to rebuild. Order instructions from least to most frequently changing.",
+    "**Multi-stage builds** separate build-time dependencies from runtime. COPY --from=builder copies only the final artifact into a minimal base image.",
+    "Files deleted in a later layer **still exist** in the earlier layer. Always clean up in the **same RUN** instruction to avoid bloated layers.",
+    "**Tags are mutable** (can be overwritten); **digests are immutable** (content-addressable). Use digests for reproducible production deployments.",
+    "The **union filesystem** (OverlayFS) merges layers into a single view. The writable container layer uses **copy-on-write** -- first write to a lower-layer file copies it up.",
+    "Use **volumes** for write-heavy workloads (databases, logs) to bypass the copy-on-write overhead of the container's writable layer.",
+    "BuildKit enables parallel stage execution, cache mounts, secret mounts, and remote cache backends -- significantly faster and more secure than the legacy builder.",
+  ],
   glossary: [
     {
       term: "Image Layer",

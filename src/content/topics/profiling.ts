@@ -215,4 +215,210 @@ Best practices:
         "A flame graph that compares two profiles, using color (red/blue) to highlight functions that became slower or faster between the two captures.",
     },
   ],
+  deepDive: [
+    "**C++ profiling with `perf` and `gprof`** gives developers precise control over performance analysis at the systems level. The Linux `perf` tool is a *sampling profiler* that uses **hardware performance counters** (PMCs) to capture stack traces at configurable frequencies with negligible overhead. Running `perf record -g ./my_program` collects call-graph data, and `perf report` renders an interactive TUI showing the hottest functions sorted by sample count. For *instrumentation-based* profiling, compiling with `g++ -pg` enables **gprof**, which injects code at every function entry/exit to record exact call counts and cumulative time. The resulting `gmon.out` file is analyzed with `gprof ./my_program gmon.out`, producing a *flat profile* (sorted by self-time) and a *call graph* (showing caller-callee relationships). While `gprof` adds 10-30% overhead, it provides **exact call counts** that sampling cannot, making it ideal for development-phase optimization of tight loops and template-heavy code.",
+    "**Valgrind's Callgrind and Cachegrind** tools provide *simulation-based* profiling that goes beyond simple timing. Callgrind runs the program on a synthetic CPU, recording every instruction executed and every call transition, producing a complete **call graph with instruction counts**. Unlike timing-based profilers, Callgrind results are *deterministic* — identical across runs — making them ideal for regression testing. The companion tool **KCachegrind** (or QCachegrind) visualizes Callgrind output as interactive call graphs and treemaps. **Cachegrind** simulates the L1/L2/L3 cache hierarchy, reporting *cache miss rates* per function — critical for optimizing data-layout-sensitive C++ code where cache misses dominate runtime. Running `valgrind --tool=cachegrind ./my_program` reveals functions with high *D1 miss rates* (L1 data cache misses) or *LL miss rates* (last-level cache misses), guiding developers toward struct packing, array-of-structs to struct-of-arrays transformations, and loop tiling optimizations.",
+    "**Modern C++ profiling strategies** combine multiple tools in a layered approach. Start with `perf stat ./my_program` for a *high-level overview* of IPC (instructions per cycle), cache miss rates, and branch mispredictions. If CPU-bound, use `perf record -g` to identify hot functions, then zoom in with **Cachegrind** to check whether the bottleneck is *compute-bound* or *memory-bound*. For multi-threaded programs, **Intel VTune** or **AMD uProf** provide *threading analysis* showing lock contention, thread imbalance, and NUMA effects. **AddressSanitizer** (`-fsanitize=address`) and **LeakSanitizer** (`-fsanitize=leak`) complement memory profilers by detecting *out-of-bounds accesses* and *memory leaks* at runtime with ~2x overhead. The key principle is to **profile before optimizing** — developers' intuition about bottlenecks is wrong roughly 90% of the time, and profiling data prevents wasted effort on code paths that contribute negligibly to total runtime.",
+  ],
+  code: [
+    {
+      language: "cpp",
+      caption: "Using perf and gprof for CPU profiling in C++",
+      source: `// Compile with gprof instrumentation
+// g++ -pg -O2 -o matrix_mul matrix_mul.cpp
+
+#include <vector>
+#include <chrono>
+#include <iostream>
+
+// Hot function: naive matrix multiplication
+void multiply(const std::vector<std::vector<double>>& A,
+              const std::vector<std::vector<double>>& B,
+              std::vector<std::vector<double>>& C, int N) {
+    for (int i = 0; i < N; ++i)
+        for (int j = 0; j < N; ++j)
+            for (int k = 0; k < N; ++k)
+                C[i][j] += A[i][k] * B[k][j]; // cache-unfriendly access on B
+}
+
+// Optimized: loop tiling for better cache behavior
+void multiply_tiled(const std::vector<std::vector<double>>& A,
+                    const std::vector<std::vector<double>>& B,
+                    std::vector<std::vector<double>>& C, int N) {
+    constexpr int TILE = 32;
+    for (int ii = 0; ii < N; ii += TILE)
+        for (int jj = 0; jj < N; jj += TILE)
+            for (int kk = 0; kk < N; kk += TILE)
+                for (int i = ii; i < std::min(ii + TILE, N); ++i)
+                    for (int j = jj; j < std::min(jj + TILE, N); ++j)
+                        for (int k = kk; k < std::min(kk + TILE, N); ++k)
+                            C[i][j] += A[i][k] * B[k][j];
+}
+
+// After running: gprof ./matrix_mul gmon.out > profile.txt
+// Or with perf: perf record -g ./matrix_mul && perf report`,
+    },
+    {
+      language: "bash",
+      caption: "Valgrind Callgrind and Cachegrind workflow",
+      source: `# Run Callgrind for instruction-level profiling
+valgrind --tool=callgrind --callgrind-out-file=callgrind.out ./my_program
+
+# Analyze with annotation showing per-line instruction counts
+callgrind_annotate callgrind.out src/hot_module.cpp
+
+# Visualize with KCachegrind (GUI)
+kcachegrind callgrind.out
+
+# Run Cachegrind for cache simulation
+valgrind --tool=cachegrind ./my_program
+# Output shows per-function: Ir (instructions), D1mr (L1 data read misses),
+# DLmr (last-level read misses), Bc (conditional branches), Bcm (mispredicted)
+
+# Compare two Cachegrind runs (before/after optimization)
+cg_diff cachegrind.out.old cachegrind.out.new
+cg_annotate cachegrind.out.diff`,
+    },
+    {
+      language: "cpp",
+      caption: "Programmatic profiling with chrono and custom scoped timer",
+      source: `#include <chrono>
+#include <iostream>
+#include <string>
+#include <unordered_map>
+
+// Scoped timer that accumulates per-label timing
+struct ScopedTimer {
+    using Clock = std::chrono::high_resolution_clock;
+    static inline std::unordered_map<std::string, double> totals;
+
+    std::string label;
+    Clock::time_point start;
+
+    explicit ScopedTimer(std::string lbl)
+        : label(std::move(lbl)), start(Clock::now()) {}
+
+    ~ScopedTimer() {
+        auto elapsed = std::chrono::duration<double, std::milli>(
+            Clock::now() - start).count();
+        totals[label] += elapsed;
+    }
+
+    static void report() {
+        std::cout << "\\n=== Profile Report ===\\n";
+        for (const auto& [name, ms] : totals)
+            std::cout << name << ": " << ms << " ms\\n";
+    }
+};
+
+// Usage in performance-critical code
+void process_data(const std::vector<int>& data) {
+    {
+        ScopedTimer t("sort");
+        auto sorted = data;
+        std::sort(sorted.begin(), sorted.end());
+    }
+    {
+        ScopedTimer t("search");
+        // ... binary search operations
+    }
+}
+// Call ScopedTimer::report() at program exit`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Profiling Tool Selection Flowchart",
+      kind: "flow",
+      caption: "Decision tree for choosing the right C++ profiling tool based on the problem type",
+      mermaid: `flowchart TD
+    Start["**Performance Issue Detected**"] --> Q1{"What type\\nof bottleneck?"}
+    Q1 -->|CPU-bound| Q2{"Production or\\nDevelopment?"}
+    Q1 -->|Memory leak| Leak["**AddressSanitizer**\\n+ **LeakSanitizer**\\n\`-fsanitize=address,leak\`"]
+    Q1 -->|Cache misses| Cache["**Cachegrind**\\n\`valgrind --tool=cachegrind\`"]
+    Q1 -->|Thread contention| Thread["**Intel VTune**\\nor **perf lock**"]
+    Q2 -->|Production| Sampling["**perf record -g**\\n*sampling, ~2% overhead*"]
+    Q2 -->|Development| Q3{"Need exact\\ncall counts?"}
+    Q3 -->|Yes| Instr["**gprof** or **Callgrind**\\n*instrumentation-based*"]
+    Q3 -->|No| Sampling
+    style Start fill:#e3f2fd,stroke:#1565c0
+    style Sampling fill:#c8e6c9,stroke:#2e7d32
+    style Instr fill:#fff9c4,stroke:#f9a825
+    style Leak fill:#ffcdd2,stroke:#c62828
+    style Cache fill:#e1bee7,stroke:#7b1fa2
+    style Thread fill:#ffe0b2,stroke:#ef6c00`,
+    },
+    {
+      title: "Flame Graph Anatomy",
+      kind: "architecture",
+      caption: "How to read a flame graph: width equals time, height equals stack depth",
+      mermaid: `flowchart TB
+    subgraph FlameGraph["**Flame Graph Structure**"]
+        direction TB
+        Main["main() — 100% width"] --> ProcessReq["process_request() — 80%"]
+        Main --> Init["init() — 20%"]
+        ProcessReq --> ParseJSON["parse_json() — 45%"]
+        ProcessReq --> DBQuery["db_query() — 35%"]
+        ParseJSON --> Alloc["allocate() — 30%\\n*WIDE PLATEAU = bottleneck*"]
+        DBQuery --> NetIO["network_io() — 25%"]
+        DBQuery --> Serialize["serialize() — 10%"]
+    end
+    style Alloc fill:#ff8a80,stroke:#d32f2f
+    style NetIO fill:#ffab91,stroke:#e64a19
+    style Main fill:#bbdefb,stroke:#1565c0
+    style ProcessReq fill:#c8e6c9,stroke:#388e3c`,
+    },
+    {
+      title: "Profiling Workflow Pipeline",
+      kind: "sequence",
+      caption: "End-to-end profiling workflow from detection to verification",
+      mermaid: `sequenceDiagram
+    participant Dev as Developer
+    participant Perf as perf / gprof
+    participant Viz as FlameGraph / KCachegrind
+    participant Code as Source Code
+    Dev->>Perf: perf stat ./program (overview)
+    Perf-->>Dev: IPC, cache misses, branch mispredictions
+    Dev->>Perf: perf record -g ./program (detailed)
+    Perf-->>Viz: Generate flame graph
+    Viz-->>Dev: Identify wide plateaus (hot functions)
+    Dev->>Code: Optimize hot path
+    Dev->>Perf: Re-profile with perf stat
+    Perf-->>Dev: Compare metrics (before vs after)
+    Note over Dev,Perf: Repeat until target met`,
+    },
+  ],
+  comparison: {
+    columns: ["Tool", "**Type**", "**Overhead**", "**Best For**", "**Output**"],
+    rows: [
+      ["`perf`", "*Sampling*", "~1-5%", "**Production** CPU profiling", "Flame graphs, `perf report`"],
+      ["`gprof`", "*Instrumentation*", "~10-30%", "**Development** exact call counts", "Flat profile + call graph"],
+      ["`Callgrind`", "*Simulation*", "~20-50x", "**Deterministic** instruction counts", "KCachegrind visualization"],
+      ["`Cachegrind`", "*Simulation*", "~20-50x", "**Cache miss** analysis", "Per-function cache stats"],
+      ["`AddressSanitizer`", "*Instrumentation*", "~2x", "**Memory errors** and leaks", "Runtime error reports"],
+      ["`Intel VTune`", "*Sampling + HW*", "~2-5%", "**Threading** and microarchitecture", "Rich GUI analysis"],
+    ],
+  },
+  exercises: [
+    "**gprof basics**: Write a C++ program with two functions — one doing matrix multiplication, one doing vector sorting. Compile with `-pg`, run it, and analyze `gmon.out` with `gprof`. Identify which function takes more *self-time* vs *cumulative time*.",
+    "**Flame graph generation**: Use `perf record -g` to profile a C++ program, then generate a flame graph using Brendan Gregg's `FlameGraph` scripts (`stackcollapse-perf.pl` and `flamegraph.pl`). Identify the widest *plateau* and explain why it is the bottleneck.",
+    "**Cache optimization**: Write a naive matrix transpose in C++, profile it with `valgrind --tool=cachegrind`, note the L1 miss rate, then rewrite with *loop tiling* and compare the cache miss rates before and after.",
+    "**Differential profiling**: Profile the same C++ program with two different algorithm implementations (e.g., `std::sort` vs a hand-written quicksort). Generate a *differential flame graph* and explain the color-coded differences.",
+    "**Scoped timer instrumentation**: Implement the `ScopedTimer` class shown in the code section. Add it to a multi-function program, collect timing data, and compare the results with `perf report` output to validate accuracy.",
+  ],
+  cheatSheet: [
+    "`perf stat ./program` — quick **overview**: IPC, cache misses, branch mispredictions, context switches",
+    "`perf record -g ./program` + `perf report` — **sampling** profiler with call-graph; use `-F 99` to set sample frequency",
+    "`g++ -pg -O2 file.cpp` + `gprof ./a.out gmon.out` — **gprof** instrumentation for exact call counts and timing",
+    "`valgrind --tool=callgrind ./program` + `kcachegrind callgrind.out` — **Callgrind** for deterministic instruction-level profiling",
+    "`valgrind --tool=cachegrind ./program` — **Cachegrind** for L1/L2/LL cache miss analysis per function",
+    "`g++ -fsanitize=address,leak -g file.cpp` — **ASan + LSan** for memory error and leak detection at ~2x overhead",
+  ],
+  revisionNotes: [
+    "**Two profiler families**: *Sampling* (perf, py-spy) captures periodic stack snapshots with low overhead (~1-5%), suitable for production. *Instrumentation* (gprof, Callgrind) hooks every function call for exact counts but adds 10-100x overhead.",
+    "**Flame graphs**: width = proportion of samples (*not* wall time), y-axis = stack depth. Look for **wide plateaus** at the top (leaf functions burning CPU). X-axis is *alphabetical*, not temporal.",
+    "**Cache profiling** with Cachegrind reveals whether a bottleneck is *compute-bound* or *memory-bound*. High D1 miss rates suggest poor data locality; fix with struct packing, SoA layouts, or loop tiling.",
+    "**Always profile before optimizing** — developer intuition about hot paths is wrong ~90% of the time. Use `perf stat` for a 10-second overview before deep-diving with detailed tools.",
+    "**Continuous profiling** (Pyroscope, Cloud Profiler) runs always-on sampling in production, enabling *regression detection* by comparing profiles across deployments without reproducing issues locally.",
+  ],
 };

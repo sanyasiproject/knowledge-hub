@@ -156,6 +156,284 @@ The ring algorithm uses O(n) messages — more efficient than the bully algorith
       back: "A majority quorum (more than half the nodes). This ensures that any two quorums overlap by at least one node, preventing two leaders from being elected simultaneously in different partitions.",
     },
   ],
+  deepDive: [
+    "The **bully algorithm** operates on the assumption that every node knows the *IDs of all other nodes* in the system and can communicate with any of them. When a node detects that the leader has failed (via a **timeout**), it sends an `ELECTION` message to all nodes with *higher IDs*. If none respond within a timeout, it declares itself the **coordinator**. The critical weakness is the assumption of *reliable failure detection* -- in practice, network delays, **GC pauses**, and transient partitions can cause false positives, leading to unnecessary elections and potential **split-brain**. The message complexity is **O(n^2)** in the worst case because every node may initiate an election simultaneously, and each must contact all higher-ID nodes.",
+    "**ZooKeeper's ephemeral sequential znodes** provide a more robust foundation for leader election. The *ephemeral* property ensures automatic cleanup when a session dies, while the *sequential* property establishes a total ordering of candidates. The **herd effect** mitigation -- where each candidate watches only the *next-lower* znode rather than the leader's znode -- is a critical design choice. Without this optimization, a leader failure would trigger `O(n)` simultaneous notifications, each candidate would issue a `getChildren()` call, and the resulting **thundering herd** could overwhelm ZooKeeper itself. The watch-predecessor pattern reduces this to `O(1)` notifications per failure, making the system scalable to *thousands of candidates*.",
+    "**Fencing tokens** represent the *last line of defense* against stale leader writes and are essential even when using robust election mechanisms like **Raft** or **ZAB**. The fundamental problem is the **process pause**: a leader might hold a valid lease, experience a *long GC pause* or *page fault*, and resume operations after its lease has expired and a **new leader** has been elected. Without fencing tokens, the stale leader's writes would be accepted, corrupting the system. The fencing token is a *monotonically increasing epoch number* attached to every write operation; storage systems **reject** any write with a token lower than the highest they have seen. This provides a *linearizable ordering* of leadership changes that survives arbitrary process delays.",
+  ],
+  code: [
+    {
+      language: "cpp",
+      caption: "Bully algorithm leader election simulation",
+      source: `#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+
+class BullyElection {
+    int nodeId_;
+    int leaderId_;
+    std::vector<int> allNodes_;
+    std::mutex mtx_;
+    std::atomic<bool> electionInProgress_{false};
+
+public:
+    BullyElection(int id, std::vector<int> nodes)
+        : nodeId_(id), leaderId_(-1), allNodes_(std::move(nodes)) {}
+
+    // Start election: contact all nodes with higher IDs
+    void startElection() {
+        std::lock_guard<std::mutex> lock(mtx_);
+        electionInProgress_ = true;
+        std::cout << "Node " << nodeId_ << " starting election\\n";
+
+        bool higherNodeResponded = false;
+        for (int node : allNodes_) {
+            if (node > nodeId_) {
+                // Send ELECTION message to higher-ID node
+                if (sendElection(node)) {
+                    higherNodeResponded = true;
+                }
+            }
+        }
+
+        if (!higherNodeResponded) {
+            // No higher node responded -- declare self as leader
+            declareLeader(nodeId_);
+        }
+        electionInProgress_ = false;
+    }
+
+    void declareLeader(int leaderId) {
+        leaderId_ = leaderId;
+        std::cout << "Node " << nodeId_
+                  << " acknowledges leader: " << leaderId_ << "\\n";
+        // Broadcast COORDINATOR message to all lower-ID nodes
+        for (int node : allNodes_) {
+            if (node < leaderId_) {
+                sendCoordinator(node, leaderId_);
+            }
+        }
+    }
+
+private:
+    bool sendElection(int targetNode) {
+        // Simulate: returns true if target is alive
+        return std::find(allNodes_.begin(), allNodes_.end(),
+                         targetNode) != allNodes_.end();
+    }
+
+    void sendCoordinator(int targetNode, int leaderId) {
+        std::cout << "  COORDINATOR(" << leaderId
+                  << ") -> Node " << targetNode << "\\n";
+    }
+};`,
+    },
+    {
+      language: "cpp",
+      caption: "Fencing token implementation for stale leader protection",
+      source: `#include <iostream>
+#include <mutex>
+#include <optional>
+#include <stdexcept>
+
+// Fencing token: monotonically increasing epoch number
+class FencingTokenGenerator {
+    uint64_t currentEpoch_ = 0;
+    std::mutex mtx_;
+
+public:
+    uint64_t issueToken() {
+        std::lock_guard<std::mutex> lock(mtx_);
+        return ++currentEpoch_;
+    }
+};
+
+// Storage that rejects writes from stale leaders
+class FencedStorage {
+    uint64_t highestSeenToken_ = 0;
+    std::string data_;
+    std::mutex mtx_;
+
+public:
+    bool write(uint64_t fencingToken, const std::string& value) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        if (fencingToken < highestSeenToken_) {
+            std::cerr << "REJECTED: token " << fencingToken
+                      << " < highest seen " << highestSeenToken_
+                      << " (stale leader detected)\\n";
+            return false;   // Reject stale leader's write
+        }
+        highestSeenToken_ = fencingToken;
+        data_ = value;
+        std::cout << "ACCEPTED: token " << fencingToken
+                  << ", value = \\"" << value << "\\"\\n";
+        return true;
+    }
+
+    std::string read() const { return data_; }
+};
+
+// Usage: two leaders, one stale
+int main() {
+    FencingTokenGenerator tokenGen;
+    FencedStorage storage;
+
+    uint64_t leaderA_token = tokenGen.issueToken(); // epoch 1
+    uint64_t leaderB_token = tokenGen.issueToken(); // epoch 2
+
+    // Leader B writes first (it was elected after A)
+    storage.write(leaderB_token, "data_from_leader_B");
+
+    // Leader A wakes up from GC pause, tries to write
+    storage.write(leaderA_token, "stale_data_from_A"); // REJECTED
+
+    return 0;
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "Ring-based leader election algorithm",
+      source: `#include <iostream>
+#include <vector>
+#include <algorithm>
+
+class RingElection {
+    int nodeId_;
+    int successor_;          // next node in the ring
+    bool participating_ = false;
+
+public:
+    RingElection(int id, int successor)
+        : nodeId_(id), successor_(successor) {}
+
+    // Initiate election by sending own ID around the ring
+    std::vector<int> startElection() {
+        participating_ = true;
+        std::vector<int> electionMsg = { nodeId_ };
+        std::cout << "Node " << nodeId_
+                  << " starts election, forwarding to "
+                  << successor_ << "\\n";
+        return electionMsg;
+    }
+
+    // Receive election message, append ID, forward or declare winner
+    std::vector<int> receiveElection(std::vector<int> msg) {
+        if (std::find(msg.begin(), msg.end(), nodeId_) != msg.end()) {
+            // Message has traversed the full ring
+            int leader = *std::max_element(msg.begin(), msg.end());
+            std::cout << "Ring traversal complete. Leader: "
+                      << leader << "\\n";
+            return {};  // Send COORDINATOR message instead
+        }
+        msg.push_back(nodeId_);
+        participating_ = true;
+        std::cout << "Node " << nodeId_ << " forwards election ["
+                  << msg.size() << " candidates] to "
+                  << successor_ << "\\n";
+        return msg;
+    }
+};`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Bully Algorithm Election Flow",
+      kind: "sequence",
+      caption: "Node 3 detects leader failure and initiates an election; the highest-ID active node (5) becomes the new leader.",
+      mermaid: `sequenceDiagram
+    participant N1 as Node 1
+    participant N3 as Node 3
+    participant N4 as Node 4
+    participant N5 as Node 5
+    Note over N3: Detects leader timeout
+    N3->>N4: ELECTION
+    N3->>N5: ELECTION
+    N4->>N5: ELECTION
+    N5-->>N3: ALIVE
+    N5-->>N4: ALIVE
+    Note over N5: Highest ID, no higher nodes
+    N5->>N1: COORDINATOR(5)
+    N5->>N3: COORDINATOR(5)
+    N5->>N4: COORDINATOR(5)
+    Note over N1,N5: Node 5 is the new leader`,
+    },
+    {
+      title: "ZooKeeper Leader Election with Watch Chain",
+      kind: "flow",
+      caption: "Candidates create sequential ephemeral znodes and watch the predecessor znode to avoid the herd effect.",
+      mermaid: `flowchart TD
+    A[Candidate joins] --> B[Create ephemeral sequential znode\n/election/candidate-0000N]
+    B --> C{Lowest sequence\nnumber?}
+    C -->|Yes| D[Become Leader]
+    C -->|No| E[Set watch on\nnext-lower znode]
+    E --> F{Watched znode\ndeleted?}
+    F -->|Yes| C
+    F -->|No| G[Wait for watch\nnotification]
+    G --> F
+    D --> H[Hold leadership\nuntil session ends]
+    H --> I[Session expires:\nznode auto-deleted]
+    I --> F`,
+    },
+    {
+      title: "Fencing Token Preventing Stale Leader Writes",
+      kind: "sequence",
+      caption: "Leader A pauses, Leader B is elected with a higher token, and storage rejects Leader A's stale write.",
+      mermaid: `sequenceDiagram
+    participant LA as Leader A
+    participant LS as Lock Service
+    participant LB as Leader B
+    participant S as Storage
+    LA->>LS: Acquire lease
+    LS-->>LA: Token = 33
+    LA->>S: Write(token=33, data)
+    S-->>LA: OK
+    Note over LA: GC pause begins
+    Note over LS: Lease expires
+    LB->>LS: Acquire lease
+    LS-->>LB: Token = 34
+    LB->>S: Write(token=34, data)
+    S-->>LB: OK (highest=34)
+    Note over LA: GC pause ends
+    LA->>S: Write(token=33, data)
+    S-->>LA: REJECTED (33 < 34)`,
+    },
+  ],
+  comparison: {
+    columns: ["Algorithm", "Message Complexity", "Partition Tolerance", "Implementation Complexity", "Use Case"],
+    rows: [
+      ["**Bully Algorithm**", "*O(n^2)* worst case", "None -- **split-brain** risk", "Low", "Academic / simple systems"],
+      ["**Ring Algorithm**", "*O(n)* messages", "None -- requires intact ring", "Medium", "Academic / structured topologies"],
+      ["**ZooKeeper (ZAB)**", "*O(n)* via watches", "**Quorum-based** -- partition safe", "High (external dependency)", "Production: Kafka, HBase, Hadoop"],
+      ["**etcd (Raft)**", "*O(n)* vote requests", "**Majority quorum** -- partition safe", "High (external dependency)", "Production: Kubernetes, CockroachDB"],
+      ["**Raft (embedded)**", "*O(n)* per election", "**Majority quorum** -- partition safe", "Medium-High", "Embedded consensus: etcd, Consul"],
+    ],
+  },
+  exercises: [
+    "Implement the **bully algorithm** in C++ with a simulated network layer using `std::thread` for each node. Introduce *random failures* and verify that the highest alive node always becomes leader.",
+    "Extend the **fencing token** example to handle *concurrent writes* from multiple stale leaders. Add a `std::shared_mutex` for reader-writer locking and verify that only the latest leader's writes succeed.",
+    "Simulate a **ZooKeeper-style** watch chain in C++ using a `std::map<int, std::function<void()>>` to register watches on predecessor znodes. Test that deleting a znode triggers *only* the next candidate's callback.",
+    "Implement a **ring election algorithm** where nodes are `std::thread` instances communicating via `std::queue`. Simulate a node failure mid-election and verify the algorithm still elects the correct leader after ring repair.",
+    "Build a **lease-based** leader election system where the leader must renew its lease every *N milliseconds*. Use `std::chrono` for timing and demonstrate what happens when the leader's renewal is delayed beyond the lease TTL.",
+  ],
+  cheatSheet: [
+    "**Bully algorithm**: highest-ID wins; `ELECTION` to higher nodes, `COORDINATOR` to all if no response -- *O(n^2)* messages worst case",
+    "**ZooKeeper election**: ephemeral sequential znodes + watch-predecessor pattern -- avoids *herd effect*, automatic cleanup on session death",
+    "**Fencing tokens**: monotonically increasing epoch attached to every write; storage **rejects** `token < highestSeen` -- prevents stale leader corruption",
+    "**Raft election**: follower times out -> becomes *candidate* -> requests votes -> wins with **majority** -> leader sends heartbeats to prevent new elections",
+    "**Split-brain prevention**: requires **majority quorum** (n/2 + 1) -- any two quorums overlap by at least one node, preventing dual leaders",
+    "**Lease-based election**: leader holds a TTL lease; must renew before expiry. If leader crashes, lease expires and new election starts -- used in *etcd* and *Chubby*",
+  ],
+  revisionNotes: [
+    "Leader election is fundamentally a **consensus problem** -- nodes must agree on *exactly one leader*. The bully algorithm does not solve consensus; it assumes reliable failure detection.",
+    "**Ephemeral znodes** are the key primitive in ZooKeeper elections: they are *automatically deleted* when the creating session ends, ensuring dead leaders are detected without explicit health checks.",
+    "**Fencing tokens** are necessary even with perfect election mechanisms because *process pauses* (GC, page faults, scheduling delays) can cause a leader to act after its lease has expired.",
+    "**Raft's election restriction**: a candidate can only win if its log is *at least as up-to-date* as the majority -- this ensures the elected leader has all committed entries.",
+    "The **herd effect** in ZooKeeper is avoided by having each candidate watch only the *next-lower* sequential znode, reducing notifications from `O(n)` to `O(1)` per failure event.",
+  ],
   glossary: [
     {
       term: "Leader Election",

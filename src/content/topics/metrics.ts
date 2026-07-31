@@ -173,4 +173,317 @@ export const metrics: TopicContent = {
         "A quantitative measure of service behavior (e.g., request latency p99 < 200ms, error rate < 0.1%) used to define and monitor SLOs.",
     },
   ],
+  deepDive: [
+    "**Designing Custom Metrics** requires careful thought about *naming conventions*, *label dimensions*, and *metric types*. Follow the pattern `<namespace>_<subsystem>_<name>_<unit>` — for example, `myapp_http_request_duration_seconds` or `myapp_queue_messages_total`. Always include a **unit suffix** (`_seconds`, `_bytes`, `_total`) so dashboards and queries are self-documenting. When choosing labels, apply the **bounded cardinality rule**: every label value set must be *finite and small* (e.g., `method=\"GET\"`, `status=\"200\"`). Never use `user_id`, `trace_id`, or `ip` as labels — these create **cardinality explosions** that crash Prometheus. Instead, record high-cardinality identifiers in *logs* or *traces* and correlate via **exemplars** (`histogram_observe_with_exemplar`). Use `const` labels for metadata that never changes per process (e.g., `version`, `region`) and `variable` labels for request-scoped dimensions. When in doubt, start with *fewer labels* and add more later — removing a label is a **breaking schema change** for existing dashboards and alerts.",
+    "**Advanced PromQL Patterns** unlock powerful observability insights. The `rate()` function is the workhorse for counters, but for *bursty traffic*, consider `irate()` which uses only the last two samples for higher resolution. **Aggregation operators** like `sum by (service)`, `avg without (instance)`, and `topk(5, ...)` let you slice data across dimensions. A critical pattern is the **error ratio**: `sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))` gives the *fraction of 5xx responses*. For **histogram percentiles**, use `histogram_quantile(0.99, sum by (le) (rate(http_duration_bucket[5m])))` — note that the `by (le)` clause is *mandatory*. **Subqueries** enable time-over-time analysis: `max_over_time(rate(cpu_usage[5m])[1h:1m])` finds the *peak 5-minute CPU rate* in the last hour. The `predict_linear()` function forecasts gauge values: `predict_linear(node_filesystem_avail_bytes[6h], 24*3600) < 0` predicts *disk exhaustion within 24 hours*. Master these patterns and you can express virtually any monitoring question in PromQL.",
+    "**SLO-Based Alerting** replaces *threshold-based* alerts with **error budget** reasoning, dramatically reducing alert fatigue. Define an *SLI* (Service Level Indicator) like `request latency p99 < 300ms` and set an *SLO* (Service Level Objective) like `99.9% of requests meet the SLI over 30 days`. The **error budget** is `1 - SLO = 0.1%`, meaning you tolerate *0.1% of requests* violating the SLI per month. Use **multi-window, multi-burn-rate alerts**: a *fast burn* (14.4x budget consumption over 1 hour, confirmed over 5 minutes) pages immediately for acute incidents, while a *slow burn* (1x budget consumption over 3 days, confirmed over 6 hours) creates a ticket for gradual degradation. Implement this in Prometheus with `recording rules` that precompute SLI compliance ratios: `sum(rate(http_requests_total{status!~\"5..\"}[30d])) / sum(rate(http_requests_total[30d]))`. Track the **remaining error budget** on a Grafana dashboard with `1 - ((1 - sli_ratio) / (1 - 0.999))` to show the *percentage of budget consumed*. This approach, documented in the **Google SRE Book**, ensures you only get paged when user experience is *measurably impacted*, not when an arbitrary threshold is crossed."
+  ],
+  code: [
+    {
+      language: "typescript",
+      caption: "Prometheus metrics instrumentation in Node.js using prom-client",
+      source: `import express from "express";
+import { Registry, Counter, Histogram, Gauge, collectDefaultMetrics } from "prom-client";
+
+const register = new Registry();
+
+// Collect default Node.js metrics (GC, event loop, memory)
+collectDefaultMetrics({ register, prefix: "myapp_" });
+
+// Counter — total HTTP requests
+const httpRequestsTotal = new Counter({
+  name: "myapp_http_requests_total",
+  help: "Total number of HTTP requests",
+  labelNames: ["method", "route", "status"] as const,
+  registers: [register],
+});
+
+// Histogram — request duration in seconds
+const httpRequestDuration = new Histogram({
+  name: "myapp_http_request_duration_seconds",
+  help: "HTTP request duration in seconds",
+  labelNames: ["method", "route"] as const,
+  buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+  registers: [register],
+});
+
+// Gauge — active connections
+const activeConnections = new Gauge({
+  name: "myapp_active_connections",
+  help: "Number of active connections",
+  registers: [register],
+});
+
+const app = express();
+
+// Middleware to track request metrics
+app.use((req, res, next) => {
+  activeConnections.inc();
+  const end = httpRequestDuration.startTimer({ method: req.method, route: req.path });
+  res.on("finish", () => {
+    httpRequestsTotal.inc({ method: req.method, route: req.path, status: String(res.statusCode) });
+    end();
+    activeConnections.dec();
+  });
+  next();
+});
+
+// Expose /metrics endpoint for Prometheus scraping
+app.get("/metrics", async (_req, res) => {
+  res.set("Content-Type", register.contentType);
+  res.end(await register.metrics());
+});
+
+app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
+app.listen(3000, () => console.log("Server listening on :3000"));`,
+    },
+    {
+      language: "promql",
+      caption: "Common PromQL query patterns for dashboards and alerts",
+      source: `# --- Rate & Throughput ---
+# Requests per second by status code (5m smoothing)
+sum by (status) (rate(myapp_http_requests_total[5m]))
+
+# Error rate as a percentage
+sum(rate(myapp_http_requests_total{status=~"5.."}[5m]))
+  / sum(rate(myapp_http_requests_total[5m])) * 100
+
+# --- Latency Percentiles ---
+# p50, p95, p99 request duration
+histogram_quantile(0.50, sum by (le) (rate(myapp_http_request_duration_seconds_bucket[5m])))
+histogram_quantile(0.95, sum by (le) (rate(myapp_http_request_duration_seconds_bucket[5m])))
+histogram_quantile(0.99, sum by (le) (rate(myapp_http_request_duration_seconds_bucket[5m])))
+
+# Average request duration
+rate(myapp_http_request_duration_seconds_sum[5m])
+  / rate(myapp_http_request_duration_seconds_count[5m])
+
+# --- Saturation & Resources ---
+# CPU usage per instance
+1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))
+
+# Memory usage percentage
+(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)
+  / node_memory_MemTotal_bytes * 100
+
+# Disk space: predict when filesystem will be full
+predict_linear(node_filesystem_avail_bytes{mountpoint="/"}[6h], 24*3600) < 0
+
+# --- Alerting: Multi-burn-rate SLO ---
+# Fast burn: 14.4x error budget consumption over 1h
+(
+  sum(rate(myapp_http_requests_total{status=~"5.."}[1h]))
+  / sum(rate(myapp_http_requests_total[1h]))
+) > (14.4 * 0.001)
+
+# Slow burn: 1x error budget consumption over 3d
+(
+  sum(rate(myapp_http_requests_total{status=~"5.."}[3d]))
+  / sum(rate(myapp_http_requests_total[3d]))
+) > (1 * 0.001)
+
+# --- Top-K & Aggregation ---
+# Top 5 endpoints by request rate
+topk(5, sum by (route) (rate(myapp_http_requests_total[5m])))
+
+# Requests per service, excluding internal routes
+sum by (service) (rate(http_requests_total{route!~"/internal/.*"}[5m]))`,
+    },
+    {
+      language: "cpp",
+      caption: "Prometheus metrics instrumentation in C++ using prometheus-cpp",
+      source: `#include <prometheus/counter.h>
+#include <prometheus/exposer.h>
+#include <prometheus/histogram.h>
+#include <prometheus/registry.h>
+#include <chrono>
+#include <memory>
+#include <thread>
+
+int main() {
+  // Create an HTTP exposer on port 8080 (serves /metrics)
+  prometheus::Exposer exposer{"0.0.0.0:8080"};
+
+  auto registry = std::make_shared<prometheus::Registry>();
+
+  // Counter family — total requests by method and status
+  auto& request_counter = prometheus::BuildCounter()
+    .Name("myapp_http_requests_total")
+    .Help("Total HTTP requests")
+    .Register(*registry);
+
+  auto& get_200 = request_counter.Add({{"method", "GET"}, {"status", "200"}});
+  auto& post_201 = request_counter.Add({{"method", "POST"}, {"status", "201"}});
+  auto& get_500 = request_counter.Add({{"method", "GET"}, {"status", "500"}});
+
+  // Histogram family — request duration
+  auto& duration_histogram = prometheus::BuildHistogram()
+    .Name("myapp_http_request_duration_seconds")
+    .Help("Request duration in seconds")
+    .Register(*registry);
+
+  auto& get_duration = duration_histogram.Add(
+    {{"method", "GET"}},
+    prometheus::Histogram::BucketBoundaries{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 5.0}
+  );
+
+  exposer.RegisterCollectable(registry);
+
+  // Simulate request handling
+  while (true) {
+    auto start = std::chrono::steady_clock::now();
+    // ... handle request ...
+    std::this_thread::sleep_for(std::chrono::milliseconds(15));
+    auto end = std::chrono::steady_clock::now();
+
+    double duration = std::chrono::duration<double>(end - start).count();
+    get_200.Increment();
+    get_duration.Observe(duration);
+  }
+
+  return 0;
+}`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Prometheus Monitoring Architecture",
+      kind: "architecture",
+      caption: "End-to-end Prometheus monitoring stack showing scraping, storage, alerting, and visualization",
+      mermaid: `graph TB
+  subgraph Targets["Instrumented Targets"]
+    A1["Service A<br/>/metrics"]
+    A2["Service B<br/>/metrics"]
+    A3["Node Exporter<br/>/metrics"]
+    A4["cAdvisor<br/>/metrics"]
+  end
+
+  subgraph Prometheus["Prometheus Server"]
+    SD["Service Discovery<br/>(Kubernetes, Consul, DNS)"]
+    SC["Scraper"]
+    TSDB["Time Series DB<br/>(Local Storage)"]
+    RE["Recording Rules<br/>Engine"]
+    AE["Alert Rules<br/>Engine"]
+    QE["PromQL<br/>Query Engine"]
+  end
+
+  subgraph Alerting["Alert Pipeline"]
+    AM["Alertmanager<br/>(Dedup, Group, Route)"]
+    SL["Slack"]
+    PD["PagerDuty"]
+    EM["Email"]
+  end
+
+  subgraph Visualization["Visualization"]
+    GR["Grafana<br/>Dashboards"]
+    PA["Prometheus<br/>Web UI"]
+  end
+
+  subgraph LongTerm["Long-Term Storage"]
+    TH["Thanos / Cortex /<br/>Mimir"]
+    OBJ["Object Storage<br/>(S3, GCS)"]
+  end
+
+  SD -->|discover targets| SC
+  SC -->|pull /metrics| A1
+  SC -->|pull /metrics| A2
+  SC -->|pull /metrics| A3
+  SC -->|pull /metrics| A4
+  SC -->|write samples| TSDB
+  TSDB --> RE
+  TSDB --> AE
+  TSDB --> QE
+  AE -->|fire alerts| AM
+  AM --> SL
+  AM --> PD
+  AM --> EM
+  QE --> GR
+  QE --> PA
+  TSDB -->|remote write| TH
+  TH --> OBJ`,
+    },
+    {
+      title: "RED and USE Methods Mindmap",
+      kind: "mindmap",
+      caption: "Comprehensive mindmap of the RED and USE monitoring methodologies with key metrics and tools",
+      mermaid: `mindmap
+  root((Metrics<br/>Methodologies))
+    RED Method
+      Rate
+        requests per second
+        rate(http_requests_total)
+        throughput by endpoint
+      Errors
+        error rate percentage
+        5xx / total requests
+        error budget tracking
+      Duration
+        p50 p95 p99 latency
+        histogram_quantile
+        Apdex score
+    USE Method
+      Utilization
+        CPU percentage
+        Memory usage
+        Disk I/O bandwidth
+        Network bandwidth
+      Saturation
+        CPU run queue
+        Disk I/O queue depth
+        Memory swap activity
+        Thread pool exhaustion
+      Errors
+        Disk errors
+        Network packet drops
+        ECC memory corrections
+        NIC errors
+    SLO Framework
+      SLI definition
+      Error budget
+      Burn rate alerts
+      Multi-window detection
+    Tools
+      Prometheus
+      Grafana
+      Alertmanager
+      Thanos / Mimir`,
+    },
+  ],
+  comparison: {
+    columns: ["Feature", "Prometheus", "Datadog", "CloudWatch", "InfluxDB"],
+    rows: [
+      ["**Type**", "Open-source, self-hosted", "Commercial SaaS", "AWS-native SaaS", "Open-source / Cloud"],
+      ["**Data Model**", "Multi-dimensional time series with *labels*", "Tags-based time series with *custom metrics*", "Namespaces, dimensions, metrics", "Tags-based time series with *field keys*"],
+      ["**Query Language**", "`PromQL` — powerful, functional", "`DQL` — proprietary query language", "CloudWatch Metrics Insights (SQL-like)", "`InfluxQL` / `Flux` — SQL-like and functional"],
+      ["**Collection**", "Pull-based (scraping `/metrics`)", "Push-based (agent / API)", "Push-based (SDK / API / agent)", "Push-based (Telegraf agent / API)"],
+      ["**Storage**", "Local TSDB; remote write to *Thanos/Mimir/Cortex*", "Managed cloud storage (*15-month retention*)", "Managed AWS storage (*15-month retention*)", "Built-in TSM engine; *InfluxDB Cloud*"],
+      ["**Alerting**", "Prometheus rules + *Alertmanager* (routing, grouping, silencing)", "Built-in monitors with *anomaly detection* and ML", "CloudWatch Alarms + *SNS* notifications", "Built-in checks and *notification endpoints*"],
+      ["**Visualization**", "Basic Web UI; pair with **Grafana**", "Built-in dashboards, *notebooks*, SLO tracking", "CloudWatch Dashboards (*limited customization*)", "Built-in Chronograf; pair with **Grafana**"],
+      ["**Scalability**", "Single-node; scale with *Thanos/Mimir* federation", "Fully managed, *auto-scaling* infrastructure", "Fully managed, *auto-scaling* per AWS region", "Clustering in *Enterprise*; InfluxDB Cloud scales"],
+      ["**Cost**", "**Free**; infrastructure cost only", "Per-host + per-metric pricing (*expensive at scale*)", "Pay per metric, dashboard, alarm, API call", "**Free** OSS; Cloud plans per usage"],
+      ["**Best For**", "Kubernetes-native, *cloud-native* microservices", "Full-stack observability with *minimal ops overhead*", "AWS-native workloads, *tight AWS integration*", "IoT, *high-write* time series, edge deployments"],
+    ],
+  },
+  exercises: [
+    "**Instrument a REST API**: Add `prom-client` to a Node.js Express app. Create a *counter* for total requests (labeled by `method`, `route`, `status`), a *histogram* for request duration with custom bucket boundaries, and a *gauge* for active connections. Expose a `/metrics` endpoint and verify the output with `curl`.",
+    "**Build a RED Dashboard**: Using Grafana and Prometheus, create a dashboard for a service with three panels: *request rate* (`rate()`), *error percentage* (ratio of 5xx to total), and *latency percentiles* (`histogram_quantile` for p50, p95, p99). Add template variables for `service` and `instance` to make it reusable.",
+    "**Simulate a Cardinality Explosion**: Create a metric with a `user_id` label and generate 100,000 unique values. Observe the impact on Prometheus memory usage and query latency. Then refactor to remove the high-cardinality label and use *exemplars* instead to link to trace IDs.",
+    "**Implement SLO-Based Alerting**: Define an SLI (`99.9% of requests < 300ms`), compute the *error budget*, and create **multi-window, multi-burn-rate** alert rules in Prometheus. Set up a Grafana panel showing *remaining error budget percentage* over a 30-day rolling window.",
+    "**Infrastructure Monitoring with USE**: Deploy `node_exporter` on a Linux host and build a Grafana dashboard applying the USE method: *CPU utilization* (`1 - idle rate`), *CPU saturation* (load average vs. core count), *memory utilization*, *disk I/O saturation* (await, queue depth), and *network errors* (packet drops). Trigger each condition with stress tools like `stress-ng`."
+  ],
+  cheatSheet: [
+    "**Counter vs Gauge**: If the value can *decrease*, use a `Gauge`. If it only goes *up* (totals, counts), use a `Counter`. Query counters with `rate()` or `increase()`, never read raw values.",
+    "**rate() vs irate()**: `rate()` averages over the full range window for *smooth graphs*. `irate()` uses only the *last two samples* for higher resolution on bursty traffic. Use `rate()` for alerts, `irate()` for dashboards.",
+    "**Histogram percentiles**: `histogram_quantile(0.99, sum by (le) (rate(my_histogram_bucket[5m])))` — the `by (le)` clause is **mandatory**. Forgetting it gives *wrong results silently*.",
+    "**Naming convention**: `<namespace>_<subsystem>_<name>_<unit>` with unit suffix: `_seconds`, `_bytes`, `_total`. Example: `myapp_http_request_duration_seconds`.",
+    "**Label cardinality rule**: Keep label value sets *bounded and small*. Never use `user_id`, `request_id`, or `ip` as labels. Move high-cardinality data to *logs* or *traces*.",
+    "**predict_linear()**: `predict_linear(node_filesystem_avail_bytes[6h], 24*3600) < 0` alerts when a disk will be *full within 24 hours* based on the last 6 hours of data. Essential for **proactive capacity planning**."
+  ],
+  revisionNotes: [
+    "**Metric Types**: *Counters* only go up (use `rate()`/`increase()`), *Gauges* go up and down (raw value is meaningful), *Histograms* use cumulative `le` buckets for percentile estimation (aggregatable), *Summaries* compute client-side quantiles (precise but **not aggregatable**).",
+    "**RED for Services**: `Rate` = `rate(requests_total[5m])`, `Errors` = `sum(rate(errors[5m])) / sum(rate(total[5m]))`, `Duration` = `histogram_quantile(0.99, ...)`. Apply to *every service endpoint*. Maps directly to **user experience**.",
+    "**USE for Infrastructure**: Check *Utilization* (% busy), *Saturation* (queue depth, swap), *Errors* (hardware errors) for **every resource** (CPU, memory, disk, network). USE finds the *root cause* that RED symptoms point to.",
+    "**SLO Alerting**: Define `SLI` (what to measure) and `SLO` (target, e.g., 99.9%). Error budget = `1 - SLO`. Use **multi-burn-rate** alerts: *fast burn* (14.4x over 1h) pages immediately, *slow burn* (1x over 3d) creates tickets. This eliminates alert fatigue from *threshold-based* alerting.",
+    "**Cardinality Management**: Each unique `{metric_name, label_values...}` combination is a separate *time series*. High cardinality = millions of series = **OOM crashes**. Audit with `prometheus_tsdb_head_series` and `topk(10, count by (__name__) ({__name__=~\".+\"}))`. Use `metric_relabel_configs` to drop unwanted labels at scrape time."
+  ],
 };

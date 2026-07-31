@@ -346,4 +346,11 @@ async function callInternalAPI(endpoint: string) {
     { term: "Scope", definition: "A permission boundary requested by the client and approved by the user, defining what the access token can do." },
     { term: "Token Introspection", definition: "An endpoint (RFC 7662) that allows resource servers to validate opaque access tokens by querying the authorization server." },
   ],
+  exercises: [
+    "Implement the full **Authorization Code + PKCE** flow for a single-page application. Generate the `code_verifier` and `code_challenge`, build the authorization URL with `state` and `nonce`, handle the callback, exchange the code for tokens, and validate the **ID token** by fetching JWKS. List every security check you perform and *why*.",
+    "An attacker intercepts the **authorization code** from the redirect URI. Explain step by step why they *cannot* exchange it for tokens when **PKCE** is in use. Then explain what would happen if the application used the **Implicit flow** instead -- why is it deprecated?",
+    "Design the token management strategy for a mobile app that uses OIDC. Cover: where to store the **access token**, **refresh token**, and **ID token**; how to handle token expiration and *silent refresh*; and what happens when the refresh token itself expires. Why should you *never* send the ID token to your API?",
+    "You are migrating a legacy app from **Resource Owner Password Credentials** (ROPC) flow to **Authorization Code + PKCE**. Outline the migration steps, explain what changes on the client and server, and describe how to handle the transition period where some clients use the old flow.",
+    "Fetch the **OIDC Discovery document** from a real provider (e.g., `https://accounts.google.com/.well-known/openid-configuration`). Identify and explain the purpose of each endpoint listed: `authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`, `jwks_uri`, and `revocation_endpoint`. How does a client use this document for **auto-configuration**?",
+  ],
 };

@@ -22,85 +22,139 @@ export const graphTheory: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "BFS and DFS on an adjacency list",
-      source: `from collections import deque
+      source: `#include <iostream>
+#include <queue>
+#include <stack>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+#include <algorithm>
 
-def bfs(graph: dict[int, list[int]], start: int) -> list[int]:
-    """Return vertices in BFS order from start."""
-    visited = {start}
-    queue = deque([start])
-    order = []
-    while queue:
-        v = queue.popleft()
-        order.append(v)
-        for neighbor in graph[v]:
-            if neighbor not in visited:
-                visited.add(neighbor)
-                queue.append(neighbor)
-    return order
+using Graph = std::unordered_map<int, std::vector<int>>;
 
-def dfs(graph: dict[int, list[int]], start: int) -> list[int]:
-    """Return vertices in DFS order from start (iterative)."""
-    visited = set()
-    stack = [start]
-    order = []
-    while stack:
-        v = stack.pop()
-        if v in visited:
-            continue
-        visited.add(v)
-        order.append(v)
-        # Push neighbors in reverse for consistent ordering
-        for neighbor in reversed(graph[v]):
-            if neighbor not in visited:
-                stack.append(neighbor)
-    return order
+// Return vertices in BFS order from start. O(V + E).
+std::vector<int> bfs(const Graph& graph, int start) {
+    std::unordered_set<int> visited = {start};
+    std::queue<int> q;
+    q.push(start);
+    std::vector<int> order;
 
-# Example graph (undirected, adjacency list)
-graph = {
-    0: [1, 2],
-    1: [0, 3],
-    2: [0, 3],
-    3: [1, 2, 4],
-    4: [3],
+    while (!q.empty()) {
+        int v = q.front(); q.pop();
+        order.push_back(v);
+        for (int neighbor : graph.at(v)) {
+            if (visited.find(neighbor) == visited.end()) {
+                visited.insert(neighbor);
+                q.push(neighbor);
+            }
+        }
+    }
+    return order;
 }
-print("BFS:", bfs(graph, 0))  # [0, 1, 2, 3, 4]
-print("DFS:", dfs(graph, 0))  # [0, 1, 3, 2, 4]`,
+
+// Return vertices in DFS order from start (iterative). O(V + E).
+std::vector<int> dfs(const Graph& graph, int start) {
+    std::unordered_set<int> visited;
+    std::stack<int> stk;
+    stk.push(start);
+    std::vector<int> order;
+
+    while (!stk.empty()) {
+        int v = stk.top(); stk.pop();
+        if (visited.count(v)) continue;
+        visited.insert(v);
+        order.push_back(v);
+        // Push neighbors in reverse for consistent ordering
+        auto& neighbors = graph.at(v);
+        for (auto it = neighbors.rbegin(); it != neighbors.rend(); ++it) {
+            if (!visited.count(*it))
+                stk.push(*it);
+        }
+    }
+    return order;
+}
+
+int main() {
+    // Undirected graph as adjacency list
+    Graph graph = {
+        {0, {1, 2}},
+        {1, {0, 3}},
+        {2, {0, 3}},
+        {3, {1, 2, 4}},
+        {4, {3}},
+    };
+
+    std::cout << "BFS:";
+    for (int v : bfs(graph, 0)) std::cout << " " << v;
+    std::cout << "\\n"; // 0 1 2 3 4
+
+    std::cout << "DFS:";
+    for (int v : dfs(graph, 0)) std::cout << " " << v;
+    std::cout << "\\n"; // 0 1 3 2 4
+
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Dijkstra's shortest path algorithm",
-      source: `import heapq
+      source: `#include <iostream>
+#include <queue>
+#include <unordered_map>
+#include <vector>
+#include <limits>
 
-def dijkstra(graph: dict[int, list[tuple[int, int]]], start: int) -> dict[int, int]:
-    """
-    Compute shortest distances from start.
-    graph: adjacency list as {node: [(neighbor, weight), ...]}
-    Returns: {node: shortest_distance}
-    """
-    dist: dict[int, int] = {start: 0}
-    heap = [(0, start)]  # (distance, vertex)
+using WeightedGraph = std::unordered_map<int, std::vector<std::pair<int,int>>>;
 
-    while heap:
-        d, u = heapq.heappop(heap)
-        if d > dist.get(u, float('inf')):
-            continue  # stale entry
-        for v, w in graph[u]:
-            new_dist = d + w
-            if new_dist < dist.get(v, float('inf')):
-                dist[v] = new_dist
-                heapq.heappush(heap, (new_dist, v))
-    return dist
+// Compute shortest distances from start.
+// graph: {node: [(neighbor, weight), ...]}
+// Returns: {node: shortest_distance}
+std::unordered_map<int,int> dijkstra(const WeightedGraph& graph, int start) {
+    constexpr int INF = std::numeric_limits<int>::max();
+    std::unordered_map<int,int> dist;
+    dist[start] = 0;
 
-# Weighted directed graph
-graph = {
-    0: [(1, 4), (2, 1)],
-    1: [(3, 1)],
-    2: [(1, 2), (3, 5)],
-    3: [],
+    // Min-heap: (distance, vertex)
+    using Pair = std::pair<int,int>;
+    std::priority_queue<Pair, std::vector<Pair>, std::greater<Pair>> heap;
+    heap.push({0, start});
+
+    while (!heap.empty()) {
+        auto [d, u] = heap.top(); heap.pop();
+        // Skip stale entries
+        if (dist.count(u) && d > dist[u]) continue;
+
+        auto it = graph.find(u);
+        if (it == graph.end()) continue;
+        for (auto [v, w] : it->second) {
+            int new_dist = d + w;
+            if (!dist.count(v) || new_dist < dist[v]) {
+                dist[v] = new_dist;
+                heap.push({new_dist, v});
+            }
+        }
+    }
+    return dist;
 }
-print(dijkstra(graph, 0))  # {0: 0, 2: 1, 1: 3, 3: 4}`,
+
+int main() {
+    // Weighted directed graph
+    WeightedGraph graph = {
+        {0, {{1, 4}, {2, 1}}},
+        {1, {{3, 1}}},
+        {2, {{1, 2}, {3, 5}}},
+        {3, {}},
+    };
+
+    auto dist = dijkstra(graph, 0);
+    for (auto& [node, d] : dist)
+        std::cout << "dist[" << node << "] = " << d << "\\n";
+    // dist[0] = 0, dist[2] = 1, dist[1] = 3, dist[3] = 4
+
+    return 0;
+}`,
     },
   ],
   diagrams: [

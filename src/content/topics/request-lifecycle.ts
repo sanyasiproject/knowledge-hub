@@ -60,42 +60,73 @@ app.use((req, res, next) => {
 });`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Full request trace using curl verbose output",
-      source: `# Trace every step of the lifecycle:
-# curl -v --trace-time https://api.example.com/users/1
+      source: `// Trace every step of the lifecycle:
+// curl -v --trace-time https://api.example.com/users/1
 
-# 1. DNS resolution:     ~20ms (cached) to ~200ms (cold)
-# 2. TCP handshake:      ~30ms (1 RTT)
-# 3. TLS handshake:      ~60ms (TLS 1.3, 1 RTT) or ~120ms (TLS 1.2, 2 RTT)
-# 4. HTTP request sent:  ~1ms
-# 5. Server processing:  ~50-500ms (varies)
-# 6. HTTP response:      ~1-100ms (depends on payload size)
-# Total first request:   ~160-850ms
-# Subsequent (keep-alive): ~50-500ms (skip steps 1-3)
+// 1. DNS resolution:     ~20ms (cached) to ~200ms (cold)
+// 2. TCP handshake:      ~30ms (1 RTT)
+// 3. TLS handshake:      ~60ms (TLS 1.3, 1 RTT) or ~120ms (TLS 1.2, 2 RTT)
+// 4. HTTP request sent:  ~1ms
+// 5. Server processing:  ~50-500ms (varies)
+// 6. HTTP response:      ~1-100ms (depends on payload size)
+// Total first request:   ~160-850ms
+// Subsequent (keep-alive): ~50-500ms (skip steps 1-3)
 
-# Python: Measuring each phase programmatically
-import socket, ssl, time
+// C++: Measuring each phase programmatically (POSIX + OpenSSL)
+#include <sys/socket.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <openssl/ssl.h>
+#include <chrono>
+#include <iostream>
+#include <cstring>
 
-host = 'api.example.com'
+int main() {
+    const char* host = "api.example.com";
+    const char* port = "443";
+    using Clock = std::chrono::steady_clock;
 
-# DNS
-t0 = time.time()
-ip = socket.getaddrinfo(host, 443)[0][4][0]
-dns_ms = (time.time() - t0) * 1000
+    // DNS resolution
+    auto t0 = Clock::now();
+    struct addrinfo hints{}, *res;
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    getaddrinfo(host, port, &hints, &res);
+    double dns_ms = std::chrono::duration<double, std::milli>(
+        Clock::now() - t0).count();
 
-# TCP
-t1 = time.time()
-sock = socket.create_connection((ip, 443))
-tcp_ms = (time.time() - t1) * 1000
+    // TCP connection
+    auto t1 = Clock::now();
+    int sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    connect(sockfd, res->ai_addr, res->ai_addrlen);
+    double tcp_ms = std::chrono::duration<double, std::milli>(
+        Clock::now() - t1).count();
+    freeaddrinfo(res);
 
-# TLS
-t2 = time.time()
-ctx = ssl.create_default_context()
-ssock = ctx.wrap_socket(sock, server_hostname=host)
-tls_ms = (time.time() - t2) * 1000
+    // TLS handshake
+    auto t2 = Clock::now();
+    SSL_library_init();
+    SSL_CTX* ctx = SSL_CTX_new(TLS_client_method());
+    SSL* ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, sockfd);
+    SSL_set_tlsext_host_name(ssl, host);
+    SSL_connect(ssl);
+    double tls_ms = std::chrono::duration<double, std::milli>(
+        Clock::now() - t2).count();
 
-print(f"DNS: {dns_ms:.1f}ms, TCP: {tcp_ms:.1f}ms, TLS: {tls_ms:.1f}ms")`,
+    std::cout << "DNS: " << dns_ms << "ms, "
+              << "TCP: " << tcp_ms << "ms, "
+              << "TLS: " << tls_ms << "ms" << std::endl;
+
+    // Cleanup
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+    SSL_CTX_free(ctx);
+    close(sockfd);
+    return 0;
+}`,
     },
   ],
   diagrams: [

@@ -182,100 +182,114 @@ async function handleOrderRequest(rawInput: unknown): Promise<ApiResponse> {
 }`
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Circuit breaker and retry patterns",
-      source: `import time
-import random
-from enum import Enum, auto
-from typing import Callable, TypeVar
-from dataclasses import dataclass, field
+      source: `#include <functional>
+#include <stdexcept>
+#include <chrono>
+#include <thread>
+#include <random>
 
-T = TypeVar("T")
-
-
-# Retry with exponential backoff and jitter
-def retry_with_backoff(
-    func: Callable[[], T],
-    max_attempts: int = 3,
-    base_delay: float = 1.0,
-    max_delay: float = 30.0,
-    retryable_exceptions: tuple = (IOError, TimeoutError),
-) -> T:
-    """Retry a function with exponential backoff and jitter."""
-    for attempt in range(max_attempts):
-        try:
-            return func()
-        except retryable_exceptions as e:
-            if attempt == max_attempts - 1:
-                raise  # Last attempt, propagate the exception
-            delay = min(base_delay * (2 ** attempt), max_delay)
-            jitter = delay * random.uniform(0, 0.25)
-            time.sleep(delay + jitter)
-    raise RuntimeError("Unreachable")  # Satisfies type checker
-
-
-# Circuit Breaker pattern
-class CircuitState(Enum):
-    CLOSED = auto()    # Normal operation, requests pass through
-    OPEN = auto()      # Failures exceeded threshold, requests fail immediately
-    HALF_OPEN = auto() # Testing if service recovered
+// Retry with exponential backoff and jitter
+template <typename T>
+T retry_with_backoff(
+    std::function<T()> func,
+    int max_attempts = 3,
+    double base_delay_s = 1.0,
+    double max_delay_s = 30.0)
+{
+    std::mt19937 rng(std::random_device{}());
+    for (int attempt = 0; attempt < max_attempts; ++attempt) {
+        try {
+            return func();
+        } catch (const std::exception&) {
+            if (attempt == max_attempts - 1) throw;
+            double delay = std::min(base_delay_s * (1 << attempt), max_delay_s);
+            std::uniform_real_distribution<> jitter(0.0, delay * 0.25);
+            int ms = static_cast<int>((delay + jitter(rng)) * 1000);
+            std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+        }
+    }
+    throw std::runtime_error("Unreachable");
+}
 
 
-@dataclass
-class CircuitBreaker:
-    failure_threshold: int = 5
-    recovery_timeout: float = 30.0
-    half_open_max_calls: int = 1
+// Circuit Breaker pattern
+enum class CircuitState { CLOSED, OPEN, HALF_OPEN };
 
-    _state: CircuitState = field(default=CircuitState.CLOSED, init=False)
-    _failure_count: int = field(default=0, init=False)
-    _last_failure_time: float = field(default=0.0, init=False)
-    _half_open_calls: int = field(default=0, init=False)
+class CircuitOpenError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
 
-    def call(self, func: Callable[[], T]) -> T:
-        if self._state == CircuitState.OPEN:
-            if time.time() - self._last_failure_time >= self.recovery_timeout:
-                self._state = CircuitState.HALF_OPEN
-                self._half_open_calls = 0
-            else:
-                raise CircuitOpenError("Circuit is open -- failing fast")
+class CircuitBreaker {
+public:
+    CircuitBreaker(int failure_threshold = 5,
+                   double recovery_timeout_s = 30.0,
+                   int half_open_max_calls = 1)
+        : failure_threshold_(failure_threshold),
+          recovery_timeout_s_(recovery_timeout_s),
+          half_open_max_calls_(half_open_max_calls) {}
 
-        if self._state == CircuitState.HALF_OPEN:
-            if self._half_open_calls >= self.half_open_max_calls:
-                raise CircuitOpenError("Circuit is half-open -- max test calls reached")
-            self._half_open_calls += 1
+    template <typename T>
+    T call(std::function<T()> func) {
+        auto now = std::chrono::steady_clock::now();
 
-        try:
-            result = func()
-            self._on_success()
-            return result
-        except Exception as e:
-            self._on_failure()
-            raise
+        if (state_ == CircuitState::OPEN) {
+            double elapsed = std::chrono::duration<double>(
+                now - last_failure_time_).count();
+            if (elapsed >= recovery_timeout_s_) {
+                state_ = CircuitState::HALF_OPEN;
+                half_open_calls_ = 0;
+            } else {
+                throw CircuitOpenError("Circuit is open -- failing fast");
+            }
+        }
 
-    def _on_success(self) -> None:
-        self._failure_count = 0
-        self._state = CircuitState.CLOSED
+        if (state_ == CircuitState::HALF_OPEN) {
+            if (half_open_calls_ >= half_open_max_calls_)
+                throw CircuitOpenError("Half-open -- max test calls reached");
+            ++half_open_calls_;
+        }
 
-    def _on_failure(self) -> None:
-        self._failure_count += 1
-        self._last_failure_time = time.time()
-        if self._failure_count >= self.failure_threshold:
-            self._state = CircuitState.OPEN
+        try {
+            T result = func();
+            on_success();
+            return result;
+        } catch (...) {
+            on_failure();
+            throw;
+        }
+    }
 
+private:
+    void on_success() {
+        failure_count_ = 0;
+        state_ = CircuitState::CLOSED;
+    }
 
-class CircuitOpenError(Exception):
-    """Raised when the circuit breaker is open."""
-    pass
+    void on_failure() {
+        ++failure_count_;
+        last_failure_time_ = std::chrono::steady_clock::now();
+        if (failure_count_ >= failure_threshold_)
+            state_ = CircuitState::OPEN;
+    }
 
+    int failure_threshold_;
+    double recovery_timeout_s_;
+    int half_open_max_calls_;
 
-# Usage
-payment_breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=60.0)
+    CircuitState state_ = CircuitState::CLOSED;
+    int failure_count_ = 0;
+    int half_open_calls_ = 0;
+    std::chrono::steady_clock::time_point last_failure_time_;
+};
 
-def process_payment(order_id: str) -> PaymentResult:
-    return payment_breaker.call(
-        lambda: payment_gateway.charge(order_id)
-    )`
+// Usage
+// CircuitBreaker payment_breaker(3, 60.0);
+// auto result = payment_breaker.call<PaymentResult>(
+//     [&]() { return payment_gateway.charge(order_id); }
+// );`
     }
   ],
 

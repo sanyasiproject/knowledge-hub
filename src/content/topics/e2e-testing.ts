@@ -179,75 +179,90 @@ test.describe('Product catalog', () => {
 });`,
     },
     {
-      language: "python",
-      caption: "Selenium Page Object Model in Python with pytest",
-      source: `# pages/search_page.py
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+      language: "cpp",
+      caption: "Selenium WebDriver Page Object Model in C++ with Google Test",
+      source: `// pages/search_page.h
+#include <string>
+#include <memory>
+#include <webdriver/webdriver.h>  // Selenium WebDriver C++ bindings
+#include <gtest/gtest.h>
 
-class SearchPage:
-    URL = "/search"
+class SearchPage {
+    static constexpr const char* URL = "/search";
 
-    def __init__(self, driver):
-        self.driver = driver
-        self.wait = WebDriverWait(driver, 10)
+public:
+    explicit SearchPage(webdriver::Session& driver)
+        : driver_(driver) {}
 
-    def navigate(self):
-        self.driver.get(f"{self.driver.base_url}{self.URL}")
-        return self
+    SearchPage& navigate() {
+        driver_.get(base_url_ + URL);
+        return *this;
+    }
 
-    def search_for(self, query: str):
-        search_input = self.wait.until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-testid='search-input']"))
-        )
-        search_input.clear()
-        search_input.send_keys(query)
-        self.driver.find_element(By.CSS_SELECTOR, "[data-testid='search-button']").click()
-        return self
+    SearchPage& search_for(const std::string& query) {
+        auto input = driver_.wait_until_clickable(
+            webdriver::By::css("[data-testid='search-input']"), 10);
+        input.clear();
+        input.send_keys(query);
+        driver_.find_element(
+            webdriver::By::css("[data-testid='search-button']")).click();
+        return *this;
+    }
 
-    def get_result_count(self) -> int:
-        results = self.wait.until(
-            EC.presence_of_all_elements_located((By.CSS_SELECTOR, "[data-testid='search-result']"))
-        )
-        return len(results)
+    int get_result_count() {
+        auto results = driver_.wait_until_all_present(
+            webdriver::By::css("[data-testid='search-result']"), 10);
+        return static_cast<int>(results.size());
+    }
 
-    def get_first_result_title(self) -> str:
-        first = self.wait.until(
-            EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-testid='search-result']:first-child h3"))
-        )
-        return first.text
+    std::string get_first_result_title() {
+        auto first = driver_.wait_until_visible(
+            webdriver::By::css(
+                "[data-testid='search-result']:first-child h3"), 10);
+        return first.text();
+    }
 
-    def has_no_results_message(self) -> bool:
-        return len(self.driver.find_elements(By.CSS_SELECTOR, "[data-testid='no-results']")) > 0
+    bool has_no_results_message() {
+        auto elems = driver_.find_elements(
+            webdriver::By::css("[data-testid='no-results']"));
+        return !elems.empty();
+    }
 
+private:
+    webdriver::Session& driver_;
+    std::string base_url_ = "http://localhost:3000";
+};
 
-# tests/test_search.py
-import pytest
-from selenium import webdriver
-from pages.search_page import SearchPage
+// tests/test_search.cpp
+class SearchTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        webdriver::ChromeOptions options;
+        options.add_argument("--headless");
+        options.add_argument("--no-sandbox");
+        driver_ = std::make_unique<webdriver::Session>(
+            webdriver::create_chrome(options));
+    }
+    void TearDown() override { driver_->quit(); }
 
-@pytest.fixture
-def driver():
-    options = webdriver.ChromeOptions()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    d = webdriver.Chrome(options=options)
-    d.base_url = "http://localhost:3000"
-    yield d
-    d.quit()
+    std::unique_ptr<webdriver::Session> driver_;
+};
 
-class TestSearch:
-    def test_search_returns_matching_results(self, driver):
-        page = SearchPage(driver).navigate()
-        page.search_for("widget")
-        assert page.get_result_count() > 0
-        assert "widget" in page.get_first_result_title().lower()
+TEST_F(SearchTest, ReturnsMatchingResults) {
+    SearchPage page(*driver_);
+    page.navigate().search_for("widget");
+    EXPECT_GT(page.get_result_count(), 0);
+    std::string title = page.get_first_result_title();
+    // case-insensitive check for "widget"
+    std::transform(title.begin(), title.end(), title.begin(), ::tolower);
+    EXPECT_NE(title.find("widget"), std::string::npos);
+}
 
-    def test_empty_search_shows_no_results(self, driver):
-        page = SearchPage(driver).navigate()
-        page.search_for("xyznonexistent12345")
-        assert page.has_no_results_message()`,
+TEST_F(SearchTest, EmptySearchShowsNoResults) {
+    SearchPage page(*driver_);
+    page.navigate().search_for("xyznonexistent12345");
+    EXPECT_TRUE(page.has_no_results_message());
+}`,
     },
   ],
   diagrams: [

@@ -126,6 +126,258 @@ export const k8sStorage: TopicContent = {
       back: "Retain (keep data after PVC deletion), Delete (remove backing storage), Recycle (deprecated -- basic scrub).",
     },
   ],
+  deepDive: [
+    "The **PV lifecycle** follows a well-defined state machine: *Available* (not yet bound), *Bound* (claimed by a PVC), *Released* (PVC deleted, data retained), and *Failed* (reclamation error). When a PVC is created, the **PV controller** in `kube-controller-manager` searches for a matching PV based on *storage capacity*, *access modes*, *StorageClass*, and *label selectors*. If no match exists and a `StorageClass` is specified, the **external provisioner** (a CSI sidecar container) dynamically creates the backing storage resource (e.g., an AWS EBS volume or GCE Persistent Disk) and a corresponding PV object. The `WaitForFirstConsumer` binding mode is critical for **topology-aware provisioning** -- it delays PV creation until a pod is actually scheduled, ensuring the volume is created in the *same availability zone* as the node. Without this, `Immediate` mode might provision a disk in `us-east-1a` while the pod lands on a node in `us-east-1b`, causing a `FailedAttachVolume` error that is notoriously confusing to debug.",
+    "**Volume snapshots** and **volume cloning** extend the CSI storage model with data management primitives. A `VolumeSnapshot` captures the state of a PVC at a point in time, backed by the storage provider's native snapshot mechanism (e.g., AWS EBS snapshots, GCE disk snapshots). Snapshots are represented by three objects: `VolumeSnapshotClass` (defines the snapshot driver and deletion policy), `VolumeSnapshot` (the user-facing request), and `VolumeSnapshotContent` (the actual snapshot resource, analogous to PV). You can create a new PVC *from a snapshot* by referencing it in `dataSource`, enabling workflows like **database backup/restore**, *environment cloning* (create a staging copy from a production snapshot), and **disaster recovery**. Volume cloning (`dataSource` referencing another PVC) creates a new volume pre-populated with data from the source, which is faster than snapshot-restore for same-zone copies. Both features require a CSI driver that implements the snapshot/clone controller capabilities.",
+    "**Secrets management in production** demands layered defenses beyond Kubernetes' built-in `Secret` objects. At the *infrastructure layer*, enable **etcd encryption at rest** via `EncryptionConfiguration` using `aescbc`, `secretbox`, or a KMS provider (AWS KMS, GCP KMS, Azure Key Vault). At the *application layer*, tools like **External Secrets Operator** sync secrets from external vaults (HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager) into Kubernetes Secrets automatically, keeping the *source of truth* outside the cluster. **Sealed Secrets** (by Bitnami) encrypt secrets client-side so they can be safely committed to Git -- only the in-cluster controller can decrypt them. For the most sensitive workloads, **CSI Secret Store Driver** mounts secrets directly from the external vault as volumes, *bypassing etcd entirely*. RBAC should restrict `get`/`list`/`watch` on Secrets to only the namespaces and service accounts that need them, and `audit logging` should track all Secret access for compliance.",
+  ],
+  code: [
+    {
+      language: "yaml",
+      caption: "**StorageClass** with `WaitForFirstConsumer` and a **PVC** requesting dynamic provisioning",
+      source: `# --- StorageClass: topology-aware SSD ---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: fast-ssd
+provisioner: ebs.csi.aws.com          # AWS EBS CSI driver
+parameters:
+  type: gp3                            # General Purpose SSD
+  iops: "4000"
+  throughput: "250"                    # MB/s
+  encrypted: "true"                    # encrypt at rest
+  fsType: ext4
+reclaimPolicy: Delete                  # delete EBS volume when PVC is removed
+volumeBindingMode: WaitForFirstConsumer # provision in same AZ as the pod
+allowVolumeExpansion: true             # allow PVC resize later
+---
+# --- PVC requesting 50Gi from fast-ssd ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: database-storage
+  namespace: production
+spec:
+  accessModes:
+    - ReadWriteOnce                    # single-node read-write
+  storageClassName: fast-ssd
+  resources:
+    requests:
+      storage: 50Gi                    # request 50 GiB`,
+    },
+    {
+      language: "yaml",
+      caption: "**ConfigMap** and **Secret** mounted as volumes in a Pod",
+      source: `# --- ConfigMap with application config ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: production
+data:
+  app.properties: |
+    server.port=8080
+    cache.ttl=300
+    log.level=info
+  feature-flags.json: |
+    {"darkMode": true, "betaAPI": false}
+---
+# --- Secret with database credentials ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: production
+type: Opaque
+data:
+  username: YWRtaW4=                  # base64("admin")
+  password: czNjdXIzUEBzcw==          # base64("s3cur3P@ss")
+immutable: true                        # prevent accidental changes
+---
+# --- Pod mounting both ConfigMap and Secret ---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-server
+spec:
+  containers:
+    - name: app
+      image: myapp:2.1
+      volumeMounts:
+        - name: config-vol
+          mountPath: /etc/app/config   # each key = file
+          readOnly: true
+        - name: secret-vol
+          mountPath: /etc/app/secrets
+          readOnly: true
+      env:
+        - name: DB_USER               # inject single key as env var
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: username
+  volumes:
+    - name: config-vol
+      configMap:
+        name: app-config
+    - name: secret-vol
+      secret:
+        secretName: db-credentials
+        defaultMode: 0400              # read-only for owner`,
+    },
+    {
+      language: "bash",
+      caption: "Essential **kubectl** commands for storage management and debugging",
+      source: `# --- PV / PVC Management ---
+# List all PersistentVolumes with status and claim
+kubectl get pv -o wide
+
+# List PVCs in a namespace with bound PV and StorageClass
+kubectl get pvc -n production -o wide
+
+# Describe a PVC to see events (binding, provisioning errors)
+kubectl describe pvc database-storage -n production
+
+# Expand a PVC (StorageClass must have allowVolumeExpansion: true)
+kubectl patch pvc database-storage -n production \\
+  -p '{"spec":{"resources":{"requests":{"storage":"100Gi"}}}}'
+
+# --- ConfigMaps & Secrets ---
+# Create ConfigMap from file
+kubectl create configmap nginx-conf --from-file=nginx.conf
+
+# Create Secret from literal values
+kubectl create secret generic api-keys \\
+  --from-literal=stripe-key=sk_live_xxx \\
+  --from-literal=sendgrid-key=SG.xxx
+
+# View decoded Secret values (base64 decode)
+kubectl get secret db-credentials -o jsonpath='{.data.password}' | base64 -d
+
+# --- Storage Debugging ---
+# Check CSI driver pods are running
+kubectl get pods -n kube-system -l app=ebs-csi-controller
+
+# View StorageClasses available in the cluster
+kubectl get storageclass
+
+# Check volume attachment status
+kubectl get volumeattachment`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "PV / PVC Binding and Dynamic Provisioning Flow",
+      kind: "flow",
+      caption: "How a **PVC** triggers *dynamic provisioning* via a **StorageClass**, resulting in a bound **PV** backed by cloud storage.",
+      mermaid: `flowchart LR
+    A["PVC Created"] --> B{"StorageClass\\nSpecified?"}
+    B -- No --> C["Match existing\\nPV by size/access"]
+    B -- Yes --> D["CSI Provisioner\\ncreates volume"]
+    D --> E["PV Created\\nautomatically"]
+    C --> F{"Match\\nFound?"}
+    F -- Yes --> G["Bind PVC to PV"]
+    F -- No --> H["PVC stays\\nPending"]
+    E --> G
+    G --> I["Pod mounts\\nPVC"]
+
+    style H fill:#f66,stroke:#333
+    style I fill:#6f6,stroke:#333`,
+    },
+    {
+      title: "Kubernetes Storage Architecture",
+      kind: "architecture",
+      caption: "The relationship between **Pods**, **PVCs**, **PVs**, **StorageClasses**, and the underlying **CSI drivers** connecting to cloud storage backends.",
+      mermaid: `flowchart TB
+    subgraph Cluster["Kubernetes Cluster"]
+        Pod["Pod"] -->|"volumeMount"| PVC["PVC\\n(namespace-scoped)"]
+        PVC -->|"binds to"| PV["PV\\n(cluster-scoped)"]
+        PVC -.->|"references"| SC["StorageClass"]
+        SC -->|"provisions via"| CSI["CSI Driver\\n(controller + node)"]
+    end
+
+    subgraph Storage["Storage Backends"]
+        EBS["AWS EBS"]
+        GCE["GCE PD"]
+        NFS["NFS Server"]
+        CEPH["Ceph / Rook"]
+    end
+
+    CSI --> EBS
+    CSI --> GCE
+    CSI --> NFS
+    CSI --> CEPH
+
+    subgraph Config["Config & Secrets"]
+        CM["ConfigMap"] -->|"mount as files\\nor env vars"| Pod
+        SEC["Secret"] -->|"mount as tmpfs\\nor env vars"| Pod
+        PROJ["Projected\\nVolume"] -->|"combine sources"| Pod
+    end`,
+    },
+    {
+      title: "Secret Management Strategies",
+      kind: "mindmap",
+      caption: "Layered approach to **Kubernetes secrets management** -- from basic built-in Secrets to external vault integrations and encryption at rest.",
+      mermaid: `mindmap
+  root(("Secrets\\nManagement"))
+    Built-in Secrets
+      base64 encoding
+      RBAC restrictions
+      immutable: true
+      tmpfs mounts
+    Encryption at Rest
+      EncryptionConfiguration
+      aescbc / secretbox
+      KMS providers
+    External Vaults
+      HashiCorp Vault
+      AWS Secrets Manager
+      GCP Secret Manager
+      Azure Key Vault
+    Operators & Tools
+      External Secrets Operator
+      Sealed Secrets
+      CSI Secret Store Driver
+    Best Practices
+      Audit logging
+      Namespace isolation
+      Rotate credentials
+      Never commit to Git`,
+    },
+  ],
+  comparison: {
+    columns: ["Feature", "PV/PVC", "ConfigMap", "Secret", "Projected Volume", "CSI Volume"],
+    rows: [
+      ["**Purpose**", "Persistent block/file storage", "Non-sensitive config data", "Sensitive data (credentials)", "Combine multiple sources", "Plugin-based storage"],
+      ["**Scope**", "PV: *cluster*; PVC: *namespace*", "*Namespace*-scoped", "*Namespace*-scoped", "*Pod*-level", "*Cluster*-level driver"],
+      ["**Data at rest**", "On disk/cloud volume", "In **etcd** (plain)", "In **etcd** (base64, encrypt recommended)", "Inherited from sources", "Provider-managed encryption"],
+      ["**Dynamic provisioning**", "Yes, via `StorageClass`", "N/A", "N/A", "N/A", "Yes (provisioner sidecar)"],
+      ["**Live updates**", "N/A (persistent data)", "*Yes* for volume mounts (~60s)", "*Yes* for volume mounts", "Yes (inherits from sources)", "N/A"],
+      ["**Access modes**", "RWO, ROX, RWX, RWOP", "N/A", "N/A", "N/A", "Driver-dependent"],
+    ],
+  },
+  exercises: [
+    "Create a **StorageClass** named `standard-gp3` with the AWS EBS CSI provisioner, `WaitForFirstConsumer` binding mode, and `allowVolumeExpansion: true`. Then create a **PVC** requesting `10Gi` and deploy a pod that mounts it at `/data`. Verify the PV is created in the *same AZ* as the scheduled node using `kubectl get pv -o wide`.",
+    "Create a **ConfigMap** from a file containing application configuration. Mount it as a volume in a pod, then *update the ConfigMap* and verify the mounted files reflect the change within ~60 seconds **without restarting** the pod. Compare this with environment variable injection -- update the ConfigMap and confirm the env var does NOT change.",
+    "Create a **Secret** with database credentials. Mount it in a pod at `/etc/db-creds` with file mode `0400`. Verify the mount is a *tmpfs* (not written to disk) by running `mount | grep db-creds` inside the container. Then try to `kubectl edit` an `immutable: true` Secret and observe the error.",
+    "Set up a **VolumeSnapshot** of an existing PVC. Then create a *new PVC* from that snapshot using `dataSource.kind: VolumeSnapshot`. Mount the new PVC in a pod and verify it contains the same data as the original. This simulates a **database backup and restore** workflow.",
+    "Deploy a pod using a **projected volume** that combines a ConfigMap (app config), a Secret (API key), and the **downward API** (pod name, namespace, labels) into a single mount at `/etc/pod-info`. Exec into the pod and verify all three sources appear as files in the same directory.",
+  ],
+  cheatSheet: [
+    "`kubectl get pv,pvc -o wide` -- **List all volumes** with status, capacity, access mode, StorageClass, and bound claim",
+    "`kubectl describe pvc <name>` -- **Debug volume issues**: check `Events` for provisioning errors, binding failures, or attach problems",
+    "`kubectl create configmap <name> --from-file=<path>` -- **Create ConfigMap** from file; use `--from-literal=key=val` for inline values",
+    "`kubectl create secret generic <name> --from-literal=key=val` -- **Create Secret** from literal; use `--from-file` for certificate files",
+    "`kubectl get secret <name> -o jsonpath='{.data.key}' | base64 -d` -- **Decode Secret** value (base64 to plaintext)",
+    "`kubectl patch pvc <name> -p '{\"spec\":{\"resources\":{\"requests\":{\"storage\":\"100Gi\"}}}}'` -- **Expand PVC** (requires `allowVolumeExpansion: true` on StorageClass)",
+  ],
+  revisionNotes: [
+    "**PV binding** matches on *capacity*, *access modes*, *StorageClass*, and *labels*. Use `WaitForFirstConsumer` binding mode to avoid **cross-AZ mounting failures** -- the PV is provisioned in the same zone as the scheduled pod.",
+    "**ConfigMaps** update *live* when volume-mounted (kubelet sync ~60s) but **NOT** when injected as environment variables. Secrets follow the same pattern. Use `immutable: true` on Secrets/ConfigMaps that should never change -- it also reduces API server watch load.",
+    "**Secrets are NOT encrypted by default** -- they are only *base64-encoded*. Enable `EncryptionConfiguration` for etcd encryption at rest. For production, use **External Secrets Operator** or **CSI Secret Store Driver** to sync from an external vault.",
+    "**CSI** replaced in-tree volume plugins with an *out-of-tree*, containerized architecture. CSI drivers enable **volume snapshots**, *cloning*, *expansion*, and *topology-aware provisioning*. They run as controller + node DaemonSet pods.",
+    "**Reclaim policies**: `Retain` keeps the PV and data after PVC deletion (manual cleanup needed); `Delete` removes backing storage automatically. Always use `Retain` for production databases to prevent accidental data loss.",
+  ],
   glossary: [
     {
       term: "PersistentVolume (PV)",

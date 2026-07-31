@@ -380,4 +380,11 @@ GEOSEARCH locations FROMMEMBER "San Francisco" BYRADIUS 200 km ASC`,
     { term: "embstr encoding", definition: "String encoding where the redisObject header and SDS are in a single allocation. Used for strings up to 44 bytes." },
     { term: "encoding promotion", definition: "Automatic upgrade from a compact encoding (listpack, intset) to a full encoding (hashtable, skiplist) when size thresholds are exceeded. Never reversed." },
   ],
+  exercises: [
+    "Create a Redis hash with 50 small fields and inspect its encoding with `OBJECT ENCODING`. Then add fields one at a time until the encoding **promotes from `listpack` to `hashtable`**. Record the exact threshold. Use `MEMORY USAGE` before and after promotion -- how much does memory per field increase?",
+    "Build a **real-time leaderboard** using a sorted set. Insert 1,000 players with random scores, then implement: *top 10 retrieval*, *player rank lookup*, *score range query*, and *atomic score increment*. Measure latency for each operation and confirm the **O(log n)** complexity claim.",
+    "Implement a **daily active users tracker** using Redis bitmaps. Use `SETBIT` to mark user IDs as active for each day, then compute users active on *all* of the last 7 days using `BITOP AND`. Compare the memory usage of this approach vs. storing user IDs in a set for 10 million users.",
+    "Use Redis Streams to build a **producer-consumer pipeline** with a consumer group. Produce 500 messages, consume them across 3 consumers, and handle failures: crash one consumer mid-processing and use `XPENDING` and `XCLAIM` to reassign its unacknowledged messages. Document the *at-least-once delivery* guarantees you observe.",
+    "Compare `HyperLogLog` accuracy against an exact `SET`-based unique count. Add 100,000 random elements to both, then add the same elements again. What is the **percentage error** of `PFCOUNT` vs `SCARD`? Repeat with 1 million and 10 million elements -- does the error rate stay within the theoretical *0.81%*?",
+  ],
 };

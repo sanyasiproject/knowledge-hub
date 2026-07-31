@@ -70,46 +70,77 @@ func main() {
 }`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption:
-        "Python: asyncio concurrency vs multiprocessing parallelism",
-      source: `import asyncio
-import multiprocessing
-import time
+        "C++: std::async concurrency vs std::thread parallelism",
+      source: `#include <iostream>
+#include <future>
+#include <thread>
+#include <vector>
+#include <string>
+#include <chrono>
+#include <numeric>
 
-# --- Concurrency with asyncio (single thread, interleaved I/O) ---
+// --- Concurrency with std::async (interleaved I/O-bound tasks) ---
 
-async def fetch(name: str, delay: float) -> str:
-    print(f"[async] {name} starting")
-    await asyncio.sleep(delay)  # non-blocking wait
-    print(f"[async] {name} done")
-    return f"{name}-result"
+std::string fetch(const std::string& name, int delay_ms) {
+    std::cout << "[async] " << name << " starting\\n";
+    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+    std::cout << "[async] " << name << " done\\n";
+    return name + "-result";
+}
 
-async def concurrent_io():
-    tasks = [fetch("A", 1.0), fetch("B", 1.5), fetch("C", 0.5)]
-    results = await asyncio.gather(*tasks)
-    print("All results:", results)
+void concurrent_io() {
+    // Launch tasks concurrently — runtime may use a thread pool
+    auto f1 = std::async(std::launch::async, fetch, "A", 1000);
+    auto f2 = std::async(std::launch::async, fetch, "B", 1500);
+    auto f3 = std::async(std::launch::async, fetch, "C", 500);
 
-# --- Parallelism with multiprocessing (bypasses the GIL) ---
+    // Collect results (blocks until each is ready)
+    std::cout << "Results: " << f1.get() << ", "
+              << f2.get() << ", " << f3.get() << "\\n";
+}
 
-def cpu_work(n: int) -> int:
-    """CPU-bound: sum of squares."""
-    return sum(i * i for i in range(n))
+// --- Parallelism with std::thread (true multi-core execution) ---
 
-def parallel_cpu():
-    chunks = [10_000_000] * 4
-    with multiprocessing.Pool(processes=4) as pool:
-        results = pool.map(cpu_work, chunks)
-    print("Parallel sums:", results)
+int64_t cpu_work(int n) {
+    // CPU-bound: sum of squares
+    int64_t sum = 0;
+    for (int i = 0; i < n; ++i) sum += static_cast<int64_t>(i) * i;
+    return sum;
+}
 
-if __name__ == "__main__":
-    start = time.time()
-    asyncio.run(concurrent_io())
-    print(f"Async took {time.time() - start:.2f}s\\n")
+void parallel_cpu() {
+    constexpr int num_threads = 4;
+    constexpr int chunk_size = 10'000'000;
+    std::vector<int64_t> results(num_threads);
+    std::vector<std::thread> threads;
 
-    start = time.time()
-    parallel_cpu()
-    print(f"Parallel took {time.time() - start:.2f}s")`,
+    for (int t = 0; t < num_threads; ++t) {
+        threads.emplace_back([&results, t]() {
+            results[t] = cpu_work(chunk_size);
+        });
+    }
+    for (auto& th : threads) th.join();
+
+    std::cout << "Parallel sums:";
+    for (auto s : results) std::cout << " " << s;
+    std::cout << "\\n";
+}
+
+int main() {
+    auto start = std::chrono::steady_clock::now();
+    concurrent_io();
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    std::cout << "Async took "
+              << std::chrono::duration<double>(elapsed).count() << "s\\n\\n";
+
+    start = std::chrono::steady_clock::now();
+    parallel_cpu();
+    elapsed = std::chrono::steady_clock::now() - start;
+    std::cout << "Parallel took "
+              << std::chrono::duration<double>(elapsed).count() << "s\\n";
+}`,
     },
     {
       language: "typescript",
@@ -508,5 +539,13 @@ async function parallelCompute(): Promise<void> {
       definition:
         "A scheduling strategy where idle threads steal tasks from the queues of busy threads, providing dynamic load balancing in parallel runtimes.",
     },
+  ],
+
+  exercises: [
+    "Write a C++ program that computes the **sum of squares** from 1 to 100,000,000 in three ways: (1) sequentially in a single thread, (2) using `std::async` with 4 parallel tasks each handling a quarter of the range, and (3) using `std::thread` with a shared `std::atomic<long long>` accumulator. Measure and compare the *wall-clock time* for each. Apply **Amdahl's Law**: what is the theoretical maximum speedup if the serial fraction (setup, result merging) takes 5% of the total time?",
+    "Implement a **thread pool** in C++ with a fixed number of worker threads and a thread-safe task queue (`std::queue<std::function<void()>>` protected by `std::mutex` + `std::condition_variable`). Submit 1,000 tasks that each simulate an I/O wait (`std::this_thread::sleep_for(1ms)`). Compare throughput with 1, 4, and 16 worker threads. Is this *concurrency*, *parallelism*, or both? Explain your answer.",
+    "Explain why Python's **GIL** prevents CPU-bound parallelism with `threading` but allows I/O-bound concurrency. Write a Python script that downloads 10 web pages: first with `threading.Thread` (concurrent I/O), then with `multiprocessing.Pool` (parallel CPU). Measure the time for each. Now write the equivalent in C++ using `std::thread` -- does C++ have a GIL? Why or why not?",
+    "Design a **concurrent web scraper** that fetches 100 URLs and extracts their titles. Compare two architectures: (1) an *event-loop* model (single thread, async I/O using callbacks or coroutines) and (2) a *thread-per-request* model (one `std::thread` per URL). For each, analyze: maximum memory usage, context-switch overhead, and behavior when one URL takes 30 seconds to respond. Which model scales better to 10,000 URLs?",
+    "A matrix multiplication of two 1000x1000 matrices is embarrassingly parallel. Implement it in C++ using `std::thread`, splitting rows across *N* threads. Measure speedup for N = 1, 2, 4, 8, and 16 on your machine. Plot the results against **Amdahl's Law** and **Gustafson's Law** predictions. At what thread count does adding more threads *hurt* performance due to **false sharing** and cache coherence overhead? How would you use `alignas` to mitigate false sharing?"
   ],
 };

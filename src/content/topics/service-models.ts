@@ -28,6 +28,301 @@ export const serviceModels: TopicContent = {
     "## Shared Responsibility Deep Dive\n\nThe shared responsibility model defines who is accountable for each layer:\n\n| Layer | IaaS | PaaS | SaaS |\n|-------|------|------|------|\n| Data classification & governance | Customer | Customer | Customer |\n| Identity & access management | Customer | Customer | Shared |\n| Application security | Customer | Customer | Provider |\n| Network controls | Shared | Provider | Provider |\n| OS patching | Customer | Provider | Provider |\n| Physical security | Provider | Provider | Provider |\n\n**Common misconception:** 'The cloud is secure so I don't need to worry about security.' Reality: the cloud secures the infrastructure; you secure what you put in it. Most cloud breaches are due to customer misconfiguration (public S3 buckets, overly permissive IAM policies, exposed credentials), not provider failures.\n\nCompliance frameworks (SOC 2, HIPAA, PCI-DSS) require demonstrating security controls at every layer. Using a certified provider covers their layers, but you must certify yours independently."
   ],
 
+  diagrams: [
+    {
+      title: "Cloud Service Models Stack",
+      kind: "architecture",
+      caption: "Visual representation of the **cloud service model stack** showing which layers are managed by the *provider* vs the *customer* for each model: IaaS, PaaS, FaaS, and SaaS.",
+      mermaid: `graph TD
+    subgraph IaaS ["**IaaS** (EC2, Azure VMs)"]
+        I1["Data — **Customer**"]
+        I2["Application — **Customer**"]
+        I3["Runtime — **Customer**"]
+        I4["OS — **Customer**"]
+        I5["Virtualization — *Provider*"]
+        I6["Servers — *Provider*"]
+        I7["Networking — *Provider*"]
+    end
+
+    subgraph PaaS ["**PaaS** (Heroku, App Engine)"]
+        P1["Data — **Customer**"]
+        P2["Application — **Customer**"]
+        P3["Runtime — *Provider*"]
+        P4["OS — *Provider*"]
+        P5["Virtualization — *Provider*"]
+        P6["Servers — *Provider*"]
+        P7["Networking — *Provider*"]
+    end
+
+    subgraph SaaS ["**SaaS** (Gmail, Salesforce)"]
+        S1["Data — **Customer**"]
+        S2["Application — *Provider*"]
+        S3["Runtime — *Provider*"]
+        S4["OS — *Provider*"]
+        S5["Virtualization — *Provider*"]
+        S6["Servers — *Provider*"]
+        S7["Networking — *Provider*"]
+    end`
+    },
+    {
+      title: "Service Model Decision Flow",
+      kind: "flow",
+      caption: "Decision tree for choosing between **IaaS**, **PaaS**, **FaaS**, and **SaaS** based on *control requirements*, team capabilities, and workload characteristics.",
+      mermaid: `graph TD
+    Start["**New Project**"] --> Q1{"Need a **custom OS**,<br/>kernel modules, or<br/>GPU passthrough?"}
+    Q1 -->|"Yes"| IaaS["**IaaS**<br/>EC2 / Azure VMs"]
+    Q1 -->|"No"| Q2{"Is this a **standard<br/>business function**?<br/>(email, CRM, chat)"}
+    Q2 -->|"Yes"| SaaS["**SaaS**<br/>Buy, don't build"]
+    Q2 -->|"No"| Q3{"Is the workload<br/>**event-driven** with<br/>short execution?"}
+    Q3 -->|"Yes"| Q4{"Need to stay<br/>below **15 min**<br/>execution time?"}
+    Q4 -->|"Yes"| FaaS["**FaaS / Serverless**<br/>Lambda / Cloud Functions"]
+    Q4 -->|"No"| PaaS2["**PaaS or CaaS**<br/>for long-running tasks"]
+    Q3 -->|"No"| Q5{"Do you have<br/>dedicated **DevOps**<br/>engineers?"}
+    Q5 -->|"Yes"| CaaS["**CaaS / IaaS**<br/>Containers on ECS/GKE"]
+    Q5 -->|"No"| PaaS["**PaaS**<br/>Heroku / Render / Railway"]`
+    },
+    {
+      title: "Shared Responsibility Model",
+      kind: "architecture",
+      caption: "The **shared responsibility model** showing which *security and operational layers* are owned by the provider vs the customer across IaaS, PaaS, and SaaS.",
+      mermaid: `graph LR
+    subgraph Customer ["**Customer Responsibility**"]
+        D["Data Classification<br/>& Governance"]
+        IAM["Identity &<br/>Access Management"]
+        AppSec["Application<br/>Security"]
+        NetCtrl["Network Controls<br/>& Firewall Rules"]
+        OSPatch["OS Patching &<br/>Hardening"]
+    end
+
+    subgraph Provider ["**Provider Responsibility**"]
+        PhysSec["Physical Security<br/>& Data Center"]
+        HW["Hardware &<br/>Hypervisor"]
+        NetFabric["Network Fabric<br/>& DDoS Protection"]
+    end
+
+    D -->|"Always customer"| IaaS_C["IaaS ✓"]
+    D -->|"Always customer"| PaaS_C["PaaS ✓"]
+    D -->|"Always customer"| SaaS_C["SaaS ✓"]
+    OSPatch -->|"Customer in IaaS"| IaaS_C
+    OSPatch -->|"Provider in PaaS"| PaaS_P["PaaS ✓"]
+    AppSec -->|"Customer"| IaaS_C
+    AppSec -->|"Provider in SaaS"| SaaS_P["SaaS ✓"]`
+    },
+  ],
+  exercises: [
+    "**Build a multi-model cost calculator:** Create a Node.js CLI tool that takes a workload profile (requests per day, average execution time, storage GB, number of users) and estimates monthly cost for deploying on **IaaS** (EC2 pricing), **PaaS** (Heroku dyno pricing), **FaaS** (Lambda pricing), and **SaaS** (per-seat pricing). Display a *comparison table* and recommend the cheapest option with trade-off notes.",
+    "**Deploy the same app to IaaS and PaaS:** Take a simple Express.js API and deploy it to both an **EC2 instance** (IaaS) and **Heroku** (PaaS). Document every step: for IaaS, cover SSH setup, Node installation, process management with `pm2`, and Nginx reverse proxy. For PaaS, cover `git push heroku main`. Compare *time-to-deploy*, operational overhead, and the `Procfile` vs `systemd` approaches.",
+    "**Implement a multi-tenant data isolation layer:** Build a Node.js middleware that reads a `X-Tenant-ID` header and automatically adds a `tenant_id` filter to all database queries. Implement two strategies: (1) **shared database** with `WHERE tenant_id = ?` injection, and (2) **separate schemas** with dynamic schema selection via `SET search_path`. Write tests proving that Tenant A cannot access Tenant B's data in either model.",
+    "**Serverless cold start benchmark:** Create the same HTTP handler in three runtimes: **Node.js**, **Python**, and **Java** (as AWS Lambda functions or simulated locally with `serverless-offline`). Measure *cold start time* and *warm invocation time* for each. Add a large dependency (e.g., `aws-sdk` for Node, `boto3` for Python) and measure the cold start impact. Document results and recommend mitigation strategies.",
+    "**Design a shared responsibility audit checklist:** Build an interactive CLI tool in Node.js that asks the user which *service model* they are using (IaaS/PaaS/FaaS/SaaS), then generates a **security audit checklist** specific to that model. For IaaS, include OS patching and firewall rules. For PaaS, focus on application-level security. For SaaS, focus on IAM and data classification. Output the checklist as formatted Markdown.",
+  ],
+  code: [
+    {
+      language: "typescript",
+      caption: "Express app deployed as both a PaaS service (Heroku) and FaaS function (Lambda)",
+      source: `// app.ts — Express app that works on both PaaS and FaaS
+import express from 'express';
+
+const app = express();
+app.use(express.json());
+
+// Health check endpoint — required by most PaaS providers
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+// Business logic — identical regardless of deployment model
+app.get('/api/users', async (req, res) => {
+  const users = await db.users.findAll();
+  res.json({ data: users, meta: { total: users.length } });
+});
+
+app.post('/api/users', async (req, res) => {
+  const { name, email } = req.body;
+  const user = await db.users.create({ name, email });
+  res.status(201).json({ data: user });
+});
+
+// --- PaaS deployment (Heroku, Railway, Render) ---
+// Just start the server — PaaS handles the rest
+// Procfile: web: node dist/app.js
+const PORT = process.env.PORT || 3000;
+if (process.env.DEPLOYMENT_MODEL !== 'lambda') {
+  app.listen(PORT, () => {
+    console.log(\`Server running on port \${PORT}\`);
+    // PaaS provides: SSL termination, load balancing,
+    // auto-scaling, zero-downtime deploys, log aggregation
+  });
+}
+
+// --- FaaS deployment (AWS Lambda via serverless-http) ---
+// Wrap the Express app for Lambda's event-driven model
+import serverless from 'serverless-http';
+export const handler = serverless(app);
+// serverless.yml:
+//   functions:
+//     api:
+//       handler: dist/app.handler
+//       events:
+//         - httpApi: '*'
+//       timeout: 29  # API Gateway limit: 30s
+//       memorySize: 256`,
+    },
+    {
+      language: "typescript",
+      caption: "Multi-tenant middleware for SaaS applications with tenant isolation",
+      source: `import { Request, Response, NextFunction } from 'express';
+import { Pool, PoolClient } from 'pg';
+
+const pool = new Pool();
+
+// Tenant context — thread-safe via AsyncLocalStorage
+import { AsyncLocalStorage } from 'async_hooks';
+const tenantStorage = new AsyncLocalStorage<{ tenantId: string }>();
+
+/**
+ * Multi-tenancy middleware — extracts tenant ID and
+ * configures database isolation strategy.
+ *
+ * **Strategy 1**: Shared database, tenant_id column
+ * **Strategy 2**: Separate schemas per tenant
+ */
+export function tenantMiddleware(
+  strategy: 'shared-column' | 'separate-schema'
+) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const tenantId = req.headers['x-tenant-id'] as string;
+    if (!tenantId) {
+      return res.status(400).json({
+        error: { code: 'MISSING_TENANT', message: 'X-Tenant-ID header required' }
+      });
+    }
+
+    // Validate tenant exists
+    const { rows } = await pool.query(
+      'SELECT id, schema_name, status FROM tenants WHERE id = $1',
+      [tenantId]
+    );
+    if (rows.length === 0 || rows[0].status !== 'active') {
+      return res.status(403).json({
+        error: { code: 'INVALID_TENANT', message: 'Tenant not found or inactive' }
+      });
+    }
+
+    // Set schema for separate-schema strategy
+    if (strategy === 'separate-schema') {
+      const client: PoolClient = await pool.connect();
+      await client.query(\`SET search_path TO '\${rows[0].schema_name}', public\`);
+      (req as any).dbClient = client;
+      res.on('finish', () => client.release());
+    }
+
+    // Store tenant context for downstream use
+    tenantStorage.run({ tenantId }, () => next());
+  };
+}
+
+// Utility: get current tenant ID (from any layer)
+export function getCurrentTenantId(): string {
+  const store = tenantStorage.getStore();
+  if (!store) throw new Error('No tenant context — call outside middleware?');
+  return store.tenantId;
+}
+
+// Query wrapper for shared-column strategy
+export async function tenantQuery(sql: string, params: any[] = []) {
+  const tenantId = getCurrentTenantId();
+  // Automatically inject tenant_id filter
+  const tenantSql = sql.replace(
+    /FROM\\s+(\\w+)/gi,
+    'FROM $1 WHERE $1.tenant_id = $' + (params.length + 1)
+  );
+  return pool.query(tenantSql, [...params, tenantId]);
+}`,
+    },
+    {
+      language: "typescript",
+      caption: "IaaS provisioning script using infrastructure-as-code concepts",
+      source: `// Simplified IaaS provisioning — demonstrates the operational
+// overhead that PaaS abstracts away
+
+import { execSync } from 'child_process';
+
+interface ServerConfig {
+  name: string;
+  instanceType: string;    // e.g., 't3.medium'
+  region: string;
+  sshKeyPath: string;
+  securityGroup: string;
+}
+
+/**
+ * IaaS setup checklist — everything PaaS handles for you:
+ * 1. Provision VM (EC2 instance)
+ * 2. Configure security groups (firewall)
+ * 3. Install OS packages (Node.js, Nginx)
+ * 4. Set up process manager (pm2, systemd)
+ * 5. Configure reverse proxy (Nginx)
+ * 6. Set up SSL (Let's Encrypt / certbot)
+ * 7. Configure log shipping
+ * 8. Set up monitoring agent
+ * 9. Automate OS patching
+ * 10. Set up backup/restore
+ */
+
+async function provisionIaaSServer(config: ServerConfig) {
+  const commands = [
+    // Update OS packages (your responsibility in IaaS)
+    'sudo apt-get update && sudo apt-get upgrade -y',
+
+    // Install Node.js runtime (PaaS does this automatically)
+    'curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -',
+    'sudo apt-get install -y nodejs',
+
+    // Install PM2 process manager (PaaS handles process lifecycle)
+    'sudo npm install -g pm2',
+
+    // Install and configure Nginx (PaaS handles routing/LB)
+    'sudo apt-get install -y nginx',
+    \`sudo tee /etc/nginx/sites-available/app << 'NGINX'
+server {
+    listen 80;
+    server_name api.example.com;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+NGINX\`,
+
+    // SSL with Let's Encrypt (PaaS provides managed SSL)
+    'sudo apt-get install -y certbot python3-certbot-nginx',
+    'sudo certbot --nginx -d api.example.com --non-interactive --agree-tos',
+
+    // Start application with PM2
+    'cd /opt/app && pm2 start dist/app.js --name api -i max',
+    'pm2 save && pm2 startup',
+
+    // Schedule OS security updates (your responsibility)
+    'echo "0 3 * * 0 apt-get update && apt-get upgrade -y" | sudo crontab -',
+  ];
+
+  console.log('IaaS setup requires', commands.length, 'manual steps.');
+  console.log('PaaS equivalent: git push heroku main (1 step)');
+
+  // Total operational overhead comparison:
+  // IaaS: ~2-4 hours initial setup + ongoing maintenance
+  // PaaS: ~5 minutes initial setup + zero maintenance
+  // Trade-off: IaaS gives full OS-level control
+}`,
+    },
+  ],
   comparison: {
     columns: ["Aspect", "IaaS", "PaaS", "FaaS/Serverless", "SaaS"],
     rows: [

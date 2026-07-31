@@ -179,4 +179,225 @@ export const gcpData: TopicContent = {
         "In Firestore, an index covering multiple fields that must be explicitly created to support queries filtering or ordering on multiple fields simultaneously.",
     },
   ],
+  deepDive: [
+    "**BigQuery's Dremel Execution Engine and Slot Scheduling Internals**\n\nAt its core, BigQuery is powered by **Dremel**, a *massively parallel* query execution engine originally described in Google's 2010 research paper. Dremel organizes query execution as a **multi-level serving tree** — a *root server* receives the SQL query, parses and optimizes it, then fans it out to **intermediate servers** (mixers) that further decompose the work into **leaf servers** (slots). Each *leaf slot* reads columnar data from Google's distributed file system (**Colossus**) in the proprietary `Capacitor` format. The key innovation is **in-situ processing** — data is read *directly* from storage without ETL into a separate compute cluster. Slot scheduling uses a **fair-share model**: on-demand queries draw from a shared pool where each project receives a *dynamic allocation* based on current demand, while **BigQuery Editions** (Enterprise, Enterprise Plus) reserve *dedicated slot commitments* (measured in `slot-hours`) for predictable performance. The query optimizer employs **adaptive execution** — it can *repartition data mid-query* if it detects skew, and uses **shuffle persistence** to materialize intermediate results in RAM or on Colossus for multi-stage joins. BigQuery also uses **BI Engine**, an *in-memory analysis service* that caches frequently accessed data in RAM for sub-second query responses on dashboards. Understanding slot utilization via `INFORMATION_SCHEMA.JOBS_BY_PROJECT` and the `slot_ms` metric is critical for **capacity planning** and *cost optimization*.",
+    "**Cloud Spanner TrueTime and Split-Based Sharding Deep Mechanics**\n\n*Cloud Spanner's* strongest differentiator is **TrueTime**, a globally distributed clock infrastructure that uses *GPS receivers* and *atomic clocks* co-located in every Google datacenter. TrueTime exposes an API returning a **time interval** `[earliest, latest]` rather than a single timestamp — this *bounded uncertainty* (typically **1-7 milliseconds**) is the foundation of Spanner's **external consistency**. When a transaction commits, Spanner performs a **commit wait**: it delays making the write visible until `TrueTime.now().latest` exceeds the commit timestamp, *guaranteeing* that any subsequent transaction sees the committed data regardless of which replica it reads from. Data is organized into **splits** — contiguous ranges of primary key space — each managed by a **Paxos group** with a *leader replica* and multiple *follower replicas* across zones. The split manager automatically **splits and merges** key ranges based on *size* (each split targets ~8 GiB) and *load* (hot splits are subdivided). **Interleaved tables** physically co-locate child rows *within the same split* as their parent row by sharing a primary key prefix, enabling `JOIN` operations to execute *locally* without cross-split coordination. Spanner's **query optimizer** supports both *hash joins* and *merge joins* across splits, and the **query statistics** tables (`SPANNER_SYS.QUERY_STATS_TOP_*`) provide *detailed execution metrics* for performance tuning. For *multi-region configurations*, Spanner uses **witness replicas** (vote in Paxos but do not serve reads) to achieve quorum without the storage overhead of full replicas.",
+    "**Bigtable Compaction, LSM-Tree Storage, and Tablet Management**\n\nCloud Bigtable uses a **Log-Structured Merge-tree** (*LSM-tree*) storage architecture, which is optimized for *write-heavy workloads*. Incoming writes are first recorded in an **in-memory buffer** called a `memtable` (backed by a **write-ahead log** on Colossus for durability). When the memtable reaches a threshold, it is **flushed** to disk as an immutable **SSTable** (*Sorted String Table*) file. Over time, multiple SSTables accumulate, and Bigtable runs **compaction** — a background process that *merges SSTables*, eliminates deleted cells (marked with **tombstones**), and discards expired versions based on *garbage collection policies*. There are two types: **minor compaction** merges a few small SSTables into a larger one, while **major compaction** rewrites *all* SSTables for a tablet into a single file, reclaiming space from deletions. The data is organized into **tablets** — contiguous row-key ranges assigned to individual *tablet servers*. The **tablet server** handles all reads and writes for its assigned tablets. A *metadata table* (`METADATA`) tracks the mapping from row-key ranges to tablets and their locations. When a tablet grows too large (typically beyond **8 GiB**), it is **automatically split** into two tablets and potentially reassigned to different servers for **load balancing**. Bigtable's **replication** works at the cluster level — each cluster maintains its *own set of tablets and SSTables*, with changes propagated via **eventually consistent replication** (or *single-row transactions* for same-cluster writes). Key performance tuning involves monitoring `server latencies`, `disk utilization`, and `hotspot metrics` through the **Key Visualizer** tool, which provides a *heatmap* of access patterns across the row-key space.",
+  ],
+  code: [
+    {
+      language: "sql",
+      caption: "BigQuery: Create a partitioned and clustered table with expiration",
+      source: `-- Create a partitioned + clustered table in BigQuery
+CREATE TABLE \`my_project.my_dataset.events\`
+(
+  event_id STRING NOT NULL,
+  user_id STRING,
+  event_type STRING,
+  event_timestamp TIMESTAMP,
+  payload JSON,
+  region STRING
+)
+PARTITION BY DATE(event_timestamp)
+CLUSTER BY region, event_type
+OPTIONS (
+  partition_expiration_days = 365,
+  description = "Partitioned by event date, clustered by region and event type"
+);
+
+-- Query that benefits from partition pruning and cluster filtering
+SELECT event_type, COUNT(*) AS event_count, AVG(TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), event_timestamp, HOUR)) AS avg_age_hours
+FROM \`my_project.my_dataset.events\`
+WHERE DATE(event_timestamp) BETWEEN '2025-01-01' AND '2025-06-30'
+  AND region = 'us-east1'
+GROUP BY event_type
+ORDER BY event_count DESC;`,
+    },
+    {
+      language: "sql",
+      caption: "Cloud Spanner: DDL with interleaved tables and secondary index",
+      source: `-- Spanner DDL: Parent table
+CREATE TABLE Customers (
+  CustomerId   INT64 NOT NULL,
+  Name         STRING(256),
+  Email        STRING(512),
+  CreatedAt    TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true),
+) PRIMARY KEY (CustomerId);
+
+-- Interleaved child table (co-located with parent rows)
+CREATE TABLE Orders (
+  CustomerId   INT64 NOT NULL,
+  OrderId      INT64 NOT NULL,
+  OrderDate    DATE,
+  TotalAmount  NUMERIC,
+  Status       STRING(64),
+) PRIMARY KEY (CustomerId, OrderId),
+  INTERLEAVE IN PARENT Customers ON DELETE CASCADE;
+
+-- Interleaved grandchild table
+CREATE TABLE OrderItems (
+  CustomerId   INT64 NOT NULL,
+  OrderId      INT64 NOT NULL,
+  ItemId       INT64 NOT NULL,
+  ProductName  STRING(512),
+  Quantity     INT64,
+  UnitPrice    NUMERIC,
+) PRIMARY KEY (CustomerId, OrderId, ItemId),
+  INTERLEAVE IN PARENT Orders ON DELETE CASCADE;
+
+-- Secondary index for querying orders by status
+CREATE INDEX OrdersByStatus ON Orders(Status) STORING (TotalAmount, OrderDate);`,
+    },
+    {
+      language: "bash",
+      caption: "Bigtable: CLI operations with cbt tool",
+      source: `# Install the cbt CLI tool
+gcloud components install cbt
+
+# Configure cbt with project and instance
+echo "project = my-project" > ~/.cbtrc
+echo "instance = my-bigtable-instance" >> ~/.cbtrc
+
+# Create a new table with column families
+cbt createtable user-events
+cbt createfamily user-events activity
+cbt createfamily user-events metadata
+
+# Set garbage collection policy (keep last 3 versions, delete cells older than 7 days)
+cbt setgcpolicy user-events activity maxversions=3
+cbt setgcpolicy user-events metadata maxage=168h
+
+# Write data using reversed timestamp key pattern
+cbt set user-events "user123#9999999999999-1690000000000" \\
+  activity:type=click \\
+  activity:page=/dashboard \\
+  metadata:ip=10.0.0.1
+
+# Read a single row
+cbt read user-events prefix="user123#" count=5
+
+# List tables in the instance
+cbt ls
+
+# Delete a table (use with caution)
+# cbt deletetable user-events`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "BigQuery Query Execution Flow",
+      kind: "flow",
+      caption: "How a SQL query flows through BigQuery's Dremel engine from submission to result",
+      mermaid: `flowchart TD
+    A["Client submits SQL query"] --> B["BigQuery API / Root Server"]
+    B --> C["Query Parser & Optimizer"]
+    C --> D{"Query uses cached result?"}
+    D -- Yes --> E["Return cached result"]
+    D -- No --> F["Generate Execution Plan"]
+    F --> G["Mixer Layer - Intermediate Servers"]
+    G --> H1["Leaf Slot 1 - Read Colossus"]
+    G --> H2["Leaf Slot 2 - Read Colossus"]
+    G --> H3["Leaf Slot N - Read Colossus"]
+    H1 --> I["Partition & Cluster Pruning"]
+    H2 --> I
+    H3 --> I
+    I --> J["Columnar Scan - Capacitor Format"]
+    J --> K["Shuffle & Aggregate"]
+    K --> L["Mixer: Merge Partial Results"]
+    L --> M["Root Server: Final Aggregation"]
+    M --> N["Result stored in temporary table"]
+    N --> O["Return results to client"]`,
+    },
+    {
+      title: "Cloud Spanner Replication Architecture",
+      kind: "architecture",
+      caption: "Spanner's multi-region Paxos-based replication with TrueTime synchronization",
+      mermaid: `flowchart LR
+    subgraph Region_A["Region A - Leader"]
+        A1["Zone 1: Leader Replica"]
+        A2["Zone 2: Follower Replica"]
+    end
+    subgraph Region_B["Region B - Follower"]
+        B1["Zone 1: Follower Replica"]
+        B2["Zone 2: Follower Replica"]
+    end
+    subgraph Region_C["Region C - Witness"]
+        C1["Zone 1: Witness Replica"]
+    end
+    subgraph TrueTime["TrueTime Infrastructure"]
+        GPS["GPS Receivers"]
+        ATOMIC["Atomic Clocks"]
+        GPS --> TT["TrueTime API"]
+        ATOMIC --> TT
+    end
+    A1 -- "Paxos Write" --> A2
+    A1 -- "Paxos Write" --> B1
+    A1 -- "Paxos Write" --> B2
+    A1 -- "Paxos Vote" --> C1
+    TT -- "Commit Timestamps" --> A1
+    A1 -- "Commit Wait" --> COMMIT["Transaction Committed"]
+    B1 -- "Serve Stale Reads" --> CLIENT_B["Client in Region B"]
+    A1 -- "Serve Strong Reads" --> CLIENT_A["Client in Region A"]`,
+    },
+    {
+      title: "GCP Database Decision Tree",
+      kind: "flow",
+      caption: "Choosing the right GCP database service based on workload requirements",
+      mermaid: `flowchart TD
+    START["What type of workload?"] --> OLAP{"OLAP / Analytics?"}
+    OLAP -- Yes --> BQ["BigQuery - Serverless Data Warehouse"]
+    OLAP -- No --> REL{"Need relational SQL?"}
+    REL -- Yes --> GLOBAL{"Need global distribution & 99.999% SLA?"}
+    GLOBAL -- Yes --> SPANNER["Cloud Spanner"]
+    GLOBAL -- No --> SCALE{"Scale > 64 TiB or need disaggregated storage?"}
+    SCALE -- Yes --> ALLOY["AlloyDB - PostgreSQL Compatible"]
+    SCALE -- No --> CSQL["Cloud SQL - MySQL / PostgreSQL / SQL Server"]
+    REL -- No --> LATENCY{"Need sub-10ms latency at PB scale?"}
+    LATENCY -- Yes --> ACCESS{"Access pattern?"}
+    ACCESS -- "Key-value / wide-column" --> BT["Cloud Bigtable"]
+    ACCESS -- "Document / real-time sync" --> FS["Firestore"]
+    LATENCY -- No --> REALTIME{"Need real-time sync & offline?"}
+    REALTIME -- Yes --> FS
+    REALTIME -- No --> CACHE{"In-memory caching?"}
+    CACHE -- Yes --> REDIS["Memorystore - Redis / Memcached"]
+    CACHE -- No --> BT`,
+    },
+  ],
+  comparison: {
+    columns: ["Feature", "BigQuery", "Cloud Spanner", "Cloud Bigtable", "Firestore", "Cloud SQL"],
+    rows: [
+      ["**Type**", "*Columnar data warehouse*", "*Distributed relational*", "*Wide-column NoSQL*", "*Document NoSQL*", "*Managed relational*"],
+      ["**Workload**", "OLAP / analytics", "Global OLTP", "High-throughput key-value", "App backends / real-time", "Traditional OLTP"],
+      ["**Query Language**", "`Standard SQL`", "`Google SQL` / `PostgreSQL`", "`HBase API` / `cbt CLI`", "*Document API (SDKs)*", "`MySQL` / `PostgreSQL` / `SQL Server`"],
+      ["**Max Scale**", "*Petabytes+, serverless*", "*Petabytes, horizontal*", "*Petabytes, linear scaling*", "*Auto-scaling, serverless*", "*64 TiB, vertical*"],
+      ["**Consistency**", "*Strong (within dataset)*", "**Strong (global external)**", "*Eventually consistent (cross-cluster)*", "**Strong (all reads)**", "*Strong (single instance)*"],
+      ["**Latency**", "*Seconds (analytical queries)*", "*Single-digit ms reads/writes*", "*Sub-10ms reads/writes*", "*Single-digit ms reads/writes*", "*Single-digit ms reads/writes*"],
+      ["**Availability SLA**", "`99.99%`", "`99.999%` (multi-region)", "`99.99%` (replicated)", "`99.999%` (multi-region)", "`99.95%` - `99.99%`"],
+      ["**Pricing Model**", "*Per TiB scanned or slot-hours*", "*Per node-hour + storage*", "*Per node-hour + storage*", "*Per read/write/delete ops*", "*Per vCPU + RAM + storage*"],
+      ["**Best For**", "BI dashboards, ML, ad-hoc analytics", "Global finance, inventory, gaming", "IoT, time-series, ML features", "Mobile/web apps, real-time sync", "Legacy apps, WordPress, ERP"],
+      ["**Key Feature**", "`BigQuery ML`, *serverless*", "`TrueTime`, *interleaved tables*", "`Key Visualizer`, *HBase compat*", "*Real-time listeners, offline mode*", "`Auth Proxy`, *read replicas*"],
+    ],
+  },
+  exercises: [
+    "**Lab 1 - BigQuery Partitioning & Clustering:** Create a BigQuery dataset and load the publicly available `bigquery-public-data.github_repos.commits` table. Create a *partitioned table* by `committer.date` and *clustered* by `repo_name`. Write queries that demonstrate **partition pruning** (filter by date range) and compare `slot_ms` and `bytes_scanned` between the partitioned vs. non-partitioned versions using `INFORMATION_SCHEMA.JOBS`.",
+    "**Lab 2 - Cloud Spanner Interleaved Tables:** Provision a *single-node regional Spanner instance*. Create a schema with `Customers`, `Orders`, and `OrderItems` as **interleaved tables**. Insert sample data using *DML batch transactions*. Run `JOIN` queries across parent-child tables and examine **query execution plans** via `SPANNER_SYS.QUERY_STATS_TOP_MINUTE` to observe the benefit of co-located data.",
+    "**Lab 3 - Bigtable Key Design & Performance:** Create a Bigtable instance with a *development cluster*. Design three different **row key schemas** for time-series IoT data: (a) `device_id#timestamp`, (b) `device_id#reversed_timestamp`, (c) `salted_hash#device_id#timestamp`. Load 100,000 rows using the `cbt` CLI or a *Dataflow pipeline*. Use the **Key Visualizer** to observe access pattern distribution and identify any *hotspotting*.",
+    "**Lab 4 - Firestore Real-Time Sync:** Build a minimal *web application* using Firestore in **Native mode**. Create a `messages` collection and implement **real-time listeners** using `onSnapshot()`. Open the app in *two browser windows* and observe real-time synchronization. Create a **composite index** for queries that filter on both `sender` and `timestamp`, and verify it appears in the *Firebase Console* under Indexes.",
+    "**Lab 5 - Cross-Service Data Pipeline:** Design and implement an *end-to-end pipeline*: IoT device data ingested into **Bigtable** (low-latency writes), periodically exported to **BigQuery** via a `Dataflow` streaming job for analytics, with aggregated results written to **Firestore** for a real-time dashboard. Use `gcloud` CLI commands to provision all resources and monitor pipeline health via *Cloud Monitoring*.",
+  ],
+  cheatSheet: [
+    "`bq query --use_legacy_sql=false 'SELECT * FROM dataset.table WHERE _PARTITIONDATE = \"2025-01-01\"'` -- Query a *partitioned table* with **partition pruning** in BigQuery",
+    "`gcloud spanner databases ddl update my-db --instance=my-instance --ddl='CREATE INDEX OrdersByDate ON Orders(OrderDate) STORING (TotalAmount)'` -- Add a **secondary index** with *stored columns* to Spanner",
+    "`cbt -instance=my-instance read my-table prefix=\"user123#\" count=10` -- Read rows by **key prefix** from Bigtable using the *cbt CLI*",
+    "`bq mk --table --schema 'id:STRING,ts:TIMESTAMP,val:FLOAT64' --time_partitioning_field ts --clustering_fields id project:dataset.table` -- Create a **partitioned + clustered** table via `bq` CLI",
+    "`gcloud sql connect my-instance --user=root --quiet` -- Connect to a **Cloud SQL** instance via *Cloud SQL Auth Proxy* with `gcloud`",
+    "`gcloud firestore indexes composite create --collection-group=orders --field-config field-path=status,order=ASCENDING --field-config field-path=created,order=DESCENDING` -- Create a **composite index** in *Firestore*",
+  ],
+  revisionNotes: [
+    "**BigQuery** uses the *Dremel* execution engine with a **multi-level serving tree** (root -> mixers -> leaf slots). Storage is in *Capacitor* columnar format on **Colossus**. Key optimization levers: `partitioning` (prune by date/integer range), `clustering` (prune blocks within partitions), and **materialized views**. Pricing is either *on-demand* ($6.25/TiB scanned) or *flat-rate slot reservations* (Editions).",
+    "**Cloud Spanner** achieves **external consistency** via *TrueTime* (GPS + atomic clocks providing bounded timestamp uncertainty). Data is split into **key-range-based splits** (~8 GiB each), each replicated via *Paxos*. **Interleaved tables** co-locate parent-child data in the same split. Multi-region configs use **witness replicas** for quorum votes without full data copies, delivering `99.999%` SLA.",
+    "**Cloud Bigtable** uses an *LSM-tree* architecture: writes go to a `memtable` (with WAL), flush to immutable **SSTables**, and are merged via *compaction* (minor and major). Data is organized into **tablets** (row-key ranges) managed by *tablet servers*. Key design is paramount — avoid *monotonically increasing keys* to prevent **hotspotting**. Use the `Key Visualizer` heatmap to diagnose access patterns.",
+    "**Firestore** operates in *Native mode* (real-time listeners, offline support, mobile SDKs) or *Datastore mode* (legacy API compatibility, no real-time). All reads are **strongly consistent**. Queries require *indexes* — single-field indexes are automatic, **composite indexes** must be explicitly created. Pricing is per *document operation* (reads, writes, deletes) plus storage.",
+    "**Cloud SQL** supports `MySQL`, `PostgreSQL`, and `SQL Server` with automated *backups*, **PITR** (binary/WAL logs), HA with *regional failover*, and up to 10 **read replicas** (including cross-region). The `Cloud SQL Auth Proxy` provides IAM-authenticated encrypted connections without IP allowlisting. Max capacity: *96 vCPUs, 624 GiB RAM, 64 TiB storage*. For larger workloads, consider **AlloyDB**.",
+  ],
 };

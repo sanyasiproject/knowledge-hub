@@ -260,4 +260,284 @@ No single defense is sufficient. Layer multiple protections:
         "An injection attack variant where results are not directly visible, requiring the attacker to infer information through behavioral differences or timing side channels.",
     },
   ],
+  deepDive: [
+    `**Injection attacks** remain the *most critical* class of web application vulnerabilities, consistently ranking in the **OWASP Top 10**. At their core, every injection flaw shares a single root cause: *untrusted data crossing a trust boundary* into an **interpreter** — whether that interpreter is a \`SQL\` engine, a \`JavaScript\` runtime, an \`OS shell\`, or even an \`LDAP\` directory parser. The attacker's payload is *indistinguishable* from legitimate code because the application **concatenates** user input directly into executable statements. Understanding this shared anatomy is essential: once you see that \`SQL injection\`, \`XSS\`, \`command injection\`, and \`template injection\` are all *instances of the same design flaw*, you can apply a **universal mitigation pattern** — separate *code* from *data* at every interpreter boundary.`,
+
+    `**Parameterized queries** and **prepared statements** are the gold standard for SQL injection prevention because they enforce a *structural separation* at the database driver level. When you write \`db.query("SELECT * FROM users WHERE id = ?", [userId])\`, the \`?\` placeholder tells the database engine: "compile this query structure *first*, then bind the parameter as **pure data**." No matter what \`userId\` contains — even \`' OR 1=1 --\` — it is *never* parsed as SQL syntax. This is fundamentally different from **escaping** or **sanitizing**, which attempt to *transform* dangerous characters but can be defeated by *double encoding*, \`Unicode\` tricks, or database-specific escape sequences. For **XSS prevention**, the equivalent principle is *contextual output encoding*: use \`textContent\` instead of \`innerHTML\`, employ frameworks like **React** that auto-escape by default, and deploy a strict \`Content-Security-Policy\` header with \`script-src 'self'\` to block inline scripts as a **defense-in-depth** layer.`,
+
+    `Modern applications face *evolving injection vectors* that go beyond classic \`SQLi\` and \`XSS\`. **NoSQL injection** exploits the *operator-based query syntax* of databases like \`MongoDB\`, where passing \`{"$gt": ""}\` as a password field bypasses authentication. **Server-Side Template Injection (SSTI)** targets engines like \`Jinja2\` or \`Pug\`, turning a seemingly harmless \`{{user_input}}\` into **remote code execution** via payloads like \`{{config.__class__.__init__.__globals__['os'].popen('id').read()}}\`. **GraphQL injection** manipulates *deeply nested queries* to cause **denial of service** or extract unauthorized data through *introspection*. The **defense-in-depth** approach demands multiple layers: *input validation* (allow-list, not deny-list), **parameterized interfaces** at every interpreter boundary, *output encoding* matched to the rendering context, \`WAF\` rules as a safety net, and regular **penetration testing** with tools like \`SQLMap\`, \`Burp Suite\`, and \`OWASP ZAP\` to catch what static analysis misses.`,
+  ],
+  code: [
+    {
+      language: "cpp",
+      caption: "Parameterized SQL query in C++ using SQLite to prevent SQL injection",
+      source: `#include <sqlite3.h>
+#include <string>
+#include <iostream>
+
+// SAFE: Using parameterized query to prevent SQL injection
+bool authenticateUser(sqlite3* db, const std::string& username, const std::string& password) {
+    const char* sql = "SELECT id FROM users WHERE username = ? AND password_hash = ?";
+    sqlite3_stmt* stmt = nullptr;
+
+    // Prepare the statement — SQL structure is compiled first
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db) << std::endl;
+        return false;
+    }
+
+    // Bind parameters as DATA, never as executable SQL
+    sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, password.c_str(), -1, SQLITE_TRANSIENT);
+
+    bool authenticated = (sqlite3_step(stmt) == SQLITE_ROW);
+    sqlite3_finalize(stmt);
+    return authenticated;
+}
+
+// VULNERABLE — never do this:
+// std::string sql = "SELECT id FROM users WHERE username = '" + username + "'";`,
+    },
+    {
+      language: "javascript",
+      caption: "Preventing XSS and NoSQL injection in a Node.js Express application",
+      source: `const express = require('express');
+const helmet = require('helmet');
+const mongoSanitize = require('express-mongo-sanitize');
+const { body, validationResult } = require('express-validator');
+
+const app = express();
+app.use(express.json());
+
+// Set security headers including Content-Security-Policy
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],       // No inline scripts allowed
+      styleSrc: ["'self'"],
+      imgSrc: ["'self'", "data:"],
+      objectSrc: ["'none'"],
+    },
+  },
+}));
+
+// Strip MongoDB operators like $gt, $ne from user input
+app.use(mongoSanitize());
+
+// SAFE: Validate and sanitize input, use parameterized queries
+app.post('/api/login',
+  body('username').isAlphanumeric().trim().escape(),
+  body('password').isLength({ min: 8 }),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    // Use explicit $eq operator to prevent operator injection
+    const user = await db.collection('users').findOne({
+      username: { $eq: req.body.username },
+    });
+
+    if (!user || !(await bcrypt.compare(req.body.password, user.passwordHash))) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    res.json({ token: generateJWT(user) });
+  }
+);`,
+    },
+    {
+      language: "cpp",
+      caption: "Safe OS command execution in C++ avoiding command injection",
+      source: `#include <array>
+#include <cstdio>
+#include <stdexcept>
+#include <string>
+#include <regex>
+
+// SAFE: Validate input strictly, then use execvp (no shell involved)
+#include <unistd.h>
+#include <sys/wait.h>
+
+bool isValidHostname(const std::string& input) {
+    // Allow-list: only alphanumeric, dots, and hyphens
+    static const std::regex hostnamePattern("^[a-zA-Z0-9][a-zA-Z0-9.\\-]{0,253}[a-zA-Z0-9]$");
+    return std::regex_match(input, hostnamePattern);
+}
+
+int safePing(const std::string& host) {
+    // Step 1: Strict input validation with allow-list
+    if (!isValidHostname(host)) {
+        throw std::invalid_argument("Invalid hostname format");
+    }
+
+    // Step 2: Use execvp instead of system() — no shell interpretation
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Child process: exec directly, bypassing shell
+        execlp("ping", "ping", "-c", "4", host.c_str(), nullptr);
+        _exit(127); // exec failed
+    }
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return WEXITSTATUS(status);
+}
+
+// VULNERABLE — never do this:
+// system(("ping " + userInput).c_str());
+// Attacker input: "8.8.8.8; rm -rf /" executes arbitrary commands`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Injection Attack Classification and Defenses",
+      kind: "mindmap",
+      caption: "Overview of injection attack types, their targets, and primary defenses",
+      mermaid: `mindmap
+  root((Injection Attacks))
+    SQL Injection
+      In-band
+        Union-based
+        Error-based
+      Blind
+        Boolean-based
+        Time-based
+      Out-of-band
+      Defense: Parameterized Queries
+    XSS
+      Stored
+      Reflected
+      DOM-based
+      Defense: Output Encoding + CSP
+    CSRF
+      Cookie-based
+      Defense: CSRF Tokens
+      Defense: SameSite Cookies
+    Other
+      NoSQL Injection
+      Command Injection
+      SSTI
+      LDAP Injection`,
+    },
+    {
+      title: "CSRF Attack and Prevention Flow",
+      kind: "sequence",
+      caption: "Sequence showing how a CSRF attack works and how tokens prevent it",
+      mermaid: `sequenceDiagram
+    participant Attacker as Attacker Site
+    participant Victim as Victim Browser
+    participant Server as Bank Server
+
+    Note over Victim,Server: Normal: User logs in
+    Victim->>Server: POST /login (credentials)
+    Server-->>Victim: Set-Cookie: session=abc123
+
+    Note over Attacker,Victim: Attack: User visits attacker page
+    Attacker->>Victim: Malicious page with hidden form
+    Victim->>Server: POST /transfer (cookie auto-included)
+    Note right of Server: No CSRF token - request succeeds!
+    Server-->>Victim: Transfer completed
+
+    Note over Victim,Server: With CSRF Protection
+    Victim->>Server: GET /transfer-form
+    Server-->>Victim: Form + CSRF token (hidden field)
+    Victim->>Server: POST /transfer + CSRF token
+    Note right of Server: Token valid - request allowed
+    Attacker->>Victim: Malicious page (no CSRF token)
+    Victim->>Server: POST /transfer (no valid token)
+    Note right of Server: Token missing - request BLOCKED`,
+    },
+  ],
+  comparison: {
+    columns: [
+      "Attack Type",
+      "Target",
+      "Injection Point",
+      "Impact",
+      "Primary Defense",
+    ],
+    rows: [
+      [
+        "**SQL Injection**",
+        "*Database engine*",
+        "`SQL` queries via user input fields",
+        "Data theft, modification, deletion, auth bypass",
+        "Parameterized queries / prepared statements",
+      ],
+      [
+        "**Stored XSS**",
+        "*Client browser*",
+        "Persistent data (comments, profiles) rendered as `HTML`",
+        "Session hijacking, defacement, malware distribution",
+        "Output encoding + `CSP` headers",
+      ],
+      [
+        "**Reflected XSS**",
+        "*Client browser*",
+        "URL parameters / form fields reflected in response",
+        "Phishing, session theft (requires victim click)",
+        "Output encoding + input validation",
+      ],
+      [
+        "**DOM-based XSS**",
+        "*Client-side JS*",
+        "`location.hash`, `postMessage`, client-side sources",
+        "Same as XSS but entirely client-side",
+        "Avoid dangerous sinks (`innerHTML`, `eval`)",
+      ],
+      [
+        "**CSRF**",
+        "*Authenticated session*",
+        "Cross-origin forged requests with auto-sent cookies",
+        "Unauthorized actions on behalf of the user",
+        "`CSRF` tokens + `SameSite` cookies",
+      ],
+      [
+        "**NoSQL Injection**",
+        "*NoSQL database*",
+        "Query operators (`$gt`, `$ne`) in `JSON` input",
+        "Auth bypass, data exfiltration",
+        "Input type validation + explicit `$eq` operator",
+      ],
+      [
+        "**Command Injection**",
+        "*OS shell*",
+        "User input passed to `system()` or `exec()`",
+        "Full system compromise, **RCE**",
+        "Avoid shell; use `execvp` / language-native APIs",
+      ],
+      [
+        "**SSTI**",
+        "*Template engine*",
+        "User input in server-side templates (`Jinja2`, `Pug`)",
+        "Remote code execution on the server",
+        "Sandboxed templates + input validation",
+      ],
+    ],
+  },
+  exercises: [
+    "**Identify the vulnerability**: Given the Node.js code `db.query('SELECT * FROM products WHERE category = \\'' + req.query.cat + '\\'')`  , explain *why* it is vulnerable to **SQL injection**, write a *malicious input* that dumps all rows, and refactor the code to use a **parameterized query** with `?` placeholders.",
+    "**Build a CSP header**: Write a `Content-Security-Policy` header that allows scripts *only* from your own origin, blocks all `inline scripts` and `eval()`, allows images from your origin and `data:` URIs, and disallows all `object`/`embed` elements. Then explain how this policy would *mitigate* a **stored XSS** payload like `<script>alert(1)</script>` injected into a comment field.",
+    "**Implement CSRF protection**: Design a *middleware function* in **Express.js** that generates a **CSRF token** using `crypto.randomBytes()`, stores it in the session, embeds it as a hidden form field, and validates it on every `POST`/`PUT`/`DELETE` request. Explain why an attacker on a *different origin* cannot forge this token.",
+    "**Exploit and fix NoSQL injection**: Given a `MongoDB` login endpoint that passes `req.body` directly to `db.collection('users').findOne(req.body)`, craft a **NoSQL injection** payload using the `$gt` operator to bypass authentication. Then fix the code using *input type checking*, the explicit `$eq` operator, and a library like `express-mongo-sanitize`.",
+    "**Defense-in-depth audit**: Review a sample web application that uses *string concatenation* for SQL queries, renders user input with `innerHTML`, and has no `CSRF` tokens. List *every injection vulnerability* present, rank them by **severity**, and propose a **layered remediation plan** covering parameterized queries, output encoding, `CSP`, `SameSite` cookies, and `WAF` rules.",
+  ],
+  cheatSheet: [
+    "**SQL Injection Prevention**: Always use *parameterized queries* (`?` or `$1` placeholders). Never concatenate user input into `SQL` strings. Use `ORM` methods that auto-parameterize. Apply **least privilege** to database accounts.",
+    "**XSS Prevention**: Use *contextual output encoding* — `HTML` entities for content, `JS` escaping for scripts, `URL` encoding for hrefs. Prefer `textContent` over `innerHTML`. Deploy `Content-Security-Policy: script-src 'self'`. Use frameworks with *auto-escaping* (React, Angular).",
+    "**CSRF Prevention**: Include a **unique CSRF token** in every state-changing form. Set cookies with `SameSite=Lax` or `Strict`. Validate `Origin` and `Referer` headers server-side. Use the *double submit cookie* pattern for stateless CSRF protection.",
+    "**Input Validation**: Always use **allow-lists** (expected format, type, length) over deny-lists. Validate on the *server side* — client-side validation is easily bypassed. Reject invalid input rather than trying to *sanitize* it.",
+    "**NoSQL Injection Prevention**: Never pass raw `req.body` to database queries. Use explicit `$eq` operators: `{ username: { $eq: input } }`. Strip query operators with `express-mongo-sanitize`. Validate *input types* (string, number) before querying.",
+    "**Command Injection Prevention**: Avoid `system()`, `exec()`, and `child_process.exec()` with user input. Use *language-native APIs* instead of shell commands. If shell is unavoidable, use `execFile()` / `execvp()` (no shell interpretation) with **strict allow-list** validation on input.",
+  ],
+  revisionNotes: [
+    "All injection attacks share one root cause: **untrusted data** is *interpreted as code* because the application fails to separate **data** from **instructions**. The universal fix is to use *parameterized interfaces* that keep user input as pure data at every interpreter boundary — `SQL`, `HTML`, `shell`, `LDAP`, or `template engine`.",
+    "For **SQL injection**, the key distinction is between *in-band* (results visible directly), *blind* (inferred via `boolean` or `time-based` side channels), and *out-of-band* (data exfiltrated via `DNS`/`HTTP`). **Parameterized queries** are the *primary* defense; `WAF` and input validation are supplementary layers.",
+    "For **XSS**, remember the three types: *Stored* (server-persisted, highest impact), *Reflected* (in the request/response cycle, requires victim click), and *DOM-based* (entirely client-side, target the `JS` data flow). Prevention requires **output encoding** matched to the *rendering context* plus `CSP` as a safety net.",
+    "**CSRF** exploits *automatic cookie inclusion* by browsers. Defenses: **CSRF tokens** (server-generated, embedded in forms, validated on submission), `SameSite=Lax/Strict` cookies (browser-level block on cross-origin requests), and `Origin`/`Referer` header validation. `SameSite=Lax` is now the *default* in modern browsers.",
+    "**Defense in depth** is non-negotiable: no single control is sufficient. Layer *input validation* (allow-list) + *parameterized queries* + *output encoding* + `CSP` headers + *least privilege* + `WAF` + regular **security testing** (`SAST`, `DAST`, pen testing). Each layer catches what the others miss.",
+  ],
 };

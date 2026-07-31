@@ -22,106 +22,146 @@ export const pVsNp: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Demonstrating verification vs solving: Subset Sum",
-      source: `# SUBSET SUM: Given a set of integers and a target, is there a subset that sums to target?
-# Verification (polynomial) vs Solving (exponential brute force)
+      source: `#include <iostream>
+#include <vector>
+#include <set>
+#include <optional>
 
-def verify_subset_sum(nums, target, certificate):
-    """
-    Verify a proposed solution in O(len(certificate)) time.
-    Certificate is the list of indices forming the subset.
-    This is why Subset Sum is in NP.
-    """
-    subset_sum = sum(nums[i] for i in certificate)
-    # Check all indices are valid and distinct
-    if len(set(certificate)) != len(certificate):
-        return False
-    if any(i < 0 or i >= len(nums) for i in certificate):
-        return False
-    return subset_sum == target
+// SUBSET SUM: Given a set of integers and a target, is there a subset that sums to target?
+// Verification (polynomial) vs Solving (exponential brute force)
 
-def solve_subset_sum_brute(nums, target):
-    """
-    Brute force: try all 2^n subsets. Time: O(2^n * n).
-    No known polynomial algorithm exists (NP-complete).
-    """
-    n = len(nums)
-    for mask in range(1 << n):       # 2^n subsets
-        total = 0
-        indices = []
-        for i in range(n):
-            if mask & (1 << i):
-                total += nums[i]
-                indices.append(i)
-        if total == target:
-            return indices
-    return None
-
-def solve_subset_sum_dp(nums, target):
-    """
-    Dynamic programming: O(n * target) — pseudo-polynomial.
-    Polynomial in the VALUE of target, not its BIT LENGTH.
-    """
-    dp = [False] * (target + 1)
-    dp[0] = True
-    for num in nums:
-        for t in range(target, num - 1, -1):
-            if dp[t - num]:
-                dp[t] = True
-    return dp[target]
-
-# Example
-nums = [3, 7, 1, 8, -2, 4]
-target = 11
-certificate = [1, 3]  # nums[1] + nums[3] = 7 + 8 = 15? No. Try [0, 3] = 3+8=11. Yes!
-certificate = [0, 3]
-print(f"Verify [0,3]: {verify_subset_sum(nums, target, certificate)}")  # True
-print(f"Brute force:  {solve_subset_sum_brute(nums, target)}")
-print(f"DP solution:  {solve_subset_sum_dp(nums, target)}")              # True`,
-    },
-    {
-      language: "python",
-      caption: "Polynomial-time reduction: Vertex Cover to Independent Set",
-      source: `# Reduction: VERTEX COVER <=_p INDEPENDENT SET
-# A vertex cover of size k exists <=> an independent set of size n-k exists.
-# Complement: S is a vertex cover iff V-S is an independent set.
-
-def is_vertex_cover(graph, cover):
-    """Check if 'cover' covers every edge."""
-    for u, v in graph["edges"]:
-        if u not in cover and v not in cover:
-            return False
-    return True
-
-def is_independent_set(graph, indep):
-    """Check if no two vertices in 'indep' share an edge."""
-    for u, v in graph["edges"]:
-        if u in indep and v in indep:
-            return False
-    return True
-
-def reduce_vc_to_is(graph, k):
-    """
-    Reduce: 'Does graph have a vertex cover of size k?'
-         => 'Does graph have an independent set of size n-k?'
-    Same graph, different parameter. Polynomial-time reduction.
-    """
-    n = len(graph["vertices"])
-    return graph, n - k
-
-# Example
-graph = {
-    "vertices": [0, 1, 2, 3, 4],
-    "edges": [(0,1), (1,2), (2,3), (3,4), (0,4)]
+bool verifySubsetSum(const std::vector<int>& nums, int target,
+                     const std::vector<int>& certificate) {
+    // Verify a proposed solution in O(len(certificate)) time.
+    // Certificate is the list of indices forming the subset.
+    // This is why Subset Sum is in NP.
+    std::set<int> seen;
+    int subsetSum = 0;
+    for (int idx : certificate) {
+        if (idx < 0 || idx >= static_cast<int>(nums.size())) return false;
+        if (!seen.insert(idx).second) return false;  // Duplicate index
+        subsetSum += nums[idx];
+    }
+    return subsetSum == target;
 }
 
-# Vertex cover {1, 3, 4} of size 3 => independent set {0, 2} of size 2
-cover = {1, 3, 4}
-indep = set(graph["vertices"]) - cover
-print(f"Cover {cover} valid: {is_vertex_cover(graph, cover)}")
-print(f"Independent set {indep} valid: {is_independent_set(graph, indep)}")
-# Both True — demonstrates the reduction`,
+std::optional<std::vector<int>> solveSubsetSumBrute(
+        const std::vector<int>& nums, int target) {
+    // Brute force: try all 2^n subsets. Time: O(2^n * n).
+    // No known polynomial algorithm exists (NP-complete).
+    int n = static_cast<int>(nums.size());
+    for (int mask = 0; mask < (1 << n); ++mask) {
+        int total = 0;
+        std::vector<int> indices;
+        for (int i = 0; i < n; ++i) {
+            if (mask & (1 << i)) {
+                total += nums[i];
+                indices.push_back(i);
+            }
+        }
+        if (total == target) return indices;
+    }
+    return std::nullopt;
+}
+
+bool solveSubsetSumDP(const std::vector<int>& nums, int target) {
+    // Dynamic programming: O(n * target) -- pseudo-polynomial.
+    // Polynomial in the VALUE of target, not its BIT LENGTH.
+    std::vector<bool> dp(target + 1, false);
+    dp[0] = true;
+    for (int num : nums) {
+        for (int t = target; t >= num; --t) {
+            if (dp[t - num]) dp[t] = true;
+        }
+    }
+    return dp[target];
+}
+
+int main() {
+    std::vector<int> nums = {3, 7, 1, 8, -2, 4};
+    int target = 11;
+    std::vector<int> certificate = {0, 3};  // nums[0]+nums[3] = 3+8 = 11
+
+    std::cout << "Verify [0,3]: " << std::boolalpha
+              << verifySubsetSum(nums, target, certificate) << std::endl;
+
+    auto brute = solveSubsetSumBrute(nums, target);
+    if (brute) {
+        std::cout << "Brute force: [";
+        for (size_t i = 0; i < brute->size(); ++i)
+            std::cout << (i ? ", " : "") << (*brute)[i];
+        std::cout << "]" << std::endl;
+    }
+
+    std::cout << "DP solution: " << std::boolalpha
+              << solveSubsetSumDP(nums, target) << std::endl;
+    return 0;
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "Polynomial-time reduction: Vertex Cover to Independent Set",
+      source: `#include <iostream>
+#include <vector>
+#include <set>
+#include <utility>
+
+// Reduction: VERTEX COVER <=_p INDEPENDENT SET
+// A vertex cover of size k exists <=> an independent set of size n-k exists.
+// Complement: S is a vertex cover iff V-S is an independent set.
+
+struct Graph {
+    std::vector<int> vertices;
+    std::vector<std::pair<int,int>> edges;
+};
+
+bool isVertexCover(const Graph& g, const std::set<int>& cover) {
+    // Check if 'cover' covers every edge
+    for (auto& [u, v] : g.edges) {
+        if (cover.count(u) == 0 && cover.count(v) == 0)
+            return false;
+    }
+    return true;
+}
+
+bool isIndependentSet(const Graph& g, const std::set<int>& indep) {
+    // Check if no two vertices in 'indep' share an edge
+    for (auto& [u, v] : g.edges) {
+        if (indep.count(u) && indep.count(v))
+            return false;
+    }
+    return true;
+}
+
+// Reduce: "Does graph have a vertex cover of size k?"
+//      => "Does graph have an independent set of size n-k?"
+// Same graph, different parameter. Polynomial-time reduction.
+int reduceVCtoIS(const Graph& g, int k) {
+    return static_cast<int>(g.vertices.size()) - k;
+}
+
+int main() {
+    Graph graph = {
+        {0, 1, 2, 3, 4},
+        {{0,1}, {1,2}, {2,3}, {3,4}, {0,4}}
+    };
+
+    // Vertex cover {1, 3, 4} of size 3 => independent set {0, 2} of size 2
+    std::set<int> cover = {1, 3, 4};
+    std::set<int> indep;
+    for (int v : graph.vertices) {
+        if (cover.count(v) == 0) indep.insert(v);
+    }
+
+    std::cout << "Cover valid: " << std::boolalpha
+              << isVertexCover(graph, cover) << std::endl;
+    std::cout << "Independent set valid: " << std::boolalpha
+              << isIndependentSet(graph, indep) << std::endl;
+    // Both true -- demonstrates the reduction
+    return 0;
+}`,
     },
   ],
   diagrams: [

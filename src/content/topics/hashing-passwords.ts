@@ -234,4 +234,232 @@ Implementation options:
         "A property of hash functions (Argon2, scrypt) that require significant RAM per computation, preventing efficient parallelization on GPUs and ASICs that have limited per-core memory.",
     },
   ],
+  deepDive: [
+    `**Password hashing** is fundamentally different from **encryption** because it is a *one-way* operation — there is no \`decrypt()\` function. When a user registers, the server computes \`hash(password + salt)\` and stores only the resulting **digest**. During login, the same computation is performed on the *submitted password*, and the result is compared to the **stored hash**. This means the server **never stores** the original password in *any recoverable form*. If the database is breached, attackers obtain hashes that cannot be *reversed* — they can only be attacked by **brute force**, trying candidate passwords one by one through the same \`hash()\` function. The choice of algorithm determines how *expensive* each guess is: \`SHA-256\` allows **billions** of guesses per second, while \`bcrypt\` or \`argon2id\` limit attackers to **single-digit** guesses per second per core.`,
+
+    `The concept of **memory-hardness** in algorithms like \`Argon2\` and \`scrypt\` is a *critical evolution* in password hashing. Traditional CPU-bound algorithms like \`bcrypt\` can be attacked using **GPUs** or **ASICs** (Application-Specific Integrated Circuits) that pack thousands of cores running in *parallel*. Memory-hard functions counter this by requiring each hash computation to consume a **large block of RAM** — for example, \`Argon2id\` configured with \`m=65536\` demands **64 MB** per hash. Since GPUs have *limited per-core memory* (often just a few KB of fast local memory), they cannot run many parallel instances. This makes **custom cracking hardware** economically *impractical*. The \`memory\` parameter, combined with \`iterations\` (t) and \`parallelism\` (p), gives defenders a *three-dimensional* tuning space to balance **security** against server **latency**.`,
+
+    `**Operational best practices** go beyond just choosing the right algorithm. First, always use a **cryptographically secure random number generator** (\`crypto.randomBytes()\` in Node.js, \`CSPRNG\` in .NET) for salt generation — *never* use \`Math.random()\`. Second, implement **pepper rotation** by encrypting the hash output with a *symmetric key* (the pepper) using \`AES-256-GCM\`, so you can re-encrypt stored hashes with a new pepper **without knowing** the original passwords. Third, plan for **work factor upgrades**: store the algorithm and parameters alongside each hash (bcrypt does this *automatically* in its \`$2b$12$...\` format), and **rehash** passwords transparently at login time when a user authenticates with a hash using *outdated* parameters. Finally, enforce **rate limiting** and **account lockout** policies at the application layer — even the strongest hash is *vulnerable* if an attacker can make **unlimited** login attempts against the live service.`,
+  ],
+  code: [
+    {
+      language: "C++",
+      caption: "Hashing a password with bcrypt using the bcrypt.h library",
+      source: `#include <bcrypt/BCrypt.hpp>
+#include <iostream>
+#include <string>
+
+int main() {
+    std::string password = "SuperSecretP@ss!";
+
+    // Generate a hash with work factor 12 (2^12 rounds)
+    std::string hash = BCrypt::generateHash(password, 12);
+    std::cout << "Bcrypt hash: " << hash << std::endl;
+
+    // Verify a password against a stored hash
+    bool valid = BCrypt::validatePassword(password, hash);
+    std::cout << "Password valid: " << (valid ? "true" : "false") << std::endl;
+
+    // Wrong password check
+    bool invalid = BCrypt::validatePassword("wrongpassword", hash);
+    std::cout << "Wrong password valid: " << (invalid ? "true" : "false") << std::endl;
+
+    return 0;
+}`,
+    },
+    {
+      language: "Node.js",
+      caption: "Hashing and verifying passwords with Argon2 in Node.js",
+      source: `const argon2 = require("argon2");
+
+async function hashAndVerify() {
+  const password = "SuperSecretP@ss!";
+
+  // Hash with Argon2id (recommended variant)
+  const hash = await argon2.hash(password, {
+    type: argon2.argon2id,
+    memoryCost: 65536,  // 64 MB
+    timeCost: 3,        // 3 iterations
+    parallelism: 1,     // 1 thread
+  });
+
+  console.log("Argon2id hash:", hash);
+  // Output: $argon2id$v=19$m=65536,t=3,p=1$<salt>$<hash>
+
+  // Verify a password against the stored hash
+  const isValid = await argon2.verify(hash, password);
+  console.log("Password valid:", isValid); // true
+
+  // Verify with wrong password
+  const isInvalid = await argon2.verify(hash, "wrongpassword");
+  console.log("Wrong password valid:", isInvalid); // false
+}
+
+hashAndVerify().catch(console.error);`,
+    },
+    {
+      language: "Node.js",
+      caption: "Implementing pepper rotation with AES-256-GCM encryption over bcrypt hashes",
+      source: `const bcrypt = require("bcrypt");
+const crypto = require("crypto");
+
+const PEPPER_KEY = crypto.randomBytes(32); // Store in env/HSM, not in code
+
+// Encrypt a bcrypt hash with the pepper key (AES-256-GCM)
+function encryptWithPepper(hash, pepperKey) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", pepperKey, iv);
+  const encrypted = Buffer.concat([cipher.update(hash, "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return Buffer.concat([iv, authTag, encrypted]).toString("base64");
+}
+
+// Decrypt a peppered hash
+function decryptWithPepper(encryptedHash, pepperKey) {
+  const buf = Buffer.from(encryptedHash, "base64");
+  const iv = buf.subarray(0, 12);
+  const authTag = buf.subarray(12, 28);
+  const encrypted = buf.subarray(28);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", pepperKey, iv);
+  decipher.setAuthTag(authTag);
+  return decipher.update(encrypted, undefined, "utf8") + decipher.final("utf8");
+}
+
+async function registerUser(password) {
+  const hash = await bcrypt.hash(password, 12);
+  const pepperedHash = encryptWithPepper(hash, PEPPER_KEY);
+  // Store pepperedHash in database
+  return pepperedHash;
+}
+
+async function verifyUser(password, storedPepperedHash) {
+  const hash = decryptWithPepper(storedPepperedHash, PEPPER_KEY);
+  return bcrypt.compare(password, hash);
+}`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Password Hashing and Verification Flow",
+      kind: "flow",
+      caption: "Shows the registration and login flow with salting, hashing, and optional peppering.",
+      mermaid: `flowchart TD
+    A["User submits password"] --> B["Generate random salt via CSPRNG"]
+    B --> C["Concatenate password + salt + pepper"]
+    C --> D["Apply hash algorithm\\n(bcrypt / Argon2id)"]
+    D --> E["Store hash + salt + algorithm params\\nin database"]
+
+    F["User attempts login"] --> G["Retrieve stored hash + salt\\nfrom database"]
+    G --> H["Hash submitted password\\nwith stored salt + pepper"]
+    H --> I{"Hashes match?"}
+    I -- Yes --> J["Grant access"]
+    I -- No --> K["Reject login"]
+    J --> L{"Work factor outdated?"}
+    L -- Yes --> M["Rehash with updated params\\nand store new hash"]
+    L -- No --> N["Done"]`,
+    },
+    {
+      title: "Password Hashing Algorithm Selection Decision Tree",
+      kind: "flow",
+      caption: "Decision tree for choosing the right password hashing algorithm based on requirements.",
+      mermaid: `flowchart TD
+    A["Need to hash passwords"] --> B{"Regulatory compliance\\nrequired? (FIPS/NIST)"}
+    B -- Yes --> C["Use PBKDF2\\nHMAC-SHA256\\n600,000+ iterations"]
+    B -- No --> D{"Memory-hard\\nresistance needed?"}
+    D -- Yes --> E{"Side-channel\\nconcerns?"}
+    E -- Yes --> F["Use Argon2id\\nm=64MB, t=3, p=1"]
+    E -- No --> G["Use Argon2d\\nfor max GPU resistance"]
+    D -- No --> H["Use bcrypt\\ncost factor >= 12"]
+    F --> I["Recommended for\\nmost applications"]`,
+    },
+  ],
+  comparison: {
+    columns: [
+      "Feature",
+      "bcrypt",
+      "Argon2id",
+      "scrypt",
+      "PBKDF2",
+    ],
+    rows: [
+      [
+        "**Year introduced**",
+        "1999",
+        "2015",
+        "2009",
+        "2000",
+      ],
+      [
+        "**Memory-hard**",
+        "*No*",
+        "*Yes* (configurable)",
+        "*Yes* (configurable)",
+        "*No*",
+      ],
+      [
+        "**Tunable parameters**",
+        "`cost` (1 dimension)",
+        "`memory`, `iterations`, `parallelism` (3 dimensions)",
+        "`N`, `r`, `p` (3 dimensions)",
+        "`iterations` (1 dimension)",
+      ],
+      [
+        "**Max password length**",
+        "72 bytes",
+        "Unlimited",
+        "Unlimited",
+        "Unlimited",
+      ],
+      [
+        "**Built-in salt**",
+        "*Yes* (128-bit, automatic)",
+        "*Yes* (automatic)",
+        "*Yes* (automatic)",
+        "*No* (manual salt required)",
+      ],
+      [
+        "**GPU/ASIC resistance**",
+        "Moderate",
+        "**High** (memory-bound)",
+        "**High** (memory-bound)",
+        "*Low* (easily parallelized)",
+      ],
+      [
+        "**OWASP recommendation**",
+        "`cost >= 12`",
+        "`m=19456, t=2, p=1`",
+        "Not primary recommendation",
+        "`600,000+ iterations` (HMAC-SHA256)",
+      ],
+      [
+        "**Best use case**",
+        "General purpose, *well-tested*",
+        "**New applications** (state-of-the-art)",
+        "Cryptocurrency, key derivation",
+        "FIPS/NIST compliance required",
+      ],
+    ],
+  },
+  exercises: [
+    "**Implement a registration and login system** using `Argon2id` in *Node.js*. Store the hash in a database (or a JSON file for simplicity). Verify that identical passwords produce *different* hashes due to unique salts.",
+    "**Benchmark hash computation times** across `bcrypt` (cost 10, 12, 14) and `Argon2id` (varying memory from 16MB to 128MB). Plot the results and determine the *optimal* parameters for a target latency of **250ms** on your hardware.",
+    "**Build a pepper rotation mechanism**: encrypt bcrypt hashes with `AES-256-GCM` using a pepper key. Write a migration script that *re-encrypts* all stored hashes when the pepper key is rotated, **without** needing the original passwords.",
+    "**Crack a set of unsalted SHA-256 hashes** from a practice dataset using a dictionary attack (use a common password list like `rockyou.txt`). Then salt the same passwords and demonstrate that the *rainbow table* approach **fails** against salted hashes.",
+    "**Write a middleware** in *Express.js* that automatically **rehashes** passwords at login time when the stored hash uses an *outdated* work factor (e.g., bcrypt cost < 12). Log the upgrade and ensure the user experience is *seamless*.",
+  ],
+  cheatSheet: [
+    "**Algorithm choice**: Use `Argon2id` for new applications; `bcrypt` (cost >= 12) as a proven fallback; `PBKDF2` only when *FIPS compliance* is required.",
+    "**Salt**: Always use a **unique, random** salt per password (minimum *128 bits*). `bcrypt` and `Argon2` handle this *automatically* -- never generate salts manually with these algorithms.",
+    "**Pepper**: Store a **server-side secret** outside the database (env var, *HSM*, secrets manager). Use `AES-256-GCM` encryption over the hash for easy **pepper rotation**.",
+    "**Work factor tuning**: Target **250ms** per hash on your production hardware. *Increase* the work factor annually to keep pace with hardware improvements.",
+    "**Never use** `MD5`, `SHA-1`, or `SHA-256` *alone* for password hashing -- they are **too fast** and lack built-in salting and key stretching.",
+    "**Rehash on login**: When a user authenticates successfully, check if their hash uses *outdated parameters* and **transparently rehash** with current settings. Store the algorithm version alongside each hash.",
+  ],
+  revisionNotes: [
+    "**Hashing vs. Encryption**: Hashing is *one-way* (no decryption key), encryption is *reversible*. Passwords must always be **hashed**, never encrypted. The server verifies by re-hashing the input and comparing with the stored hash.",
+    "**Salt** = *unique random value per password*, stored in the DB (not secret, ensures uniqueness). **Pepper** = *global secret*, stored outside the DB (adds a secret layer). Use **both** for defense in depth.",
+    "**Argon2id** is the *state-of-the-art*: memory-hard (`m`), configurable iterations (`t`), and parallelism (`p`). OWASP minimum: `m=19456, t=2, p=1`. **Bcrypt** is the battle-tested alternative: set `cost >= 12` (each increment *doubles* computation time).",
+    "**GPU/ASIC resistance** comes from **memory-hardness** -- `Argon2` and `scrypt` require large RAM per hash, limiting parallelism on hardware with *limited per-core memory*. `bcrypt` and `PBKDF2` are CPU-only and more *vulnerable* to GPU attacks.",
+    "**Operational essentials**: use `crypto.randomBytes()` or equivalent **CSPRNG** for salts; plan for **work factor upgrades** and **pepper rotation**; enforce *rate limiting* and *account lockout* at the application layer; store algorithm + params alongside each hash for future-proofing.",
+  ],
 };

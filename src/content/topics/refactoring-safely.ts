@@ -148,77 +148,98 @@ async processPaymentWithShadow(payment: Payment): Promise<PaymentResult> {
 }`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption:
         "Strangler Fig pattern: gradually migrating a monolith endpoint",
-      source: `# strangler_proxy.py — routing layer that migrates traffic incrementally
-from flask import Flask, request, jsonify
-import requests
-import random
-import time
+      source: `// strangler_proxy.cpp — routing layer that migrates traffic incrementally
+#include <string>
+#include <unordered_map>
+#include <functional>
+#include <chrono>
+#include <random>
+#include <iostream>
 
-app = Flask(__name__)
+// Configuration for each endpoint's migration state
+struct MigrationEntry {
+    std::string new_service;
+    int percentage; // 0-100
+};
 
-# Configuration: percentage of traffic routed to new service
-MIGRATION_CONFIG = {
-    "/api/users": {"new_service": "http://users-v2:8080", "percentage": 100},
-    "/api/orders": {"new_service": "http://orders-v2:8080", "percentage": 50},
-    "/api/inventory": {"new_service": "http://inventory-v2:8080", "percentage": 0},
+const std::unordered_map<std::string, MigrationEntry> MIGRATION_CONFIG = {
+    {"/api/users",     {"http://users-v2:8080",     100}},
+    {"/api/orders",    {"http://orders-v2:8080",      50}},
+    {"/api/inventory", {"http://inventory-v2:8080",    0}},
+};
+const std::string LEGACY_SERVICE = "http://monolith:3000";
+
+// Forward declarations
+void emit_metric(const std::string& name,
+                 const std::unordered_map<std::string, std::string>& tags);
+
+bool should_route_to_new(const std::string& endpoint,
+                         const std::string& user_id = "") {
+    auto it = MIGRATION_CONFIG.find(endpoint);
+    if (it == MIGRATION_CONFIG.end() || it->second.percentage == 0)
+        return false;
+    if (it->second.percentage == 100)
+        return true;
+    // Deterministic routing by user_id for session consistency
+    if (!user_id.empty()) {
+        size_t h = std::hash<std::string>{}(user_id);
+        return (h % 100) < static_cast<size_t>(it->second.percentage);
+    }
+    static thread_local std::mt19937 rng{std::random_device{}()};
+    std::uniform_int_distribution<int> dist(1, 100);
+    return dist(rng) <= it->second.percentage;
 }
-LEGACY_SERVICE = "http://monolith:3000"
 
+// Simplified proxy handler (conceptual — use cpp-httplib, Crow, or Drogon)
+struct ProxyResult {
+    std::string body;
+    int status_code;
+    std::unordered_map<std::string, std::string> headers;
+};
 
-def should_route_to_new(endpoint: str, user_id: str | None = None) -> bool:
-    """Determine whether to route this request to the new service."""
-    config = MIGRATION_CONFIG.get(endpoint)
-    if not config or config["percentage"] == 0:
-        return False
-    if config["percentage"] == 100:
-        return True
-    # Deterministic routing by user_id for session consistency
-    if user_id:
-        return (hash(user_id) % 100) < config["percentage"]
-    return random.randint(1, 100) <= config["percentage"]
+ProxyResult proxy(const std::string& method,
+                  const std::string& path,
+                  const std::unordered_map<std::string, std::string>& req_headers,
+                  const std::string& req_body) {
+    // Extract top-level endpoint from path, e.g. "/api/orders"
+    std::string endpoint = "/api/" + path.substr(0, path.find('/'));
+    std::string full_path = "/api/" + path;
 
+    std::string user_id;
+    if (auto it = req_headers.find("X-User-Id"); it != req_headers.end())
+        user_id = it->second;
 
-@app.route("/api/<path:path>", methods=["GET", "POST", "PUT", "DELETE"])
-def proxy(path):
-    endpoint = f"/api/{path.split('/')[0]}"
-    full_path = f"/api/{path}"
-    user_id = request.headers.get("X-User-Id")
-    target_url = LEGACY_SERVICE
+    std::string target_url = LEGACY_SERVICE;
+    if (should_route_to_new(endpoint, user_id)) {
+        target_url = MIGRATION_CONFIG.at(endpoint).new_service;
+    }
 
-    if should_route_to_new(endpoint, user_id):
-        config = MIGRATION_CONFIG[endpoint]
-        target_url = config["new_service"]
+    // Forward the request (pseudocode — use an HTTP client library)
+    auto start = std::chrono::steady_clock::now();
+    // auto resp = http_client::request(method, target_url + full_path, ...);
+    auto end = std::chrono::steady_clock::now();
+    double duration_ms =
+        std::chrono::duration<double, std::milli>(end - start).count();
 
-    # Forward the request
-    start = time.monotonic()
-    resp = requests.request(
-        method=request.method,
-        url=f"{target_url}{full_path}",
-        headers={k: v for k, v in request.headers if k != "Host"},
-        data=request.get_data(),
-        params=request.args,
-        timeout=30,
-    )
-    duration = time.monotonic() - start
-
-    # Emit metrics for monitoring migration health
+    // Emit metrics for monitoring migration health
     emit_metric("proxy.request", {
-        "endpoint": endpoint,
-        "target": "new" if target_url != LEGACY_SERVICE else "legacy",
-        "status": resp.status_code,
-        "duration_ms": duration * 1000,
-    })
+        {"endpoint",    endpoint},
+        {"target",      target_url != LEGACY_SERVICE ? "new" : "legacy"},
+        {"status",      "200" /* resp.status_code */},
+        {"duration_ms", std::to_string(duration_ms)},
+    });
 
-    return (resp.content, resp.status_code, dict(resp.headers))
+    return {"/* response body */", 200, {}};
+}
 
-
-def emit_metric(name: str, tags: dict):
-    """Send metric to monitoring system (Datadog, Prometheus, etc.)."""
-    # Implementation depends on your monitoring stack
-    pass`,
+void emit_metric(const std::string& name,
+                 const std::unordered_map<std::string, std::string>& tags) {
+    // Send metric to monitoring system (Datadog, Prometheus, etc.)
+    // Implementation depends on your monitoring stack
+}`,
     },
   ],
   diagrams: [

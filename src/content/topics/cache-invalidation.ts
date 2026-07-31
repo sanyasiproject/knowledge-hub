@@ -402,4 +402,12 @@ const topProducts = await xfetch(
     { term: "Surrogate Key", definition: "A tag assigned to cached objects (especially in CDNs) enabling batch invalidation of all objects sharing the same tag." },
     { term: "Cache-Control", definition: "An HTTP header that controls caching behavior, including max-age (TTL), stale-while-revalidate, no-cache, and no-store directives." },
   ],
+
+  exercises: [
+    "You run an e-commerce site where **product prices** change 50 times/day across 100,000 products. Design a cache invalidation strategy that keeps the product listing page fresh within *5 seconds* of a price change. Compare three approaches: *TTL-based* (5-second TTL), *event-driven* (Kafka-based invalidation), and *versioned keys*. For each, calculate the approximate **cache hit rate** and the load on your database.",
+    "Implement the **XFetch algorithm** (probabilistic early expiration) in C++ using `std::unordered_map` as the cache, `std::chrono` for timestamps, and `std::mt19937` for random number generation. Store `{value, delta, expiry}` per entry. Simulate 1,000 concurrent reads on a hot key approaching TTL expiry and verify that exactly *one* reader triggers the refresh. Tune the `beta` parameter and observe the effect.",
+    "A **cache stampede** is crashing your database every time a popular product's cache entry expires. You have Redis available. Implement *two* solutions: (1) a **distributed lock** using `SET key NX EX` where only one request recomputes, and (2) a **stale-while-revalidate** pattern where expired entries are served while one request refreshes in the background. What happens if the lock holder crashes in solution 1?",
+    "In a **microservices architecture**, Service A owns user data and Service B caches user profiles locally. When Service A updates a user's email, Service B's cache becomes stale. Design an *event-driven invalidation pipeline* using Kafka: define the event schema, the producer logic in Service A, the consumer logic in Service B, and explain how you handle **out-of-order events** and **duplicate deliveries**.",
+    "Your CDN caches API responses for a news site. Breaking news articles must appear within *10 seconds*, but CDN purge propagation takes *30 seconds* across all edge nodes. Propose a solution using **versioned URLs** or **surrogate keys** that guarantees freshness without waiting for purge propagation. How does `Cache-Control: stale-while-revalidate` fit into this design?"
+  ],
 };

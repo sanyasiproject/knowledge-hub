@@ -23,79 +23,146 @@ export const tries: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Standard trie with insert, search, and startsWith",
-      source: `class TrieNode:
-    def __init__(self):
-        self.children = {}       # char -> TrieNode
-        self.is_end = False      # marks end of a complete word
+      source: `#include <iostream>
+#include <string>
+#include <unordered_map>
+#include <memory>
 
-class Trie:
-    def __init__(self):
-        self.root = TrieNode()
+struct TrieNode {
+    std::unordered_map<char, std::unique_ptr<TrieNode>> children;
+    bool is_end = false;  // marks end of a complete word
+};
 
-    def insert(self, word: str) -> None:
-        node = self.root
-        for ch in word:
-            if ch not in node.children:
-                node.children[ch] = TrieNode()
-            node = node.children[ch]
-        node.is_end = True
+class Trie {
+    std::unique_ptr<TrieNode> root = std::make_unique<TrieNode>();
 
-    def search(self, word: str) -> bool:
-        node = self._find_node(word)
-        return node is not None and node.is_end
+    TrieNode* find_node(const std::string& prefix) const {
+        TrieNode* node = root.get();
+        for (char ch : prefix) {
+            auto it = node->children.find(ch);
+            if (it == node->children.end()) return nullptr;
+            node = it->second.get();
+        }
+        return node;
+    }
 
-    def starts_with(self, prefix: str) -> bool:
-        return self._find_node(prefix) is not None
+public:
+    void insert(const std::string& word) {
+        TrieNode* node = root.get();
+        for (char ch : word) {
+            if (node->children.find(ch) == node->children.end()) {
+                node->children[ch] = std::make_unique<TrieNode>();
+            }
+            node = node->children[ch].get();
+        }
+        node->is_end = true;
+    }
 
-    def _find_node(self, prefix: str):
-        node = self.root
-        for ch in prefix:
-            if ch not in node.children:
-                return None
-            node = node.children[ch]
-        return node
+    bool search(const std::string& word) const {
+        TrieNode* node = find_node(word);
+        return node != nullptr && node->is_end;
+    }
 
-# Usage
-t = Trie()
-for w in ["apple", "app", "apex", "bat", "ball"]:
-    t.insert(w)
-print(t.search("app"))        # True
-print(t.search("ap"))         # False (not a complete word)
-print(t.starts_with("ap"))    # True`,
+    bool starts_with(const std::string& prefix) const {
+        return find_node(prefix) != nullptr;
+    }
+};
+
+int main() {
+    Trie t;
+    for (const auto& w : {"apple", "app", "apex", "bat", "ball"}) {
+        t.insert(w);
+    }
+    std::cout << std::boolalpha;
+    std::cout << t.search("app") << "\\n";        // true
+    std::cout << t.search("ap") << "\\n";         // false (not a complete word)
+    std::cout << t.starts_with("ap") << "\\n";    // true
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Autocomplete: collect all words with a given prefix",
-      source: `def autocomplete(trie: Trie, prefix: str) -> list[str]:
-    """Return all words in the trie that start with the given prefix."""
-    node = trie._find_node(prefix)
-    if node is None:
-        return []
-    results: list[str] = []
-    _dfs(node, list(prefix), results)
-    return results
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <map>
+#include <memory>
 
-def _dfs(node: 'TrieNode', path: list[str], results: list[str]) -> None:
-    if node.is_end:
-        results.append("".join(path))
-    for ch, child in sorted(node.children.items()):
-        path.append(ch)
-        _dfs(child, path, results)
-        path.pop()
+struct TrieNode {
+    std::map<char, std::unique_ptr<TrieNode>> children;  // sorted by key
+    bool is_end = false;
+};
 
-# Usage
-t = Trie()
-for w in ["car", "card", "care", "careful", "cars", "cat"]:
-    t.insert(w)
+class Trie {
+    std::unique_ptr<TrieNode> root_ = std::make_unique<TrieNode>();
 
-print(autocomplete(t, "car"))
-# ['car', 'card', 'care', 'careful', 'cars']
-print(autocomplete(t, "cat"))
-# ['cat']
-print(autocomplete(t, "cab"))
-# []`,
+    TrieNode* find_node(const std::string& prefix) const {
+        TrieNode* node = root_.get();
+        for (char ch : prefix) {
+            auto it = node->children.find(ch);
+            if (it == node->children.end()) return nullptr;
+            node = it->second.get();
+        }
+        return node;
+    }
+
+    void dfs(const TrieNode* node, std::string& path,
+             std::vector<std::string>& results) const {
+        if (node->is_end) {
+            results.push_back(path);
+        }
+        for (const auto& [ch, child] : node->children) {
+            path.push_back(ch);
+            dfs(child.get(), path, results);
+            path.pop_back();
+        }
+    }
+
+public:
+    void insert(const std::string& word) {
+        TrieNode* node = root_.get();
+        for (char ch : word) {
+            if (node->children.find(ch) == node->children.end())
+                node->children[ch] = std::make_unique<TrieNode>();
+            node = node->children[ch].get();
+        }
+        node->is_end = true;
+    }
+
+    std::vector<std::string> autocomplete(const std::string& prefix) const {
+        TrieNode* node = find_node(prefix);
+        if (!node) return {};
+        std::vector<std::string> results;
+        std::string path = prefix;
+        dfs(node, path, results);
+        return results;
+    }
+};
+
+int main() {
+    Trie t;
+    for (const auto& w : {"car", "card", "care", "careful", "cars", "cat"}) {
+        t.insert(w);
+    }
+
+    auto print_results = [](const std::vector<std::string>& v) {
+        std::cout << "[";
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (i > 0) std::cout << ", ";
+            std::cout << "'" << v[i] << "'";
+        }
+        std::cout << "]\\n";
+    };
+
+    print_results(t.autocomplete("car"));
+    // ['car', 'card', 'care', 'careful', 'cars']
+    print_results(t.autocomplete("cat"));
+    // ['cat']
+    print_results(t.autocomplete("cab"));
+    // []
+}`,
     },
     {
       language: "typescript",

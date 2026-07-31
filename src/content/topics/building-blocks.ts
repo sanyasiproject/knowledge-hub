@@ -144,4 +144,503 @@ export const buildingBlocks: TopicContent = {
         "The process of decrypting TLS/SSL-encrypted traffic at the load balancer, so backend servers handle unencrypted traffic. Reduces compute load on application servers.",
     },
   ],
+
+  deepDive: [
+    "## How Load Balancers Actually Work Under the Hood\n\nLoad balancers are far more than simple traffic distributors -- they are critical **control plane components** that shape how your entire system behaves under stress. At **Layer 4**, a load balancer operates on TCP segments: it reads the destination IP and port from the packet header, selects a backend using its configured algorithm, and rewrites the packet's destination (NAT) before forwarding it. Because it never parses the payload, L4 is *extremely fast* -- measured in microseconds -- and is protocol-agnostic (HTTP, gRPC, WebSocket, database wire protocols all work transparently). At **Layer 7**, the load balancer terminates the TCP connection, fully parses the HTTP request (method, URI, headers, sometimes the body), makes a routing decision, and opens a *new* connection to the chosen backend. This gives it superpowers:\n\n- **Path-based routing**: send `/api/v2/*` to the new service, `/api/v1/*` to the legacy service\n- **Header injection**: add `X-Request-ID` for distributed tracing\n- **Rate limiting**: enforce per-client request quotas before traffic reaches your application\n- **SSL termination**: decrypt TLS at the LB so backends handle plain HTTP, reducing CPU overhead\n\nThe trade-off is latency: L7 parsing adds ~1-5ms per request. In practice, most production architectures use **both**: an L4 NLB at the edge for raw TCP performance and DDoS absorption, fronting L7 ALBs that handle application-level routing.",
+
+    "## Cache Hierarchies and Invalidation Strategies in Depth\n\nCaching is not a single layer -- it is a **hierarchy**, and understanding where each layer sits is critical for designing low-latency systems. The hierarchy from closest to the user to closest to the data source is: *browser cache* (controlled by `Cache-Control` and `ETag` headers) -> *CDN edge cache* -> *API gateway cache* -> *application-level in-process cache* (e.g., `std::unordered_map` in C++ or Guava/Caffeine in Java) -> *distributed cache* (Redis, Memcached) -> *database buffer pool*. Each layer trades **freshness** for **speed**.\n\nThe three canonical write strategies are:\n- **Cache-aside (lazy loading)**: the application checks the cache first; on a miss, it reads from the DB and populates the cache. On writes, the application updates the DB and *invalidates* (deletes) the cache key. Simple but vulnerable to race conditions if two writers invalidate simultaneously.\n- **Write-through**: every write goes to both the cache and the DB synchronously. Guarantees consistency but adds write latency.\n- **Write-behind (write-back)**: writes go to the cache immediately; a background process asynchronously flushes to the DB. Lowest write latency but risks data loss if the cache node fails before flushing.\n\nThe hardest problem is **invalidation**. TTL-based expiration is simple but allows stale reads. Event-driven invalidation (publish a cache-bust event on every DB write) is more precise but adds infrastructure complexity. For hot keys, consider **refresh-ahead**: a background thread proactively refreshes the cache entry *before* the TTL expires, so no request ever sees a miss.",
+
+    "## Message Queues vs. Event Streams: Choosing the Right Abstraction\n\nMessage queues and event streams solve overlapping but fundamentally different problems. A **message queue** (RabbitMQ, SQS) implements the *competing consumers* pattern: a message is delivered to **one** consumer, acknowledged, and removed. This is ideal for **task distribution** -- e.g., sending emails, processing image uploads, executing background jobs. If a consumer fails, the message is redelivered to another consumer. The queue acts as a *buffer* that absorbs traffic spikes.\n\nAn **event stream** (Kafka, Kinesis) implements the *publish-subscribe log* pattern: events are **appended** to an immutable, ordered log partitioned by key. Multiple **consumer groups** can each read the entire stream independently, at their own pace. Events are *retained* for a configurable period (days, weeks, or forever with compaction), enabling **replay** -- a new consumer can start from the beginning and rebuild its state. This is the foundation of *event sourcing* and *CQRS* architectures.\n\nKey decision factors:\n- **Do multiple independent services need the same data?** -> Event stream (each gets its own consumer group)\n- **Do you need message replay or audit trails?** -> Event stream\n- **Is ordering critical within a partition key?** -> Kafka guarantees per-partition ordering; SQS FIFO guarantees per-group ordering\n- **Do you need complex routing (fanout, topic-based)?** -> RabbitMQ excels with its exchange/binding model\n- **Is operational simplicity paramount?** -> SQS (fully managed, no clusters to maintain)",
+
+    "## Database Internals: Storage Engines and Index Structures\n\nUnderstanding *how* databases store and retrieve data helps you make better schema and indexing decisions. The two dominant storage engine paradigms are **B-tree** and **LSM-tree**. B-tree engines (used by PostgreSQL, MySQL/InnoDB) maintain a balanced tree of pages on disk. Reads are fast (O(log n) page reads), but writes require in-place updates and potentially page splits. LSM-tree engines (used by Cassandra, RocksDB, LevelDB) write to an in-memory buffer (`memtable`), which periodically flushes to sorted immutable files (`SSTables`) on disk. Reads may need to check multiple SSTables (mitigated by Bloom filters), but writes are sequential and very fast. **Rule of thumb**: B-tree for read-heavy workloads; LSM-tree for write-heavy workloads.\n\nIndex types matter enormously:\n- **B-tree index**: the default. Great for equality and range queries (`WHERE age BETWEEN 20 AND 30`)\n- **Hash index**: O(1) lookups but no range queries. Used internally by `std::unordered_map` in C++ and by some in-memory databases\n- **Inverted index**: maps terms to document IDs. The foundation of Elasticsearch and full-text search\n- **Geospatial index** (R-tree, geohash): enables queries like `find all restaurants within 5km`\n\nIn system design interviews, always state which indexes you would create and *why*. A missing index on a high-cardinality column in a hot query path is one of the most common performance mistakes in production systems.",
+  ],
+
+  code: [
+    {
+      language: "cpp",
+      caption: "LRU Cache implementation using a doubly linked list and hash map (O(1) get and put)",
+      source: `#include <iostream>
+#include <unordered_map>
+#include <list>
+using namespace std;
+
+class LRUCache {
+    int capacity;
+    list<pair<int, int>> dll;                        // doubly linked list: (key, value)
+    unordered_map<int, list<pair<int,int>>::iterator> cache; // key -> iterator into dll
+
+public:
+    LRUCache(int cap) : capacity(cap) {}
+
+    int get(int key) {
+        if (cache.find(key) == cache.end()) return -1;
+        // Move accessed node to front (most recently used)
+        dll.splice(dll.begin(), dll, cache[key]);
+        return cache[key]->second;
+    }
+
+    void put(int key, int value) {
+        if (cache.find(key) != cache.end()) {
+            // Update existing key
+            cache[key]->second = value;
+            dll.splice(dll.begin(), dll, cache[key]);
+            return;
+        }
+        if ((int)dll.size() == capacity) {
+            // Evict least recently used (back of list)
+            int evictKey = dll.back().first;
+            dll.pop_back();
+            cache.erase(evictKey);
+        }
+        dll.emplace_front(key, value);
+        cache[key] = dll.begin();
+    }
+};
+
+int main() {
+    LRUCache cache(3);
+    cache.put(1, 10);
+    cache.put(2, 20);
+    cache.put(3, 30);
+    cout << "Get 1: " << cache.get(1) << endl;  // 10, moves key 1 to front
+    cache.put(4, 40);                             // Evicts key 2 (least recently used)
+    cout << "Get 2: " << cache.get(2) << endl;   // -1 (evicted)
+    cout << "Get 3: " << cache.get(3) << endl;   // 30
+    return 0;
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "Consistent hashing with virtual nodes for balanced load distribution",
+      source: `#include <iostream>
+#include <map>
+#include <string>
+#include <functional>
+using namespace std;
+
+class ConsistentHash {
+    map<size_t, string> ring;   // hash -> server name
+    int virtualNodes;
+    hash<string> hasher;
+
+public:
+    ConsistentHash(int vnodes = 150) : virtualNodes(vnodes) {}
+
+    void addServer(const string& server) {
+        for (int i = 0; i < virtualNodes; i++) {
+            size_t h = hasher(server + "#" + to_string(i));
+            ring[h] = server;
+        }
+        cout << "Added server: " << server
+             << " (" << virtualNodes << " virtual nodes)" << endl;
+    }
+
+    void removeServer(const string& server) {
+        for (int i = 0; i < virtualNodes; i++) {
+            size_t h = hasher(server + "#" + to_string(i));
+            ring.erase(h);
+        }
+        cout << "Removed server: " << server << endl;
+    }
+
+    string getServer(const string& key) const {
+        if (ring.empty()) return "";
+        size_t h = hasher(key);
+        auto it = ring.lower_bound(h);
+        if (it == ring.end()) it = ring.begin();  // wrap around the ring
+        return it->second;
+    }
+};
+
+int main() {
+    ConsistentHash ch(100);
+    ch.addServer("cache-server-1");
+    ch.addServer("cache-server-2");
+    ch.addServer("cache-server-3");
+
+    // Route keys to servers
+    for (const auto& key : {"user:1001", "user:1002", "session:abc", "order:5678"}) {
+        cout << key << " -> " << ch.getServer(key) << endl;
+    }
+
+    // Remove a server -- only keys mapped to it are redistributed
+    ch.removeServer("cache-server-2");
+    cout << "\\nAfter removing cache-server-2:" << endl;
+    for (const auto& key : {"user:1001", "user:1002", "session:abc", "order:5678"}) {
+        cout << key << " -> " << ch.getServer(key) << endl;
+    }
+    return 0;
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "Thread-safe producer-consumer queue using std::mutex and std::condition_variable",
+      source: `#include <iostream>
+#include <queue>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <string>
+using namespace std;
+
+template <typename T>
+class MessageQueue {
+    queue<T> buffer;
+    size_t maxSize;
+    mutex mtx;
+    condition_variable notFull;
+    condition_variable notEmpty;
+    bool closed = false;
+
+public:
+    MessageQueue(size_t cap) : maxSize(cap) {}
+
+    void produce(const T& item) {
+        unique_lock<mutex> lock(mtx);
+        notFull.wait(lock, [&] { return buffer.size() < maxSize || closed; });
+        if (closed) return;
+        buffer.push(item);
+        cout << "[Producer] Enqueued: " << item << " (queue size: " << buffer.size() << ")" << endl;
+        notEmpty.notify_one();
+    }
+
+    bool consume(T& item) {
+        unique_lock<mutex> lock(mtx);
+        notEmpty.wait(lock, [&] { return !buffer.empty() || closed; });
+        if (buffer.empty() && closed) return false;
+        item = buffer.front();
+        buffer.pop();
+        notFull.notify_one();
+        return true;
+    }
+
+    void close() {
+        unique_lock<mutex> lock(mtx);
+        closed = true;
+        notFull.notify_all();
+        notEmpty.notify_all();
+    }
+};
+
+int main() {
+    MessageQueue<string> mq(5);
+
+    thread producer([&] {
+        for (int i = 1; i <= 8; i++) {
+            mq.produce("task-" + to_string(i));
+            this_thread::sleep_for(chrono::milliseconds(100));
+        }
+        mq.close();
+    });
+
+    thread consumer([&] {
+        string item;
+        while (mq.consume(item)) {
+            cout << "[Consumer] Processing: " << item << endl;
+            this_thread::sleep_for(chrono::milliseconds(200));
+        }
+        cout << "[Consumer] Queue closed, exiting." << endl;
+    });
+
+    producer.join();
+    consumer.join();
+    return 0;
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "Simple round-robin and least-connections load balancer simulation",
+      source: `#include <iostream>
+#include <vector>
+#include <string>
+#include <algorithm>
+using namespace std;
+
+struct Server {
+    string name;
+    int activeConnections = 0;
+    bool healthy = true;
+};
+
+class LoadBalancer {
+    vector<Server> servers;
+    int rrIndex = 0;
+
+public:
+    void addServer(const string& name) {
+        servers.push_back({name, 0, true});
+    }
+
+    // Round-robin: cycle through servers in order
+    Server& roundRobin() {
+        int attempts = 0;
+        while (attempts < (int)servers.size()) {
+            Server& s = servers[rrIndex % servers.size()];
+            rrIndex++;
+            if (s.healthy) {
+                s.activeConnections++;
+                return s;
+            }
+            attempts++;
+        }
+        throw runtime_error("No healthy servers available");
+    }
+
+    // Least connections: pick the server with the fewest active connections
+    Server& leastConnections() {
+        Server* best = nullptr;
+        for (auto& s : servers) {
+            if (s.healthy && (!best || s.activeConnections < best->activeConnections)) {
+                best = &s;
+            }
+        }
+        if (!best) throw runtime_error("No healthy servers available");
+        best->activeConnections++;
+        return *best;
+    }
+
+    void releaseConnection(const string& name) {
+        for (auto& s : servers) {
+            if (s.name == name && s.activeConnections > 0) {
+                s.activeConnections--;
+                return;
+            }
+        }
+    }
+
+    void markUnhealthy(const string& name) {
+        for (auto& s : servers) {
+            if (s.name == name) { s.healthy = false; return; }
+        }
+    }
+
+    void printStatus() const {
+        for (const auto& s : servers) {
+            cout << "  " << s.name << ": " << s.activeConnections
+                 << " connections, " << (s.healthy ? "healthy" : "DOWN") << endl;
+        }
+    }
+};
+
+int main() {
+    LoadBalancer lb;
+    lb.addServer("web-1");
+    lb.addServer("web-2");
+    lb.addServer("web-3");
+
+    cout << "--- Round Robin ---" << endl;
+    for (int i = 0; i < 6; i++) {
+        Server& s = lb.roundRobin();
+        cout << "Request " << i+1 << " -> " << s.name << endl;
+    }
+    cout << endl;
+    lb.printStatus();
+    return 0;
+}`,
+    },
+    {
+      language: "bash",
+      caption: "Infrastructure commands: Redis caching, Nginx load balancer config, and Kafka topic management",
+      source: `#!/bin/bash
+# === Redis Cache Operations ===
+# Set a cache key with 300-second TTL
+redis-cli SET "user:1001:profile" '{"name":"Alice","role":"admin"}' EX 300
+
+# Get a cached value
+redis-cli GET "user:1001:profile"
+
+# Check TTL remaining
+redis-cli TTL "user:1001:profile"
+
+# Invalidate a cache key
+redis-cli DEL "user:1001:profile"
+
+# Monitor cache hit rate
+redis-cli INFO stats | grep -E "keyspace_hits|keyspace_misses"
+
+
+# === Nginx Load Balancer Configuration ===
+cat <<'NGINX' > /etc/nginx/conf.d/load-balancer.conf
+upstream backend_pool {
+    least_conn;                    # Least connections algorithm
+    server 10.0.1.10:8080 weight=3;  # Higher capacity server
+    server 10.0.1.11:8080 weight=2;
+    server 10.0.1.12:8080 weight=1;
+    server 10.0.1.13:8080 backup;    # Only used when others are down
+}
+
+server {
+    listen 80;
+    location /api/ {
+        proxy_pass http://backend_pool;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Request-ID $request_id;
+        proxy_next_upstream error timeout http_502 http_503;
+    }
+}
+NGINX
+nginx -t && nginx -s reload
+
+
+# === Kafka Topic Management ===
+# Create a topic with 12 partitions and replication factor 3
+kafka-topics.sh --bootstrap-server kafka:9092 \\
+  --create --topic order-events \\
+  --partitions 12 --replication-factor 3
+
+# List all topics
+kafka-topics.sh --bootstrap-server kafka:9092 --list
+
+# Describe a topic (shows partitions, replicas, ISR)
+kafka-topics.sh --bootstrap-server kafka:9092 \\
+  --describe --topic order-events
+
+# Produce a test message
+echo '{"orderId":"ORD-123","status":"created"}' | \\
+  kafka-console-producer.sh --bootstrap-server kafka:9092 \\
+  --topic order-events
+
+# Consume from the beginning
+kafka-console-consumer.sh --bootstrap-server kafka:9092 \\
+  --topic order-events --from-beginning --max-messages 10`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "Load Balancer Architecture with Health Checks",
+      kind: "architecture",
+      caption: "L4/L7 load balancer distributing traffic across healthy backend servers with health check monitoring",
+      mermaid: `flowchart TB
+    Client1[Client A] --> LB
+    Client2[Client B] --> LB
+    Client3[Client C] --> LB
+
+    LB[Load Balancer<br/>L7 - Nginx/HAProxy]
+
+    LB -->|/api/*| API1[API Server 1<br/>Healthy]
+    LB -->|/api/*| API2[API Server 2<br/>Healthy]
+    LB -->|/api/*| API3[API Server 3<br/>Unhealthy]
+    LB -->|/static/*| CDN[CDN Edge]
+
+    HC[Health Checker] -->|GET /health<br/>every 10s| API1
+    HC -->|GET /health<br/>every 10s| API2
+    HC -->|GET /health<br/>every 10s| API3
+
+    API1 --> DB[(Primary DB)]
+    API2 --> DB
+    API1 --> Cache[(Redis Cache)]
+    API2 --> Cache
+
+    style API3 fill:#ff6b6b,stroke:#c0392b,color:#fff
+    style LB fill:#3498db,stroke:#2980b9,color:#fff
+    style Cache fill:#f39c12,stroke:#e67e22,color:#fff`,
+    },
+    {
+      title: "Cache-Aside Pattern Request Flow",
+      kind: "sequence",
+      caption: "Sequence diagram showing cache-aside (lazy loading) pattern with cache hit and cache miss paths",
+      mermaid: `sequenceDiagram
+    participant App as Application
+    participant Cache as Redis Cache
+    participant DB as Database
+
+    Note over App,DB: Cache Hit Path
+    App->>Cache: GET user:1001
+    Cache-->>App: {"name":"Alice"} (HIT)
+
+    Note over App,DB: Cache Miss Path
+    App->>Cache: GET user:1002
+    Cache-->>App: null (MISS)
+    App->>DB: SELECT * FROM users WHERE id=1002
+    DB-->>App: {"name":"Bob"}
+    App->>Cache: SET user:1002 {"name":"Bob"} EX 300
+    Cache-->>App: OK
+
+    Note over App,DB: Write + Invalidate Path
+    App->>DB: UPDATE users SET name='Robert' WHERE id=1002
+    DB-->>App: OK
+    App->>Cache: DEL user:1002
+    Cache-->>App: OK (invalidated)`,
+    },
+    {
+      title: "Message Queue vs Event Stream Architecture",
+      kind: "flow",
+      caption: "Comparison of competing-consumer queue pattern (RabbitMQ/SQS) versus publish-subscribe log pattern (Kafka)",
+      mermaid: `flowchart LR
+    subgraph MQ["Message Queue (RabbitMQ/SQS)"]
+        P1[Producer] -->|publish| Q[(Queue)]
+        Q -->|consume & ack| C1[Consumer 1]
+        Q -->|consume & ack| C2[Consumer 2]
+        Q -->|consume & ack| C3[Consumer 3]
+    end
+
+    subgraph ES["Event Stream (Kafka)"]
+        EP[Producer] -->|append| T[Topic<br/>Partition 0..N]
+        T -->|read at offset| CG1[Consumer Group A<br/>Service X]
+        T -->|read at offset| CG2[Consumer Group B<br/>Service Y]
+        T -->|read at offset| CG3[Consumer Group C<br/>Analytics]
+    end
+
+    style Q fill:#e74c3c,stroke:#c0392b,color:#fff
+    style T fill:#27ae60,stroke:#229954,color:#fff`,
+    },
+    {
+      title: "CDN Request Flow with Origin Shield",
+      kind: "flow",
+      caption: "How a CDN serves content through edge locations with an origin shield to protect the origin server",
+      mermaid: `flowchart TB
+    User1[User - Mumbai] --> Edge1[Edge Server<br/>Mumbai]
+    User2[User - Tokyo] --> Edge2[Edge Server<br/>Tokyo]
+    User3[User - London] --> Edge3[Edge Server<br/>London]
+
+    Edge1 -->|MISS| Shield[Origin Shield<br/>US-East]
+    Edge2 -->|MISS| Shield
+    Edge3 -->|MISS| Shield
+
+    Edge1 -.->|HIT| User1
+    Edge2 -.->|HIT| User2
+    Edge3 -.->|HIT| User3
+
+    Shield -->|MISS| Origin[Origin Server]
+    Shield -.->|HIT| Edge1
+    Shield -.->|HIT| Edge2
+    Shield -.->|HIT| Edge3
+
+    Origin --> Storage[(Object Storage<br/>S3)]
+
+    style Shield fill:#9b59b6,stroke:#8e44ad,color:#fff
+    style Origin fill:#e67e22,stroke:#d35400,color:#fff`,
+    },
+  ],
+
+  exercises: [
+    "Design and implement an LRU cache with a configurable eviction policy (support both LRU and LFU). Write it in C++ using STL containers. Then extend it to be thread-safe using `std::shared_mutex` for concurrent read access and exclusive write access. Benchmark the difference between the locked and lock-free versions.",
+    "Build a consistent hashing ring simulator. Start with basic hashing, then add virtual nodes. Measure the standard deviation of key distribution across servers with 10, 50, 100, and 200 virtual nodes. Visualize how few keys are remapped when a node is added or removed compared to simple modulo hashing.",
+    "Design a URL shortening service on paper. Specify which building blocks you would use: load balancer type and algorithm, caching layer (what to cache, eviction policy, TTL), database type and schema, and CDN strategy. Justify each choice. Then estimate the storage and throughput requirements for 100M URLs with a 100:1 read-to-write ratio.",
+    "Implement a dead-letter queue pattern: create a producer-consumer system where failed messages (after 3 retries with exponential backoff) are moved to a separate dead-letter queue for manual inspection. Use C++ threads and condition variables for the concurrency model.",
+    "Compare write-through, write-behind, and cache-aside patterns by implementing all three in a small C++ program with an in-memory cache and a simulated database (a `std::map`). Measure latency and consistency trade-offs under concurrent reads and writes.",
+  ],
+
+  cheatSheet: [
+    "**L4 vs L7 LB**: L4 = transport layer (IP+port, fast, protocol-agnostic). L7 = application layer (HTTP headers/URL, content-based routing, SSL termination). Use L4 for raw throughput, L7 for smart routing.",
+    "**Cache eviction**: LRU (least recently used) -- best general-purpose. LFU (least frequently used) -- better for skewed access patterns. TTL -- simple time-based expiry. Combine LRU + TTL in practice.",
+    "**Cache write strategies**: Cache-aside (app manages cache, most common). Write-through (sync write to both, consistent but slow writes). Write-behind (async flush to DB, fast but risks data loss).",
+    "**Consistent hashing**: Maps servers and keys to a ring. Adding/removing a server only remaps ~1/N keys. Use 100-200 virtual nodes per server for even distribution.",
+    "**CDN types**: Pull CDN (fetch on first request, cache with TTL) -- good for high-traffic dynamic content. Push CDN (proactively upload) -- good for large static files. Pull is more common.",
+    "**Kafka vs RabbitMQ**: Kafka = distributed log, replay, consumer groups, high throughput. RabbitMQ = traditional broker, complex routing, per-message ack. Kafka for events, RabbitMQ for tasks.",
+    "**Database selection by access pattern**: Relational (joins, ACID) -> PostgreSQL. Document (flexible schema) -> MongoDB. Key-value (sub-ms lookups) -> Redis. Wide-column (high write throughput) -> Cassandra. Graph (relationships) -> Neo4j. Search -> Elasticsearch.",
+    "**Storage engines**: B-tree (PostgreSQL, MySQL) = fast reads, in-place updates. LSM-tree (Cassandra, RocksDB) = fast sequential writes, compaction overhead on reads. B-tree for read-heavy, LSM for write-heavy.",
+  ],
+
+  revisionNotes: [
+    "Load balancers are the front door of your system. L4 for speed and protocol-agnostic routing, L7 for content-aware routing. Most architectures use both: L4 at the edge, L7 for application routing. Always mention health checks.",
+    "Caching exists at every layer (browser, CDN, app, distributed cache, DB buffer pool). In system design, 'the cache' usually means Redis between app servers and the DB. Always discuss eviction policy (LRU), TTL, and invalidation strategy.",
+    "Cache stampede is a top interview topic. Three solutions: mutex/lock (only one fetches), probabilistic early expiration (stagger refreshes), background refresh (proactive). Mention stale-while-revalidate as a bonus.",
+    "CDNs are not just for static files. They handle API response caching, DDoS protection, SSL termination, and dynamic content acceleration. Origin shield reduces origin load by acting as an intermediate cache.",
+    "Message queues (RabbitMQ, SQS) are for task distribution with competing consumers. Event streams (Kafka) are for pub-sub with replay and multiple consumer groups. Know when to use each and be able to justify your choice.",
+    "Polyglot persistence is the norm in large systems. PostgreSQL for core data, Redis for caching, Elasticsearch for search, Kafka for event streaming. Always explain why each database type was chosen based on access patterns.",
+    "Consistent hashing is essential for distributed caches and partitioned databases. Virtual nodes solve the uneven distribution problem. Key insight: adding/removing a server only affects ~1/N of the keys, unlike modulo hashing which remaps almost everything.",
+    "In system design interviews, always specify your building blocks explicitly: LB type and algorithm, cache layer and eviction policy, database type and indexes, queue/stream choice. Vague answers like 'add a cache' lose points -- say 'Redis with LRU eviction and 5-minute TTL using cache-aside pattern.'",
+  ],
 };

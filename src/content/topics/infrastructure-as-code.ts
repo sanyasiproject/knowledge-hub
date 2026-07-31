@@ -92,14 +92,218 @@ export const infrastructureAsCode: TopicContent = {
     { front: "What is policy-as-code?", back: "Automated enforcement of organizational rules (no public buckets, required tags) against IaC plans using tools like OPA, Sentinel, or Checkov." },
     { front: "What is remote state locking?", back: "A mechanism (e.g., DynamoDB for S3 backend) that prevents concurrent Terraform operations from corrupting the state file." },
   ],
-  glossary: [
-    { term: "Infrastructure as Code (IaC)", definition: "The practice of managing and provisioning infrastructure through machine-readable configuration files rather than manual processes." },
-    { term: "Declarative", definition: "A paradigm where you specify the desired end state and the tool determines the steps to achieve it." },
-    { term: "Imperative", definition: "A paradigm where you specify the exact sequence of operations to perform." },
-    { term: "State file", definition: "A record maintained by IaC tools that maps declared resources to their real-world counterparts and attributes." },
-    { term: "Drift", definition: "The divergence between the infrastructure's actual state and the state declared in IaC configuration files." },
-    { term: "Provider", definition: "A Terraform plugin responsible for understanding API interactions with a specific infrastructure platform." },
-    { term: "Idempotent", definition: "An operation that produces the same result whether executed once or multiple times." },
-    { term: "Plan", definition: "A preview of changes an IaC tool will make, showing resources to be created, updated, or destroyed." },
+
+  deepDive: [
+    "## Terraform Internals: The Graph Engine\n\nTerraform builds a **Directed Acyclic Graph (DAG)** of all resources and their dependencies. When you run `terraform plan`, the engine walks this graph to determine the correct order of operations — a security group must exist before the EC2 instance that references it. Terraform parallelizes operations where possible: independent resources are created concurrently, respecting a configurable `-parallelism` flag (default 10). The `terraform graph` command outputs DOT format you can visualize with Graphviz.\n\n**Import and State Surgery:** `terraform import` brings existing resources under management by writing their cloud state into the state file. For bulk imports, `import` blocks (Terraform 1.5+) let you declare imports in HCL. State surgery commands — `terraform state mv`, `terraform state rm` — let you rename, split, or remove resources without destroying real infrastructure. These are powerful but dangerous; always back up state first.\n\n**Provider Development:** Providers are Go binaries using the Terraform Plugin SDK (or the newer Plugin Framework). Each resource type implements CRUD operations. The schema definition specifies attributes, types, defaults, validators, and plan modifiers. Custom providers let you manage anything with an API — internal platforms, SaaS products, DNS providers.",
+
+    "## Multi-Environment Strategies\n\nTeams need to manage dev, staging, and production from the same codebase without duplication.\n\n**Workspaces:** Terraform workspaces create separate state files per environment. Simple but limited — you can only vary by `terraform.workspace` conditionals, and all environments share the same backend configuration.\n\n**Directory-per-environment:** Each environment gets its own directory with a `backend.tf` and `terraform.tfvars`. Modules are shared via relative paths or a registry. More explicit but requires discipline to keep directories in sync.\n\n**Terragrunt:** A thin wrapper that generates backend configs, manages dependencies between modules, and reduces boilerplate. Its `terragrunt.hcl` files compose modules with environment-specific inputs. Popular in large organizations but adds another tool to learn.\n\n**Feature branches for infrastructure:** Use CI/CD to run `terraform plan` on PRs and `terraform apply` on merge to main. Atlantis, Spacelift, and Terraform Cloud automate this workflow with plan comments, policy checks, and approval gates.",
+
+    "## Security and Compliance Automation\n\n**Policy-as-Code** tools enforce guardrails before infrastructure is provisioned:\n- **OPA (Open Policy Agent):** Write policies in Rego against the Terraform plan JSON. Example: deny any `aws_s3_bucket` without `server_side_encryption_configuration`.\n- **Sentinel (HashiCorp):** Embedded in Terraform Cloud/Enterprise. Policies run between `plan` and `apply` with soft/hard mandatory enforcement levels.\n- **Checkov / tfsec:** Static analysis tools that scan HCL files for misconfigurations against CIS benchmarks, OWASP, and custom rules.\n\n**Supply Chain Security:** Pin provider versions in `required_providers`. Use a private registry mirror for air-gapped environments. Sign and verify modules. Audit the `.terraform.lock.hcl` file in version control — it records provider checksums.\n\n**Secrets in State:** The state file contains attribute values in plaintext, including database passwords and API keys passed as resource arguments. Always use encrypted remote backends (S3 with SSE, Terraform Cloud). Consider using `sensitive` variable/output markers and external secret stores (Vault, AWS Secrets Manager) referenced via data sources."
+  ],
+
+  code: [
+    {
+      language: "hcl",
+      caption: "Terraform: VPC with public/private subnets and NAT gateway",
+      source: `module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "5.1.0"
+
+  name = "my-app-vpc"
+  cidr = "10.0.0.0/16"
+
+  azs             = ["us-east-1a", "us-east-1b", "us-east-1c"]
+  private_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+  public_subnets  = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
+
+  enable_nat_gateway   = true
+  single_nat_gateway   = true  # Cost optimization for non-prod
+  enable_dns_hostnames = true
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_security_group" "app" {
+  name_prefix = "app-"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}`
+    },
+    {
+      language: "yaml",
+      caption: "CloudFormation: S3 bucket with encryption and versioning",
+      source: `AWSTemplateFormatVersion: '2010-09-09'
+Description: Secure S3 bucket with encryption and versioning
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Name of the S3 bucket
+
+Resources:
+  SecureBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: ManagedBy
+          Value: cloudformation
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SecureBucket
+      PolicyDocument:
+        Statement:
+          - Sid: EnforceTLS
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt SecureBucket.Arn
+              - !Sub "\${SecureBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+Outputs:
+  BucketArn:
+    Value: !GetAtt SecureBucket.Arn`
+    },
+    {
+      language: "typescript",
+      caption: "Pulumi: ECS Fargate service with ALB",
+      source: `import * as pulumi from "@pulumi/pulumi";
+import * as aws from "@pulumi/aws";
+import * as awsx from "@pulumi/awsx";
+
+const cluster = new aws.ecs.Cluster("app-cluster");
+
+const alb = new awsx.lb.ApplicationLoadBalancer("app-lb");
+
+const service = new awsx.ecs.FargateService("app-service", {
+  cluster: cluster.arn,
+  desiredCount: 2,
+  taskDefinitionArgs: {
+    container: {
+      name: "app",
+      image: "my-app:latest",
+      cpu: 256,
+      memory: 512,
+      essential: true,
+      portMappings: [{
+        containerPort: 8080,
+        targetGroup: alb.defaultTargetGroup,
+      }],
+      environment: [
+        { name: "NODE_ENV", value: "production" },
+      ],
+    },
+  },
+});
+
+export const url = alb.loadBalancer.dnsName;`
+    }
+  ],
+
+  comparison: {
+    columns: ["Aspect", "Terraform", "CloudFormation", "Pulumi", "AWS CDK"],
+    rows: [
+      ["Language", "HCL (declarative)", "JSON/YAML (declarative)", "TypeScript, Python, Go, C#", "TypeScript, Python, Java, C#"],
+      ["Multi-cloud", "Yes (any provider)", "AWS only", "Yes (any provider)", "AWS only (synthesizes to CFN)"],
+      ["State management", "State file (S3, TF Cloud)", "Managed by AWS", "State file (S3, Pulumi Cloud)", "Managed by CloudFormation"],
+      ["Drift detection", "On plan/refresh", "Built-in drift detection API", "On preview/refresh", "Via CloudFormation"],
+      ["Rollback", "Manual (no auto-rollback)", "Automatic stack rollback", "Manual", "Automatic via CloudFormation"],
+      ["Modularity", "Modules (registry)", "Nested stacks, macros", "Components (classes)", "Constructs (L1/L2/L3)"],
+      ["Testing", "terraform test, Terratest", "cfn-lint, TaskCat", "Unit tests in any framework", "cdk-assert, Jest"],
+      ["Learning curve", "Medium (learn HCL)", "Low (YAML, AWS-native)", "Low (use your language)", "Medium (CDK + CFN concepts)"],
+      ["Community", "Largest (any cloud)", "AWS ecosystem", "Growing", "AWS ecosystem"],
+      ["Best for", "Multi-cloud, large orgs", "AWS-only shops", "Devs who prefer real code", "AWS shops wanting type safety"],
+    ]
+  },
+
+  diagrams: [
+    { title: "Terraform Plan/Apply Workflow", kind: "flow", caption: "Developer writes HCL, runs plan to preview, gets approval, runs apply to provision." },
+    { title: "IaC CI/CD Pipeline Architecture", kind: "architecture", caption: "PR triggers plan, merge triggers apply, with policy checks and approval gates." },
+  ],
+
+  animations: [
+    {
+      title: "Terraform workflow: from code to cloud",
+      steps: [
+        { label: "Write HCL", detail: "Define resources in .tf files — VPC, subnets, security groups, EC2 instances. Use modules for reuse." },
+        { label: "terraform init", detail: "Download provider plugins (e.g., aws v5.x), initialize the backend, and install modules." },
+        { label: "terraform plan", detail: "Terraform builds the resource graph, refreshes state from the cloud, and computes the diff. Output shows + create, ~ update, - destroy." },
+        { label: "Code review", detail: "The plan output is posted as a PR comment (via Atlantis/Spacelift). Team reviews the changes and approves." },
+        { label: "terraform apply", detail: "Terraform executes the plan — creating, updating, or destroying resources in dependency order with parallelism." },
+        { label: "State updated", detail: "The state file is updated with new resource IDs, ARNs, and attributes. Stored in the encrypted remote backend." },
+        { label: "Drift monitoring", detail: "Scheduled plans or drift detection tools run periodically to catch manual changes and alert the team." },
+      ],
+    },
+  ],
+
+  exercises: [
+    "Create a Terraform module that provisions a VPC with public and private subnets across 3 AZs, a NAT gateway, and outputs the subnet IDs. Use it from a root module with different CIDR blocks for dev and prod.",
+    "Write a CloudFormation template that creates an RDS PostgreSQL instance with Multi-AZ, automated backups, and a security group that only allows access from a specified CIDR. Use parameters for instance class and storage.",
+    "Set up a Terraform CI/CD pipeline using GitHub Actions: run `terraform fmt -check` and `terraform validate` on PRs, post `terraform plan` output as a PR comment, and run `terraform apply` on merge to main.",
+    "Implement a Checkov custom policy that denies any `aws_security_group` with an ingress rule allowing 0.0.0.0/0 on port 22 (SSH). Test it against a deliberately insecure configuration.",
+    "Migrate an existing manually-created AWS infrastructure (VPC, 2 EC2 instances, an RDS database) into Terraform using `terraform import`. Write the matching HCL and verify with `terraform plan` that no changes are needed.",
+  ],
+
+  cheatSheet: [
+    "terraform init → download providers and modules, configure backend",
+    "terraform plan → preview changes without applying (safe to run anytime)",
+    "terraform apply → execute the plan (creates/updates/destroys resources)",
+    "terraform destroy → tear down all managed resources (use with caution)",
+    "terraform import aws_instance.foo i-1234567890 → bring existing resource under management",
+    "terraform state mv → rename a resource in state without destroying it",
+    "terraform workspace new staging → create isolated state for a new environment",
+    "Always pin provider versions: required_providers { aws = { version = \"~> 5.0\" } }",
+  ],
+
+  revisionNotes: [
+    "IaC = version-controlled, peer-reviewed, repeatable infrastructure — treat infra like application code",
+    "Declarative (Terraform, CFN) describes WHAT; imperative (scripts) describes HOW — prefer declarative for idempotency",
+    "Terraform state is the single source of truth — store it encrypted with locking (S3 + DynamoDB)",
+    "Drift = manual changes diverging from declared state — detect with scheduled plans, fix by re-applying",
+    "Modules are the unit of reuse — keep them small, versioned, and published to a registry",
+    "Policy-as-code (OPA, Sentinel, Checkov) enforces guardrails before apply — shift security left",
+    "Never hardcode secrets in IaC — use Vault, Secrets Manager, or data sources",
+    "Multi-environment strategies: workspaces (simple), directory-per-env (explicit), Terragrunt (DRY at scale)",
+  ],
+
+  resources: [
+    { label: "Terraform: Up & Running (Brikman)", kind: "book", note: "The definitive guide to Terraform in production, covering modules, state, testing, and team workflows" },
+    { label: "Terraform Documentation", kind: "docs", note: "Official docs covering all providers, functions, and configuration language" },
+    { label: "AWS CloudFormation User Guide", kind: "docs", note: "Complete reference for CloudFormation templates, intrinsic functions, and stack management" },
+    { label: "Infrastructure as Code (Morris)", kind: "book", note: "Principles and patterns for managing infrastructure in the cloud era" },
+    { label: "Spacelift Blog: IaC Best Practices", kind: "article", note: "Practical articles on Terraform workflows, testing strategies, and policy enforcement" },
   ],
 };

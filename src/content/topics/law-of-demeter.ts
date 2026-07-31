@@ -100,34 +100,69 @@ function renderDiscount(order: Order) {
 }`
     },
     {
-      language: "python",
-      caption: "When chaining is acceptable: fluent builders and stream pipelines",
-      source: `# ACCEPTABLE: Fluent builder -- each call returns the same builder object
-query = (
-    QueryBuilder()
-    .select("name", "email")
-    .from_table("users")
+      language: "cpp",
+      caption: "When chaining is acceptable: fluent builders and STL pipelines",
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <numeric>
+#include <algorithm>
+
+// ACCEPTABLE: Fluent builder -- each call returns *this (same object)
+class QueryBuilder {
+    std::string query_;
+public:
+    QueryBuilder& select(const std::string& cols) {
+        query_ = "SELECT " + cols; return *this;
+    }
+    QueryBuilder& from(const std::string& table) {
+        query_ += " FROM " + table; return *this;
+    }
+    QueryBuilder& where(const std::string& cond) {
+        query_ += " WHERE " + cond; return *this;
+    }
+    QueryBuilder& order_by(const std::string& col) {
+        query_ += " ORDER BY " + col; return *this;
+    }
+    QueryBuilder& limit(int n) {
+        query_ += " LIMIT " + std::to_string(n); return *this;
+    }
+    std::string build() const { return query_; }
+};
+
+auto query = QueryBuilder()
+    .select("name, email")
+    .from("users")
     .where("active = true")
     .order_by("created_at")
     .limit(50)
-    .build()
-)
+    .build();
 
-# ACCEPTABLE: Stream/pipeline -- operating on a single abstraction (iterator)
-from functools import reduce
+// ACCEPTABLE: STL algorithms -- operating on a single abstraction (range)
+struct Order { bool is_confirmed; double total; };
+std::vector<Order> orders = {{true, 100.0}, {false, 50.0}, {true, 200.0}};
 
-total_revenue = (
-    orders
-    .filter(lambda o: o.is_confirmed)
-    .map(lambda o: o.total)
-    .reduce(lambda a, b: a + b, 0)
-)
+double total_revenue = 0.0;
+for (const auto& o : orders) {
+    if (o.is_confirmed) total_revenue += o.total;
+}
+// Or with std::accumulate and a lambda -- single-abstraction pipeline
 
-# VIOLATION: Navigating unrelated domain objects
-city = company.get_ceo().get_assistant().get_office().get_address().get_city()
+// VIOLATION: Navigating unrelated domain objects
+// city = company.get_ceo().get_assistant().get_office().get_address().get_city();
 
-# REFACTORED:
-city = company.get_headquarters_city()`
+// REFACTORED: single call to immediate collaborator
+class Company {
+    // ... internal structure hidden ...
+public:
+    std::string get_headquarters_city() const {
+        // Internally delegates through the object graph
+        return "San Francisco";  // details encapsulated
+    }
+};
+
+Company company;
+auto city = company.get_headquarters_city();  // LoD compliant`
     },
     {
       language: "java",

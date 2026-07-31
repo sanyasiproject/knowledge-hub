@@ -112,87 +112,113 @@ for (Shape s : shapes) {
 }`
     },
     {
-      language: "python",
-      caption: "Python multiple inheritance, MRO, and super() mechanics",
-      source: `class Animal:
-    def __init__(self, name: str):
-        self.name = name
-        print(f"Animal.__init__({name})")
+      language: "cpp",
+      caption: "C++ multiple inheritance with mixins and virtual dispatch",
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <sstream>
 
-    def speak(self) -> str:
-        return f"{self.name} makes a sound"
+// Base classes for multiple inheritance
+class Animal {
+protected:
+    std::string name_;
+public:
+    Animal(const std::string& name) : name_(name) {
+        std::cout << "Animal(" << name << ")\\n";
+    }
+    virtual ~Animal() = default;
 
+    virtual std::string speak() const {
+        return name_ + " makes a sound";
+    }
+};
 
-class Flyable:
-    def __init__(self, max_altitude: float = 1000):
-        self.max_altitude = max_altitude
-        print(f"Flyable.__init__(max_altitude={max_altitude})")
+class Flyable {
+protected:
+    double max_altitude_;
+public:
+    Flyable(double max_altitude = 1000.0) : max_altitude_(max_altitude) {
+        std::cout << "Flyable(max_altitude=" << max_altitude << ")\\n";
+    }
+    virtual ~Flyable() = default;
 
-    def fly(self) -> str:
-        return f"Flying up to {self.max_altitude}m"
+    std::string fly() const {
+        return "Flying up to " + std::to_string(max_altitude_) + "m";
+    }
+};
 
+class Swimmable {
+protected:
+    double max_depth_;
+public:
+    Swimmable(double max_depth = 50.0) : max_depth_(max_depth) {
+        std::cout << "Swimmable(max_depth=" << max_depth << ")\\n";
+    }
+    virtual ~Swimmable() = default;
 
-class Swimmable:
-    def __init__(self, max_depth: float = 50):
-        self.max_depth = max_depth
-        print(f"Swimmable.__init__(max_depth={max_depth})")
+    std::string swim() const {
+        return "Swimming down to " + std::to_string(max_depth_) + "m";
+    }
+};
 
-    def swim(self) -> str:
-        return f"Swimming down to {self.max_depth}m"
+// Multiple inheritance -- Duck inherits from all three
+class Duck : public Animal, public Flyable, public Swimmable {
+public:
+    Duck(const std::string& name)
+        : Animal(name), Flyable(500.0), Swimmable(10.0) {}
 
+    std::string speak() const override {
+        return name_ + " says Quack!";
+    }
+};
 
-# Multiple inheritance -- Diamond with cooperative super()
-class Duck(Animal, Flyable, Swimmable):
-    def __init__(self, name: str):
-        # super() follows MRO: Duck -> Animal -> Flyable -> Swimmable
-        # But this only calls Animal.__init__ because Animal doesn't call super()
-        # For cooperative MI, ALL classes should call super().__init__()
-        super().__init__(name)  # Calls Animal.__init__
-        Flyable.__init__(self, max_altitude=500)  # Explicit call
-        Swimmable.__init__(self, max_depth=10)     # Explicit call
+// --- Mixin pattern using CRTP (Curiously Recurring Template Pattern) ---
+template <typename Derived>
+class LoggableMixin {
+    std::vector<std::string> log_;
+public:
+    void log(const std::string& message) {
+        log_.push_back(message);
+    }
+    const std::vector<std::string>& get_log() const { return log_; }
+};
 
-    def speak(self) -> str:
-        return f"{self.name} says Quack!"
+template <typename Derived>
+class SerializableMixin {
+public:
+    // Derived class must implement serialize()
+    std::string to_string() const {
+        return static_cast<const Derived*>(this)->serialize();
+    }
+};
 
+// User class composing mixins via multiple inheritance + CRTP
+class User : public LoggableMixin<User>, public SerializableMixin<User> {
+public:
+    std::string name;
+    std::string email;
 
-# Cooperative multiple inheritance using super() correctly
-class Base:
-    def __init__(self, **kwargs):
-        # Absorb remaining kwargs -- end of MRO chain
-        pass
+    User(const std::string& name, const std::string& email)
+        : name(name), email(email) {}
 
-class LoggableMixin(Base):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)  # Forward to next in MRO
-        self._log = []
+    std::string serialize() const {
+        return "{ name: " + name + ", email: " + email + " }";
+    }
+};
 
-    def log(self, message: str):
-        self._log.append(message)
+int main() {
+    Duck duck("Donald");
+    std::cout << duck.speak() << "\\n";   // Donald says Quack!
+    std::cout << duck.fly() << "\\n";     // Flying up to 500m
+    std::cout << duck.swim() << "\\n";    // Swimming down to 10m
 
-class SerializableMixin(Base):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)  # Forward to next in MRO
-
-    def to_dict(self) -> dict:
-        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
-
-class User(LoggableMixin, SerializableMixin):
-    def __init__(self, name: str, email: str):
-        super().__init__()  # Cooperative: calls LoggableMixin -> SerializableMixin -> Base
-        self.name = name
-        self.email = email
-
-
-# Inspect MRO
-print(Duck.__mro__)
-# (<class 'Duck'>, <class 'Animal'>, <class 'Flyable'>, <class 'Swimmable'>, <class 'object'>)
-
-print(User.__mro__)
-# (<class 'User'>, <class 'LoggableMixin'>, <class 'SerializableMixin'>, <class 'Base'>, <class 'object'>)
-
-user = User("Alice", "alice@example.com")
-user.log("Created")
-print(user.to_dict())  # {'name': 'Alice', 'email': 'alice@example.com'}`
+    User user("Alice", "alice@example.com");
+    user.log("Created");
+    std::cout << user.to_string() << "\\n";
+    // { name: Alice, email: alice@example.com }
+    return 0;
+}`
     },
     {
       language: "cpp",
@@ -461,94 +487,108 @@ user.restore();
 console.log(user.createdAt); // Date object from construction`
     },
     {
-      language: "python",
-      caption: "Python ABC with abstract methods and cooperative inheritance",
-      source: `from abc import ABC, abstractmethod
-from typing import List, Optional
-from dataclasses import dataclass, field
-from datetime import datetime
+      language: "cpp",
+      caption: "C++ abstract classes (pure virtual), mixins, and the repository pattern",
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <optional>
+#include <chrono>
+#include <ctime>
+#include <memory>
 
-# Abstract base class with enforced contracts
-class Repository(ABC):
-    """Abstract repository -- defines the contract for data access."""
+// Simple entity represented as a map of string key-value pairs
+using Entity = std::unordered_map<std::string, std::string>;
 
-    @abstractmethod
-    def find_by_id(self, entity_id: str) -> Optional[dict]:
-        ...
+// Abstract base class with enforced contracts (pure virtual methods)
+class Repository {
+public:
+    virtual ~Repository() = default;
 
-    @abstractmethod
-    def save(self, entity: dict) -> dict:
-        ...
+    virtual std::optional<Entity> find_by_id(const std::string& id) = 0;
+    virtual Entity save(Entity entity) = 0;
+    virtual bool remove(const std::string& id) = 0;
+    virtual std::vector<Entity> find_all() = 0;
 
-    @abstractmethod
-    def delete(self, entity_id: str) -> bool:
-        ...
+    // Concrete method using abstract methods (Template Method)
+    bool exists(const std::string& id) {
+        return find_by_id(id).has_value();
+    }
+};
 
-    @abstractmethod
-    def find_all(self) -> List[dict]:
-        ...
+// Mixin for audit logging via inheritance
+class AuditMixin : public virtual Repository {
+    static std::string now_iso() {
+        auto t = std::time(nullptr);
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%FT%T", std::localtime(&t));
+        return buf;
+    }
+public:
+    Entity save(Entity entity) override {
+        entity["updated_at"] = now_iso();
+        if (entity.find("created_at") == entity.end()) {
+            entity["created_at"] = entity["updated_at"];
+        }
+        return entity;  // Derived class continues processing
+    }
 
-    # Concrete method using abstract methods (Template Method)
-    def exists(self, entity_id: str) -> bool:
-        return self.find_by_id(entity_id) is not None
+    bool remove(const std::string& id) override {
+        auto entity = find_by_id(id);
+        if (entity) {
+            std::cout << "AUDIT: Deleting entity " << id << "\\n";
+        }
+        return false;  // Derived class performs actual deletion
+    }
+};
 
+// Concrete implementation combining repository contract and audit mixin
+class InMemoryRepository : public AuditMixin {
+    std::unordered_map<std::string, Entity> store_;
+public:
+    std::optional<Entity> find_by_id(const std::string& id) override {
+        auto it = store_.find(id);
+        if (it != store_.end()) return it->second;
+        return std::nullopt;
+    }
 
-# Mixin for audit logging
-class AuditMixin:
-    """Mixin that adds audit trail to repository operations."""
+    Entity save(Entity entity) override {
+        // AuditMixin::save adds timestamps
+        entity = AuditMixin::save(std::move(entity));
+        auto id = entity["id"];
+        store_[id] = entity;
+        return entity;
+    }
 
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
+    std::vector<Entity> find_all() override {
+        std::vector<Entity> result;
+        result.reserve(store_.size());
+        for (const auto& [key, val] : store_) {
+            result.push_back(val);
+        }
+        return result;
+    }
 
-    def save(self, entity: dict) -> dict:
-        entity["updated_at"] = datetime.now().isoformat()
-        if "created_at" not in entity:
-            entity["created_at"] = entity["updated_at"]
-        # Call next in MRO (cooperative super)
-        return super().save(entity)
+    bool remove(const std::string& id) override {
+        AuditMixin::remove(id);  // logs the deletion
+        return store_.erase(id) > 0;
+    }
+};
 
-    def delete(self, entity_id: str) -> bool:
-        entity = self.find_by_id(entity_id)  # type: ignore
-        if entity:
-            print(f"AUDIT: Deleting entity {entity_id} at {datetime.now()}")
-        return super().delete(entity_id)
+int main() {
+    InMemoryRepository repo;
+    Entity alice = {{"id", "1"}, {"name", "Alice"}};
+    repo.save(alice);
 
-
-# Concrete implementation with mixin
-class InMemoryRepository(AuditMixin, Repository):
-    """In-memory implementation with audit logging via mixin."""
-
-    def __init__(self):
-        self._store: dict[str, dict] = {}
-
-    def find_by_id(self, entity_id: str) -> Optional[dict]:
-        return self._store.get(entity_id)
-
-    def save(self, entity: dict) -> dict:
-        # AuditMixin.save adds timestamps, then calls Repository.save (which is abstract,
-        # but MRO means it actually calls THIS save via super chain)
-        entity = super().save(entity)  # Goes to AuditMixin.save first
-        self._store[entity["id"]] = entity
-        return entity
-
-    def find_all(self) -> List[dict]:
-        return list(self._store.values())
-
-    def delete(self, entity_id: str) -> bool:
-        # AuditMixin.delete logs, then calls this via super chain
-        if entity_id in self._store:
-            del self._store[entity_id]
-            return True
-        return False
-
-
-# MRO: InMemoryRepository -> AuditMixin -> Repository -> ABC -> object
-print(InMemoryRepository.__mro__)
-
-repo = InMemoryRepository()
-repo.save({"id": "1", "name": "Alice"})
-print(repo.find_by_id("1"))
-# {'id': '1', 'name': 'Alice', 'updated_at': '...', 'created_at': '...'}`
+    auto found = repo.find_by_id("1");
+    if (found) {
+        std::cout << "Found: " << (*found)["name"]
+                  << " (created: " << (*found)["created_at"] << ")\\n";
+    }
+    // Found: Alice (created: 2024-01-15T10:30:00)
+    return 0;
+}`
     }
   ],
 

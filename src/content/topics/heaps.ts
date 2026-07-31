@@ -23,149 +23,204 @@ export const heaps: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Min-heap with sift-up and sift-down from scratch",
-      source: `class MinHeap:
-    def __init__(self):
-        self.data = []
+      source: `#include <iostream>
+#include <stdexcept>
+#include <vector>
 
-    def _parent(self, i):
-        return (i - 1) // 2
+class MinHeap {
+    std::vector<int> data_;
 
-    def _left(self, i):
-        return 2 * i + 1
+    int parent(int i) const { return (i - 1) / 2; }
+    int left(int i)   const { return 2 * i + 1; }
+    int right(int i)  const { return 2 * i + 2; }
 
-    def _right(self, i):
-        return 2 * i + 2
+    void sift_up(int i) {
+        while (i > 0 && data_[i] < data_[parent(i)]) {
+            std::swap(data_[i], data_[parent(i)]);
+            i = parent(i);
+        }
+    }
 
-    def _swap(self, i, j):
-        self.data[i], self.data[j] = self.data[j], self.data[i]
+    void sift_down(int i) {
+        int n = static_cast<int>(data_.size());
+        while (true) {
+            int smallest = i;
+            int l = left(i), r = right(i);
+            if (l < n && data_[l] < data_[smallest]) smallest = l;
+            if (r < n && data_[r] < data_[smallest]) smallest = r;
+            if (smallest == i) break;
+            std::swap(data_[i], data_[smallest]);
+            i = smallest;
+        }
+    }
 
-    def _sift_up(self, i):
-        while i > 0 and self.data[i] < self.data[self._parent(i)]:
-            self._swap(i, self._parent(i))
-            i = self._parent(i)
+public:
+    void push(int val) {
+        data_.push_back(val);
+        sift_up(static_cast<int>(data_.size()) - 1);
+    }
 
-    def _sift_down(self, i):
-        n = len(self.data)
-        while True:
-            smallest = i
-            l, r = self._left(i), self._right(i)
-            if l < n and self.data[l] < self.data[smallest]:
-                smallest = l
-            if r < n and self.data[r] < self.data[smallest]:
-                smallest = r
-            if smallest == i:
-                break
-            self._swap(i, smallest)
-            i = smallest
+    int pop() {
+        if (data_.empty()) throw std::out_of_range("pop from empty heap");
+        int root = data_[0];
+        data_[0] = data_.back();
+        data_.pop_back();
+        if (!data_.empty()) sift_down(0);
+        return root;
+    }
 
-    def push(self, val):
-        self.data.append(val)
-        self._sift_up(len(self.data) - 1)
+    int peek() const {
+        if (data_.empty()) throw std::out_of_range("peek at empty heap");
+        return data_[0];
+    }
 
-    def pop(self):
-        if not self.data:
-            raise IndexError("pop from empty heap")
-        root = self.data[0]
-        last = self.data.pop()
-        if self.data:
-            self.data[0] = last
-            self._sift_down(0)
-        return root
+    size_t size() const { return data_.size(); }
+    bool empty() const  { return data_.empty(); }
+};
 
-    def peek(self):
-        if not self.data:
-            raise IndexError("peek at empty heap")
-        return self.data[0]
-
-    def __len__(self):
-        return len(self.data)
-
-# Usage
-h = MinHeap()
-for v in [5, 3, 8, 1, 2, 7]:
-    h.push(v)
-print(h.pop())  # 1
-print(h.pop())  # 2
-print(h.pop())  # 3`,
+int main() {
+    MinHeap h;
+    for (int v : {5, 3, 8, 1, 2, 7})
+        h.push(v);
+    std::cout << h.pop() << "\\n"; // 1
+    std::cout << h.pop() << "\\n"; // 2
+    std::cout << h.pop() << "\\n"; // 3
+    return 0;
+}`,
     },
     {
-      language: "python",
-      caption: "Using Python's heapq for a priority queue with custom priorities",
-      source: `import heapq
+      language: "cpp",
+      caption: "Using std::priority_queue and heap algorithms from <algorithm>",
+      source: `#include <algorithm>
+#include <functional>
+#include <iostream>
+#include <queue>
+#include <string>
+#include <vector>
 
-# heapq implements a min-heap over a list.
-# For a max-heap, negate the values.
+int main() {
+    // --- Basic usage with heap algorithms ---
+    std::vector<int> nums = {5, 3, 8, 1, 2, 7};
+    std::make_heap(nums.begin(), nums.end(), std::greater<>{}); // min-heap, O(n)
 
-# --- Basic usage ---
-nums = [5, 3, 8, 1, 2, 7]
-heapq.heapify(nums)          # O(n) in-place
-print(heapq.heappop(nums))   # 1
+    // Pop minimum (front after make_heap with greater<>)
+    std::pop_heap(nums.begin(), nums.end(), std::greater<>{});
+    std::cout << nums.back() << "\\n"; // 1
+    nums.pop_back();
 
-heapq.heappush(nums, 0)
-print(heapq.heappop(nums))   # 0
+    // Push a new value
+    nums.push_back(0);
+    std::push_heap(nums.begin(), nums.end(), std::greater<>{});
+    std::pop_heap(nums.begin(), nums.end(), std::greater<>{});
+    std::cout << nums.back() << "\\n"; // 0
+    nums.pop_back();
 
-# --- Priority queue with (priority, item) tuples ---
-tasks = []
-heapq.heappush(tasks, (2, "code review"))
-heapq.heappush(tasks, (1, "fix prod bug"))
-heapq.heappush(tasks, (3, "write tests"))
+    // --- Priority queue with (priority, task) pairs ---
+    // std::priority_queue is a max-heap by default; use greater<> for min-heap
+    using Task = std::pair<int, std::string>;
+    std::priority_queue<Task, std::vector<Task>, std::greater<Task>> tasks;
 
-while tasks:
-    priority, task = heapq.heappop(tasks)
-    print(f"Priority {priority}: {task}")
-# Output:
-# Priority 1: fix prod bug
-# Priority 2: code review
-# Priority 3: write tests
+    tasks.push({2, "code review"});
+    tasks.push({1, "fix prod bug"});
+    tasks.push({3, "write tests"});
 
-# --- Top-k elements: k largest in O(n log k) ---
-data = [40, 10, 90, 20, 50, 60, 30, 80, 70]
-top3 = heapq.nlargest(3, data)   # [90, 80, 70]
-bot3 = heapq.nsmallest(3, data)  # [10, 20, 30]
+    while (!tasks.empty()) {
+        auto [priority, task] = tasks.top();
+        tasks.pop();
+        std::cout << "Priority " << priority << ": " << task << "\\n";
+    }
+    // Priority 1: fix prod bug
+    // Priority 2: code review
+    // Priority 3: write tests
 
-# --- Merging k sorted iterators ---
-merged = list(heapq.merge([1, 4, 7], [2, 5, 8], [3, 6, 9]))
-# [1, 2, 3, 4, 5, 6, 7, 8, 9]`,
+    // --- Top-k elements using partial_sort ---
+    std::vector<int> data = {40, 10, 90, 20, 50, 60, 30, 80, 70};
+
+    // 3 largest: partial_sort puts top 3 at the front (descending)
+    std::partial_sort(data.begin(), data.begin() + 3, data.end(), std::greater<>{});
+    std::cout << "Top 3:";
+    for (int i = 0; i < 3; ++i) std::cout << " " << data[i]; // 90 80 70
+    std::cout << "\\n";
+
+    // 3 smallest: partial_sort ascending
+    std::partial_sort(data.begin(), data.begin() + 3, data.end());
+    std::cout << "Bottom 3:";
+    for (int i = 0; i < 3; ++i) std::cout << " " << data[i]; // 10 20 30
+    std::cout << "\\n";
+
+    // --- Merging k sorted ranges (using a min-heap) ---
+    std::vector<std::vector<int>> sorted_lists = {{1,4,7},{2,5,8},{3,6,9}};
+    // Min-heap of (value, list_index, element_index)
+    using Entry = std::tuple<int, int, int>;
+    std::priority_queue<Entry, std::vector<Entry>, std::greater<>> pq;
+
+    for (int i = 0; i < (int)sorted_lists.size(); ++i)
+        if (!sorted_lists[i].empty())
+            pq.push({sorted_lists[i][0], i, 0});
+
+    std::vector<int> merged;
+    while (!pq.empty()) {
+        auto [val, li, ei] = pq.top(); pq.pop();
+        merged.push_back(val);
+        if (ei + 1 < (int)sorted_lists[li].size())
+            pq.push({sorted_lists[li][ei + 1], li, ei + 1});
+    }
+    std::cout << "Merged:";
+    for (int v : merged) std::cout << " " << v; // 1 2 3 4 5 6 7 8 9
+    std::cout << "\\n";
+
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Heapsort implementation (in-place, O(n log n) worst case)",
-      source: `def heapsort(arr):
-    """In-place heapsort using a max-heap."""
-    n = len(arr)
+      source: `#include <algorithm>
+#include <iostream>
+#include <vector>
 
-    def sift_down(start, end):
-        """Repair the max-heap property for node at 'start'
-        within the range [start, end)."""
-        root = start
-        while True:
-            child = 2 * root + 1
-            if child >= end:
-                break
-            # Pick the larger child
-            if child + 1 < end and arr[child] < arr[child + 1]:
-                child += 1
-            if arr[root] < arr[child]:
-                arr[root], arr[child] = arr[child], arr[root]
-                root = child
-            else:
-                break
+void sift_down(std::vector<int>& arr, int start, int end) {
+    // Repair the max-heap property for node at 'start'
+    // within the range [start, end).
+    int root = start;
+    while (true) {
+        int child = 2 * root + 1;
+        if (child >= end) break;
+        // Pick the larger child
+        if (child + 1 < end && arr[child] < arr[child + 1])
+            ++child;
+        if (arr[root] < arr[child]) {
+            std::swap(arr[root], arr[child]);
+            root = child;
+        } else {
+            break;
+        }
+    }
+}
 
-    # Phase 1: Build a max-heap (Floyd's algorithm, O(n))
-    for i in range(n // 2 - 1, -1, -1):
-        sift_down(i, n)
+void heapsort(std::vector<int>& arr) {
+    int n = static_cast<int>(arr.size());
 
-    # Phase 2: Repeatedly extract the max to the end
-    for end in range(n - 1, 0, -1):
-        arr[0], arr[end] = arr[end], arr[0]  # move max to sorted region
-        sift_down(0, end)                     # restore heap on reduced range
+    // Phase 1: Build a max-heap (Floyd's algorithm, O(n))
+    for (int i = n / 2 - 1; i >= 0; --i)
+        sift_down(arr, i, n);
 
-# Example
-data = [38, 27, 43, 3, 9, 82, 10]
-heapsort(data)
-print(data)  # [3, 9, 10, 27, 38, 43, 82]`,
+    // Phase 2: Repeatedly extract the max to the end
+    for (int end = n - 1; end > 0; --end) {
+        std::swap(arr[0], arr[end]); // move max to sorted region
+        sift_down(arr, 0, end);      // restore heap on reduced range
+    }
+}
+
+int main() {
+    std::vector<int> data = {38, 27, 43, 3, 9, 82, 10};
+    heapsort(data);
+    for (int v : data) std::cout << v << " ";
+    std::cout << "\\n"; // 3 9 10 27 38 43 82
+    return 0;
+}`,
     },
   ],
   diagrams: [

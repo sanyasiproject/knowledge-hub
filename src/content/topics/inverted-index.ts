@@ -139,67 +139,91 @@ POST /_analyze
 // Output tokens: [index, and, search]`
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "BM25 scoring implementation showing term frequency saturation and length normalization",
-      source: `import math
-from collections import Counter
+      source: `#include <iostream>
+#include <vector>
+#include <string>
+#include <unordered_map>
+#include <cmath>
+#include <sstream>
+#include <iomanip>
+#include <algorithm>
 
-def bm25_score(query_terms, document, corpus, k1=1.2, b=0.75):
-    """
-    BM25 scoring for a single document against a query.
+using Document = std::vector<std::string>;
 
-    Parameters:
-        query_terms: list of query terms (already tokenized)
-        document: list of terms in the document
-        corpus: list of documents (each a list of terms)
-        k1: term frequency saturation parameter (default 1.2)
-        b: document length normalization parameter (default 0.75)
-    """
-    doc_len = len(document)
-    avg_doc_len = sum(len(d) for d in corpus) / len(corpus)
-    N = len(corpus)
+double bm25_score(const std::vector<std::string>& query_terms,
+                  const Document& document,
+                  const std::vector<Document>& corpus,
+                  double k1 = 1.2, double b = 0.75) {
+    int doc_len = static_cast<int>(document.size());
+    double avg_doc_len = 0.0;
+    for (const auto& d : corpus) avg_doc_len += d.size();
+    avg_doc_len /= corpus.size();
+    int N = static_cast<int>(corpus.size());
 
-    doc_term_freqs = Counter(document)
-    score = 0.0
+    // Count term frequencies in this document
+    std::unordered_map<std::string, int> doc_tf;
+    for (const auto& term : document) doc_tf[term]++;
 
-    for term in query_terms:
-        # Document frequency: how many docs contain this term
-        df = sum(1 for d in corpus if term in d)
-        if df == 0:
-            continue
+    double score = 0.0;
+    for (const auto& term : query_terms) {
+        // Document frequency: how many docs contain this term
+        int df = 0;
+        for (const auto& d : corpus) {
+            if (std::find(d.begin(), d.end(), term) != d.end()) ++df;
+        }
+        if (df == 0) continue;
 
-        # IDF with smoothing (Lucene's formula)
-        idf = math.log(1 + (N - df + 0.5) / (df + 0.5))
+        // IDF with smoothing (Lucene's formula)
+        double idf = std::log(1.0 + (N - df + 0.5) / (df + 0.5));
 
-        # Term frequency in this document
-        tf = doc_term_freqs.get(term, 0)
+        // Term frequency in this document
+        int tf = 0;
+        auto it = doc_tf.find(term);
+        if (it != doc_tf.end()) tf = it->second;
 
-        # BM25 TF component with saturation and length normalization
-        # As tf grows, this approaches (k1 + 1) asymptotically
-        tf_norm = (tf * (k1 + 1)) / (
-            tf + k1 * (1 - b + b * doc_len / avg_doc_len)
-        )
+        // BM25 TF component with saturation and length normalization
+        double tf_norm = (tf * (k1 + 1.0)) /
+            (tf + k1 * (1.0 - b + b * doc_len / avg_doc_len));
 
-        score += idf * tf_norm
+        score += idf * tf_norm;
+    }
+    return score;
+}
 
-    return score
+// Helper: split a string into words
+Document split_words(const std::string& s) {
+    Document words;
+    std::istringstream iss(s);
+    std::string word;
+    while (iss >> word) words.push_back(word);
+    return words;
+}
 
-# Example
-corpus = [
-    "the quick brown fox jumps over the lazy dog".split(),
-    "a quick brown dog outpaces the fox".split(),
-    "the fox is quick and the dog is lazy".split(),
-    "search engines use inverted indexes for fast retrieval".split(),
-]
+int main() {
+    std::vector<Document> corpus = {
+        split_words("the quick brown fox jumps over the lazy dog"),
+        split_words("a quick brown dog outpaces the fox"),
+        split_words("the fox is quick and the dog is lazy"),
+        split_words("search engines use inverted indexes for fast retrieval"),
+    };
 
-query = ["quick", "fox"]
-for i, doc in enumerate(corpus):
-    s = bm25_score(query, doc, corpus)
-    print(f"Doc {i}: {s:.4f}  ->  {' '.join(doc)}")
-# Doc 0: 0.6931  ->  the quick brown fox jumps over the lazy dog
-# Doc 1: 0.7735  ->  a quick brown dog outpaces the fox
-# Doc 2: 0.8108  ->  the fox is quick and the dog is lazy
-# Doc 3: 0.0000  ->  search engines use inverted indexes ...`
+    std::vector<std::string> query = {"quick", "fox"};
+
+    for (size_t i = 0; i < corpus.size(); ++i) {
+        double s = bm25_score(query, corpus[i], corpus);
+        std::cout << "Doc " << i << ": " << std::fixed << std::setprecision(4)
+                  << s << "  ->  ";
+        for (const auto& w : corpus[i]) std::cout << w << " ";
+        std::cout << "\\n";
+    }
+    // Doc 0: 0.6931  ->  the quick brown fox jumps over the lazy dog
+    // Doc 1: 0.7735  ->  a quick brown dog outpaces the fox
+    // Doc 2: 0.8108  ->  the fox is quick and the dog is lazy
+    // Doc 3: 0.0000  ->  search engines use inverted indexes for fast retrieval
+    return 0;
+}`
     },
     {
       language: "json",
@@ -271,7 +295,7 @@ PUT /articles
   diagrams: [
     {
       title: "Inverted Index Structure",
-      kind: "structure",
+      kind: "architecture",
       caption: "Term dictionary maps each unique term to a posting list containing document IDs, term frequencies, and positions. The dictionary is stored as a Finite State Transducer (FST) for compact in-memory representation."
     },
     {
@@ -463,6 +487,13 @@ PUT /articles
     "_analyze API: test what tokens an analyzer produces from given text"
   ],
 
+  exercises: [
+    "Build an **inverted index from scratch** in C++: given a vector of documents (each a string), tokenize by whitespace, apply lowercasing, and construct a `std::unordered_map<string, vector<pair<int, vector<int>>>>` mapping each term to document IDs and positions. Implement a `search(term)` method and a `phrase_search(term1, term2)` method that checks position adjacency.",
+    "Design a **custom Elasticsearch analyzer** for code search that handles camelCase, snake_case, and dot-separated identifiers. Use a `pattern` tokenizer that splits on `[._\\s]` and non-alphanumeric boundaries, combined with `lowercase` and `word_delimiter_graph` filters. Test it with the `_analyze` API against inputs like `getUserById`, `get_user_by_id`, and `com.example.UserService`.",
+    "Implement the **BM25 scoring function** in C++ for a given query against a small corpus. Use parameters `k1 = 1.2` and `b = 0.75`. For the same corpus, also compute TF-IDF scores and compare the rankings. Identify a case where BM25's *term frequency saturation* produces a different ranking than TF-IDF and explain why.",
+    "You notice that searching for `'running'` returns no results even though documents contain the word. Use the `POST /_analyze` API to debug the issue. Discover that the index analyzer applies `porter_stem` (producing `'run'`) but the search analyzer does not stem. Fix the problem by configuring a separate `search_analyzer` and explain the **index-time vs query-time analysis** distinction.",
+    "Implement **delta encoding with variable-byte (VByte) compression** for a posting list in C++. Given a sorted vector of document IDs like `[100, 105, 110, 200, 201]`, compute deltas `[100, 5, 5, 90, 1]` and encode each delta using VByte (7 bits per byte, high bit as continuation flag). Decode back to original IDs and verify correctness. Measure the space savings compared to storing raw 32-bit integers.",
+  ],
   resources: [
     { label: "Elasticsearch: The Definitive Guide - Inverted Index chapter", kind: "book", note: "Comprehensive explanation of how Elasticsearch builds and queries inverted indexes" },
     { label: "Introduction to Information Retrieval (Manning, Raghavan, Schutze)", kind: "book", note: "The standard academic textbook covering inverted indexes, TF-IDF, and scoring models" },

@@ -24,32 +24,57 @@ export const paradigmsOverview: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Imperative: step-by-step mutation",
-      source: `# Sum of squares of even numbers, imperative style
-numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-result = 0
-for n in numbers:
-    if n % 2 == 0:
-        result += n * n
-print(result)  # 220`,
+      source: `#include <iostream>
+#include <vector>
+
+int main() {
+    // Sum of squares of even numbers, imperative style
+    std::vector<int> numbers = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    int result = 0;
+    for (int n : numbers) {
+        if (n % 2 == 0) {
+            result += n * n;
+        }
+    }
+    std::cout << result << std::endl;  // 220
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Functional: same problem using pure functions and no mutation",
-      source: `# Sum of squares of even numbers, functional style
-from functools import reduce
+      source: `#include <iostream>
+#include <vector>
+#include <numeric>
+#include <algorithm>
 
-numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-result = reduce(
-    lambda acc, x: acc + x,
-    map(lambda n: n * n, filter(lambda n: n % 2 == 0, numbers)),
-    0
-)
-print(result)  # 220
+int main() {
+    // Sum of squares of even numbers, functional style
+    std::vector<int> numbers = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
-# Or with a generator expression (Pythonic declarative)
-result = sum(n * n for n in numbers if n % 2 == 0)`,
+    // Filter even numbers
+    std::vector<int> evens;
+    std::copy_if(numbers.begin(), numbers.end(), std::back_inserter(evens),
+                 [](int n) { return n % 2 == 0; });
+
+    // Map to squares
+    std::vector<int> squares(evens.size());
+    std::transform(evens.begin(), evens.end(), squares.begin(),
+                   [](int n) { return n * n; });
+
+    // Reduce (fold) to sum
+    int result = std::accumulate(squares.begin(), squares.end(), 0);
+    std::cout << result << std::endl;  // 220
+
+    // Or as a single transform_reduce (C++17 declarative)
+    int result2 = std::transform_reduce(
+        numbers.begin(), numbers.end(), 0, std::plus<>(),
+        [](int n) { return (n % 2 == 0) ? n * n : 0; });
+    std::cout << result2 << std::endl;  // 220
+    return 0;
+}`,
     },
     {
       language: "java",

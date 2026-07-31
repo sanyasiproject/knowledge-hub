@@ -126,6 +126,242 @@ export const k8sNetworking: TopicContent = {
       back: "A newer, role-oriented alternative to Ingress with GatewayClass, Gateway, and HTTPRoute resources supporting TCP/UDP, weighted routing, and header matching.",
     },
   ],
+  deepDive: [
+    "The **Kubernetes networking model** mandates three fundamental rules: every Pod gets its own *unique IP address*, all Pods can reach every other Pod *without NAT*, and the IP a Pod sees for itself is the same IP others use to reach it. Implementing this flat network falls to **CNI plugins**, each of which takes a different approach. **Flannel** uses a simple *VXLAN overlay* -- it encapsulates Pod-to-Pod traffic in UDP packets that traverse the underlay network, trading some performance for operational simplicity. **Calico** avoids encapsulation entirely by using *BGP peering* to distribute Pod routes to every node, achieving near-native throughput but requiring either a BGP-capable fabric or an IP-in-IP fallback for cross-subnet traffic. **Cilium** rewrites the networking stack at the *kernel level* using **eBPF programs**, replacing kube-proxy entirely (`kubeProxyReplacement: true`) and enabling features like *transparent encryption* (WireGuard), *L7 policy enforcement* (HTTP method/path matching), and *Hubble observability* without sidecar proxies. Choosing a CNI plugin is one of the most consequential infrastructure decisions in a cluster because it determines **NetworkPolicy support**, *encryption capabilities*, *performance characteristics*, and *observability depth*.",
+    "**kube-proxy** is the component responsible for translating `Service` objects into *data-plane forwarding rules*. In the default **iptables mode**, kube-proxy creates chains of `DNAT` rules that randomly select a backend Pod for each new connection, achieving statistically even distribution. However, iptables rules scale *O(n)* with the number of Services and endpoints -- clusters with 10,000+ Services can see noticeable rule-update latency and CPU consumption on every node. **IPVS mode** (`--proxy-mode=ipvs`) uses the kernel's *IP Virtual Server* module, which stores rules in a hash table and supports multiple load-balancing algorithms: `rr` (round-robin), `lc` (least connections), `wrr` (weighted round-robin), `sh` (source hashing for session affinity), and more. IPVS scales *O(1)* for rule lookups, making it the recommended mode for large clusters. Beyond kube-proxy entirely, Cilium's eBPF-based `kube-proxy replacement` handles service load balancing directly in the kernel's XDP/TC hooks, reducing per-packet overhead and enabling *Maglev consistent hashing* for better connection distribution during endpoint changes.",
+    "The **Gateway API** (graduated to GA in Kubernetes 1.31 for core resources) represents a generational leap beyond Ingress. Its *role-oriented design* separates infrastructure concerns (**GatewayClass** -- managed by the platform provider), cluster-level configuration (**Gateway** -- managed by cluster operators who define listeners with ports, protocols, and TLS settings), and application routing (**HTTPRoute**, **GRPCRoute**, **TCPRoute**, **UDPRoute** -- managed by application developers). This separation enables *self-service routing* without granting developers access to infrastructure configuration. Key capabilities absent from Ingress include: **traffic splitting** with weights (e.g., `90%` to stable, `10%` to canary via `backendRefs` weights), **header-based matching** and modification, **request mirroring** for shadow traffic testing, **cross-namespace routing** via `ReferenceGrant` (allowing an HTTPRoute in namespace A to reference a Service in namespace B), and **TLS passthrough** for end-to-end encryption. The extensibility model uses *policy attachment* -- custom policies (like rate limiting or authentication) can be attached to Gateways, Routes, or BackendRefs using the `targetRef` pattern, avoiding the annotation sprawl that plagues Ingress configurations.",
+  ],
+  code: [
+    {
+      language: "yaml",
+      caption: "**NetworkPolicy** implementing *zero-trust*: deny all traffic, then allow specific ingress and DNS egress",
+      source: `# Step 1: Default deny all ingress and egress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: production
+spec:
+  podSelector: {}    # selects ALL pods in namespace
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Step 2: Allow frontend pods to receive traffic on port 8080
+# and allow egress to the API service + DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: api-server
+      ports:
+        - protocol: TCP
+          port: 3000
+    - to:                    # Allow DNS resolution
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53`,
+    },
+    {
+      language: "yaml",
+      caption: "**Gateway API** setup: *GatewayClass*, *Gateway* with TLS, and *HTTPRoute* with traffic splitting",
+      source: `# GatewayClass -- managed by platform team
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: cloud-lb
+spec:
+  controllerName: example.com/gateway-controller
+---
+# Gateway -- managed by cluster operator
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: api-gateway
+  namespace: infra
+spec:
+  gatewayClassName: cloud-lb
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: api-tls-cert
+            kind: Secret
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              gateway-access: "true"
+---
+# HTTPRoute -- managed by app developer (canary split)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: api-route
+  namespace: api-team
+spec:
+  parentRefs:
+    - name: api-gateway
+      namespace: infra
+  hostnames:
+    - "api.example.com"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v2
+      backendRefs:
+        - name: api-stable
+          port: 8080
+          weight: 90
+        - name: api-canary
+          port: 8080
+          weight: 10`,
+    },
+    {
+      language: "bash",
+      caption: "Diagnostic **kubectl** commands for *debugging networking*, DNS, and services",
+      source: `# Verify DNS resolution from inside a pod
+kubectl run dnstest --rm -it --image=busybox:1.36 --restart=Never -- \\
+  nslookup my-service.default.svc.cluster.local
+
+# Check endpoints backing a Service
+kubectl get endpoints my-service -o wide
+
+# Inspect kube-proxy mode (iptables vs IPVS)
+kubectl get configmap kube-proxy -n kube-system -o yaml | grep mode
+
+# List IPVS rules on a node (if using IPVS mode)
+kubectl debug node/worker-1 -it --image=nicolaka/netshoot -- \\
+  ipvsadm -Ln
+
+# Trace NetworkPolicy effects with Cilium
+kubectl exec -n kube-system cilium-xxxxx -- \\
+  cilium monitor --type policy-verdict
+
+# Verify Ingress controller routing
+kubectl describe ingress my-ingress
+kubectl logs -n ingress-nginx deploy/ingress-nginx-controller --tail=50
+
+# Test service connectivity with curl
+kubectl run curlpod --rm -it --image=curlimages/curl --restart=Never -- \\
+  curl -v http://my-service.default.svc.cluster.local:8080/health`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Kubernetes Service Traffic Flow",
+      kind: "flow",
+      caption: "How external traffic flows through **LoadBalancer**, *NodePort*, *ClusterIP*, and **kube-proxy** to reach Pod endpoints",
+      mermaid: `flowchart TB
+  Client["External Client"] -->|DNS resolves to LB IP| LB["Cloud Load Balancer\n(LoadBalancer Service)"]
+  LB -->|Routes to NodePort| NP["NodePort\n(port 30000-32767\non every node)"]
+  NP -->|Forwards to ClusterIP| CIP["ClusterIP\n(Virtual IP)"]
+  CIP -->|kube-proxy rules\niptables / IPVS| KP{"kube-proxy\nLoad Balancing"}
+  KP -->|Round-robin / Least-conn| P1["Pod 1\n10.244.1.5:8080"]
+  KP --> P2["Pod 2\n10.244.2.8:8080"]
+  KP --> P3["Pod 3\n10.244.3.3:8080"]
+
+  subgraph Internal Traffic
+    SVC["Internal Service\n(ClusterIP only)"] -->|DNS: svc.ns.svc.cluster.local| CIP2["ClusterIP"]
+    CIP2 -->|kube-proxy| KP2{"Load Balance"}
+    KP2 --> P4["Backend Pod"]
+  end`,
+    },
+    {
+      title: "CNI Plugin Network Architecture",
+      kind: "architecture",
+      caption: "Comparison of **Flannel** (VXLAN overlay), **Calico** (BGP routing), and **Cilium** (eBPF) network architectures",
+      mermaid: `flowchart LR
+  subgraph Flannel["Flannel (Overlay)"]
+    direction TB
+    FP1["Pod A\n10.244.1.2"] --> FV1["veth pair"]
+    FV1 --> FB["cni0 bridge"]
+    FB --> FVXLAN["VXLAN\nflannel.1"]
+    FVXLAN -->|UDP encap| FNET["Node Network"]
+  end
+
+  subgraph Calico["Calico (BGP)"]
+    direction TB
+    CP1["Pod B\n10.244.2.3"] --> CV1["veth pair"]
+    CV1 --> CR["Routing Table\n(BGP-distributed)"]
+    CR -->|Direct routing\nno encap| CNET["Node Network"]
+  end
+
+  subgraph Cilium["Cilium (eBPF)"]
+    direction TB
+    EP1["Pod C\n10.244.3.4"] --> EV1["veth pair"]
+    EV1 --> EBP["eBPF Programs\n(TC / XDP hooks)"]
+    EBP -->|Kernel-level\nprocessing| ENET["Node Network"]
+  end
+
+  FNET -.->|Underlay| Switch["Physical / Virtual\nNetwork"]
+  CNET -.-> Switch
+  ENET -.-> Switch`,
+    },
+  ],
+  comparison: {
+    columns: ["Feature", "Flannel", "Calico", "Cilium", "Weave"],
+    rows: [
+      ["**Networking model**", "*VXLAN overlay*", "*BGP routing* (or IP-in-IP)", "*eBPF* kernel programs", "*Mesh overlay*"],
+      ["**NetworkPolicy**", "No (needs Calico addon)", "Yes (full support)", "Yes (L3/L4 + *L7*)", "Yes (basic)"],
+      ["**Performance**", "Good (encap overhead)", "**Excellent** (native routing)", "**Excellent** (kernel bypass)", "Moderate"],
+      ["**Encryption**", "No", "WireGuard optional", "**WireGuard** built-in", "IPsec (sleeve mode)"],
+      ["**Observability**", "Minimal", "Flow logs", "**Hubble** (deep L7 visibility)", "Basic flow logs"],
+      ["**kube-proxy replacement**", "No", "Via eBPF (with Calico eBPF)", "**Yes** (full replacement)", "No"],
+      ["**Complexity**", "*Low*", "*Medium*", "*Medium-High*", "*Low*"],
+      ["**Best for**", "Simple clusters, dev/test", "Production, BGP-capable DCs", "Advanced security + observability", "Small clusters, encryption"],
+    ],
+  },
+  exercises: [
+    "**Implement zero-trust networking**: Create a namespace `secure-app` with three Deployments (`frontend`, `api`, `database`). Apply a *default-deny-all* NetworkPolicy, then write targeted policies allowing: `frontend` ingress from Ingress controller only, `frontend` to `api` on port 3000, `api` to `database` on port 5432, and DNS egress for all pods. Verify with `kubectl exec` curl tests that unauthorized paths are blocked.",
+    "**Set up Gateway API with canary routing**: Install a Gateway API-compatible controller (e.g., *Envoy Gateway* or *NGINX Gateway Fabric*). Create a `GatewayClass`, a `Gateway` with HTTPS listener, and an `HTTPRoute` that splits traffic 90/10 between a stable and canary backend. Gradually shift weights and observe traffic distribution using `kubectl logs`.",
+    "**Debug DNS resolution failures**: Deliberately misconfigure a Service (e.g., wrong selector labels so no endpoints exist). Use `kubectl run` with a *busybox* or *netshoot* debug pod to trace the failure: check `nslookup`, verify endpoints with `kubectl get endpoints`, inspect CoreDNS logs, and fix the issue. Document each diagnostic step.",
+    "**Compare kube-proxy modes**: Set up two test clusters (or reconfigure one), one with **iptables** mode and one with **IPVS** mode. Deploy 100 Services and measure `iptables -L -n | wc -l` vs `ipvsadm -Ln | wc -l`. Benchmark connection latency and CPU usage under load using `wrk` or `hey`. Document the performance differences.",
+    "**Build a multi-namespace Ingress**: Create three namespaces (`team-a`, `team-b`, `shared-infra`). Deploy different applications in each team namespace. Configure an NGINX Ingress controller in `shared-infra` with *host-based routing* (`a.example.com` and `b.example.com`) and *path-based routing* (`/api` vs `/web`). Add TLS termination using a self-signed certificate Secret.",
+  ],
+  cheatSheet: [
+    "**Service DNS format**: `<service>.<namespace>.svc.cluster.local` -- within the same namespace, just use `<service>` thanks to search domains in `/etc/resolv.conf`",
+    "**Headless Service**: Set `clusterIP: None` to get individual Pod IPs as DNS A records instead of a single VIP -- required for StatefulSets and peer discovery",
+    "**NetworkPolicy default deny**: An empty `podSelector: {}` selects *all pods*; empty `ingress: []` / `egress: []` arrays deny all traffic in that direction",
+    "**NodePort range**: `30000-32767` by default; override with `--service-node-port-range` on the API server (e.g., `--service-node-port-range=20000-30000`)",
+    "**Debug pod networking**: `kubectl run netshoot --rm -it --image=nicolaka/netshoot -- bash` gives you `curl`, `dig`, `nslookup`, `tcpdump`, `iperf`, `traceroute`",
+    "**kube-proxy mode check**: `kubectl get cm kube-proxy -n kube-system -o yaml | grep mode` -- empty string means iptables (default); set to `ipvs` for large clusters",
+  ],
+  revisionNotes: [
+    "Kubernetes networking is **flat**: every Pod gets a unique IP, all Pods communicate *without NAT*. **CNI plugins** implement this -- *Flannel* (VXLAN overlay), *Calico* (BGP routing), *Cilium* (eBPF with L7 visibility and kube-proxy replacement).",
+    "**Services** provide stable VIPs: *ClusterIP* (internal), *NodePort* (external via node ports 30000-32767), *LoadBalancer* (cloud LB provisioning). **kube-proxy** implements forwarding via *iptables* (O(n) rules) or *IPVS* (O(1) hash lookups, multiple algorithms).",
+    "**CoreDNS** resolves `<svc>.<ns>.svc.cluster.local` to ClusterIPs. **Headless Services** (`clusterIP: None`) return individual Pod IPs. **StatefulSet** pods get unique DNS entries via `<pod>.<headless-svc>.<ns>.svc.cluster.local`.",
+    "**NetworkPolicies** are *additive*, pod-level firewalls. Once a policy selects a pod, unmatched traffic in that direction is *denied*. Implement zero-trust with a default-deny policy + explicit allow rules. The CNI must support them (*Calico* and *Cilium* do; *Flannel* alone does not).",
+    "**Gateway API** (GA in K8s 1.31) replaces Ingress with a *role-oriented model*: `GatewayClass` (infra provider), `Gateway` (operator), `HTTPRoute` (developer). Supports *traffic splitting*, *header matching*, *cross-namespace routing* via `ReferenceGrant`, and extensibility via *policy attachment*.",
+  ],
   glossary: [
     {
       term: "ClusterIP",

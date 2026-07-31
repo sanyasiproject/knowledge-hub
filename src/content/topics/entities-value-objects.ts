@@ -341,4 +341,303 @@ describe("Money", () => {
         "A static method that creates an object while naming the business operation (e.g., Order.place()) and enforcing creation invariants. Preferred over constructors for entities with complex creation logic.",
     },
   ],
+  deepDive: [
+    `**Entities** in C++ demand careful attention to *identity semantics* and *ownership*. Unlike garbage-collected languages, C++ requires explicit management of entity lifecycles through \`std::unique_ptr\` or \`std::shared_ptr\`. An entity's identity is typically represented by a *strongly-typed ID wrapper* -- a small class or \`enum class\` that prevents accidental mixing of, say, \`CustomerId\` with \`OrderId\`. The **Rule of Five** (or Rule of Zero) applies heavily: entities that own resources must define or delete copy/move constructors and assignment operators. Since two entities with the same attributes but different IDs are *not equal*, the copy constructor is often deleted to prevent accidental duplication, while move semantics are preserved for efficient container usage. The \`operator==\` compares only the identity field, never the mutable state.`,
+
+    `**Value objects** in C++ benefit enormously from the language's value semantics. A well-designed value object is a *regular type*: it supports copy, move, equality comparison, and optionally ordering. Making all data members \`const\` enforces immutability at compile time -- the compiler itself prevents mutation. C++20's \`operator<=>\` (the *spaceship operator*) makes implementing comparison trivial: a single defaulted declaration generates all six relational operators. Value objects are ideal candidates for \`constexpr\` construction, allowing the compiler to evaluate them at *compile time*. When a value object must be "modified," a new instance is returned -- methods like \`Money::add()\` return a fresh \`Money\` by value. Because C++ has *no garbage collector*, returning by value is both idiomatic and efficient thanks to copy elision (RVO/NRVO) guaranteed by the standard.`,
+
+    `The interplay between entities and value objects shapes *aggregate design* in C++. An aggregate root (an entity) owns its value objects by value (embedded in the class) or by \`std::vector\` for collections. Value objects stored inline benefit from *cache locality* -- they sit contiguously in memory alongside the entity, avoiding pointer indirection. For persistence, value objects serialize naturally into JSON or database columns because they carry no identity. Entities, by contrast, map to rows with primary keys and require a **Repository** abstraction. The key design heuristic in C++ is: *if you can store it by value, model it as a value object; if you must store it by pointer with unique ownership, it is likely an entity*. This mirrors the DDD distinction perfectly and leverages C++'s strengths in memory layout and deterministic destruction.`,
+  ],
+  code: [
+    {
+      language: "cpp",
+      caption: "Strongly-typed Entity with identity-based equality and deleted copy",
+      source: `#include <string>
+#include <utility>
+#include <memory>
+
+// Strongly-typed ID prevents mixing different entity IDs
+class CustomerId {
+public:
+    explicit CustomerId(std::string value) : value_(std::move(value)) {}
+    bool operator==(const CustomerId& other) const { return value_ == other.value_; }
+    const std::string& value() const { return value_; }
+private:
+    std::string value_;
+};
+
+class Customer {
+public:
+    Customer(CustomerId id, std::string name, std::string email)
+        : id_(std::move(id)), name_(std::move(name)), email_(std::move(email)) {}
+
+    // Entities compare by identity only
+    bool operator==(const Customer& other) const { return id_ == other.id_; }
+    bool operator!=(const Customer& other) const { return !(*this == other); }
+
+    // No copy -- two customers with same data are still distinct
+    Customer(const Customer&) = delete;
+    Customer& operator=(const Customer&) = delete;
+
+    // Move is fine -- transferring ownership, not duplicating identity
+    Customer(Customer&&) noexcept = default;
+    Customer& operator=(Customer&&) noexcept = default;
+
+    // Mutation is expected for entities
+    void change_email(std::string new_email) { email_ = std::move(new_email); }
+    void rename(std::string new_name) { name_ = std::move(new_name); }
+
+    const CustomerId& id() const { return id_; }
+    const std::string& name() const { return name_; }
+
+private:
+    CustomerId id_;
+    std::string name_;
+    std::string email_;
+};`,
+    },
+    {
+      language: "cpp",
+      caption: "Immutable Value Object with compile-time enforcement using const members",
+      source: `#include <stdexcept>
+#include <string>
+#include <compare>
+
+enum class Currency { USD, EUR, GBP, INR };
+
+class Money {
+public:
+    // Factory method enforces invariants
+    static Money of(double amount, Currency currency) {
+        if (amount < 0.0)
+            throw std::invalid_argument("Amount cannot be negative");
+        return Money(amount, currency);
+    }
+
+    static Money zero(Currency currency) { return Money(0.0, currency); }
+
+    // Immutable operations return new instances
+    Money add(const Money& other) const {
+        if (currency_ != other.currency_)
+            throw std::logic_error("Cannot add different currencies");
+        return Money(amount_ + other.amount_, currency_);
+    }
+
+    Money multiply(double factor) const {
+        return Money::of(amount_ * factor, currency_);
+    }
+
+    // C++20 spaceship operator gives ==, !=, <, >, <=, >= for free
+    auto operator<=>(const Money&) const = default;
+    bool operator==(const Money&) const = default;
+
+    double amount() const { return amount_; }
+    Currency currency() const { return currency_; }
+
+private:
+    Money(double amount, Currency currency)
+        : amount_(amount), currency_(currency) {}
+
+    double amount_;
+    Currency currency_;
+};`,
+    },
+    {
+      language: "cpp",
+      caption: "Aggregate Root (Entity) composed of Value Objects with domain methods",
+      source: `#include <vector>
+#include <string>
+#include <stdexcept>
+#include <numeric>
+
+enum class OrderStatus { PLACED, CONFIRMED, SHIPPED, DELIVERED };
+
+// Value Object -- no identity, defined by attributes
+struct OrderLineItem {
+    std::string product_name;
+    int quantity;
+    Money unit_price;
+
+    Money line_total() const {
+        return unit_price.multiply(static_cast<double>(quantity));
+    }
+
+    bool operator==(const OrderLineItem&) const = default;
+};
+
+// Value Object
+struct ShippingAddress {
+    std::string street;
+    std::string city;
+    std::string postal_code;
+    std::string country;
+
+    bool operator==(const ShippingAddress&) const = default;
+};
+
+// Entity -- Aggregate Root with identity and lifecycle
+class Order {
+public:
+    static Order place(std::string id,
+                       std::vector<OrderLineItem> items,
+                       ShippingAddress address) {
+        if (items.empty())
+            throw std::invalid_argument("Order must have at least one item");
+        return Order(std::move(id), std::move(items),
+                     std::move(address), OrderStatus::PLACED);
+    }
+
+    void confirm() {
+        if (status_ != OrderStatus::PLACED)
+            throw std::logic_error("Only placed orders can be confirmed");
+        status_ = OrderStatus::CONFIRMED;
+    }
+
+    Money total() const {
+        return std::accumulate(
+            items_.begin(), items_.end(),
+            Money::zero(Currency::USD),
+            [](const Money& sum, const OrderLineItem& item) {
+                return sum.add(item.line_total());
+            });
+    }
+
+    bool operator==(const Order& other) const { return id_ == other.id_; }
+
+    const std::string& id() const { return id_; }
+    OrderStatus status() const { return status_; }
+
+private:
+    Order(std::string id, std::vector<OrderLineItem> items,
+          ShippingAddress addr, OrderStatus status)
+        : id_(std::move(id)), items_(std::move(items)),
+          address_(std::move(addr)), status_(status) {}
+
+    std::string id_;
+    std::vector<OrderLineItem> items_;
+    ShippingAddress address_;
+    OrderStatus status_;
+};`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Entity vs Value Object Decision Flow",
+      kind: "flow",
+      caption: "Use this flowchart to determine whether a domain concept should be modeled as an **Entity** or a **Value Object**.",
+      mermaid: `flowchart TD
+    A["New Domain Concept"] --> B{"Does it need a\\nunique identity?"}
+    B -- Yes --> C{"Does it have a\\nlifecycle with\\nstate transitions?"}
+    B -- No --> D{"Is it defined\\nentirely by its\\nattributes?"}
+    C -- Yes --> E["Model as ENTITY"]
+    C -- No --> F{"Must two instances\\nwith same attributes\\nbe distinguishable?"}
+    F -- Yes --> E
+    F -- No --> G["Model as VALUE OBJECT"]
+    D -- Yes --> G
+    D -- No --> H{"Can it be freely\\nreplaced by another\\nwith same values?"}
+    H -- Yes --> G
+    H -- No --> E
+    style E fill:#2d6a4f,color:#fff,stroke:#1b4332
+    style G fill:#1d3557,color:#fff,stroke:#0d1b2a`,
+    },
+    {
+      title: "Entity and Value Object Composition in an Aggregate",
+      kind: "architecture",
+      caption: "Shows how an **Order** aggregate root (entity) is composed of embedded **value objects** with clear ownership boundaries.",
+      mermaid: `classDiagram
+    class Order {
+        -OrderId id
+        -OrderStatus status
+        -List~OrderLineItem~ items
+        -ShippingAddress address
+        +place(id, items, address) Order
+        +confirm() void
+        +total() Money
+        +operator==(Order) bool
+    }
+    class OrderId {
+        -string value
+        +operator==(OrderId) bool
+    }
+    class OrderLineItem {
+        -string productName
+        -Quantity quantity
+        -Money unitPrice
+        +lineTotal() Money
+        +operator==(OrderLineItem) bool
+    }
+    class ShippingAddress {
+        -string street
+        -string city
+        -PostalCode postalCode
+        -CountryCode country
+        +operator==(ShippingAddress) bool
+    }
+    class Money {
+        -double amount
+        -Currency currency
+        +add(Money) Money
+        +multiply(double) Money
+        +operator==(Money) bool
+    }
+    Order *-- OrderId : identity
+    Order *-- OrderLineItem : contains
+    Order *-- ShippingAddress : embeds
+    OrderLineItem *-- Money : uses`,
+    },
+    {
+      title: "Entity Lifecycle State Machine",
+      kind: "state",
+      caption: "Entities transition through well-defined states; value objects have *no lifecycle* -- they are created and remain unchanged.",
+      mermaid: `stateDiagram-v2
+    [*] --> Placed : Order.place()
+    Placed --> Confirmed : confirm()
+    Placed --> Cancelled : cancel()
+    Confirmed --> Shipped : ship()
+    Confirmed --> Cancelled : cancel()
+    Shipped --> Delivered : markDelivered()
+    Shipped --> Returned : initiateReturn()
+    Delivered --> [*]
+    Cancelled --> [*]
+    Returned --> Refunded : processRefund()
+    Refunded --> [*]`,
+    },
+  ],
+  comparison: {
+    columns: ["Aspect", "Entity", "Value Object"],
+    rows: [
+      ["**Identity**", "Defined by a *unique identifier* (UUID, sequence, natural key)", "**No identity** -- defined entirely by attribute values"],
+      ["**Equality**", "`operator==` compares *ID only*", "`operator==` compares *all attributes*"],
+      ["**Mutability**", "*Mutable* -- state changes over lifecycle", "*Immutable* -- \"changes\" produce new instances"],
+      ["**Copy semantics (C++)**", "Copy *deleted* or explicitly controlled", "Copy *enabled* -- regular type semantics"],
+      ["**Lifecycle**", "Created, transitions through states, eventually archived/deleted", "Created once, never modified, *no lifecycle*"],
+      ["**Persistence**", "Own table row with **primary key**", "Embedded in entity's row or serialized as JSON"],
+      ["**Thread safety**", "Requires *synchronization* for concurrent access", "Inherently **thread-safe** (immutable)"],
+      ["**Testing**", "Requires setup of identity and state; may need *mocking*", "Simple: construct, invoke, assert -- *no mocking needed*"],
+      ["**C++ memory**", "Typically heap-allocated via `std::unique_ptr`", "Stored *by value* inline for cache locality"],
+      ["**Examples**", "`Customer`, `Order`, `Account`, `Product`", "`Money`, `Address`, `DateRange`, `Email`, `Coordinates`"],
+    ],
+  },
+  exercises: [
+    "**Refactor primitive obsession**: You have a `User` class with `std::string email`, `std::string phone`, and `double balance`. Extract **three value objects** (`Email`, `PhoneNumber`, `Money`) with *self-validation* in their constructors. Ensure each value object is *immutable*, supports `operator==`, and rejects invalid input (e.g., negative balance, malformed email). Write a test that verifies an invalid email throws an exception at construction time.",
+    "**Implement identity-based equality**: Create a `BankAccount` entity with an `AccountId`, `owner_name`, and `balance`. Implement `operator==` to compare *only by identity*. Write a test demonstrating that two `BankAccount` instances with identical `owner_name` and `balance` but different `AccountId` values are **not equal**, and two with different balances but the same `AccountId` **are equal**.",
+    "**Value object composition**: Design a `DateRange` value object with `start_date` and `end_date`. Implement methods: `overlaps(const DateRange&)`, `contains(const Date&)`, and `duration_days()`. Enforce the invariant that `start_date <= end_date` at construction. Write a method `merge(const DateRange&)` that returns a new `DateRange` covering both ranges if they overlap, or throws if they do not. Verify immutability by confirming the original objects are unchanged after merge.",
+    "**Aggregate design exercise**: Model a `ShoppingCart` (entity) that contains `CartItem` value objects. Each `CartItem` has a `ProductReference`, `Quantity`, and `Money` unit price. Implement `add_item()`, `remove_item()`, and `total()` on the cart. Ensure that adding the same product twice *increases the quantity* rather than creating a duplicate entry. Write tests covering the empty cart, single item, duplicate product, and removal scenarios.",
+    "**Context-dependent modeling**: Consider the concept of `Address`. Write *two implementations*: one as a **value object** for an e-commerce shipping context (immutable, equality by all fields), and one as an **entity** for a real estate context (with an `AddressId`, mutable fields for property details, identity-based equality). Write a brief comment in each explaining *why* the modeling choice is appropriate for that context.",
+  ],
+  cheatSheet: [
+    "**Entity** = identity + lifecycle + mutable state. `operator==` compares *ID only*. Delete copy constructor; keep move semantics.",
+    "**Value Object** = attributes + immutability + no identity. `operator==` compares *all fields*. Use `= default` for copy, move, and C++20 `operator<=>` for ordering.",
+    "**Self-validation**: Value objects validate invariants in the constructor/factory. An invalid value object *cannot exist*. Use `static Money::of()` pattern to enforce preconditions.",
+    "**Prefer value objects**: They are simpler, *thread-safe* (immutable), easier to test (no mocking), and benefit from *cache locality* when stored by value in C++.",
+    "**Context matters**: The same concept (e.g., `Address`) can be an entity in one bounded context and a value object in another. Always ask: *does it need identity here?*",
+    "**Persistence mapping**: Entities -> own table row with PK. Value objects -> embedded columns, JSON column, or separate table *without domain identity*. Resist ORM pressure to add IDs to value objects.",
+  ],
+  revisionNotes: [
+    "An **entity** is defined by its *unique identity*, not its attributes. Two entities with identical fields but different IDs are **distinct**. In C++, delete the copy constructor and compare only by ID in `operator==`.",
+    "A **value object** is defined by its *attributes*, has **no identity**, and is **immutable**. Two value objects with the same field values are *interchangeable*. In C++, use `const` members, return by value, and leverage `operator<=>` for comparisons.",
+    "**Favor value objects** over entities wherever possible. They are simpler to reason about, inherently *thread-safe*, easier to test (construct-invoke-assert, no mocking), and in C++ they benefit from *cache locality* when stored inline.",
+    "**Aggregates** compose an entity (the root) with embedded value objects. The entity *owns* its value objects by value (not pointer). Value objects are created, stored, and destroyed with the aggregate -- they have no independent lifecycle.",
+    "**Context-dependent classification**: The same real-world concept may be an entity in one bounded context and a value object in another. `Address` is a value object in e-commerce (a shipping destination) but an entity in real estate (a property with history and identity).",
+  ],
 };

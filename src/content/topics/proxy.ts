@@ -248,85 +248,116 @@ const state = createReactiveState<UserState>(
 state.name = "Bob";  // Logs: State changed: name = Alice -> Bob`,
     },
     {
-      language: "python",
-      caption: "Python logging proxy and lazy-loading proxy using __getattr__",
-      source: `import time
-from typing import Any, TypeVar, Generic
-from functools import wraps
+      language: "cpp",
+      caption: "C++ logging proxy and lazy-loading proxy using templates",
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <map>
+#include <memory>
+#include <chrono>
+#include <thread>
+#include <functional>
 
+// RealSubject: expensive to create
+class DatabaseConnection {
+public:
+    explicit DatabaseConnection(const std::string& connectionString) {
+        std::cout << "Connecting to database: " << connectionString << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        connString_ = connectionString;
+    }
 
-class DatabaseConnection:
-    """RealSubject: expensive to create."""
-    def __init__(self, connection_string: str) -> None:
-        print(f"Connecting to database: {connection_string}")
-        time.sleep(0.1)  # Simulate connection time
-        self._conn_string = connection_string
+    std::vector<std::map<std::string, std::string>> execute(const std::string& query) {
+        std::cout << "Executing: " << query << std::endl;
+        return {{{"id", "1"}, {"name", "Alice"}}};
+    }
 
-    def execute(self, query: str) -> list[dict]:
-        print(f"Executing: {query}")
-        return [{"id": 1, "name": "Alice"}]
+    void close() {
+        std::cout << "Connection closed" << std::endl;
+    }
 
-    def close(self) -> None:
-        print("Connection closed")
+private:
+    std::string connString_;
+};
 
+// Virtual Proxy: defers connection until first query
+class LazyDatabaseProxy {
+public:
+    explicit LazyDatabaseProxy(const std::string& connectionString)
+        : connectionString_(connectionString) {}
 
-class LazyDatabaseProxy:
-    """Virtual Proxy: defers connection until first query."""
-    def __init__(self, connection_string: str) -> None:
-        self._connection_string = connection_string
-        self._real_connection: DatabaseConnection | None = None
+    std::vector<std::map<std::string, std::string>> execute(const std::string& query) {
+        return ensureConnected().execute(query);
+    }
 
-    def _ensure_connected(self) -> DatabaseConnection:
-        if self._real_connection is None:
-            self._real_connection = DatabaseConnection(self._connection_string)
-        return self._real_connection
+    void close() {
+        if (realConnection_) {
+            realConnection_->close();
+            realConnection_.reset();
+        }
+    }
 
-    def execute(self, query: str) -> list[dict]:
-        return self._ensure_connected().execute(query)
+private:
+    DatabaseConnection& ensureConnected() {
+        if (!realConnection_) {
+            realConnection_ = std::make_unique<DatabaseConnection>(connectionString_);
+        }
+        return *realConnection_;
+    }
 
-    def close(self) -> None:
-        if self._real_connection is not None:
-            self._real_connection.close()
-            self._real_connection = None
+    std::string connectionString_;
+    std::unique_ptr<DatabaseConnection> realConnection_;
+};
 
+// Logging Proxy: wraps a target and logs method calls via function wrappers
+template <typename T>
+class LoggingProxy {
+public:
+    LoggingProxy(std::unique_ptr<T> target, const std::string& loggerName = "proxy")
+        : target_(std::move(target)), loggerName_(loggerName) {}
 
-class LoggingProxy:
-    """Logging Proxy: wraps any object and logs all method calls."""
-    def __init__(self, target: Any, logger_name: str = "proxy") -> None:
-        self._target = target
-        self._logger_name = logger_name
+    template <typename Ret, typename... Args>
+    Ret loggedCall(const std::string& methodName,
+                   Ret (T::*method)(Args...), Args... args) {
+        std::cout << "[" << loggerName_ << "] " << methodName << "(...)" << std::endl;
+        auto start = std::chrono::high_resolution_clock::now();
+        Ret result = (target_.get()->*method)(args...);
+        auto elapsed = std::chrono::high_resolution_clock::now() - start;
+        auto ms = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+        std::cout << "[" << loggerName_ << "] " << methodName
+                  << " completed (" << ms / 1000.0 << "ms)" << std::endl;
+        return result;
+    }
 
-    def __getattr__(self, name: str) -> Any:
-        attr = getattr(self._target, name)
-        if callable(attr):
-            @wraps(attr)
-            def logged_call(*args: Any, **kwargs: Any) -> Any:
-                args_str = ", ".join(
-                    [repr(a) for a in args] +
-                    [f"{k}={v!r}" for k, v in kwargs.items()]
-                )
-                print(f"[{self._logger_name}] {name}({args_str})")
-                start = time.perf_counter()
-                result = attr(*args, **kwargs)
-                elapsed = time.perf_counter() - start
-                print(f"[{self._logger_name}] {name} -> {result!r} ({elapsed:.4f}s)")
-                return result
-            return logged_call
-        return attr
+    T* operator->() { return target_.get(); }
 
+private:
+    std::unique_ptr<T> target_;
+    std::string loggerName_;
+};
 
-# Usage: combine proxies
-db = LoggingProxy(
-    LazyDatabaseProxy("postgresql://localhost/mydb"),
-    logger_name="DB"
-)
-# No connection yet -- lazy proxy defers it
-results = db.execute("SELECT * FROM users")
-# Output:
-# [DB] execute('SELECT * FROM users')
-# Connecting to database: postgresql://localhost/mydb
-# Executing: SELECT * FROM users
-# [DB] execute -> [{'id': 1, 'name': 'Alice'}] (0.1042s)`,
+// Usage: combine proxies
+int main() {
+    LoggingProxy<LazyDatabaseProxy> db(
+        std::make_unique<LazyDatabaseProxy>("postgresql://localhost/mydb"),
+        "DB"
+    );
+
+    // No connection yet -- lazy proxy defers it
+    auto results = db.loggedCall(
+        "execute",
+        &LazyDatabaseProxy::execute,
+        std::string("SELECT * FROM users")
+    );
+
+    // Output:
+    // [DB] execute(...)
+    // Connecting to database: postgresql://localhost/mydb
+    // Executing: SELECT * FROM users
+    // [DB] execute completed (100.42ms)
+    return 0;
+}`,
     },
   ],
   diagrams: [

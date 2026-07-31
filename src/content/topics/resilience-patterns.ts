@@ -191,6 +191,444 @@ The order matters: the circuit breaker wraps retries (not the other way around),
       back: "Outermost to innermost: Bulkhead > Circuit Breaker > Retry > Timeout. Fallback triggers when circuit breaker rejects or retries are exhausted.",
     },
   ],
+  deepDive: [
+    `## The Anatomy of Cascade Failures and Why Resilience Matters
+
+In a **distributed microservices architecture**, a single unhealthy dependency can trigger a **domino effect** that takes down the entire system. Consider a typical e-commerce platform: the *product catalog* service calls the *inventory service*, which calls the *warehouse API*, which queries a *database*. If the database becomes slow (not down, just *slow*), the warehouse API threads start piling up waiting for responses. The inventory service threads then pile up waiting for the warehouse API. The product catalog service piles up waiting for inventory. Within minutes, every thread pool across three services is exhausted, and the entire platform is unresponsive — even the **checkout flow**, which never touched the slow database. This is a **cascade failure**, and it is the primary motivator for every resilience pattern. The insidious part is that the root cause (a slow database) may resolve on its own in 30 seconds, but without resilience patterns, the recovery can take *minutes* because every service in the chain has exhausted resources and needs time to drain queues, close stale connections, and restart processing. Resilience patterns break this chain at multiple points: **timeouts** prevent indefinite blocking, **circuit breakers** stop calling the failing service, **bulkheads** isolate the blast radius, and **fallbacks** keep the user experience functional.`,
+
+    `## Circuit Breaker Internals: State Machine, Metrics Windows, and Failure Detection
+
+The circuit breaker is fundamentally a **finite state machine** with three states: \`CLOSED\`, \`OPEN\`, and \`HALF_OPEN\`. The transition logic depends on a **sliding window** of recent call outcomes. There are two common windowing strategies: *count-based* (e.g., the last 100 calls) and *time-based* (e.g., calls within the last 60 seconds). The **failure rate** is computed over this window, and when it exceeds a configurable threshold (e.g., **50%**), the circuit trips to \`OPEN\`. In the \`OPEN\` state, every call is immediately rejected with a \`CircuitBreakerOpenException\` — no network call is made. After a configurable **wait duration** (e.g., 30 seconds), the circuit transitions to \`HALF_OPEN\`. In this probing state, a limited number of calls (the *permitted number of calls in half-open state*) are allowed through. If these test calls meet the success criteria (e.g., all succeed, or failure rate drops below threshold), the circuit **closes** and normal operation resumes. If any test call fails, the circuit **reopens** and the wait timer resets. Advanced implementations also track **slow calls** — calls that succeed but exceed a latency threshold — as a separate metric. A high slow-call rate can trip the circuit even if there are no outright failures, because slow responses are often a precursor to timeouts and failures. The state transitions should emit **events** (via callbacks or an event bus) so that monitoring systems can alert on circuit state changes and dashboards can visualize the health of each dependency.`,
+
+    `## Production Hardening: Combining Patterns with Observability
+
+Implementing resilience patterns in production requires more than just wrapping calls — it demands **observability**, **testing**, and **tuning**. Every circuit breaker, retry, timeout, and bulkhead should emit **metrics**: circuit state changes, rejection counts, retry counts, timeout counts, bulkhead queue depths, and fallback invocations. These metrics feed into dashboards (e.g., *Grafana*, *Datadog*) and alerts. Without metrics, you cannot distinguish between "the circuit breaker is protecting us from a real failure" and "the circuit breaker is misconfigured and rejecting healthy traffic." **Chaos engineering** — intentionally injecting failures using tools like *Chaos Monkey*, *Litmus*, or *Gremlin* — is essential for validating that resilience patterns work as intended. A fallback that has never been exercised in production may itself be broken. **Tuning** is an ongoing process: a failure threshold that is too low causes false positives (circuit trips during normal variance), while one that is too high allows too many failures before protection kicks in. The timeout value must be informed by actual latency percentiles (\`p99\`, \`p999\`) of the downstream service. **Retry budgets** should be set based on load testing to ensure that retries do not exceed the downstream's capacity. Finally, resilience patterns must be layered in the correct order — **Bulkhead > Circuit Breaker > Retry > Timeout** — and each layer's configuration must be consistent (e.g., the retry timeout must be less than the circuit breaker's slow-call threshold).`,
+  ],
+
+  code: [
+    {
+      language: "cpp",
+      caption: "Circuit Breaker State Machine in C++",
+      source: `#include <chrono>
+#include <functional>
+#include <mutex>
+#include <stdexcept>
+
+enum class CircuitState { CLOSED, OPEN, HALF_OPEN };
+
+class CircuitBreaker {
+public:
+    CircuitBreaker(int failureThreshold, int successThreshold,
+                   std::chrono::milliseconds openDuration)
+        : failureThreshold_(failureThreshold),
+          successThreshold_(successThreshold),
+          openDuration_(openDuration),
+          state_(CircuitState::CLOSED),
+          failureCount_(0),
+          successCount_(0) {}
+
+    // Execute a callable through the circuit breaker
+    template <typename Func>
+    auto execute(Func&& func) -> decltype(func()) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        switch (state_) {
+        case CircuitState::OPEN:
+            if (shouldAttemptReset()) {
+                state_ = CircuitState::HALF_OPEN;
+                successCount_ = 0;
+                // Fall through to allow the test call
+            } else {
+                throw std::runtime_error("CircuitBreaker is OPEN");
+            }
+            [[fallthrough]];
+
+        case CircuitState::HALF_OPEN:
+        case CircuitState::CLOSED:
+            try {
+                // Unlock during the actual call to avoid holding
+                // the mutex during potentially slow I/O
+                mutex_.unlock();
+                auto result = func();
+                mutex_.lock();
+                onSuccess();
+                return result;
+            } catch (...) {
+                mutex_.lock();
+                onFailure();
+                throw;
+            }
+        }
+        // Unreachable, but satisfies compiler
+        throw std::runtime_error("Unknown circuit state");
+    }
+
+    CircuitState getState() const { return state_; }
+
+private:
+    void onSuccess() {
+        if (state_ == CircuitState::HALF_OPEN) {
+            successCount_++;
+            if (successCount_ >= successThreshold_) {
+                state_ = CircuitState::CLOSED;
+                failureCount_ = 0;
+            }
+        } else {
+            failureCount_ = 0; // Reset on success in CLOSED
+        }
+    }
+
+    void onFailure() {
+        failureCount_++;
+        if (state_ == CircuitState::HALF_OPEN) {
+            // Any failure in HALF_OPEN reopens
+            state_ = CircuitState::OPEN;
+            lastOpenTime_ = std::chrono::steady_clock::now();
+        } else if (failureCount_ >= failureThreshold_) {
+            state_ = CircuitState::OPEN;
+            lastOpenTime_ = std::chrono::steady_clock::now();
+        }
+    }
+
+    bool shouldAttemptReset() const {
+        auto elapsed = std::chrono::steady_clock::now() - lastOpenTime_;
+        return elapsed >= openDuration_;
+    }
+
+    int failureThreshold_;
+    int successThreshold_;
+    std::chrono::milliseconds openDuration_;
+    CircuitState state_;
+    int failureCount_;
+    int successCount_;
+    std::chrono::steady_clock::time_point lastOpenTime_;
+    std::mutex mutex_;
+};
+
+// Usage:
+// CircuitBreaker cb(5, 3, std::chrono::seconds(30));
+// auto result = cb.execute([&]() { return httpClient.get("/api/data"); });`,
+    },
+    {
+      language: "cpp",
+      caption: "Bulkhead Pattern with Semaphore Isolation in C++",
+      source: `#include <condition_variable>
+#include <functional>
+#include <mutex>
+#include <stdexcept>
+#include <chrono>
+
+class Bulkhead {
+public:
+    // maxConcurrent: max simultaneous calls allowed
+    // maxWait: max time to wait for a permit before rejecting
+    Bulkhead(int maxConcurrent, std::chrono::milliseconds maxWait)
+        : maxConcurrent_(maxConcurrent),
+          maxWait_(maxWait),
+          activeCount_(0) {}
+
+    template <typename Func>
+    auto execute(Func&& func) -> decltype(func()) {
+        acquirePermit();
+        try {
+            auto result = func();
+            releasePermit();
+            return result;
+        } catch (...) {
+            releasePermit();
+            throw;
+        }
+    }
+
+    int getActiveCount() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return activeCount_;
+    }
+
+private:
+    void acquirePermit() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (!cv_.wait_for(lock, maxWait_,
+                [this] { return activeCount_ < maxConcurrent_; })) {
+            throw std::runtime_error(
+                "Bulkhead full: max concurrent calls reached");
+        }
+        activeCount_++;
+    }
+
+    void releasePermit() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            activeCount_--;
+        }
+        cv_.notify_one();
+    }
+
+    int maxConcurrent_;
+    std::chrono::milliseconds maxWait_;
+    int activeCount_;
+    mutable std::mutex mutex_;
+    std::condition_variable cv_;
+};
+
+// Usage:
+// Bulkhead paymentBulkhead(10, std::chrono::seconds(2));
+// Bulkhead recommendationBulkhead(5, std::chrono::seconds(1));
+//
+// // Payment calls are isolated from recommendation calls
+// auto payment = paymentBulkhead.execute([&]() {
+//     return paymentGateway.charge(order);
+// });
+// auto recs = recommendationBulkhead.execute([&]() {
+//     return recsService.getRecommendations(userId);
+// });`,
+    },
+    {
+      language: "typescript",
+      caption: "Resilient HTTP Client with Circuit Breaker, Retry, and Timeout in Node.js",
+      source: `import CircuitBreaker from "opossum";
+
+interface ResilientCallOptions {
+  /** Maximum time for a single attempt (ms) */
+  timeout: number;
+  /** Max retry attempts (excluding the initial call) */
+  maxRetries: number;
+  /** Base delay for exponential backoff (ms) */
+  baseDelay: number;
+  /** Circuit breaker failure threshold (percentage) */
+  failureThreshold: number;
+  /** Circuit breaker reset timeout (ms) */
+  resetTimeout: number;
+}
+
+const DEFAULT_OPTIONS: ResilientCallOptions = {
+  timeout: 3000,
+  maxRetries: 3,
+  baseDelay: 200,
+  failureThreshold: 50,
+  resetTimeout: 30000,
+};
+
+/**
+ * Wraps an async function with retry + exponential backoff + jitter.
+ * Only retries on transient errors (5xx, timeouts, network errors).
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number,
+  baseDelay: number
+): Promise<T> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastError = err;
+
+      // Do not retry client errors (4xx)
+      if (err.statusCode && err.statusCode >= 400 && err.statusCode < 500) {
+        throw err;
+      }
+
+      if (attempt < maxRetries) {
+        // Exponential backoff with full jitter
+        const exponentialDelay = baseDelay * Math.pow(2, attempt);
+        const jitteredDelay = Math.random() * exponentialDelay;
+        console.log(
+          \`Retry \${attempt + 1}/\${maxRetries} after \${Math.round(jitteredDelay)}ms\`
+        );
+        await new Promise((resolve) => setTimeout(resolve, jitteredDelay));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+/**
+ * Creates a resilient wrapper around an async service call.
+ * Layers: Circuit Breaker > Retry with Backoff > Timeout
+ */
+function createResilientCall<T>(
+  serviceFn: (...args: any[]) => Promise<T>,
+  fallbackFn: (...args: any[]) => Promise<T>,
+  options: Partial<ResilientCallOptions> = {}
+): (...args: any[]) => Promise<T> {
+  const opts = { ...DEFAULT_OPTIONS, ...options };
+
+  // Wrap the service call with retry logic
+  const retryWrapped = (...args: any[]) =>
+    retryWithBackoff(() => serviceFn(...args), opts.maxRetries, opts.baseDelay);
+
+  // Wrap with circuit breaker (opossum)
+  const breaker = new CircuitBreaker(retryWrapped, {
+    timeout: opts.timeout,
+    errorThresholdPercentage: opts.failureThreshold,
+    resetTimeout: opts.resetTimeout,
+    volumeThreshold: 10, // Minimum calls before threshold is evaluated
+  });
+
+  // Register fallback
+  breaker.fallback(fallbackFn);
+
+  // Observability: log circuit state changes
+  breaker.on("open", () =>
+    console.warn("[CircuitBreaker] OPEN - requests will be rejected")
+  );
+  breaker.on("halfOpen", () =>
+    console.info("[CircuitBreaker] HALF_OPEN - testing downstream")
+  );
+  breaker.on("close", () =>
+    console.info("[CircuitBreaker] CLOSED - normal operation resumed")
+  );
+
+  return (...args: any[]) => breaker.fire(...args);
+}
+
+// --- Example Usage ---
+// const resilientGetUser = createResilientCall(
+//   (userId: string) => fetch(\`https://api.example.com/users/\${userId}\`)
+//     .then(res => { if (!res.ok) throw new Error(\`HTTP \${res.status}\`); return res.json(); }),
+//   (userId: string) => Promise.resolve({ id: userId, name: "Unknown", cached: true }),
+//   { timeout: 2000, maxRetries: 2, resetTimeout: 15000 }
+// );
+//
+// const user = await resilientGetUser("user-123");`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "Circuit Breaker State Machine",
+      kind: "state",
+      caption:
+        "The three states of a circuit breaker and the transitions between them based on failure thresholds, timeouts, and test call outcomes.",
+      mermaid: `stateDiagram-v2
+    [*] --> Closed
+    Closed --> Open : Failure rate >= threshold
+    Open --> HalfOpen : Wait duration elapsed
+    HalfOpen --> Closed : Test calls succeed\\n(success >= successThreshold)
+    HalfOpen --> Open : Test call fails
+
+    state Closed {
+        [*] --> Monitoring
+        Monitoring --> Monitoring : Count successes/failures\\nin sliding window
+    }
+
+    state Open {
+        [*] --> Rejecting
+        Rejecting --> Rejecting : All calls rejected\\nimmediately (fail fast)
+    }
+
+    state HalfOpen {
+        [*] --> Testing
+        Testing --> Testing : Allow limited\\ntest requests through
+    }`,
+    },
+    {
+      title: "Resilience Pattern Layering",
+      kind: "flow",
+      caption:
+        "How resilience patterns are layered around a downstream service call, from outermost (bulkhead) to innermost (timeout).",
+      mermaid: `flowchart TD
+    A[Incoming Request] --> B{Bulkhead\\nPermit available?}
+    B -- No --> B1[Reject: Resource limit]
+    B -- Yes --> C{Circuit Breaker\\nState?}
+    C -- OPEN --> C1[Reject: Circuit open]
+    C1 --> F[Fallback Response]
+    C -- CLOSED / HALF_OPEN --> D[Retry with Backoff]
+    D --> E{Timeout\\nExceeded?}
+    E -- Yes --> D1{Retries\\nremaining?}
+    D1 -- Yes --> D
+    D1 -- No --> G[Record failure]
+    G --> F
+    E -- No --> H[Downstream Service Call]
+    H -- Success --> I[Return response]
+    H -- Failure --> D1
+    B1 --> F`,
+    },
+  ],
+
+  comparison: {
+    columns: [
+      "Pattern",
+      "Problem Solved",
+      "Mechanism",
+      "Overhead",
+      "When to Use",
+    ],
+    rows: [
+      [
+        "**Circuit Breaker**",
+        "Cascade failures from a *down* dependency",
+        "State machine that stops calls after failure threshold",
+        "Low (counter + timer)",
+        "Every external service call",
+      ],
+      [
+        "**Retry with Backoff**",
+        "*Transient* failures (network blips, brief overloads)",
+        "Re-attempt with exponentially increasing delays + jitter",
+        "Low (delay logic only)",
+        "Idempotent operations with transient error potential",
+      ],
+      [
+        "**Bulkhead**",
+        "Resource exhaustion from one *slow* dependency",
+        "Isolated thread/connection pools or semaphores per dependency",
+        "Medium (thread pool management)",
+        "Services calling multiple downstream dependencies",
+      ],
+      [
+        "**Timeout**",
+        "Indefinite blocking on slow calls",
+        "Hard deadline on each outbound call",
+        "Negligible",
+        "Every outbound network call, always",
+      ],
+      [
+        "**Fallback**",
+        "Complete failure of a dependency",
+        "Return cached/default/degraded response",
+        "Low (cache lookup or static data)",
+        "Non-critical data enrichment, user-facing features",
+      ],
+      [
+        "**Hedged Requests**",
+        "Tail latency spikes",
+        "Send duplicate request to another replica after p95 delay",
+        "Medium (extra network call)",
+        "Idempotent reads where latency SLA is strict",
+      ],
+    ],
+  },
+
+  exercises: [
+    "**Design a circuit breaker** for a payment gateway integration. Specify the failure threshold, wait duration, and success threshold values you would use. Justify each choice considering that false positives (tripping on healthy traffic) block revenue, while false negatives (not tripping fast enough) risk cascade failures.",
+    "**Implement retry with exponential backoff and jitter** in your preferred language. Test it by simulating a service that fails 3 times then succeeds. Verify with logs that (a) delays increase exponentially, (b) jitter randomizes the actual wait time, and (c) the 4th attempt succeeds.",
+    "**Calculate the retry amplification** in a 3-tier service chain (A -> B -> C) where each tier retries 3 times. If C returns an error, how many total requests does C receive from a single user request to A? What is the maximum if you add a 4th tier? Propose a mitigation strategy.",
+    "**Design bulkhead boundaries** for a service that depends on: (1) a *PostgreSQL* database for user data, (2) a *Redis* cache, (3) an external *payment gateway*, and (4) a *recommendation engine*. For each dependency, choose between thread pool isolation and semaphore isolation, and justify your pool sizes based on expected concurrency and criticality.",
+    "**Chaos engineering exercise**: Write a test harness that wraps a mock HTTP client with a circuit breaker and retry logic. Inject failures at configurable rates (e.g., 30%, 60%, 90%) and measure: (a) when the circuit breaker trips, (b) how many retries occur before tripping, (c) how long recovery takes after failures stop. Plot the results to find the optimal failure threshold.",
+  ],
+
+  cheatSheet: [
+    "**Circuit Breaker states**: `CLOSED` (normal, counting failures) -> `OPEN` (all calls rejected, timer running) -> `HALF_OPEN` (limited test calls allowed). Trips when failure rate exceeds threshold over a *sliding window*.",
+    "**Retry formula**: `delay = baseDelay * 2^attempt * (0.5 + random() * 0.5)`. Always set a **max retry count** (typically 3). Only retry *transient* errors (5xx, timeout, connection refused) — never 4xx.",
+    "**Retry amplification**: In an N-tier chain with R retries each, worst-case total calls = **R^N**. Mitigate with *retry budgets* (cap retries at 10% of total traffic) and circuit breakers.",
+    "**Bulkhead sizing**: Set pool size based on `expectedConcurrency * (averageLatency / 1000)`. For a dependency with 100 RPS and 200ms latency: `100 * 0.2 = 20` threads. Add 20-50% headroom.",
+    "**Timeout hierarchy**: `connectionTimeout < requestTimeout < overallTimeout`. Example: `1s < 3s < 10s`. For deadline propagation: each hop deducts its own processing time from the remaining budget.",
+    "**Layering order** (outermost to innermost): *Bulkhead* > *Circuit Breaker* > *Retry* > *Timeout*. Fallback triggers when circuit rejects or retries exhausted. The circuit breaker **must** wrap retries so failures count toward the threshold.",
+  ],
+
+  revisionNotes: [
+    "The **circuit breaker** is a *state machine* with three states. The key insight is that it **fails fast** — callers get immediate errors instead of waiting for timeouts, which prevents thread pool exhaustion and cascade failures.",
+    "**Exponential backoff without jitter** is dangerous: all clients retry at identical intervals, creating *synchronized retry storms*. Always add **full jitter** (`delay * random()`) or **decorrelated jitter** to spread retries across time.",
+    "**Bulkheads** are about *blast radius containment*. The analogy is ship compartments: a hull breach floods one compartment, not the whole ship. In software, a slow dependency exhausts its own pool without starving others.",
+    "The **correct layering order** is critical and frequently asked in interviews: **Bulkhead > Circuit Breaker > Retry > Timeout**. If retries wrap the circuit breaker (wrong order), retry failures do not count toward the circuit breaker threshold, so the circuit never trips.",
+    "**Fallbacks must be tested regularly** — an untested fallback may itself be broken when needed. Use *chaos engineering* to deliberately fail dependencies and verify fallback behavior under realistic conditions.",
+  ],
+
   glossary: [
     {
       term: "Circuit Breaker",

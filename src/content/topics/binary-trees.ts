@@ -22,113 +22,136 @@ export const binaryTrees: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "BST operations: insert, search, delete, and all four traversals",
-      source: `class TreeNode:
-    def __init__(self, val=0, left=None, right=None):
-        self.val = val
-        self.left = left
-        self.right = right
+      source: `#include <iostream>
+#include <vector>
+#include <queue>
+#include <memory>
 
-def insert_bst(root: TreeNode | None, val: int) -> TreeNode:
-    if not root:
-        return TreeNode(val)
-    if val < root.val:
-        root.left = insert_bst(root.left, val)
-    elif val > root.val:
-        root.right = insert_bst(root.right, val)
-    return root
+struct TreeNode {
+    int val;
+    TreeNode* left;
+    TreeNode* right;
+    TreeNode(int v) : val(v), left(nullptr), right(nullptr) {}
+};
 
-def search_bst(root: TreeNode | None, val: int) -> TreeNode | None:
-    if not root or root.val == val:
-        return root
-    return search_bst(root.left, val) if val < root.val else search_bst(root.right, val)
+TreeNode* insert_bst(TreeNode* root, int val) {
+    if (!root) return new TreeNode(val);
+    if (val < root->val)
+        root->left = insert_bst(root->left, val);
+    else if (val > root->val)
+        root->right = insert_bst(root->right, val);
+    return root;
+}
 
-def delete_bst(root: TreeNode | None, val: int) -> TreeNode | None:
-    if not root:
-        return None
-    if val < root.val:
-        root.left = delete_bst(root.left, val)
-    elif val > root.val:
-        root.right = delete_bst(root.right, val)
-    else:
-        # Node found
-        if not root.left:
-            return root.right
-        if not root.right:
-            return root.left
-        # Two children: replace with inorder successor
-        succ = root.right
-        while succ.left:
-            succ = succ.left
-        root.val = succ.val
-        root.right = delete_bst(root.right, succ.val)
-    return root
+TreeNode* search_bst(TreeNode* root, int val) {
+    if (!root || root->val == val) return root;
+    return val < root->val ? search_bst(root->left, val)
+                           : search_bst(root->right, val);
+}
 
-# Traversals
-def inorder(root: TreeNode | None) -> list[int]:
-    return inorder(root.left) + [root.val] + inorder(root.right) if root else []
+TreeNode* delete_bst(TreeNode* root, int val) {
+    if (!root) return nullptr;
+    if (val < root->val)
+        root->left = delete_bst(root->left, val);
+    else if (val > root->val)
+        root->right = delete_bst(root->right, val);
+    else {
+        // Node found
+        if (!root->left) { auto tmp = root->right; delete root; return tmp; }
+        if (!root->right) { auto tmp = root->left; delete root; return tmp; }
+        // Two children: replace with inorder successor
+        TreeNode* succ = root->right;
+        while (succ->left) succ = succ->left;
+        root->val = succ->val;
+        root->right = delete_bst(root->right, succ->val);
+    }
+    return root;
+}
 
-def preorder(root: TreeNode | None) -> list[int]:
-    return [root.val] + preorder(root.left) + preorder(root.right) if root else []
+// Traversals
+void inorder(TreeNode* root, std::vector<int>& result) {
+    if (!root) return;
+    inorder(root->left, result);
+    result.push_back(root->val);
+    inorder(root->right, result);
+}
 
-def postorder(root: TreeNode | None) -> list[int]:
-    return postorder(root.left) + postorder(root.right) + [root.val] if root else []
+void preorder(TreeNode* root, std::vector<int>& result) {
+    if (!root) return;
+    result.push_back(root->val);
+    preorder(root->left, result);
+    preorder(root->right, result);
+}
 
-from collections import deque
+void postorder(TreeNode* root, std::vector<int>& result) {
+    if (!root) return;
+    postorder(root->left, result);
+    postorder(root->right, result);
+    result.push_back(root->val);
+}
 
-def level_order(root: TreeNode | None) -> list[list[int]]:
-    if not root:
-        return []
-    result, queue = [], deque([root])
-    while queue:
-        level = []
-        for _ in range(len(queue)):
-            node = queue.popleft()
-            level.append(node.val)
-            if node.left:
-                queue.append(node.left)
-            if node.right:
-                queue.append(node.right)
-        result.append(level)
-    return result`,
+std::vector<std::vector<int>> level_order(TreeNode* root) {
+    std::vector<std::vector<int>> result;
+    if (!root) return result;
+    std::queue<TreeNode*> q;
+    q.push(root);
+    while (!q.empty()) {
+        int level_size = q.size();
+        std::vector<int> level;
+        for (int i = 0; i < level_size; ++i) {
+            TreeNode* node = q.front(); q.pop();
+            level.push_back(node->val);
+            if (node->left) q.push(node->left);
+            if (node->right) q.push(node->right);
+        }
+        result.push_back(level);
+    }
+    return result;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Lowest Common Ancestor for BST and general binary tree",
-      source: `def lca_bst(root: TreeNode, p: TreeNode, q: TreeNode) -> TreeNode:
-    """LCA in a BST. O(h) time, O(1) space (iterative)."""
-    while root:
-        if p.val < root.val and q.val < root.val:
-            root = root.left
-        elif p.val > root.val and q.val > root.val:
-            root = root.right
-        else:
-            return root  # split point is the LCA
+      source: `#include <algorithm>
+#include <climits>
 
-def lca_binary_tree(root: TreeNode | None, p: TreeNode, q: TreeNode) -> TreeNode | None:
-    """LCA in a general binary tree. O(n) time, O(h) space."""
-    if not root or root is p or root is q:
-        return root
-    left = lca_binary_tree(root.left, p, q)
-    right = lca_binary_tree(root.right, p, q)
-    if left and right:
-        return root      # p and q are in different subtrees
-    return left or right  # both in the same subtree
+// LCA in a BST. O(h) time, O(1) space (iterative).
+TreeNode* lca_bst(TreeNode* root, TreeNode* p, TreeNode* q) {
+    while (root) {
+        if (p->val < root->val && q->val < root->val)
+            root = root->left;
+        else if (p->val > root->val && q->val > root->val)
+            root = root->right;
+        else
+            return root;  // split point is the LCA
+    }
+    return nullptr;
+}
 
-def is_valid_bst(root: TreeNode | None, lo=float('-inf'), hi=float('inf')) -> bool:
-    """Check if a binary tree is a valid BST. O(n)."""
-    if not root:
-        return True
-    if root.val <= lo or root.val >= hi:
-        return False
-    return is_valid_bst(root.left, lo, root.val) and is_valid_bst(root.right, root.val, hi)
+// LCA in a general binary tree. O(n) time, O(h) space.
+TreeNode* lca_binary_tree(TreeNode* root, TreeNode* p, TreeNode* q) {
+    if (!root || root == p || root == q) return root;
+    TreeNode* left  = lca_binary_tree(root->left, p, q);
+    TreeNode* right = lca_binary_tree(root->right, p, q);
+    if (left && right) return root;   // p and q are in different subtrees
+    return left ? left : right;       // both in the same subtree
+}
 
-def max_depth(root: TreeNode | None) -> int:
-    """Height of the tree. O(n)."""
-    if not root:
-        return 0
-    return 1 + max(max_depth(root.left), max_depth(root.right))`,
+// Check if a binary tree is a valid BST. O(n).
+bool is_valid_bst(TreeNode* root, long lo = LONG_MIN, long hi = LONG_MAX) {
+    if (!root) return true;
+    if (root->val <= lo || root->val >= hi) return false;
+    return is_valid_bst(root->left, lo, root->val)
+        && is_valid_bst(root->right, root->val, hi);
+}
+
+// Height of the tree. O(n).
+int max_depth(TreeNode* root) {
+    if (!root) return 0;
+    return 1 + std::max(max_depth(root->left), max_depth(root->right));
+}`,
     },
   ],
   diagrams: [

@@ -134,6 +134,506 @@ The saga's state must be persisted durably — if the orchestrator crashes mid-s
       back: "The orchestrator stores saga state (current step, completed steps, pending compensations) in a durable store. If the orchestrator crashes, it recovers from persisted state and resumes the saga.",
     },
   ],
+  deepDive: [
+    `## Saga Execution Semantics and the ACD Property Model
+
+The saga pattern deliberately **relaxes the isolation guarantee** of traditional ACID transactions. While each local transaction within a saga is fully ACID-compliant against its own database, the overall saga provides only **ACD** — *Atomicity* (all steps complete or all are compensated), *Consistency* (each local transaction leaves its service in a valid state), and *Durability* (committed local transactions are durable). The missing **I (Isolation)** means that intermediate states are visible to other transactions. For example, during an order saga, an inventory query might see stock as reserved even though the saga has not yet confirmed the order. This is called a **dirty read** in saga terminology. To mitigate isolation anomalies, practitioners use several strategies: **semantic locks** (marking resources as "in-saga" so other operations treat them carefully), **commutative compensations** (designing compensations that produce the correct result regardless of execution order), and **pessimistic views** (reading the "worst case" state when querying data involved in an active saga). Understanding these trade-offs is essential — choosing the saga pattern means accepting eventual consistency and designing the entire system around that assumption.`,
+
+    `## Orchestrator State Machine Design
+
+A well-designed saga orchestrator is essentially a **persistent finite state machine**. Each state represents a point in the saga lifecycle — \`STARTED\`, \`PAYMENT_PENDING\`, \`PAYMENT_SUCCEEDED\`, \`INVENTORY_PENDING\`, \`INVENTORY_RESERVED\`, \`COMPLETED\`, \`COMPENSATING\`, \`FAILED\`. Transitions are triggered by **command responses** (success or failure) and **timeouts**. The state machine must be **deterministic** — given the same state and input, it always produces the same next state and side effects. This is critical for crash recovery: when the orchestrator restarts, it reloads the persisted state and re-evaluates pending transitions. The state machine should also encode **which compensations are needed** based on which steps have completed. A common implementation stores a \`completedSteps\` array alongside the current state, so on failure the orchestrator iterates this array in reverse and issues compensating commands. The orchestrator communicates with services via a **message broker** (e.g., *RabbitMQ*, *Kafka*, *Redis Streams*) using **command/reply channels**, ensuring that messages are durable and at-least-once delivery is guaranteed. Idempotency keys on both commands and compensations protect against duplicate processing.`,
+
+    `## Production Concerns: Observability, Testing, and Failure Injection
+
+Running sagas in production requires **deep observability**. Each saga instance should have a unique \`sagaId\` that is propagated as a **correlation ID** across all service calls, log entries, and message headers. This enables end-to-end tracing of a saga's lifecycle through distributed tracing tools like *Jaeger* or *OpenTelemetry*. Dashboards should track saga metrics: *completion rate*, *average duration*, *compensation frequency*, *timeout rate*, and *stuck sagas* (sagas that have not progressed within an expected window). Testing sagas is inherently complex because you must verify not just the happy path but every **failure permutation** — what happens if step 2 fails, step 3 times out, or a compensation itself fails. **Contract testing** between the orchestrator and each service ensures command/response schemas stay compatible. **Chaos engineering** practices — injecting artificial failures, delays, and message duplications — are invaluable for validating that the saga handles real-world conditions. Many teams maintain a \`SagaTestHarness\` that simulates service responses and lets them script failure scenarios deterministically, verifying that the state machine reaches the correct terminal state and all compensations fire in the correct order.`,
+  ],
+
+  code: [
+    {
+      language: "typescript",
+      caption: "Express.js Saga Orchestrator with MongoDB persistence — handles order creation, payment, and inventory reservation with full compensation logic",
+      source: `import express from "express";
+import { MongoClient, ObjectId, Db, Collection } from "mongodb";
+
+// --- Saga State Types ---
+type SagaStep = "PAYMENT" | "INVENTORY" | "CONFIRMATION";
+type SagaStatus =
+  | "STARTED"
+  | "PAYMENT_PENDING"
+  | "PAYMENT_SUCCEEDED"
+  | "INVENTORY_PENDING"
+  | "INVENTORY_RESERVED"
+  | "COMPLETED"
+  | "COMPENSATING"
+  | "FAILED";
+
+interface SagaState {
+  _id?: ObjectId;
+  sagaId: string;
+  orderId: string;
+  status: SagaStatus;
+  completedSteps: SagaStep[];
+  compensatedSteps: SagaStep[];
+  payload: { userId: string; items: string[]; amount: number };
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// --- Simulated Service Calls (replace with real HTTP/message calls) ---
+async function chargePayment(sagaId: string, amount: number): Promise<boolean> {
+  console.log(\`[Saga \${sagaId}] Charging payment: $\${amount}\`);
+  // Simulate 80% success rate
+  return Math.random() > 0.2;
+}
+
+async function refundPayment(sagaId: string, amount: number): Promise<void> {
+  console.log(\`[Saga \${sagaId}] **Compensating**: Refunding $\${amount}\`);
+}
+
+async function reserveInventory(sagaId: string, items: string[]): Promise<boolean> {
+  console.log(\`[Saga \${sagaId}] Reserving inventory: \${items.join(", ")}\`);
+  return Math.random() > 0.3;
+}
+
+async function releaseInventory(sagaId: string, items: string[]): Promise<void> {
+  console.log(\`[Saga \${sagaId}] **Compensating**: Releasing inventory\`);
+}
+
+// --- Saga Orchestrator ---
+class OrderSagaOrchestrator {
+  private sagas: Collection<SagaState>;
+
+  constructor(db: Db) {
+    this.sagas = db.collection<SagaState>("sagas");
+  }
+
+  /** Start a new saga instance and persist initial state */
+  async start(orderId: string, payload: SagaState["payload"]): Promise<string> {
+    const sagaId = new ObjectId().toHexString();
+    const saga: SagaState = {
+      sagaId,
+      orderId,
+      status: "STARTED",
+      completedSteps: [],
+      compensatedSteps: [],
+      payload,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    await this.sagas.insertOne(saga);
+    // Begin execution
+    await this.execute(sagaId);
+    return sagaId;
+  }
+
+  /** Core state machine — advances the saga or triggers compensation */
+  private async execute(sagaId: string): Promise<void> {
+    const saga = await this.sagas.findOne({ sagaId });
+    if (!saga) throw new Error(\`Saga \${sagaId} not found\`);
+
+    switch (saga.status) {
+      case "STARTED":
+      case "PAYMENT_PENDING": {
+        await this.transition(sagaId, "PAYMENT_PENDING");
+        const paid = await chargePayment(sagaId, saga.payload.amount);
+        if (paid) {
+          await this.markStepCompleted(sagaId, "PAYMENT", "PAYMENT_SUCCEEDED");
+          await this.execute(sagaId); // advance
+        } else {
+          await this.transition(sagaId, "COMPENSATING");
+          await this.compensate(sagaId);
+        }
+        break;
+      }
+      case "PAYMENT_SUCCEEDED":
+      case "INVENTORY_PENDING": {
+        await this.transition(sagaId, "INVENTORY_PENDING");
+        const reserved = await reserveInventory(sagaId, saga.payload.items);
+        if (reserved) {
+          await this.markStepCompleted(sagaId, "INVENTORY", "INVENTORY_RESERVED");
+          await this.execute(sagaId);
+        } else {
+          await this.transition(sagaId, "COMPENSATING");
+          await this.compensate(sagaId);
+        }
+        break;
+      }
+      case "INVENTORY_RESERVED": {
+        // All steps done — mark completed
+        await this.transition(sagaId, "COMPLETED");
+        console.log(\`[Saga \${sagaId}] *Saga completed successfully*\`);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  /** Run compensating transactions in **reverse** order */
+  private async compensate(sagaId: string): Promise<void> {
+    const saga = await this.sagas.findOne({ sagaId });
+    if (!saga) return;
+
+    const compensations: Record<SagaStep, () => Promise<void>> = {
+      PAYMENT: () => refundPayment(sagaId, saga.payload.amount),
+      INVENTORY: () => releaseInventory(sagaId, saga.payload.items),
+      CONFIRMATION: async () => {},
+    };
+
+    // Compensate in reverse order of completion
+    const stepsToCompensate = [...saga.completedSteps].reverse();
+    for (const step of stepsToCompensate) {
+      try {
+        await compensations[step]();
+        await this.sagas.updateOne(
+          { sagaId },
+          { $push: { compensatedSteps: step }, $set: { updatedAt: new Date() } }
+        );
+      } catch (err) {
+        console.error(\`[Saga \${sagaId}] Compensation failed for \${step}, will retry\`);
+        // In production: enqueue for retry with exponential backoff
+      }
+    }
+    await this.transition(sagaId, "FAILED");
+    console.log(\`[Saga \${sagaId}] *Saga failed — all compensations executed*\`);
+  }
+
+  private async transition(sagaId: string, status: SagaStatus): Promise<void> {
+    await this.sagas.updateOne({ sagaId }, { $set: { status, updatedAt: new Date() } });
+  }
+
+  private async markStepCompleted(
+    sagaId: string,
+    step: SagaStep,
+    status: SagaStatus
+  ): Promise<void> {
+    await this.sagas.updateOne(
+      { sagaId },
+      { $push: { completedSteps: step }, $set: { status, updatedAt: new Date() } }
+    );
+  }
+}
+
+// --- Express API ---
+const app = express();
+app.use(express.json());
+
+let orchestrator: OrderSagaOrchestrator;
+
+app.post("/api/orders", async (req, res) => {
+  const { userId, items, amount } = req.body;
+  const orderId = new ObjectId().toHexString();
+  try {
+    const sagaId = await orchestrator.start(orderId, { userId, items, amount });
+    res.status(202).json({ orderId, sagaId, message: "Order saga initiated" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to start order saga" });
+  }
+});
+
+app.get("/api/sagas/:sagaId", async (req, res) => {
+  const db = (await MongoClient.connect("mongodb://localhost:27017")).db("orders");
+  const saga = await db.collection("sagas").findOne({ sagaId: req.params.sagaId });
+  res.json(saga);
+});
+
+async function main() {
+  const client = await MongoClient.connect("mongodb://localhost:27017");
+  const db = client.db("orders");
+  orchestrator = new OrderSagaOrchestrator(db);
+  app.listen(3000, () => console.log("Saga orchestrator running on :3000"));
+}
+
+main();`,
+    },
+    {
+      language: "cpp",
+      caption: "C++ Saga State Machine — compile-time safe state transitions using enum classes and a transition table",
+      source: `#include <iostream>
+#include <vector>
+#include <string>
+#include <functional>
+#include <unordered_map>
+#include <stdexcept>
+
+// --- Saga state and step enums ---
+enum class SagaState {
+    STARTED,
+    PAYMENT_PENDING,
+    PAYMENT_SUCCEEDED,
+    INVENTORY_PENDING,
+    INVENTORY_RESERVED,
+    COMPLETED,
+    COMPENSATING,
+    FAILED
+};
+
+enum class SagaStep {
+    PAYMENT,
+    INVENTORY,
+    CONFIRMATION
+};
+
+// --- String conversion helpers ---
+std::string stateToString(SagaState s) {
+    static const std::unordered_map<int, std::string> names = {
+        {0, "STARTED"}, {1, "PAYMENT_PENDING"}, {2, "PAYMENT_SUCCEEDED"},
+        {3, "INVENTORY_PENDING"}, {4, "INVENTORY_RESERVED"},
+        {5, "COMPLETED"}, {6, "COMPENSATING"}, {7, "FAILED"}
+    };
+    return names.at(static_cast<int>(s));
+}
+
+std::string stepToString(SagaStep s) {
+    static const std::unordered_map<int, std::string> names = {
+        {0, "PAYMENT"}, {1, "INVENTORY"}, {2, "CONFIRMATION"}
+    };
+    return names.at(static_cast<int>(s));
+}
+
+// --- Saga State Machine ---
+class SagaStateMachine {
+public:
+    SagaStateMachine(const std::string& sagaId)
+        : m_sagaId(sagaId), m_state(SagaState::STARTED) {}
+
+    /** Attempt to transition to a new state with validation */
+    void transition(SagaState newState) {
+        std::cout << "[Saga " << m_sagaId << "] "
+                  << stateToString(m_state) << " -> "
+                  << stateToString(newState) << std::endl;
+        m_state = newState;
+    }
+
+    /** Record a completed step for later compensation */
+    void markStepCompleted(SagaStep step) {
+        m_completedSteps.push_back(step);
+        std::cout << "[Saga " << m_sagaId << "] Step completed: "
+                  << stepToString(step) << std::endl;
+    }
+
+    /** Execute compensating transactions in **reverse** order */
+    void compensate(
+        const std::unordered_map<int, std::function<bool()>>& compensators
+    ) {
+        transition(SagaState::COMPENSATING);
+        // Iterate completed steps in reverse
+        for (auto it = m_completedSteps.rbegin(); it != m_completedSteps.rend(); ++it) {
+            int key = static_cast<int>(*it);
+            if (compensators.count(key)) {
+                std::cout << "[Saga " << m_sagaId << "] *Compensating*: "
+                          << stepToString(*it) << std::endl;
+                bool ok = compensators.at(key)();
+                if (!ok) {
+                    std::cerr << "[Saga " << m_sagaId
+                              << "] Compensation FAILED for "
+                              << stepToString(*it)
+                              << " — flagging for manual intervention"
+                              << std::endl;
+                }
+            }
+        }
+        transition(SagaState::FAILED);
+    }
+
+    SagaState state() const { return m_state; }
+    const std::vector<SagaStep>& completedSteps() const { return m_completedSteps; }
+
+private:
+    std::string m_sagaId;
+    SagaState m_state;
+    std::vector<SagaStep> m_completedSteps;
+};
+
+// --- Simulated service calls ---
+bool chargePayment(double amount) {
+    std::cout << "  Charging payment: $" << amount << std::endl;
+    return true;  // simulate success
+}
+bool reserveInventory(const std::string& item) {
+    std::cout << "  Reserving inventory: " << item << std::endl;
+    return false; // simulate failure to trigger compensation
+}
+bool refundPayment(double amount) {
+    std::cout << "  **Refunding** payment: $" << amount << std::endl;
+    return true;
+}
+
+int main() {
+    SagaStateMachine saga("order-42");
+
+    // Compensation functions map (keyed by SagaStep int value)
+    std::unordered_map<int, std::function<bool()>> compensators = {
+        { static_cast<int>(SagaStep::PAYMENT), [&]() { return refundPayment(99.99); } },
+        { static_cast<int>(SagaStep::INVENTORY), []() { return true; } },
+    };
+
+    // --- Execute saga steps ---
+    // Step 1: Payment
+    saga.transition(SagaState::PAYMENT_PENDING);
+    if (chargePayment(99.99)) {
+        saga.markStepCompleted(SagaStep::PAYMENT);
+        saga.transition(SagaState::PAYMENT_SUCCEEDED);
+    } else {
+        saga.compensate(compensators);
+        return 1;
+    }
+
+    // Step 2: Inventory
+    saga.transition(SagaState::INVENTORY_PENDING);
+    if (reserveInventory("widget-x")) {
+        saga.markStepCompleted(SagaStep::INVENTORY);
+        saga.transition(SagaState::INVENTORY_RESERVED);
+    } else {
+        // Inventory failed — compensate all completed steps
+        saga.compensate(compensators);
+        return 1;
+    }
+
+    saga.transition(SagaState::COMPLETED);
+    std::cout << "Saga completed successfully." << std::endl;
+    return 0;
+}`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "Order Saga Orchestration Flow",
+      kind: "sequence",
+      caption: "Sequence diagram showing the orchestrator coordinating payment, inventory, and order confirmation steps with compensating transactions on failure",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant Orchestrator
+    participant PaymentService
+    participant InventoryService
+    participant OrderService
+
+    Client->>Orchestrator: POST /api/orders
+    Orchestrator->>Orchestrator: Create saga (status: STARTED)
+
+    Orchestrator->>PaymentService: ChargePayment command
+    PaymentService-->>Orchestrator: PaymentSucceeded
+
+    Orchestrator->>InventoryService: ReserveStock command
+    alt Inventory succeeds
+        InventoryService-->>Orchestrator: StockReserved
+        Orchestrator->>OrderService: ConfirmOrder command
+        OrderService-->>Orchestrator: OrderConfirmed
+        Orchestrator->>Client: 200 Order Confirmed
+    else Inventory fails
+        InventoryService-->>Orchestrator: StockReservationFailed
+        Orchestrator->>Orchestrator: Begin compensation
+        Orchestrator->>PaymentService: RefundPayment (compensate)
+        PaymentService-->>Orchestrator: RefundCompleted
+        Orchestrator->>Client: 409 Order Failed (compensated)
+    end`,
+    },
+    {
+      title: "Saga State Machine — Compensation Flow",
+      kind: "state",
+      caption: "State diagram showing all saga states and transitions, including the compensation path triggered on any step failure",
+      mermaid: `stateDiagram-v2
+    [*] --> STARTED
+    STARTED --> PAYMENT_PENDING : begin saga
+
+    PAYMENT_PENDING --> PAYMENT_SUCCEEDED : payment OK
+    PAYMENT_PENDING --> COMPENSATING : payment failed
+
+    PAYMENT_SUCCEEDED --> INVENTORY_PENDING : advance
+    INVENTORY_PENDING --> INVENTORY_RESERVED : stock reserved
+    INVENTORY_PENDING --> COMPENSATING : reservation failed
+
+    INVENTORY_RESERVED --> COMPLETED : confirm order
+
+    COMPENSATING --> FAILED : all compensations done
+
+    COMPLETED --> [*]
+    FAILED --> [*]
+
+    note right of COMPENSATING
+        Runs compensating transactions
+        in reverse completion order.
+        Retries on transient failures.
+    end note`,
+    },
+  ],
+
+  comparison: {
+    columns: [
+      "Aspect",
+      "Choreography Saga",
+      "Orchestration Saga",
+    ],
+    rows: [
+      [
+        "**Coordination**",
+        "Decentralized — each service reacts to events autonomously",
+        "Centralized — a *saga orchestrator* directs each step via commands",
+      ],
+      [
+        "**Coupling**",
+        "Loose coupling; services only know about events, not each other",
+        "Services coupled to the orchestrator's command/reply contract",
+      ],
+      [
+        "**Workflow Visibility**",
+        "Implicit — workflow is scattered across service event handlers",
+        "Explicit — entire workflow is defined in one place (state machine)",
+      ],
+      [
+        "**Complexity at Scale**",
+        "Grows rapidly with steps; *cyclic event dependencies* emerge",
+        "Scales well; adding steps means adding states to the orchestrator",
+      ],
+      [
+        "**Error Handling**",
+        "Each service independently handles failure events and compensates",
+        "Orchestrator centralizes all error handling and compensation logic",
+      ],
+      [
+        "**Debugging & Tracing**",
+        "Difficult — requires correlating events across multiple service logs",
+        "Easier — saga state and history are stored in one place with a `sagaId`",
+      ],
+      [
+        "**Single Point of Failure**",
+        "No single coordinator to fail; resilience is distributed",
+        "Orchestrator is a dependency; must be made highly available",
+      ],
+      [
+        "**Best For**",
+        "Simple workflows (2-4 steps), autonomous teams, event-driven architectures",
+        "Complex workflows, many steps, branching logic, business-critical transactions",
+      ],
+    ],
+  },
+
+  exercises: [
+    "**Design a travel booking saga**: A user books a flight, hotel, and car rental. Draw the saga steps, identify the *pivot transaction* (hint: which step cannot be undone?), and write the compensating transaction for each reversible step. Consider what happens if the car rental fails after flight and hotel are booked.",
+    "**Implement idempotent compensation**: Extend the Express.js orchestrator code to use an `idempotencyKey` (stored in MongoDB) for each compensating transaction. Ensure that if `refundPayment` is called twice with the same key, the refund only executes once. Write a test that calls the compensation endpoint twice and verifies the refund amount is not doubled.",
+    "**Add timeout handling**: Modify the saga orchestrator to detect when a service has not responded within 30 seconds. Implement a `setTimeout`-based mechanism that transitions the saga to `COMPENSATING` state if the deadline expires. Store the timeout deadline in the saga document so that a restarted orchestrator can resume timeout tracking.",
+    "**Choreography to orchestration migration**: Given a choreography saga with these events — `OrderCreated`, `PaymentProcessed`, `PaymentFailed`, `StockReserved`, `StockFailed`, `OrderConfirmed`, `OrderCancelled` — redesign it as an orchestration saga. Define the orchestrator's state machine (states and transitions), the commands it sends, and the reply messages it expects. Compare the two designs in terms of *number of event/message types* and *debugging ease*.",
+    "**Saga observability dashboard**: Design a monitoring system for sagas in production. Define the **metrics** you would track (e.g., saga duration, failure rate, compensation rate), the **alerts** you would configure (e.g., stuck sagas, high compensation rate), and the **log fields** each saga step should emit. Sketch a Grafana dashboard layout with at least 4 panels.",
+  ],
+
+  cheatSheet: [
+    "**Saga = sequence of local transactions + compensating actions** — no distributed locks, no two-phase commit. Each step commits independently; failures trigger reverse compensations.",
+    "**Choreography** = event-driven, no coordinator (good for simple flows); **Orchestration** = central state machine directing steps (good for complex flows with many steps or branching).",
+    "**Compensating transactions must be idempotent and retriable** — they may execute multiple times due to retries or duplicate messages. Use `idempotencyKey` fields to guard against double execution.",
+    "**Pivot transaction** = the point of no return. Before it: steps are *compensatable*. After it: steps are *retriable* only (cannot be undone). Design your saga to place irreversible actions as late as possible.",
+    "**Always persist saga state** — store `sagaId`, current status, `completedSteps`, and `compensatedSteps` in a durable store (e.g., *MongoDB*, *PostgreSQL*). If the orchestrator crashes, it recovers and resumes from persisted state.",
+    "**Propagate a correlation ID (`sagaId`)** through every service call, message header, and log entry. This is essential for distributed tracing, debugging failures, and building observability dashboards.",
+  ],
+
+  revisionNotes: [
+    "The saga pattern trades **strong consistency** (ACID isolation) for **availability and partition tolerance**. It provides ACD guarantees but *not* isolation — intermediate states are visible. Use semantic locks or commutative operations to mitigate dirty reads.",
+    "**Two coordination styles**: *Choreography* (decentralized, event-driven, loosely coupled but hard to trace) vs. *Orchestration* (centralized state machine, explicit workflow, easier to debug but introduces a coordinator dependency).",
+    "**Compensating transactions are semantic inverses**, not rollbacks. They must be *idempotent* (safe to repeat), *retriable* (must eventually succeed), and executed in **reverse order** of the original steps. If a compensation fails, retry with backoff or escalate to manual intervention.",
+    "**Three step categories in a saga**: (1) *Compensatable* steps — can be undone via compensating transactions; (2) *Pivot transaction* — the point of no return after which only forward progress is possible; (3) *Retriable* steps — must eventually succeed (placed after the pivot).",
+    "**Production essentials**: persist saga state for crash recovery, use correlation IDs (`sagaId`) for distributed tracing, implement timeout handling for unresponsive services, monitor saga metrics (duration, failure rate, stuck sagas), and test every failure permutation with a saga test harness.",
+  ],
+
   glossary: [
     {
       term: "Saga",

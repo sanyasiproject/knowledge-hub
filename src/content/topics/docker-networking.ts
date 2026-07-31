@@ -173,4 +173,310 @@ export const dockerNetworking: TopicContent = {
         "IP Virtual Server — a Linux kernel-level Layer 4 load balancer used by Docker Swarm for distributing traffic to service tasks via a Virtual IP (VIP), more reliable than DNS round-robin.",
     },
   ],
+  deepDive: [
+    "**Docker networking** is built on top of Linux kernel primitives — *network namespaces*, *veth pairs*, *bridges*, and *iptables* — that together create isolated yet connectable network environments for containers. When Docker starts, it creates a default bridge called `docker0` and assigns it a private subnet (typically `172.17.0.0/16`). Each container launched on this bridge gets its own network namespace with a `veth` pair: one end becomes `eth0` inside the container, the other end is plugged into the `docker0` bridge. This architecture means:\n\n- Containers on the same bridge can reach each other by IP address\n- Outbound traffic from containers is **NATed** (masqueraded) through the host's IP\n- Inbound traffic requires explicit **port publishing** (`-p`) which creates `iptables DNAT` rules\n- The default bridge does **not** provide DNS — only user-defined bridges run Docker's embedded DNS at `127.0.0.11`",
+    "**Overlay networking** extends container communication across multiple hosts using **VXLAN encapsulation** (UDP port 4789). In a Docker Swarm cluster, the Swarm manager maintains a distributed key-value store that tracks which container IPs live on which host. When container A on host 1 sends a packet to container B on host 2, the local VTEP (VXLAN Tunnel Endpoint) encapsulates the Layer 2 frame inside a UDP packet, routes it over the physical network to the destination host, where the remote VTEP decapsulates it and delivers it to container B's network namespace. Key considerations include:\n\n- Overlay networks add ~10-15% latency overhead due to encapsulation\n- The `--opt encrypted` flag enables *IPsec ESP* encryption between nodes\n- Each overlay network creates a separate VXLAN segment with a unique **VNI** (VXLAN Network Identifier)\n- **Ingress routing mesh** in Swarm publishes service ports on *every* node, forwarding to the correct task via IPVS",
+    "**Volume management** is critical for stateful containers because the container's writable layer (managed by the storage driver — overlay2, devicemapper, etc.) is *ephemeral* and tied to the container's lifecycle. Docker provides three mount types: **volumes** (managed in `/var/lib/docker/volumes/`), **bind mounts** (arbitrary host paths), and **tmpfs mounts** (in-memory only). Volumes are the preferred production approach because they decouple data from the container lifecycle, support volume drivers for remote storage (e.g., `local`, `nfs`, `rexray/ebs`, `convoy`), and provide consistent behavior across platforms. Important patterns include:\n\n- *Named volumes* pre-populate from image content on first mount; *anonymous volumes* get a random hash name and are harder to manage\n- `docker volume prune` removes all *unused* volumes — dangerous for backup volumes not currently attached\n- **Read-only bind mounts** (`:ro` suffix) prevent the container from modifying host files, improving security\n- Volume data persists across `docker stop`, `docker start`, and `docker rm` — only `docker volume rm` or `docker volume prune` deletes it",
+    "**Network security and troubleshooting** require understanding how Docker manipulates the host's network stack. Docker creates several iptables chains (`DOCKER`, `DOCKER-ISOLATION-STAGE-1`, `DOCKER-ISOLATION-STAGE-2`, `DOCKER-USER`) to manage traffic. The `DOCKER-USER` chain is the recommended place for custom firewall rules because Docker never modifies it. Common pitfalls include:\n\n- Published ports bypassing `ufw`/`firewalld` because Docker's chains are evaluated first\n- DNS resolution failures when containers use the default bridge instead of user-defined networks\n- Network namespace debugging: use `docker exec <container> ip addr`, `docker network inspect`, and `nsenter --net=/proc/<pid>/ns/net` for deep inspection\n- **Container-to-container traffic** on the same bridge is unrestricted by default; use `--icc=false` on the daemon or network policies (in Kubernetes) to restrict it\n- MTU mismatches between overlay networks and the physical network causing packet fragmentation and performance degradation",
+  ],
+  code: [
+    {
+      language: "bash",
+      caption: "Create and inspect user-defined bridge networks",
+      source: `# Create a user-defined bridge network with a custom subnet
+docker network create \\
+  --driver bridge \\
+  --subnet 10.0.1.0/24 \\
+  --gateway 10.0.1.1 \\
+  --opt com.docker.network.bridge.name=my_bridge \\
+  my_app_network
+
+# Run two containers on the custom network
+docker run -d --name web --network my_app_network nginx:alpine
+docker run -d --name api --network my_app_network node:alpine
+
+# Verify DNS resolution between containers
+docker exec web ping -c 3 api
+# PING api (10.0.1.3): 56 data bytes
+# 64 bytes from 10.0.1.3: seq=0 ttl=64 time=0.095 ms
+
+# Inspect the network to see connected containers
+docker network inspect my_app_network --format '{{range .Containers}}{{.Name}}: {{.IPv4Address}}{{println}}{{end}}'
+
+# Connect an existing container to an additional network
+docker network connect my_app_network existing_container`,
+    },
+    {
+      language: "bash",
+      caption: "Port mapping, host networking, and network debugging",
+      source: `# Publish ports with specific interface binding
+docker run -d --name web_public -p 8080:80 nginx:alpine           # All interfaces
+docker run -d --name web_local -p 127.0.0.1:8081:80 nginx:alpine  # Localhost only
+docker run -d --name web_range -p 9000-9010:9000-9010 myapp       # Port range
+
+# Run a container with host networking (no NAT, no port mapping)
+docker run -d --name monitor --network host prometheus/prometheus
+
+# Run a container with no network access
+docker run -d --name isolated --network none alpine sleep 3600
+
+# Debug container networking
+docker exec web_public ip addr show
+docker exec web_public cat /etc/resolv.conf
+docker exec web_public nslookup api
+
+# Inspect iptables rules created by Docker
+sudo iptables -t nat -L DOCKER -n -v
+sudo iptables -L DOCKER-USER -n -v
+
+# View network namespace of a container
+PID=$(docker inspect --format '{{.State.Pid}}' web_public)
+sudo nsenter --target $PID --net ip addr`,
+    },
+    {
+      language: "bash",
+      caption: "Volume management and data persistence",
+      source: `# Create and use named volumes
+docker volume create postgres_data
+docker run -d --name db \\
+  -v postgres_data:/var/lib/postgresql/data \\
+  -e POSTGRES_PASSWORD=secret \\
+  postgres:15
+
+# Bind mount for development (hot-reloading)
+docker run -d --name dev_app \\
+  -v $(pwd)/src:/app/src:cached \\
+  -v /app/node_modules \\
+  -p 3000:3000 \\
+  node:18-alpine npm run dev
+
+# Read-only bind mount for configuration
+docker run -d --name web \\
+  -v $(pwd)/nginx.conf:/etc/nginx/nginx.conf:ro \\
+  -v $(pwd)/certs:/etc/ssl/certs:ro \\
+  nginx:alpine
+
+# tmpfs mount for sensitive data (in-memory only)
+docker run -d --name secure_app \\
+  --tmpfs /app/secrets:rw,noexec,size=64m \\
+  myapp:latest
+
+# Inspect, list, and prune volumes
+docker volume inspect postgres_data
+docker volume ls --filter dangling=true
+docker volume prune --filter "label!=keep"`,
+    },
+    {
+      language: "dockerfile",
+      caption: "Dockerfile with networking and volume best practices",
+      source: `FROM node:18-alpine AS base
+
+# Declare the port the application listens on
+EXPOSE 3000
+
+# Declare a volume mount point for persistent data
+VOLUME ["/app/data"]
+
+# Install curl for container health checks
+RUN apk add --no-cache curl
+
+# Health check using the exposed port
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \\
+  CMD curl -f http://localhost:3000/health || exit 1
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+
+# Run as non-root user for security
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+
+CMD ["node", "server.js"]`,
+    },
+    {
+      language: "bash",
+      caption: "Docker Compose networking with multiple networks",
+      source: `# docker-compose.yml with isolated frontend/backend networks
+cat <<'YAML'
+version: "3.9"
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - frontend
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+
+  api:
+    build: ./api
+    networks:
+      - frontend
+      - backend
+    environment:
+      - DB_HOST=postgres
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15-alpine
+    networks:
+      - backend
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+    secrets:
+      - db_password
+
+networks:
+  frontend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+  backend:
+    driver: bridge
+    internal: true  # No external access
+
+volumes:
+  pg_data:
+    driver: local
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+YAML`,
+    },
+  ],
+  diagrams: [
+    {
+      title: "Docker Bridge Network Architecture",
+      kind: "architecture",
+      caption: "Shows how containers connect to the docker0 bridge via veth pairs, with NAT for external traffic and iptables DNAT for port publishing.",
+      mermaid: `flowchart TB
+  subgraph Host["Docker Host"]
+    direction TB
+    subgraph NS1["Container A (net namespace)"]
+      eth0a["eth0\\n10.0.1.2"]
+    end
+    subgraph NS2["Container B (net namespace)"]
+      eth0b["eth0\\n10.0.1.3"]
+    end
+    subgraph Bridge["User-defined Bridge (br-xxxx)"]
+      vethA["veth-a"]
+      vethB["veth-b"]
+      DNS["Embedded DNS\\n127.0.0.11"]
+    end
+    IPT["iptables\\nDNAT / MASQUERADE"]
+    HostNIC["Host NIC (eth0)\\n192.168.1.100"]
+  end
+  Internet["External Network"]
+  Client["Client :8080"]
+
+  eth0a --- vethA
+  eth0b --- vethB
+  vethA --- DNS
+  vethB --- DNS
+  Bridge --- IPT
+  IPT --- HostNIC
+  HostNIC --- Internet
+  Client -->|"-p 8080:80"| IPT`,
+    },
+    {
+      title: "Overlay Network Multi-Host Communication",
+      kind: "flow",
+      caption: "Illustrates VXLAN encapsulation for container-to-container traffic across Docker Swarm nodes.",
+      mermaid: `flowchart LR
+  subgraph Host1["Swarm Node 1"]
+    C1["Container A\\n10.0.0.2"]
+    VTEP1["VTEP\\n(VXLAN Tunnel Endpoint)"]
+    NIC1["eth0\\n192.168.1.10"]
+  end
+  subgraph Host2["Swarm Node 2"]
+    NIC2["eth0\\n192.168.1.11"]
+    VTEP2["VTEP\\n(VXLAN Tunnel Endpoint)"]
+    C2["Container B\\n10.0.0.3"]
+  end
+  C1 -->|"L2 Frame"| VTEP1
+  VTEP1 -->|"VXLAN Encap\\nUDP:4789"| NIC1
+  NIC1 -->|"Underlay Network"| NIC2
+  NIC2 -->|"VXLAN Decap"| VTEP2
+  VTEP2 -->|"L2 Frame"| C2`,
+    },
+    {
+      title: "Docker DNS Resolution Flow",
+      kind: "sequence",
+      caption: "Sequence of DNS resolution in a user-defined bridge network when one container resolves another by name.",
+      mermaid: `sequenceDiagram
+  participant App as Container: app
+  participant DNS as Docker DNS<br/>127.0.0.11
+  participant DB as Container: postgres
+
+  App->>DNS: DNS query: "postgres" (A record)
+  DNS->>DNS: Look up container name<br/>in network registry
+  DNS-->>App: Response: 10.0.1.5
+  App->>DB: TCP SYN to 10.0.1.5:5432
+  DB-->>App: TCP SYN-ACK
+  App->>DB: SQL query over established connection`,
+    },
+    {
+      title: "Docker Storage Types",
+      kind: "mindmap",
+      caption: "Overview of Docker storage options: volumes, bind mounts, and tmpfs mounts with their characteristics.",
+      mermaid: `mindmap
+  root((Docker Storage))
+    Volumes
+      Managed by Docker daemon
+      /var/lib/docker/volumes/
+      Named or anonymous
+      Pre-populate from image
+      Volume drivers for remote storage
+      Survives container removal
+    Bind Mounts
+      Arbitrary host path
+      Direct host filesystem access
+      Development hot-reloading
+      Read-only option with :ro
+      Overrides container mount point
+      Host path dependency
+    tmpfs Mounts
+      In-memory only
+      Never written to disk
+      Lost on container stop
+      Sensitive data / secrets
+      Size-limited`,
+    },
+  ],
+  exercises: [
+    "Create a multi-container application with Docker Compose that has three services (web, api, database) on two networks: a 'frontend' network connecting web and api, and an 'internal' backend network connecting api and database. Verify that the web container cannot directly reach the database container, but the api container can reach both.",
+    "Set up a Docker environment where you create a named volume, write data to it from one container, stop and remove that container, then start a new container mounting the same volume and verify the data persists. Repeat the exercise with a bind mount and compare the behavior.",
+    "Investigate Docker's iptables rules by running a container with port publishing (-p 8080:80), then use 'iptables -t nat -L DOCKER -n' and 'iptables -L DOCKER-USER -n' to trace the NAT and filter rules Docker created. Add a custom rule to the DOCKER-USER chain to restrict access to the published port from a specific IP range.",
+    "Build a Docker Swarm cluster with at least two nodes (use docker-machine or VMs), create an overlay network, deploy a replicated service with 3 replicas, and verify that containers on different hosts can communicate by name. Test the ingress routing mesh by accessing the service from any node's IP.",
+    "Debug a DNS resolution failure: create two containers on the default bridge network and attempt to ping by container name (it will fail). Then create a user-defined bridge, attach both containers, and demonstrate that DNS resolution works. Use 'docker exec' to inspect /etc/resolv.conf in both scenarios.",
+  ],
+  cheatSheet: [
+    "`docker network ls` — list all networks; `docker network inspect <name>` — show network details, connected containers, and IPAM config",
+    "`docker network create --driver bridge --subnet 10.0.0.0/24 <name>` — create a user-defined bridge with a custom subnet",
+    "`docker run --network <name> --name <container>` — attach a container to a specific network at launch",
+    "`docker network connect <network> <container>` / `docker network disconnect <network> <container>` — attach/detach a running container to/from a network",
+    "`docker run -p 127.0.0.1:8080:80` — publish port bound to localhost only; omit the IP to bind to all interfaces (0.0.0.0)",
+    "`docker volume create <name>` / `docker volume inspect <name>` / `docker volume rm <name>` — manage named volumes",
+    "`docker run -v <volume>:/path` (named volume) vs `-v /host/path:/path` (bind mount) vs `--tmpfs /path` (in-memory mount)",
+    "`docker volume prune` — remove all unused volumes (WARNING: irreversible); use `--filter` to target specific labels",
+  ],
+  revisionNotes: [
+    "The **default bridge** provides IP-only connectivity with no DNS; **user-defined bridges** add automatic DNS resolution, better isolation, and runtime connect/disconnect — always prefer user-defined bridges.",
+    "**Port publishing** (`-p`) creates iptables DNAT rules that can bypass host firewalls (ufw/firewalld). Bind to `127.0.0.1` for localhost-only access. Use the `DOCKER-USER` chain for custom firewall rules.",
+    "**Host networking** (`--network host`) removes all network isolation for maximum performance; **none networking** (`--network none`) provides complete network isolation with only loopback.",
+    "**Overlay networks** use VXLAN (UDP 4789) for multi-host communication. Docker Swarm manages overlay networking natively; Kubernetes uses CNI plugins (Flannel, Calico, Cilium).",
+    "**Named volumes** are managed by Docker, persist across container lifecycle, and pre-populate from image content on first mount. **Bind mounts** map host paths directly and override mount points.",
+    "**tmpfs mounts** store data in memory only — never written to disk, lost on container stop. Use for secrets and sensitive temporary data.",
+    "Docker's embedded DNS server at `127.0.0.11` resolves container names and `--network-alias` values. Swarm services use IPVS-based Virtual IP load balancing instead of DNS round-robin.",
+    "Docker Compose automatically creates a user-defined bridge per project and registers services by name, enabling DNS-based service discovery without explicit network configuration.",
+  ],
 };

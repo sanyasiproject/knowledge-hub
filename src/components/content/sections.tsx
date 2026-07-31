@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import type {
   AnimationSpec,
   ComparisonTable,
@@ -11,6 +11,7 @@ import type {
 } from "../../content/types";
 import type { ContentComponentKind } from "../../data/topicSections";
 import { Placeholder, Pill, cx } from "../ui/primitives";
+import { RichParagraphs, RichText } from "./RichText";
 
 /* ------------------------------------------------------------------ */
 /* Learn                                                               */
@@ -18,13 +19,7 @@ import { Placeholder, Pill, cx } from "../ui/primitives";
 
 function Paragraphs({ items }: { items?: string[] }) {
   if (!items?.length) return null;
-  return (
-    <div className="space-y-3 text-slate-700 dark:text-slate-300">
-      {items.map((p, i) => (
-        <p key={i}>{p}</p>
-      ))}
-    </div>
-  );
+  return <RichParagraphs items={items} />;
 }
 
 function QuickSummary({ c }: { c: TopicContent }) {
@@ -32,11 +27,11 @@ function QuickSummary({ c }: { c: TopicContent }) {
     return <Placeholder icon="⚡" title="Quick Summary">A 2-minute revision of this topic will appear here.</Placeholder>;
   return (
     <div className="rounded-xl border border-brand-200 bg-brand-50 p-5 dark:border-brand-800/60 dark:bg-brand-900/20">
-      <ul className="space-y-2">
+      <ul className="space-y-3">
         {c.quickSummary.map((s, i) => (
           <li key={i} className="flex gap-2 text-slate-700 dark:text-slate-200">
             <span className="mt-1 text-brand-500">◆</span>
-            <span>{s}</span>
+            <span><RichText text={s} /></span>
           </li>
         ))}
       </ul>
@@ -89,6 +84,75 @@ const DIAGRAM_ICON: Record<string, string> = {
   network: "🌐",
 };
 
+function MermaidBlock({ source }: { source: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [svg, setSvg] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSvg(null);
+    setError(false);
+    (async () => {
+      try {
+        const { default: mermaid } = await import("mermaid");
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: document.documentElement.classList.contains("dark") ? "dark" : "default",
+          securityLevel: "loose",
+          fontFamily: "Inter, system-ui, sans-serif",
+        });
+        const id = `mermaid-${Math.random().toString(36).slice(2, 9)}`;
+        const { svg: rendered } = await mermaid.render(id, source);
+        if (!cancelled) setSvg(rendered);
+      } catch {
+        if (!cancelled) setError(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [source]);
+
+  if (error) {
+    return (
+      <div className="flex h-36 items-center justify-center rounded-lg border-2 border-dashed border-red-300 text-sm text-red-400 dark:border-red-700">
+        Diagram syntax error
+      </div>
+    );
+  }
+  if (!svg) {
+    return (
+      <div className="flex h-36 items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-sm text-slate-400 dark:border-slate-700">
+        Loading diagram...
+      </div>
+    );
+  }
+  return (
+    <div
+      ref={ref}
+      className="overflow-x-auto rounded-lg bg-white p-3 dark:bg-slate-800/50 [&_svg]:mx-auto [&_svg]:max-w-full"
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
+}
+
+class DiagramErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex h-36 items-center justify-center rounded-lg border-2 border-dashed border-red-300 text-sm text-red-400 dark:border-red-700">
+          Diagram failed to render
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function Diagrams({ c }: { c: TopicContent }) {
   if (!c.diagrams?.length)
     return (
@@ -105,9 +169,13 @@ function Diagrams({ c }: { c: TopicContent }) {
             <span className="font-semibold text-slate-800 dark:text-slate-100">{d.title}</span>
             <Pill>{d.kind}</Pill>
           </div>
-          <div className="flex h-36 items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-sm text-slate-400 dark:border-slate-700">
-            {d.kind} diagram
-          </div>
+          {d.mermaid ? (
+            <DiagramErrorBoundary><MermaidBlock source={d.mermaid} /></DiagramErrorBoundary>
+          ) : (
+            <div className="flex h-36 items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-sm text-slate-400 dark:border-slate-700">
+              {d.kind} diagram
+            </div>
+          )}
           {d.caption && <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">{d.caption}</p>}
         </div>
       ))}
@@ -233,7 +301,7 @@ function QA({ item }: { item: QAItem }) {
       </button>
       {open && (
         <div className="border-t border-slate-100 px-4 py-3 text-sm dark:border-slate-800">
-          <p className="text-slate-700 dark:text-slate-300">{item.a}</p>
+          <div className="text-slate-700 dark:text-slate-300"><RichText text={item.a} /></div>
           {item.followUps?.length ? (
             <div className="mt-3">
               <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Follow-ups</div>
@@ -270,7 +338,7 @@ function FollowUps({ c }: { c: TopicContent }) {
       {c.followUps.map((f, i) => (
         <li key={i} className="flex gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
           <span className="text-brand-500">→</span>
-          {f}
+          <span><RichText text={f} /></span>
         </li>
       ))}
     </ul>
@@ -309,9 +377,9 @@ function MCQ({ item }: { item: MCQItem }) {
         })}
       </div>
       {answered && item.explanation && (
-        <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-600 dark:bg-slate-800/50 dark:text-slate-300">
-          {item.explanation}
-        </p>
+        <div className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-600 dark:bg-slate-800/50 dark:text-slate-300">
+          <RichText text={item.explanation} />
+        </div>
       )}
     </div>
   );
@@ -336,8 +404,8 @@ function Exercises({ c }: { c: TopicContent }) {
     <ol className="space-y-2">
       {c.exercises.map((e, i) => (
         <li key={i} className="flex gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-          <span className="font-semibold text-brand-500">{i + 1}</span>
-          {e}
+          <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-bold text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">{i + 1}</span>
+          <span><RichText text={e} /></span>
         </li>
       ))}
     </ol>
@@ -382,14 +450,14 @@ function BulletBox({ items, icon, title, tone }: { items?: string[]; icon: strin
         "rounded-xl border p-5",
         tone === "notes"
           ? "border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-900/10"
-          : "border-slate-200 bg-white font-mono text-sm dark:border-slate-800 dark:bg-slate-900"
+          : "border-slate-200 bg-white text-sm dark:border-slate-800 dark:bg-slate-900"
       )}
     >
-      <ul className="space-y-1.5">
+      <ul className="space-y-2">
         {items.map((n, i) => (
           <li key={i} className="flex gap-2 text-slate-700 dark:text-slate-300">
-            <span className="text-slate-400">{tone === "notes" ? "•" : "›"}</span>
-            {n}
+            <span className={tone === "notes" ? "mt-1 text-amber-500" : "mt-1 text-brand-500"}>{tone === "notes" ? "●" : "›"}</span>
+            <span><RichText text={n} /></span>
           </li>
         ))}
       </ul>
@@ -433,7 +501,7 @@ function Glossary({ entries }: { entries?: GlossaryEntry[] }) {
       {entries.map((e, i) => (
         <div key={i} className="px-4 py-3">
           <dt className="font-semibold text-slate-800 dark:text-slate-100">{e.term}</dt>
-          <dd className="text-sm text-slate-600 dark:text-slate-400">{e.definition}</dd>
+          <dd className="text-sm text-slate-600 dark:text-slate-400"><RichText text={e.definition} /></dd>
         </div>
       ))}
     </dl>

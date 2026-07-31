@@ -14,6 +14,218 @@ export const buildingMcpServers: TopicContent = {
     "## Error Handling and Validation\n\nRobust error handling is critical for good LLM interaction. Use JSON Schema validation for parameter types and constraints (the SDK does this automatically). Add business logic validation in handlers (e.g., date ranges, permission checks). Return structured error messages that tell the LLM what went wrong and how to fix it. Use MCP error codes for protocol-level errors (InvalidRequest, MethodNotFound, InternalError). Never expose internal stack traces or sensitive information in error responses. Log errors server-side for debugging while returning user-friendly messages.",
     "## Testing and Debugging\n\nTest MCP servers using the MCP Inspector (`npx @modelcontextprotocol/inspector`), which provides a web UI to connect to your server, list tools/resources, and execute calls interactively. For automated testing, use the SDK's in-memory transport to connect a test client directly to your server without stdio or HTTP. Write unit tests for individual tool handlers and integration tests for the full server lifecycle (init, tool calls, shutdown). Debug protocol issues by enabling verbose logging of JSON-RPC messages. The Inspector is the single most useful debugging tool during development.",
   ],
+  deepDive: [
+    "## Transport Layers: stdio vs Streamable HTTP (SSE)\n\nMCP supports two primary transports. **stdio** is the simplest: the client spawns the server as a child process and communicates over stdin/stdout using newline-delimited JSON-RPC. This is ideal for local tools (IDE extensions, CLI wrappers) because there is zero network configuration, no auth overhead, and the process lifecycle is managed by the client. However, stdio is limited to one client per server process and cannot cross machine boundaries. **Streamable HTTP** (formerly called HTTP+SSE) uses HTTP POST for client-to-server requests and Server-Sent Events for server-to-client streaming. The client sends JSON-RPC requests to a single endpoint (typically `/mcp`). If the server needs to stream multiple responses or send notifications, it upgrades the response to an SSE stream; otherwise it returns a plain JSON response. This transport supports multiple concurrent clients, runs behind load balancers and API gateways, and is the correct choice for any remote or cloud-hosted server. The SDK classes `StdioServerTransport` and `SSEServerTransport` / `StreamableHTTPServerTransport` abstract these details.",
+    "## Authentication and Authorization Patterns\n\nRemote MCP servers (HTTP transport) must authenticate clients. The recommended approach is **OAuth 2.1** with PKCE, which the MCP specification defines as the standard auth flow. The server exposes `/.well-known/oauth-authorization-server` metadata, and the client performs the authorization code flow with PKCE to obtain an access token. Tokens are sent as `Authorization: Bearer <token>` headers on every HTTP request. For simpler deployments, API key authentication via a custom header works but lacks token rotation and scoping. Authorization is handled at the tool/resource level: check permissions inside each handler before executing. For example, a database server might allow `read` tools for all authenticated users but restrict `write` tools to admin roles. Use middleware or a shared `authorize(user, action)` helper to keep permission checks consistent. Never embed secrets in tool responses, and always validate that the authenticated user has access to the specific resource URI being requested.",
+    "## Production Deployment Considerations\n\nDeploying MCP servers to production requires attention to several concerns. **Health checks**: expose a `GET /health` endpoint (separate from the MCP endpoint) for load balancer probes. **Rate limiting**: apply per-client rate limits to prevent a single LLM agent from overwhelming the server; use token bucket or sliding window algorithms. **Logging and observability**: log every tool call with request ID, client identity, tool name, execution duration, and result status; emit OpenTelemetry traces for distributed debugging. **Graceful shutdown**: handle SIGTERM by stopping acceptance of new requests, draining in-flight requests (with a timeout), and closing transport connections cleanly. **Stateless design**: for HTTP transport, keep servers stateless so they can scale horizontally behind a load balancer; externalize session state to Redis or a database if needed. **Containerization**: package as a Docker image with a non-root user, health check, and resource limits. Pin SDK versions in your lockfile and run security scans on dependencies. Monitor memory usage carefully since long-running SSE connections accumulate state per client.",
+  ],
+  code: [
+    {
+      language: "typescript",
+      caption: "Basic MCP server with a tool handler using McpServer (high-level API)",
+      source: `import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+
+const server = new McpServer({
+  name: "weather-server",
+  version: "1.0.0",
+});
+
+// Register a tool with Zod schema validation
+server.tool(
+  "get-weather",
+  "Get current weather for a city",
+  { city: z.string().describe("City name, e.g. 'London'") },
+  async ({ city }) => {
+    const response = await fetch(
+      \`https://api.weather.example.com/current?city=\${encodeURIComponent(city)}\`
+    );
+    if (!response.ok) {
+      return {
+        content: [{ type: "text", text: \`Failed to fetch weather for \${city}: \${response.statusText}\` }],
+        isError: true,
+      };
+    }
+    const data = await response.json();
+    return {
+      content: [{ type: "text", text: \`Weather in \${city}: \${data.temperature}°C, \${data.condition}\` }],
+    };
+  }
+);
+
+const transport = new StdioServerTransport();
+await server.connect(transport);`,
+    },
+    {
+      language: "typescript",
+      caption: "Resource provider with URI templates",
+      source: `import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+
+const server = new McpServer({
+  name: "docs-server",
+  version: "1.0.0",
+});
+
+// Static resource
+server.resource("readme", "docs://readme", async (uri) => ({
+  contents: [{ uri: uri.href, mimeType: "text/markdown", text: "# Welcome\\nProject documentation." }],
+}));
+
+// Dynamic resource with URI template
+server.resource(
+  "user-profile",
+  new ResourceTemplate("users://{userId}/profile", { list: undefined }),
+  async (uri, { userId }) => {
+    const user = await db.users.findById(userId);
+    if (!user) {
+      throw new Error(\`User \${userId} not found\`);
+    }
+    return {
+      contents: [{
+        uri: uri.href,
+        mimeType: "application/json",
+        text: JSON.stringify({ name: user.name, email: user.email }),
+      }],
+    };
+  }
+);
+
+const transport = new StdioServerTransport();
+await server.connect(transport);`,
+    },
+    {
+      language: "cpp",
+      caption: "C++ MCP-style server with tool registration, resource handling, and prompt creation",
+      source: `#include <iostream>
+#include <string>
+#include <functional>
+#include <unordered_map>
+#include <sstream>
+#include <cctype>
+#include <stdexcept>
+
+// Simplified MCP server framework demonstrating the pattern
+struct McpServer {
+    std::string name;
+    std::unordered_map<std::string, std::function<std::string(const std::string&)>> tools;
+    std::unordered_map<std::string, std::function<std::string()>> resources;
+    std::unordered_map<std::string, std::function<std::string(const std::string&)>> prompts;
+
+    explicit McpServer(const std::string& server_name) : name(server_name) {}
+
+    void register_tool(const std::string& id,
+                       std::function<std::string(const std::string&)> handler) {
+        tools[id] = std::move(handler);
+    }
+
+    void register_resource(const std::string& uri,
+                           std::function<std::string()> handler) {
+        resources[uri] = std::move(handler);
+    }
+
+    void register_prompt(const std::string& id,
+                         std::function<std::string(const std::string&)> handler) {
+        prompts[id] = std::move(handler);
+    }
+
+    std::string invoke_tool(const std::string& id, const std::string& arg) {
+        auto it = tools.find(id);
+        if (it == tools.end()) return "Error: unknown tool";
+        return it->second(arg);
+    }
+
+    void run() {
+        std::cout << "MCP server '" << name << "' running (stdio transport)\\n";
+        // In production: read JSON-RPC from stdin, dispatch, write to stdout
+    }
+};
+
+// --- Tool: safe arithmetic expression evaluator ---
+std::string calculate(const std::string& expression) {
+    const std::string allowed = "0123456789+-*/.(). ";
+    for (char c : expression) {
+        if (allowed.find(c) == std::string::npos)
+            return "Error: expression contains invalid characters";
+    }
+    // Simplified: evaluate a single binary operation (a op b)
+    // Replace with a proper expression parser in production
+    std::istringstream iss(expression);
+    double a, b; char op;
+    if (iss >> a >> op >> b) {
+        switch (op) {
+            case '+': return "Result: " + std::to_string(a + b);
+            case '-': return "Result: " + std::to_string(a - b);
+            case '*': return "Result: " + std::to_string(a * b);
+            case '/': return b != 0 ? "Result: " + std::to_string(a / b)
+                                    : "Error: division by zero";
+            default:  return "Error: unsupported operator";
+        }
+    }
+    return "Error: could not parse expression";
+}
+
+// --- Resource: application config ---
+std::string get_config() {
+    return R"({"version":"1.0.0","debug":false})";
+}
+
+// --- Prompt: code review ---
+std::string review_prompt(const std::string& code) {
+    return "Please review this code for bugs and improvements:\\n\\n" + code;
+}
+
+int main() {
+    McpServer server("demo-server");
+    server.register_tool("calculate", calculate);
+    server.register_resource("config://app", get_config);
+    server.register_prompt("review", review_prompt);
+
+    // Demo invocation
+    std::cout << server.invoke_tool("calculate", "3.5 + 2.1") << "\\n";
+    server.run();
+    return 0;
+}`,
+    },
+  ],
+  comparison: {
+    columns: ["Aspect", "stdio Transport", "Streamable HTTP Transport"],
+    rows: [
+      ["Deployment", "Local only; client spawns server as child process", "Remote or local; server runs independently behind HTTP"],
+      ["Concurrency", "One client per server process", "Multiple concurrent clients via standard HTTP"],
+      ["Authentication", "Inherited from OS process (no auth needed)", "OAuth 2.1 with PKCE, API keys, or custom auth headers"],
+      ["Use case", "IDE extensions, CLI tools, local dev", "Cloud services, shared servers, multi-user environments"],
+      ["Scalability", "Vertical only (one process)", "Horizontal scaling behind load balancers"],
+      ["SDK class (TS)", "`StdioServerTransport`", "`SSEServerTransport` / `StreamableHTTPServerTransport`"],
+      ["SDK class (Python)", "`mcp.run()` (default)", "`mcp.run(transport='sse')` or custom ASGI setup"],
+    ],
+  },
+  diagrams: [
+    {
+      title: "MCP Server Architecture",
+      kind: "architecture",
+      caption: "Internal structure of an MCP server showing how the SDK routes incoming JSON-RPC messages through the protocol layer to registered tool handlers, resource providers, and prompt templates, then serializes responses back through the transport.",
+    },
+    {
+      title: "MCP Tool Call Request Flow",
+      kind: "sequence",
+      caption: "Sequence diagram showing a tool call lifecycle: LLM generates a tool_use block, the MCP client sends a tools/call JSON-RPC request over the transport, the server validates arguments against the JSON Schema, invokes the handler, and returns the result through the same transport back to the client and LLM.",
+    },
+  ],
+  animations: [
+    {
+      title: "Tool Call Lifecycle",
+      steps: [
+        { label: "LLM generates tool_use", detail: "The LLM decides to call a tool and emits a tool_use content block with the tool name and JSON arguments in its response." },
+        { label: "Client sends tools/call", detail: "The MCP client extracts the tool name and arguments, constructs a JSON-RPC `tools/call` request, and sends it over the transport (stdio pipe or HTTP POST) to the server." },
+        { label: "Server validates arguments", detail: "The SDK deserializes the request, matches the tool name to a registered handler, and validates the arguments against the tool's JSON Schema. Invalid arguments return an error response immediately." },
+        { label: "Handler executes", detail: "The validated arguments are passed to the tool handler function. The handler performs its logic (API calls, database queries, computations) and returns a result object with a `content` array." },
+        { label: "Server returns result", detail: "The SDK wraps the handler's return value in a JSON-RPC response and sends it back over the transport. If the handler set `isError: true`, the LLM will interpret the result as a failure." },
+        { label: "Client delivers to LLM", detail: "The MCP client receives the response, formats it as a tool_result content block, and feeds it back into the LLM's conversation context for the next generation step." },
+      ],
+    },
+  ],
   interviewQA: [
     {
       q: "How would you structure an MCP server for a database?",
@@ -85,6 +297,47 @@ export const buildingMcpServers: TopicContent = {
     { front: "What is the in-memory transport used for?", back: "Automated testing. It connects a test client directly to your server without stdio or HTTP, enabling fast unit and integration tests." },
     { front: "How do resource subscriptions work?", back: "The client subscribes to a resource URI. When content changes, the server sends a `notifications/resources/updated` notification. The client can then re-read the resource." },
     { front: "What is McpServer vs Server?", back: "McpServer is the high-level API with convenient registration methods. Server is the low-level API for custom protocol handling. Most servers should use McpServer." },
+  ],
+  followUps: [
+    "How do you implement OAuth 2.1 authentication for a remote MCP server using the Streamable HTTP transport?",
+    "What strategies exist for versioning MCP server APIs when tool schemas change without breaking existing clients?",
+    "How do you handle long-running tool operations (e.g., large file processing) and report progress to the client?",
+    "What are the best practices for implementing resource subscriptions and change notifications in a production MCP server?",
+    "How do you structure a monorepo with multiple MCP servers that share common utilities and types?",
+  ],
+  exercises: [
+    "Build a file-system MCP server that exposes `read-file`, `write-file`, and `list-directory` tools with proper path validation to prevent directory traversal attacks.",
+    "Create a database MCP server with resources for table schemas (`db://tables/{table}/schema`) and tools for executing parameterized queries, ensuring SQL injection prevention.",
+    "Implement an MCP server with HTTP transport that authenticates clients via OAuth 2.1 PKCE and restricts certain tools to admin-role tokens only.",
+    "Write automated tests for an MCP server using the SDK's in-memory transport: test tool validation errors, successful tool calls, resource listing, and resource reading.",
+    "Build a multi-tool MCP server that wraps an external REST API, converting its endpoints into MCP tools with proper error mapping (HTTP status codes to MCP error responses).",
+  ],
+  cheatSheet: [
+    "**Install TS SDK**: `npm install @modelcontextprotocol/sdk zod` | **Install Python SDK**: `pip install mcp`",
+    "**Register a tool (TS)**: `server.tool(name, description, zodSchema, handler)` on a `McpServer` instance",
+    "**Register a tool (Python)**: decorate a function with `@mcp.tool()` on a `FastMCP` instance",
+    "**Register a resource (TS)**: `server.resource(name, uri | ResourceTemplate, handler)`",
+    "**stdio transport (TS)**: `new StdioServerTransport()` then `server.connect(transport)`",
+    "**HTTP transport (TS)**: `new StreamableHTTPServerTransport(...)` mounted on an Express/Hono route",
+    "**Error result**: return `{ content: [{ type: 'text', text: '...' }], isError: true }` from tool handlers",
+    "**Debug**: `npx @modelcontextprotocol/inspector` launches the Inspector web UI to test your server interactively",
+  ],
+  revisionNotes: [
+    "MCP servers expose **tools** (actions the LLM can invoke), **resources** (data the LLM can read), and **prompts** (reusable prompt templates).",
+    "The TypeScript SDK provides two API levels: `McpServer` (high-level, use for most servers) and `Server` (low-level, for custom protocol handling).",
+    "The Python SDK's `FastMCP` class uses decorators (`@mcp.tool()`, `@mcp.resource()`, `@mcp.prompt()`) for a Flask-like developer experience.",
+    "**stdio** transport is for local servers (one client, no auth). **Streamable HTTP** is for remote servers (multiple clients, OAuth 2.1).",
+    "Tool handlers must return `{ content: [...], isError?: boolean }`. Set `isError: true` so the LLM knows the call failed.",
+    "Use JSON Schema (or Zod in TypeScript) to define tool input validation; the SDK validates automatically before calling your handler.",
+    "The MCP Inspector (`npx @modelcontextprotocol/inspector`) is the primary debugging tool for development.",
+    "For production: implement health checks, rate limiting, graceful shutdown, structured logging, and horizontal scaling for HTTP transport servers.",
+  ],
+  resources: [
+    { label: "Model Context Protocol Specification", kind: "docs", note: "The official MCP spec at modelcontextprotocol.io covering protocol messages, transports, capabilities, and lifecycle." },
+    { label: "MCP TypeScript SDK (modelcontextprotocol/typescript-sdk)", kind: "repo", note: "Official TypeScript SDK on GitHub with McpServer, Server, transports, and examples." },
+    { label: "MCP Python SDK (modelcontextprotocol/python-sdk)", kind: "repo", note: "Official Python SDK on GitHub with FastMCP, decorators, and transport implementations." },
+    { label: "Building MCP Servers - Anthropic Documentation", kind: "docs", note: "Anthropic's guide to building MCP servers with step-by-step tutorials and best practices." },
+    { label: "MCP Inspector", kind: "repo", note: "Interactive debugging tool for MCP servers. Install via `npx @modelcontextprotocol/inspector`." },
   ],
   glossary: [
     { term: "MCP SDK", definition: "Official libraries (TypeScript, Python) that handle protocol negotiation, serialization, transport, and handler registration for building MCP servers." },

@@ -23,95 +23,133 @@ export const virtualMemory: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Virtual address translation (simulating 2-level page table)",
-      source: `def translate(virtual_addr, page_table, page_size=4096):
-    """Simulate virtual-to-physical address translation.
+      source: `#include <iostream>
+#include <map>
+#include <cstdint>
+#include <stdexcept>
+#include <iomanip>
 
-    virtual_addr: integer virtual address
-    page_table: dict mapping virtual_page_number -> (frame_number, present_bit)
-    page_size: bytes per page (default 4096 = 2^12)
-    """
-    offset_bits = page_size.bit_length() - 1  # 12 for 4096
-    vpn = virtual_addr >> offset_bits
-    offset = virtual_addr & (page_size - 1)
+struct PageTableEntry {
+    uint32_t frame_num;
+    bool present;
+};
 
-    if vpn not in page_table:
-        raise Exception(f"Segmentation fault: VPN {vpn} not mapped")
+uint32_t translate(uint32_t virtual_addr,
+                   const std::map<uint32_t, PageTableEntry>& page_table,
+                   uint32_t page_size = 4096) {
+    // Calculate offset bits: log2(page_size)
+    uint32_t offset_bits = 0;
+    for (uint32_t ps = page_size; ps > 1; ps >>= 1) ++offset_bits;  // 12 for 4096
 
-    frame_num, present = page_table[vpn]
-    if not present:
-        raise Exception(f"Page fault: VPN {vpn} not in memory (on disk)")
+    uint32_t vpn = virtual_addr >> offset_bits;
+    uint32_t offset = virtual_addr & (page_size - 1);
 
-    physical_addr = (frame_num << offset_bits) | offset
-    return physical_addr
+    auto it = page_table.find(vpn);
+    if (it == page_table.end()) {
+        throw std::runtime_error("Segmentation fault: VPN " +
+                                 std::to_string(vpn) + " not mapped");
+    }
 
-# Example: 16-bit address space, 4 KB pages
-page_table = {
-    0: (5, True),   # virtual page 0 -> frame 5, present
-    1: (3, True),   # virtual page 1 -> frame 3, present
-    2: (7, False),  # virtual page 2 -> frame 7, on disk
-    3: (1, True),   # virtual page 3 -> frame 1, present
+    const auto& entry = it->second;
+    if (!entry.present) {
+        throw std::runtime_error("Page fault: VPN " +
+                                 std::to_string(vpn) + " not in memory (on disk)");
+    }
+
+    uint32_t physical_addr = (entry.frame_num << offset_bits) | offset;
+    return physical_addr;
 }
 
-# Translate virtual address 0x1A3C (VPN=1, offset=0xA3C)
-va = 0x1A3C
-pa = translate(va, page_table)
-print(f"VA 0x{va:04X} -> PA 0x{pa:04X}")  # frame 3, offset 0xA3C = 0x3A3C`,
+int main() {
+    // Example: 16-bit address space, 4 KB pages
+    std::map<uint32_t, PageTableEntry> page_table = {
+        {0, {5, true}},   // virtual page 0 -> frame 5, present
+        {1, {3, true}},   // virtual page 1 -> frame 3, present
+        {2, {7, false}},  // virtual page 2 -> frame 7, on disk
+        {3, {1, true}},   // virtual page 3 -> frame 1, present
+    };
+
+    // Translate virtual address 0x1A3C (VPN=1, offset=0xA3C)
+    uint32_t va = 0x1A3C;
+    uint32_t pa = translate(va, page_table);
+    std::cout << "VA 0x" << std::hex << std::setw(4) << std::setfill('0') << va
+              << " -> PA 0x" << std::setw(4) << pa << "\\n";
+    // frame 3, offset 0xA3C = 0x3A3C
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "LRU and Clock page replacement algorithm simulation",
-      source: `from collections import OrderedDict
+      source: `#include <iostream>
+#include <list>
+#include <unordered_map>
+#include <vector>
 
-def lru_page_replacement(pages, num_frames):
-    """Simulate LRU page replacement. Returns number of page faults."""
-    frames = OrderedDict()  # page -> True, order = LRU order
-    faults = 0
+int lru_page_replacement(const std::vector<int>& pages, int num_frames) {
+    // Simulate LRU page replacement. Returns number of page faults.
+    std::list<int> order;  // front = LRU, back = MRU
+    std::unordered_map<int, std::list<int>::iterator> frame_map;
+    int faults = 0;
 
-    for page in pages:
-        if page in frames:
-            frames.move_to_end(page)  # mark as most recently used
-        else:
-            faults += 1
-            if len(frames) >= num_frames:
-                frames.popitem(last=False)  # evict least recently used
-            frames[page] = True
-        print(f"Access {page}: frames={list(frames.keys())}"
-              f"{' FAULT' if page not in frames or faults != faults else ''}")
+    for (int page : pages) {
+        if (frame_map.count(page)) {
+            // Move to back (most recently used)
+            order.erase(frame_map[page]);
+            order.push_back(page);
+            frame_map[page] = std::prev(order.end());
+        } else {
+            ++faults;
+            if (static_cast<int>(order.size()) >= num_frames) {
+                // Evict least recently used (front)
+                int evicted = order.front();
+                frame_map.erase(evicted);
+                order.pop_front();
+            }
+            order.push_back(page);
+            frame_map[page] = std::prev(order.end());
+        }
+    }
+    return faults;
+}
 
-    return faults
+int clock_page_replacement(const std::vector<int>& pages, int num_frames) {
+    // Simulate Clock (Second-Chance) page replacement.
+    std::vector<int> frames(num_frames, -1);
+    std::vector<int> ref_bits(num_frames, 0);
+    int hand = 0, faults = 0;
+    std::unordered_map<int, int> page_to_slot;
 
-def clock_page_replacement(pages, num_frames):
-    """Simulate Clock (Second-Chance) page replacement."""
-    frames = [None] * num_frames
-    ref_bits = [0] * num_frames
-    hand = 0
-    faults = 0
-    page_to_slot = {}
+    for (int page : pages) {
+        if (page_to_slot.count(page)) {
+            ref_bits[page_to_slot[page]] = 1;  // set reference bit
+        } else {
+            ++faults;
+            while (ref_bits[hand] == 1) {
+                ref_bits[hand] = 0;               // clear reference bit
+                hand = (hand + 1) % num_frames;   // advance hand
+            }
+            // Evict page at hand position
+            if (frames[hand] != -1) {
+                page_to_slot.erase(frames[hand]);
+            }
+            frames[hand] = page;
+            page_to_slot[page] = hand;
+            ref_bits[hand] = 1;
+            hand = (hand + 1) % num_frames;
+        }
+    }
+    return faults;
+}
 
-    for page in pages:
-        if page in page_to_slot:
-            ref_bits[page_to_slot[page]] = 1  # set reference bit
-        else:
-            faults += 1
-            while ref_bits[hand] == 1:
-                ref_bits[hand] = 0  # clear reference bit
-                hand = (hand + 1) % num_frames  # advance hand
-            # Evict page at hand position
-            if frames[hand] is not None:
-                del page_to_slot[frames[hand]]
-            frames[hand] = page
-            page_to_slot[page] = hand
-            ref_bits[hand] = 1
-            hand = (hand + 1) % num_frames
-
-    return faults
-
-# Reference string
-ref_string = [7, 0, 1, 2, 0, 3, 0, 4, 2, 3, 0, 3, 2, 1, 2, 0, 1, 7, 0, 1]
-print(f"LRU faults:   {lru_page_replacement(ref_string, 3)}")
-print(f"Clock faults: {clock_page_replacement(ref_string, 3)}")`,
+int main() {
+    std::vector<int> ref_string = {
+        7, 0, 1, 2, 0, 3, 0, 4, 2, 3, 0, 3, 2, 1, 2, 0, 1, 7, 0, 1
+    };
+    std::cout << "LRU faults:   " << lru_page_replacement(ref_string, 3) << "\\n";
+    std::cout << "Clock faults: " << clock_page_replacement(ref_string, 3) << "\\n";
+}`,
     },
     {
       language: "c",

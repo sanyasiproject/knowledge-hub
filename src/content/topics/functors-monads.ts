@@ -636,6 +636,13 @@ buildUser().then(console.log); // { name: "Alice", age: 30 }`,
     "Promise.all = Applicative (independent, concurrent). .then chaining = Monad (sequential, dependent).",
   ],
 
+  exercises: [
+    "Implement a `Result<T, E>` type in **TypeScript** with `ok(value)`, `err(error)`, `map`, and `flatMap` methods. Verify the **three monad laws** (left identity, right identity, associativity) with concrete test cases. Then use your `Result` to chain `parseJSON(input)` -> `extractField('email')` -> `validateEmail(email)`, handling each failure case without try/catch.",
+    "Write an **Applicative validation** in TypeScript that validates a user registration form (name, email, age) and *collects all errors* rather than short-circuiting on the first one. Contrast this with a monadic approach using `flatMap` that stops at the first error. Explain why `Applicative` is more appropriate here than `Monad`.",
+    "Implement `Maybe` (with `Just` and `Nothing`) in **C++** using `std::optional` as the backing type. Provide `map` and `flatMap` (called `and_then` in C++). Chain `findUser(name)` -> `getAddress(user)` -> `getZipCode(address)` and show how `std::nullopt` propagates automatically without explicit null checks.",
+    "In Haskell, rewrite a function that uses explicit `case` matching on `Maybe` values into **do-notation** using `>>=`. Then refactor further into point-free style using Kleisli composition `(>=>)`. Compare the readability of all three versions and explain when each style is appropriate.",
+    "Demonstrate that JavaScript **Promise** violates the monad laws by constructing a concrete example where `Promise.resolve(x).then(f)` does *not* equal `f(x)` due to auto-flattening or eager evaluation. Then implement a *lazy* `Task` type that defers execution until explicitly run, showing how it satisfies all three monad laws.",
+  ],
   resources: [
     {
       label: "Learn You a Haskell -- Functors, Applicatives, and Monads",

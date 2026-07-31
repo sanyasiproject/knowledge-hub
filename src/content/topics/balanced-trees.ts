@@ -23,233 +23,277 @@ export const balancedTrees: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "AVL Tree insertion with rotations",
-      source: `class AVLNode:
-    __slots__ = ('key', 'left', 'right', 'height')
-    def __init__(self, key):
-        self.key = key
-        self.left = self.right = None
-        self.height = 1
+      source: `#include <algorithm>
 
-def height(node):
-    return node.height if node else 0
+struct AVLNode {
+    int key;
+    AVLNode* left;
+    AVLNode* right;
+    int height;
+    AVLNode(int k) : key(k), left(nullptr), right(nullptr), height(1) {}
+};
 
-def balance_factor(node):
-    return height(node.left) - height(node.right) if node else 0
+int height(AVLNode* node) {
+    return node ? node->height : 0;
+}
 
-def update_height(node):
-    node.height = 1 + max(height(node.left), height(node.right))
+int balance_factor(AVLNode* node) {
+    return node ? height(node->left) - height(node->right) : 0;
+}
 
-def rotate_right(y):
-    x = y.left
-    t2 = x.right
-    x.right = y
-    y.left = t2
-    update_height(y)
-    update_height(x)
-    return x          # x is new root of subtree
+void update_height(AVLNode* node) {
+    node->height = 1 + std::max(height(node->left), height(node->right));
+}
 
-def rotate_left(x):
-    y = x.right
-    t2 = y.left
-    y.left = x
-    x.right = t2
-    update_height(x)
-    update_height(y)
-    return y
+AVLNode* rotate_right(AVLNode* y) {
+    AVLNode* x = y->left;
+    AVLNode* t2 = x->right;
+    x->right = y;
+    y->left = t2;
+    update_height(y);
+    update_height(x);
+    return x;          // x is new root of subtree
+}
 
-def avl_insert(root, key):
-    if not root:
-        return AVLNode(key)
-    if key < root.key:
-        root.left = avl_insert(root.left, key)
-    elif key > root.key:
-        root.right = avl_insert(root.right, key)
-    else:
-        return root   # duplicate keys not allowed
+AVLNode* rotate_left(AVLNode* x) {
+    AVLNode* y = x->right;
+    AVLNode* t2 = y->left;
+    y->left = x;
+    x->right = t2;
+    update_height(x);
+    update_height(y);
+    return y;
+}
 
-    update_height(root)
-    bf = balance_factor(root)
+AVLNode* avl_insert(AVLNode* root, int key) {
+    if (!root) return new AVLNode(key);
+    if (key < root->key)
+        root->left = avl_insert(root->left, key);
+    else if (key > root->key)
+        root->right = avl_insert(root->right, key);
+    else
+        return root;   // duplicate keys not allowed
 
-    # Left-Left case
-    if bf > 1 and key < root.left.key:
-        return rotate_right(root)
-    # Right-Right case
-    if bf < -1 and key > root.right.key:
-        return rotate_left(root)
-    # Left-Right case
-    if bf > 1 and key > root.left.key:
-        root.left = rotate_left(root.left)
-        return rotate_right(root)
-    # Right-Left case
-    if bf < -1 and key < root.right.key:
-        root.right = rotate_right(root.right)
-        return rotate_left(root)
+    update_height(root);
+    int bf = balance_factor(root);
 
-    return root`,
+    // Left-Left case
+    if (bf > 1 && key < root->left->key)
+        return rotate_right(root);
+    // Right-Right case
+    if (bf < -1 && key > root->right->key)
+        return rotate_left(root);
+    // Left-Right case
+    if (bf > 1 && key > root->left->key) {
+        root->left = rotate_left(root->left);
+        return rotate_right(root);
+    }
+    // Right-Left case
+    if (bf < -1 && key < root->right->key) {
+        root->right = rotate_right(root->right);
+        return rotate_left(root);
+    }
+
+    return root;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Red-Black Tree insertion (simplified)",
-      source: `RED, BLACK = True, False
+      source: `enum Color { RED, BLACK };
 
-class RBNode:
-    __slots__ = ('key', 'color', 'left', 'right', 'parent')
-    def __init__(self, key, color=RED):
-        self.key = key
-        self.color = color
-        self.left = self.right = self.parent = None
+struct RBNode {
+    int key;
+    Color color;
+    RBNode* left;
+    RBNode* right;
+    RBNode* parent;
+    RBNode(int k, Color c = RED)
+        : key(k), color(c), left(nullptr), right(nullptr), parent(nullptr) {}
+};
 
-class RedBlackTree:
-    def __init__(self):
-        self.NIL = RBNode(key=None, color=BLACK)
-        self.root = self.NIL
+class RedBlackTree {
+public:
+    RedBlackTree() {
+        NIL = new RBNode(0, BLACK);  // sentinel node
+        root = NIL;
+    }
 
-    def _rotate_left(self, x):
-        y = x.right
-        x.right = y.left
-        if y.left != self.NIL:
-            y.left.parent = x
-        y.parent = x.parent
-        if x.parent is None:
-            self.root = y
-        elif x == x.parent.left:
-            x.parent.left = y
-        else:
-            x.parent.right = y
-        y.left = x
-        x.parent = y
+    void insert(int key) {
+        RBNode* z = new RBNode(key);
+        z->left = z->right = NIL;
+        RBNode* y = nullptr;
+        RBNode* x = root;
+        while (x != NIL) {
+            y = x;
+            x = (z->key < x->key) ? x->left : x->right;
+        }
+        z->parent = y;
+        if (!y)
+            root = z;
+        else if (z->key < y->key)
+            y->left = z;
+        else
+            y->right = z;
+        fix_insert(z);
+    }
 
-    def _rotate_right(self, y):
-        x = y.left
-        y.left = x.right
-        if x.right != self.NIL:
-            x.right.parent = y
-        x.parent = y.parent
-        if y.parent is None:
-            self.root = x
-        elif y == y.parent.right:
-            y.parent.right = x
-        else:
-            y.parent.left = x
-        x.right = y
-        y.parent = x
+private:
+    RBNode* root;
+    RBNode* NIL;
 
-    def insert(self, key):
-        z = RBNode(key)
-        z.left = z.right = self.NIL
-        y, x = None, self.root
-        while x != self.NIL:
-            y = x
-            x = x.left if z.key < x.key else x.right
-        z.parent = y
-        if y is None:
-            self.root = z
-        elif z.key < y.key:
-            y.left = z
-        else:
-            y.right = z
-        self._fix_insert(z)
+    void rotate_left(RBNode* x) {
+        RBNode* y = x->right;
+        x->right = y->left;
+        if (y->left != NIL) y->left->parent = x;
+        y->parent = x->parent;
+        if (!x->parent)         root = y;
+        else if (x == x->parent->left) x->parent->left = y;
+        else                    x->parent->right = y;
+        y->left = x;
+        x->parent = y;
+    }
 
-    def _fix_insert(self, z):
-        while z.parent and z.parent.color == RED:
-            if z.parent == z.parent.parent.left:
-                uncle = z.parent.parent.right
-                if uncle.color == RED:        # Case 1: recolor
-                    z.parent.color = BLACK
-                    uncle.color = BLACK
-                    z.parent.parent.color = RED
-                    z = z.parent.parent
-                else:
-                    if z == z.parent.right:   # Case 2: triangle
-                        z = z.parent
-                        self._rotate_left(z)
-                    z.parent.color = BLACK    # Case 3: line
-                    z.parent.parent.color = RED
-                    self._rotate_right(z.parent.parent)
-            else:                             # mirror cases
-                uncle = z.parent.parent.left
-                if uncle.color == RED:
-                    z.parent.color = BLACK
-                    uncle.color = BLACK
-                    z.parent.parent.color = RED
-                    z = z.parent.parent
-                else:
-                    if z == z.parent.left:
-                        z = z.parent
-                        self._rotate_right(z)
-                    z.parent.color = BLACK
-                    z.parent.parent.color = RED
-                    self._rotate_left(z.parent.parent)
-        self.root.color = BLACK`,
+    void rotate_right(RBNode* y) {
+        RBNode* x = y->left;
+        y->left = x->right;
+        if (x->right != NIL) x->right->parent = y;
+        x->parent = y->parent;
+        if (!y->parent)         root = x;
+        else if (y == y->parent->right) y->parent->right = x;
+        else                    y->parent->left = x;
+        x->right = y;
+        y->parent = x;
+    }
+
+    void fix_insert(RBNode* z) {
+        while (z->parent && z->parent->color == RED) {
+            if (z->parent == z->parent->parent->left) {
+                RBNode* uncle = z->parent->parent->right;
+                if (uncle->color == RED) {            // Case 1: recolor
+                    z->parent->color = BLACK;
+                    uncle->color = BLACK;
+                    z->parent->parent->color = RED;
+                    z = z->parent->parent;
+                } else {
+                    if (z == z->parent->right) {      // Case 2: triangle
+                        z = z->parent;
+                        rotate_left(z);
+                    }
+                    z->parent->color = BLACK;         // Case 3: line
+                    z->parent->parent->color = RED;
+                    rotate_right(z->parent->parent);
+                }
+            } else {                                  // mirror cases
+                RBNode* uncle = z->parent->parent->left;
+                if (uncle->color == RED) {
+                    z->parent->color = BLACK;
+                    uncle->color = BLACK;
+                    z->parent->parent->color = RED;
+                    z = z->parent->parent;
+                } else {
+                    if (z == z->parent->left) {
+                        z = z->parent;
+                        rotate_right(z);
+                    }
+                    z->parent->color = BLACK;
+                    z->parent->parent->color = RED;
+                    rotate_left(z->parent->parent);
+                }
+            }
+        }
+        root->color = BLACK;
+    }
+};`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "B-Tree search and split (order m)",
-      source: `class BTreeNode:
-    def __init__(self, leaf=True):
-        self.keys = []      # sorted keys
-        self.children = []   # child pointers (len = len(keys)+1 for internal)
-        self.leaf = leaf
+      source: `#include <vector>
+#include <optional>
+#include <utility>
 
-class BTree:
-    def __init__(self, t=2):       # minimum degree t; max keys = 2t-1
-        self.t = t
-        self.root = BTreeNode()
+struct BTreeNode {
+    std::vector<int> keys;               // sorted keys
+    std::vector<BTreeNode*> children;    // child pointers
+    bool leaf;
+    BTreeNode(bool is_leaf = true) : leaf(is_leaf) {}
+};
 
-    def search(self, node, key):
-        i = 0
-        while i < len(node.keys) and key > node.keys[i]:
-            i += 1
-        if i < len(node.keys) and key == node.keys[i]:
-            return (node, i)
-        if node.leaf:
-            return None
-        return self.search(node.children[i], key)
+class BTree {
+public:
+    explicit BTree(int t = 2) : t_(t), root_(new BTreeNode()) {}  // minimum degree t
 
-    def _split_child(self, parent, i):
-        t = self.t
-        full = parent.children[i]
-        new = BTreeNode(leaf=full.leaf)
-        mid_key = full.keys[t - 1]
+    std::optional<std::pair<BTreeNode*, int>> search(BTreeNode* node, int key) const {
+        int i = 0;
+        while (i < (int)node->keys.size() && key > node->keys[i])
+            ++i;
+        if (i < (int)node->keys.size() && key == node->keys[i])
+            return std::make_pair(node, i);
+        if (node->leaf)
+            return std::nullopt;
+        return search(node->children[i], key);
+    }
 
-        new.keys = full.keys[t:]       # right half of keys
-        full.keys = full.keys[:t - 1]  # left half (median removed)
+    void insert(int key) {
+        if ((int)root_->keys.size() == 2 * t_ - 1) {   // root is full
+            auto new_root = new BTreeNode(false);
+            new_root->children.push_back(root_);
+            split_child(new_root, 0);
+            root_ = new_root;
+        }
+        insert_nonfull(root_, key);
+    }
 
-        if not full.leaf:
-            new.children = full.children[t:]
-            full.children = full.children[:t]
+    BTreeNode* root() const { return root_; }
 
-        parent.children.insert(i + 1, new)
-        parent.keys.insert(i, mid_key)
+private:
+    int t_;
+    BTreeNode* root_;
 
-    def insert(self, key):
-        root = self.root
-        if len(root.keys) == 2 * self.t - 1:   # root is full
-            new_root = BTreeNode(leaf=False)
-            new_root.children.append(root)
-            self._split_child(new_root, 0)
-            self.root = new_root
-        self._insert_nonfull(self.root, key)
+    void split_child(BTreeNode* parent, int i) {
+        BTreeNode* full = parent->children[i];
+        auto* sibling = new BTreeNode(full->leaf);
+        int mid_key = full->keys[t_ - 1];
 
-    def _insert_nonfull(self, node, key):
-        i = len(node.keys) - 1
-        if node.leaf:
-            node.keys.append(None)
-            while i >= 0 and key < node.keys[i]:
-                node.keys[i + 1] = node.keys[i]
-                i -= 1
-            node.keys[i + 1] = key
-        else:
-            while i >= 0 and key < node.keys[i]:
-                i -= 1
-            i += 1
-            if len(node.children[i].keys) == 2 * self.t - 1:
-                self._split_child(node, i)
-                if key > node.keys[i]:
-                    i += 1
-            self._insert_nonfull(node.children[i], key)`,
+        // Right half of keys goes to sibling
+        sibling->keys.assign(full->keys.begin() + t_, full->keys.end());
+        // Left half stays (median removed)
+        full->keys.resize(t_ - 1);
+
+        if (!full->leaf) {
+            sibling->children.assign(full->children.begin() + t_, full->children.end());
+            full->children.resize(t_);
+        }
+
+        parent->children.insert(parent->children.begin() + i + 1, sibling);
+        parent->keys.insert(parent->keys.begin() + i, mid_key);
+    }
+
+    void insert_nonfull(BTreeNode* node, int key) {
+        int i = (int)node->keys.size() - 1;
+        if (node->leaf) {
+            node->keys.push_back(0);  // make room
+            while (i >= 0 && key < node->keys[i]) {
+                node->keys[i + 1] = node->keys[i];
+                --i;
+            }
+            node->keys[i + 1] = key;
+        } else {
+            while (i >= 0 && key < node->keys[i])
+                --i;
+            ++i;
+            if ((int)node->children[i]->keys.size() == 2 * t_ - 1) {
+                split_child(node, i);
+                if (key > node->keys[i])
+                    ++i;
+            }
+            insert_nonfull(node->children[i], key);
+        }
+    }
+};`,
     },
   ],
   diagrams: [

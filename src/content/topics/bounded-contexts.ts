@@ -221,6 +221,377 @@ Bounded context boundaries are not fixed at project inception. They evolve as do
       back: "Two bounded contexts evolve together with mutual coordination. Both teams align their planning, releases, and model changes. Suitable when contexts are interdependent and teams are co-located or closely collaborating.",
     },
   ],
+  deepDive: [
+    `## The Linguistics of Bounded Contexts
+
+Bounded contexts are, at their core, a **linguistic construct** before they are a technical one. Eric Evans coined the term because he observed that the biggest source of project failure was not bad code but **ambiguous language**. When two teams say "Customer," they may carry entirely different mental models -- the *billing* team thinks of a **tax entity** with a VAT number and payment terms, while the *support* team thinks of a **person** with a sentiment score and ticket history. A bounded context draws a line and says: "within *this* boundary, the word Customer means exactly *this*, with *these* attributes and *these* behaviors, and nothing else." The ubiquitous language is enforced not by a glossary document gathering dust on Confluence, but by the **code itself** -- class names, method signatures, event names, and database columns all reflect the agreed-upon vocabulary. When you see a pull request that introduces a term from another context without translation, that is a **context leak**, and it should be treated with the same urgency as a security vulnerability. The discipline of maintaining linguistic purity within a boundary is what makes bounded contexts powerful: it ensures that every developer, product manager, and domain expert can communicate without hidden misunderstandings.`,
+
+    `## Strategic Context Mapping in Practice
+
+Context mapping is the **cartography of your system's integration landscape**. In practice, drawing a context map is one of the highest-leverage activities a software architect can perform, yet it is frequently skipped in favor of jumping straight to API design. A good context map captures not just *which* contexts exist but the **power dynamics** between them. An *upstream* context dictates; a *downstream* context adapts. When you integrate with a third-party payment provider like Stripe, you are in a **Conformist** or **ACL** relationship -- Stripe will never change its API to suit your domain model. Internally, two teams building \`Catalog\` and \`Pricing\` might start as **Partners**, co-evolving their models, but as the organization scales, one team inevitably becomes the upstream supplier and the other the downstream consumer. Recognizing this shift early and introducing an **Anti-Corruption Layer** prevents the downstream team from accumulating technical debt in the form of foreign concepts scattered through their codebase. Context maps should be **living documents** -- updated during architecture reviews, referenced during sprint planning, and consulted before any new integration is approved. Teams that maintain accurate context maps consistently make better decomposition decisions and avoid the trap of the *distributed monolith*.`,
+
+    `## Bounded Contexts and the Modular Monolith Strategy
+
+The modern consensus among DDD practitioners is to **start with a modular monolith** rather than microservices. In a modular monolith, each bounded context is implemented as a **separate module** with a well-defined public API (typically a set of interfaces or facade classes), its own internal domain model, and -- critically -- **no direct database access across module boundaries**. Modules communicate through **in-process events** or **explicit service interfaces**, mirroring the integration patterns that would later become network calls. This approach gives you the **design discipline** of microservices without the operational complexity of distributed systems. When a module genuinely needs independent scaling, a different technology stack, or separate team ownership and deployment cadence, you extract it into a service. Because the module already communicates through a clean boundary, the extraction is largely mechanical: replace in-process calls with HTTP/gRPC and in-process events with a message broker. The key insight is that **bounded context boundaries are a design decision, not a deployment decision**. Getting the boundaries right matters far more than whether those boundaries are enforced by process isolation or by module conventions. Teams that skip the modular monolith phase and jump straight to microservices almost always discover their context boundaries are wrong -- and redrawing boundaries across services is an order of magnitude more expensive than refactoring modules within a monolith.`,
+  ],
+
+  code: [
+    {
+      language: "cpp",
+      caption: "Anti-Corruption Layer translating an external ERP model into the local Order context",
+      source: `#include <string>
+#include <unordered_map>
+#include <vector>
+#include <stdexcept>
+
+// --- External ERP model (upstream context) ---
+struct ErpSalesDocument {
+    std::string doc_number;
+    std::string status_code;   // "10", "20", "30", "90"
+    double      net_value;
+    std::string currency;
+    // ... many ERP-specific fields we do not care about
+};
+
+// --- Local Order context (downstream) ---
+enum class OrderStatus { Created, Confirmed, Shipped, Cancelled, Unknown };
+
+struct Money {
+    double      amount;
+    std::string currency;
+};
+
+struct Order {
+    std::string id;
+    OrderStatus status;
+    Money       total;
+};
+
+// **Anti-Corruption Layer** -- translates ERP concepts into our domain
+class ErpOrderAdapter {
+public:
+    Order translate(const ErpSalesDocument& erp) const {
+        return Order{
+            .id     = erp.doc_number,
+            .status = translateStatus(erp.status_code),
+            .total  = Money{ erp.net_value, erp.currency }
+        };
+    }
+
+private:
+    OrderStatus translateStatus(const std::string& code) const {
+        static const std::unordered_map<std::string, OrderStatus> mapping = {
+            {"10", OrderStatus::Created},
+            {"20", OrderStatus::Confirmed},
+            {"30", OrderStatus::Shipped},
+            {"90", OrderStatus::Cancelled},
+        };
+        auto it = mapping.find(code);
+        return (it != mapping.end()) ? it->second : OrderStatus::Unknown;
+    }
+};`,
+    },
+    {
+      language: "cpp",
+      caption: "Bounded context modules with explicit public interfaces and domain event communication",
+      source: `#include <string>
+#include <vector>
+#include <functional>
+#include <iostream>
+
+// ---- Shared infrastructure: lightweight domain event bus ----
+struct DomainEvent {
+    std::string type;
+    std::string payload;   // JSON or serialized data
+};
+
+class EventBus {
+    std::vector<std::function<void(const DomainEvent&)>> subscribers_;
+public:
+    void subscribe(std::function<void(const DomainEvent&)> handler) {
+        subscribers_.push_back(std::move(handler));
+    }
+    void publish(const DomainEvent& event) const {
+        for (auto& handler : subscribers_) handler(event);
+    }
+};
+
+// ---- **Catalog** bounded context ----
+namespace Catalog {
+    struct Product {
+        std::string sku;
+        std::string name;
+        std::string description;
+    };
+
+    // Public facade -- the *only* entry point other contexts may use
+    class CatalogService {
+        EventBus& bus_;
+    public:
+        explicit CatalogService(EventBus& bus) : bus_(bus) {}
+
+        void registerProduct(const std::string& sku,
+                             const std::string& name,
+                             const std::string& desc) {
+            // ... persist internally ...
+            bus_.publish(DomainEvent{
+                "catalog.product_registered",
+                "{\\"sku\\":\\"" + sku + "\\"}"
+            });
+        }
+    };
+}
+
+// ---- **Pricing** bounded context ----
+namespace Pricing {
+    // Pricing has its *own* view of a product -- only what it needs
+    struct PricedItem {
+        std::string productRef;   // NOT a Catalog::Product -- translated ID
+        double      basePrice;
+    };
+
+    class PricingService {
+    public:
+        explicit PricingService(EventBus& bus) {
+            // ACL: consume Catalog events and translate into local concepts
+            bus.subscribe([this](const DomainEvent& e) {
+                if (e.type == "catalog.product_registered") {
+                    onProductRegistered(e.payload);
+                }
+            });
+        }
+
+    private:
+        void onProductRegistered(const std::string& payload) {
+            // Parse payload, create a *local* PricedItem with default price
+            std::cout << "Pricing context: new product registered, "
+                      << "creating default price entry.\\n";
+        }
+    };
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "Shared Kernel -- a small, jointly owned value object used by two contexts",
+      source: `#include <string>
+#include <stdexcept>
+
+// **Shared Kernel** -- both Catalog and Pricing agree on this value object.
+// Changes here require coordination between *both* teams.
+namespace SharedKernel {
+
+    // A strongly-typed SKU that both contexts reference
+    class SKU {
+        std::string value_;
+    public:
+        explicit SKU(const std::string& raw) {
+            if (raw.empty() || raw.size() > 20)
+                throw std::invalid_argument("SKU must be 1-20 characters");
+            value_ = raw;
+        }
+
+        const std::string& value() const { return value_; }
+
+        bool operator==(const SKU& other) const {
+            return value_ == other.value_;
+        }
+        bool operator!=(const SKU& other) const {
+            return !(*this == other);
+        }
+    };
+
+    // A Money value object shared across financial contexts
+    class Money {
+        long        cents_;       // store as minor units to avoid floating-point
+        std::string currency_;    // ISO 4217 code
+    public:
+        Money(long cents, const std::string& currency)
+            : cents_(cents), currency_(currency) {
+            if (currency.size() != 3)
+                throw std::invalid_argument("Currency must be ISO 4217");
+        }
+
+        long cents()                    const { return cents_; }
+        const std::string& currency()   const { return currency_; }
+
+        Money operator+(const Money& other) const {
+            if (currency_ != other.currency_)
+                throw std::logic_error("Cannot add different currencies");
+            return Money(cents_ + other.cents_, currency_);
+        }
+    };
+}`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "Context Map -- E-Commerce System",
+      kind: "architecture",
+      caption: "Shows bounded contexts and their integration relationships (ACL, Shared Kernel, Conformist, Open Host Service)",
+      mermaid: `graph TB
+    subgraph "E-Commerce System Context Map"
+        CAT["**Catalog** Context<br/>(Core Domain)"]
+        PRC["**Pricing** Context"]
+        ORD["**Ordering** Context"]
+        INV["**Inventory** Context"]
+        PAY["**Payments** Context"]
+        SHIP["**Shipping** Context"]
+        ERP["**Legacy ERP**<br/>(External)"]
+        STRIPE["**Stripe**<br/>(Third Party)"]
+    end
+
+    CAT -- "Shared Kernel<br/>(SKU, Money)" --- PRC
+    CAT -- "Open Host Service<br/>(Product API)" --> ORD
+    CAT -- "Open Host Service<br/>(Product API)" --> INV
+    ORD -- "Customer-Supplier<br/>(Domain Events)" --> SHIP
+    ORD -- "ACL" --> ERP
+    PAY -- "Conformist" --> STRIPE
+    ORD -- "Published Language<br/>(OrderPlaced event)" --> PAY
+    INV -- "ACL" --> ERP
+
+    style CAT fill:#4a9eff,color:#fff
+    style PRC fill:#34d399,color:#fff
+    style ORD fill:#f59e0b,color:#fff
+    style INV fill:#a78bfa,color:#fff
+    style PAY fill:#f87171,color:#fff
+    style SHIP fill:#38bdf8,color:#fff
+    style ERP fill:#9ca3af,color:#fff
+    style STRIPE fill:#9ca3af,color:#fff`,
+    },
+    {
+      title: "Anti-Corruption Layer -- Internal Structure",
+      kind: "flow",
+      caption: "The ACL sits between the downstream context and the upstream system, translating data through Facade, Adapter, and Translator components",
+      mermaid: `flowchart LR
+    subgraph Upstream["**Upstream Context** (Legacy ERP)"]
+        API["ERP API<br/>foreign model"]
+    end
+
+    subgraph ACL["**Anti-Corruption Layer**"]
+        direction TB
+        FAC["**Facade**<br/>simplified interface"]
+        ADP["**Adapter**<br/>format conversion"]
+        TRN["**Translator**<br/>vocabulary mapping"]
+        FAC --> ADP --> TRN
+    end
+
+    subgraph Downstream["**Downstream Context** (Order Service)"]
+        DOM["Local Domain Model<br/>Order, OrderStatus, Money"]
+    end
+
+    API -->|raw ERP data| FAC
+    TRN -->|translated domain objects| DOM
+
+    style Upstream fill:#9ca3af,color:#fff
+    style ACL fill:#fbbf24,color:#000
+    style Downstream fill:#4a9eff,color:#fff`,
+    },
+    {
+      title: "Bounded Context Lifecycle -- From Monolith to Microservices",
+      kind: "flow",
+      caption: "Evolution path: identify contexts inside a monolith, extract into modules, then promote to services when needed",
+      mermaid: `flowchart TD
+    A["**Monolith**<br/>Single deployment, tangled models"] --> B["**Event Storming**<br/>Identify domain events and clusters"]
+    B --> C["**Context Discovery**<br/>Define linguistic and model boundaries"]
+    C --> D["**Modular Monolith**<br/>Each context = one module<br/>In-process communication"]
+    D --> E{"Need independent<br/>scaling or deployment?"}
+    E -->|No| F["**Stay as Module**<br/>Lower operational cost"]
+    E -->|Yes| G["**Extract to Service**<br/>Replace in-process calls<br/>with network + events"]
+    G --> H["**Microservice**<br/>Independent deploy, own DB,<br/>team ownership"]
+
+    style A fill:#f87171,color:#fff
+    style D fill:#fbbf24,color:#000
+    style H fill:#34d399,color:#fff`,
+    },
+  ],
+
+  comparison: {
+    columns: [
+      "Pattern",
+      "Coupling Level",
+      "Translation Required",
+      "Team Coordination",
+      "Best Used When",
+    ],
+    rows: [
+      [
+        "**Shared Kernel**",
+        "High -- shared code/model",
+        "None (same model)",
+        "Tight -- joint ownership",
+        "Closely collaborating teams sharing a small, stable subset",
+      ],
+      [
+        "**Partnership**",
+        "Medium -- mutual dependency",
+        "Minimal",
+        "Tight -- aligned roadmaps",
+        "Two interdependent contexts evolving together",
+      ],
+      [
+        "**Customer-Supplier**",
+        "Medium -- one-way dependency",
+        "Optional (downstream adapts)",
+        "Moderate -- upstream accommodates",
+        "Upstream team willing to serve downstream needs",
+      ],
+      [
+        "**Conformist**",
+        "Medium -- one-way, no negotiation",
+        "None (adopt upstream model)",
+        "None -- accept what is given",
+        "Upstream will not change; translation cost too high",
+      ],
+      [
+        "**Anti-Corruption Layer**",
+        "Low -- full isolation",
+        "Full translation at boundary",
+        "None -- teams are independent",
+        "Legacy integration, third-party APIs, unstable upstream",
+      ],
+      [
+        "**Open Host Service**",
+        "Low -- stable public API",
+        "Published Language as contract",
+        "Minimal -- API versioning only",
+        "One context serving many downstream consumers",
+      ],
+      [
+        "**Separate Ways**",
+        "None -- no relationship",
+        "N/A",
+        "None",
+        "Contexts genuinely have no integration need",
+      ],
+    ],
+  },
+
+  exercises: [
+    "**Context Discovery Exercise:** Take a familiar domain (e.g., a university system) and identify at least **four bounded contexts**. For each context, list the *ubiquitous language* terms, key entities, and which team would own it. Draw a **context map** showing the relationships (ACL, Shared Kernel, etc.) between them.",
+    "**ACL Implementation:** You are integrating with a third-party weather API that returns temperatures in Fahrenheit, wind speed in mph, and uses numeric status codes (`1` = clear, `2` = cloudy, `3` = rain). Write a C++ **Anti-Corruption Layer** that translates these into your local domain model using Celsius, km/h, and a `WeatherCondition` enum.",
+    "**Boundary Refactoring:** Given a monolithic e-commerce codebase where `Product` has fields for catalog info (`name`, `description`, `images`), pricing info (`basePrice`, `discountRules`), and inventory info (`warehouseLocation`, `stockCount`), refactor it into **three bounded contexts** with separate `Product` representations in each. Define the **domain events** that flow between them.",
+    "**Context Map Analysis:** A startup has these services: *UserAuth*, *ProfileManager*, *ContentFeed*, *Notifications*, *Analytics*, and *BillingGateway*. The *ContentFeed* directly queries the *ProfileManager* database for user display names. The *BillingGateway* conforms to Stripe's model. *Analytics* consumes events from all other services. Identify the **context mapping patterns** in use, point out the **anti-pattern**, and propose a fix.",
+    "**Shared Kernel Design:** Two teams (Catalog and Pricing) need to share a `Money` value object and a `SKU` identifier. Design a **Shared Kernel** in C++ with proper value semantics, validation, and equality. Discuss the **governance rules** -- who approves changes, how are they versioned, and what happens when one team needs an incompatible change.",
+  ],
+
+  cheatSheet: [
+    "**One context = one ubiquitous language.** If the same word means different things, you have crossed a context boundary. Never force a single model to serve multiple meanings.",
+    "**ACL = Facade + Adapter + Translator.** The Facade simplifies the external interface, the Adapter converts data formats, and the Translator maps vocabulary. Together they prevent upstream model leakage.",
+    "**Start modular monolith, extract services later.** Each module is a bounded context with a public facade, private internals, and no cross-module database access. Extract to a microservice only when scaling, deployment, or team ownership demands it.",
+    "**Context map power dynamics matter.** Upstream dictates, downstream adapts. Know whether you are in a *Customer-Supplier* (negotiable), *Conformist* (take it or leave it), or *ACL* (translate and isolate) relationship.",
+    "**Shared Kernels are high-maintenance.** Only share a kernel when both teams are tightly collaborating and the shared subset is small and stable. Prefer duplication over coupling when in doubt.",
+    "**Domain events are the primary cross-context integration mechanism.** Contexts publish events at boundaries; consumers translate through their ACL. This keeps contexts temporally decoupled and independently deployable.",
+  ],
+
+  revisionNotes: [
+    "A **bounded context** defines where a domain model applies and where a specific **ubiquitous language** is valid. It is both a *linguistic* and *technical* boundary -- same word, different context, different meaning.",
+    "**Context mapping** documents the relationships between bounded contexts: *Shared Kernel* (jointly owned model), *Customer-Supplier* (upstream accommodates), *Conformist* (downstream conforms), *ACL* (downstream translates), *Partnership* (mutual evolution), *Open Host Service* (public API), *Published Language* (versioned schema), and *Separate Ways* (no relationship).",
+    "The **Anti-Corruption Layer** (ACL) is the most important integration pattern for maintaining model integrity. It consists of a **Facade** (simplified interface), **Adapter** (format conversion), and **Translator** (vocabulary mapping). Use it for legacy systems, third-party APIs, and any upstream whose model you want to isolate from.",
+    "**Modular monolith first, microservices second.** Each bounded context becomes a module with a public interface, private domain model, and its own data store. Extract to a service only when you need independent scaling, deployment cadence, or team ownership. The module boundary becomes the service boundary.",
+    "**Signs of wrong boundaries:** frequent cross-context changes for single features, conflicting entity meanings within one context, multiple teams colliding in the same context, or excessive integration overhead from over-splitting. Boundaries should be **refactored** (split, merge, or redefine) as domain understanding evolves.",
+  ],
+
   glossary: [
     {
       term: "Bounded Context",

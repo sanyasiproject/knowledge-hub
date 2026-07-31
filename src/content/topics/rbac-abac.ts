@@ -399,4 +399,11 @@ decision := "deny" if {
     { term: "Zanzibar", definition: "Google's global authorization system implementing ReBAC with relation tuples and graph traversal for consistent, scalable access checks." },
     { term: "Principle of least privilege", definition: "Users should have only the minimum permissions necessary to perform their tasks — no more, no less." },
   ],
+  exercises: [
+    "Design an **RBAC system** for a content management platform with four roles: *viewer*, *editor*, *moderator*, and *admin*. Define the role hierarchy (inheritance), list permissions for each role, and implement the `hasPermission(user, permission)` function in TypeScript. Then show how adding a rule like *'editors can only edit posts in their own department'* causes **role explosion**.",
+    "Implement an **ABAC policy engine** that evaluates the following rule: *'Doctors can view patient records only in their own department, only during business hours (9am-5pm), and only if MFA is verified.'* Define the `Subject`, `Resource`, and `Environment` interfaces. Write the policy evaluation function and test it with scenarios that should be allowed and denied.",
+    "You are tasked with modeling **Google Drive-style sharing** permissions. Compare how you would implement *'Alice shared document X with Bob as editor, and Bob shared it with the Engineering group as viewer'* in (a) pure **RBAC**, (b) **ABAC**, and (c) **ReBAC** (Zanzibar-style relation tuples). Which model handles this most naturally, and why?",
+    "Write an **OPA Rego policy** that enforces: admins can do anything; users can read resources at or below their clearance level; users can only write resources in their department; and *confidential* resources require MFA. Test the policy with `opa eval` using at least 4 different input scenarios covering allow and deny cases.",
+    "An organization has 10 departments, 4 data classification levels, 3 access tiers, and 2 time-based restrictions (business hours / always). Calculate the number of roles needed in a **pure RBAC** approach. Then design an equivalent **hybrid RBAC + ABAC** solution that uses fewer than 10 roles by encoding contextual conditions as ABAC policies.",
+  ],
 };

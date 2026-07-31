@@ -184,83 +184,116 @@ function applyMiddleware<T>(
 }`
     },
     {
-      language: "python",
-      caption: "HOFs in Python: built-ins, functools, decorators as HOFs",
-      source: `from functools import reduce, partial, lru_cache
-from typing import Callable, TypeVar, List
+      language: "cpp",
+      caption: "HOFs in C++: STL algorithms, lambdas, memoization, and composition",
+      source: `#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <numeric>
+#include <functional>
+#include <string>
+#include <unordered_map>
+#include <stdexcept>
 
-T = TypeVar("T")
-U = TypeVar("U")
+// --- STL algorithms as HOFs ---
+std::vector<int> numbers = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
-# --- Built-in HOFs ---
-numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+// map equivalent: std::transform
+std::vector<int> doubled(numbers.size());
+std::transform(numbers.begin(), numbers.end(), doubled.begin(),
+    [](int n) { return n * 2; });
 
-doubled = list(map(lambda n: n * 2, numbers))
-evens = list(filter(lambda n: n % 2 == 0, numbers))
-total = reduce(lambda acc, n: acc + n, numbers, 0)
+// filter equivalent: std::copy_if
+std::vector<int> evens;
+std::copy_if(numbers.begin(), numbers.end(), std::back_inserter(evens),
+    [](int n) { return n % 2 == 0; });
 
-# Pythonic alternatives using comprehensions (often preferred)
-doubled_comp = [n * 2 for n in numbers]
-evens_comp = [n for n in numbers if n % 2 == 0]
+// reduce equivalent: std::accumulate
+int total = std::accumulate(numbers.begin(), numbers.end(), 0);
 
-# --- Decorators are HOFs ---
-def retry(max_attempts: int = 3):
-    """Decorator factory (HOF returning a HOF)."""
-    def decorator(fn: Callable) -> Callable:
-        def wrapper(*args, **kwargs):
-            last_error = None
-            for attempt in range(1, max_attempts + 1):
-                try:
-                    return fn(*args, **kwargs)
-                except Exception as e:
-                    last_error = e
-                    print(f"Attempt {attempt} failed: {e}")
-            raise last_error
-        return wrapper
-    return decorator
+// --- HOF returning a function (like a decorator) ---
+template <typename Fn>
+auto retry(int max_attempts, Fn fn) {
+    return [=](auto&&... args) -> decltype(fn(args...)) {
+        std::exception_ptr last_error;
+        for (int attempt = 1; attempt <= max_attempts; ++attempt) {
+            try {
+                return fn(std::forward<decltype(args)>(args)...);
+            } catch (...) {
+                last_error = std::current_exception();
+                std::cerr << "Attempt " << attempt << " failed\\n";
+            }
+        }
+        std::rethrow_exception(last_error);
+    };
+}
 
-@retry(max_attempts=3)
-def fetch_data(url: str) -> dict:
-    ...
+auto safe_fetch = retry(3, [](const std::string& url) -> std::string {
+    // ... fetch logic ...
+    return "data";
+});
 
-# --- Closure gotcha in Python ---
-# BAD: all lambdas capture the same variable i
-fns_bad = [lambda: i for i in range(5)]
-[f() for f in fns_bad]  # [4, 4, 4, 4, 4]
+// --- Closures: C++ lambdas make capture explicit ---
+// [i] captures by value (no closure gotcha like Python)
+std::vector<std::function<int()>> fns;
+for (int i = 0; i < 5; ++i) {
+    fns.push_back([i]() { return i; });  // each captures its own copy
+}
+// fns[0]() == 0, fns[4]() == 4  -- correct, no capture bug
 
-# GOOD: default parameter captures current value
-fns_good = [lambda i=i: i for i in range(5)]
-[f() for f in fns_good]  # [0, 1, 2, 3, 4]
+// --- Partial application with std::bind or lambdas ---
+int power(int base, int exponent) {
+    int result = 1;
+    for (int i = 0; i < exponent; ++i) result *= base;
+    return result;
+}
 
-# --- Partial application with functools.partial ---
-def power(base: int, exponent: int) -> int:
-    return base ** exponent
+auto square = std::bind(power, std::placeholders::_1, 2);
+auto cube = [](int base) { return power(base, 3); };
 
-square = partial(power, exponent=2)
-cube = partial(power, exponent=3)
+// --- compose and pipe ---
+template <typename F, typename G>
+auto compose(F f, G g) {
+    return [=](auto&&... args) {
+        return f(g(std::forward<decltype(args)>(args)...));
+    };
+}
 
-# --- compose and pipe ---
-def compose(*fns: Callable) -> Callable:
-    """Right-to-left function composition."""
-    return reduce(lambda f, g: lambda *a, **kw: f(g(*a, **kw)), fns)
+template <typename F, typename... Fs>
+auto pipe(F first, Fs... rest) {
+    if constexpr (sizeof...(rest) == 0) return first;
+    else return [=](auto&&... args) {
+        return pipe(rest...)(first(std::forward<decltype(args)>(args)...));
+    };
+}
 
-def pipe(*fns: Callable) -> Callable:
-    """Left-to-right function composition."""
-    return reduce(lambda f, g: lambda *a, **kw: g(f(*a, **kw)), fns)
+auto to_lower = [](std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+    return s;
+};
+auto trim = [](const std::string& s) {
+    size_t start = s.find_first_not_of(" ");
+    size_t end = s.find_last_not_of(" ");
+    return (start == std::string::npos) ? std::string("") : s.substr(start, end - start + 1);
+};
+auto replace_spaces = [](std::string s) {
+    std::replace(s.begin(), s.end(), ' ', '-');
+    return s;
+};
+auto process = pipe(trim, to_lower, replace_spaces);
+// process("  Hello World  ") returns "hello-world"
 
-process = pipe(
-    str.strip,
-    str.lower,
-    lambda s: s.replace(" ", "-"),
-)
-process("  Hello World  ")  # "hello-world"
-
-# --- lru_cache: memoization as a HOF ---
-@lru_cache(maxsize=None)
-def fibonacci(n: int) -> int:
-    if n <= 1:
-        return n
-    return fibonacci(n - 1) + fibonacci(n - 2)`
+// --- Memoized Fibonacci ---
+std::function<long long(int)> fibonacci;
+std::unordered_map<int, long long> fib_cache;
+fibonacci = [&](int n) -> long long {
+    if (n <= 1) return n;
+    auto it = fib_cache.find(n);
+    if (it != fib_cache.end()) return it->second;
+    long long result = fibonacci(n - 1) + fibonacci(n - 2);
+    fib_cache[n] = result;
+    return result;
+};`
     },
     {
       language: "haskell",
@@ -502,6 +535,13 @@ safeComputation = (\\x -> safeDivide 100 x) >=> (\\y -> safeDivide y 2)`
     "const memoize = fn => { const c = new Map(); return (...a) => { const k = JSON.stringify(a); return c.has(k) ? c.get(k) : (c.set(k, fn(...a)), c.get(k)); }; }"
   ],
 
+  exercises: [
+    "Implement `map`, `filter`, and `flatMap` using only **`reduce`** in TypeScript. For each implementation, explain why `reduce` is considered the *most general* collection iterator and how it subsumes the other two. Test with a pipeline that takes an array of strings, maps to their lengths, filters for lengths > 3, and sums the result.",
+    "Write a **memoize** higher-order function in C++ using templates and `std::unordered_map`. The function should accept any unary function and return a cached version. Handle the edge case where the function throws an exception (the failed result should *not* be cached). Demonstrate with a recursive Fibonacci function.",
+    "Create a **middleware pipeline** pattern using HOFs in TypeScript: define a `Middleware<T>` type as `(value: T, next: (value: T) => T) => T`, then write an `applyMiddleware` function that chains N middlewares using `reduceRight`. Implement three middlewares for a request object: *logging*, *authentication check*, and *rate limiting*.",
+    "Demonstrate the **closure loop bug** in JavaScript: create an array of 5 functions inside a `for` loop using `var` that should each log their index, but all log `5`. Then fix it using three different techniques: (1) `let` instead of `var`, (2) an IIFE, and (3) `forEach`. Explain *why* `var` causes the bug in terms of closure semantics.",
+    "Implement a `pipe` function in C++ (C++17 or later) that composes N unary functions left-to-right using **fold expressions**. Demonstrate it with a pipeline that takes a `std::string`, converts to lowercase, removes non-alphanumeric characters, and reverses the result. Compare the readability and performance to an equivalent imperative loop.",
+  ],
   resources: [
     { label: "MDN - Array.prototype.reduce()", kind: "docs", note: "Definitive reference for JavaScript's reduce with examples and edge cases" },
     { label: "Professor Frisby's Mostly Adequate Guide to Functional Programming", kind: "book", note: "Free online book covering HOFs, composition, functors, and monads in JavaScript" },

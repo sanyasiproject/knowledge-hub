@@ -120,67 +120,109 @@ memoFib = (map fib [0..] !!)
         fib n = memoFib (n-1) + memoFib (n-2)`,
     },
     {
-      language: "python",
-      caption: "Pure functions, memoization, and property-based testing",
-      source: `from functools import lru_cache
-from typing import List, Tuple
+      language: "cpp",
+      caption: "Pure functions, memoization, and compile-time purity",
+      source: `#include <iostream>
+#include <vector>
+#include <unordered_map>
+#include <algorithm>
+#include <string>
+#include <cassert>
+#include <sstream>
+#include <fstream>
 
-# Pure function: deterministic, no side effects
-def merge_sorted(a: List[int], b: List[int]) -> List[int]:
-    """Merge two sorted lists into one sorted list."""
-    result = []
-    i = j = 0
-    while i < len(a) and j < len(b):
-        if a[i] <= b[j]:
-            result.append(a[i]); i += 1
-        else:
-            result.append(b[j]); j += 1
-    result.extend(a[i:])
-    result.extend(b[j:])
-    return result
+// Pure function: deterministic, no side effects
+std::vector<int> mergeSorted(const std::vector<int>& a, const std::vector<int>& b) {
+    std::vector<int> result;
+    result.reserve(a.size() + b.size());
+    size_t i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+        if (a[i] <= b[j]) {
+            result.push_back(a[i++]);
+        } else {
+            result.push_back(b[j++]);
+        }
+    }
+    result.insert(result.end(), a.begin() + i, a.end());
+    result.insert(result.end(), b.begin() + j, b.end());
+    return result;
+}
 
-# Memoization: safe because the function is pure
-@lru_cache(maxsize=None)
-def fibonacci(n: int) -> int:
-    if n < 2:
-        return n
-    return fibonacci(n - 1) + fibonacci(n - 2)
+// Memoization: safe because the function is pure
+class Fibonacci {
+public:
+    long long compute(int n) {
+        if (n < 2) return n;
+        auto it = cache_.find(n);
+        if (it != cache_.end()) return it->second;
+        long long result = compute(n - 1) + compute(n - 2);
+        cache_[n] = result;
+        return result;
+    }
+private:
+    std::unordered_map<int, long long> cache_;
+};
 
-# Property-based testing with hypothesis
-from hypothesis import given
-from hypothesis.strategies import lists, integers
+// constexpr: compile-time purity enforcement (C++17)
+constexpr int factorial(int n) {
+    return (n <= 1) ? 1 : n * factorial(n - 1);
+}
+static_assert(factorial(5) == 120, "Compile-time pure computation");
 
-@given(lists(integers()))
-def test_sort_idempotent(xs: List[int]):
-    """Sorting a sorted list gives the same result — a property of pure sort."""
-    assert sorted(sorted(xs)) == sorted(xs)
+// Property-based testing concept (manual approach)
+void testSortIdempotent() {
+    // Sorting a sorted vector gives the same result -- a property of pure sort
+    std::vector<int> xs = {3, 1, 4, 1, 5, 9, 2, 6};
+    auto sorted1 = xs;
+    std::sort(sorted1.begin(), sorted1.end());
+    auto sorted2 = sorted1;
+    std::sort(sorted2.begin(), sorted2.end());
+    assert(sorted1 == sorted2);  // idempotent
+}
 
-@given(lists(integers()), lists(integers()))
-def test_merge_sorted_preserves_elements(a: List[int], b: List[int]):
-    """Pure merge preserves all elements."""
-    merged = merge_sorted(sorted(a), sorted(b))
-    assert sorted(merged) == sorted(a + b)
+void testMergeSortedPreservesElements() {
+    std::vector<int> a = {1, 3, 5};
+    std::vector<int> b = {2, 4, 6};
+    auto merged = mergeSorted(a, b);
+    auto expected = a;
+    expected.insert(expected.end(), b.begin(), b.end());
+    std::sort(expected.begin(), expected.end());
+    assert(merged == expected);
+}
 
-# Impure → pure refactoring
-# BEFORE: impure — reads file, mutates global state
-config = {}
-def load_config_impure(path: str) -> None:
-    with open(path) as f:
-        config.update(json.load(f))  # side effects: I/O + mutation
+// Impure -> pure refactoring
+// Pure: parses config string into key-value pairs
+std::unordered_map<std::string, std::string> parseConfig(const std::string& raw) {
+    std::unordered_map<std::string, std::string> config;
+    std::istringstream stream(raw);
+    std::string line;
+    while (std::getline(stream, line)) {
+        auto pos = line.find('=');
+        if (pos != std::string::npos) {
+            config[line.substr(0, pos)] = line.substr(pos + 1);
+        }
+    }
+    return config;
+}
 
-# AFTER: separate reading (impure) from processing (pure)
-def parse_config(raw: str) -> dict:
-    """Pure: parses config string into dict."""
-    return json.loads(raw)
+// Pure: merges two config maps
+std::unordered_map<std::string, std::string> mergeConfigs(
+    const std::unordered_map<std::string, std::string>& base,
+    const std::unordered_map<std::string, std::string>& overrides) {
+    auto merged = base;
+    for (const auto& [key, value] : overrides) {
+        merged[key] = value;  // override wins
+    }
+    return merged;
+}
 
-def merge_configs(base: dict, override: dict) -> dict:
-    """Pure: merges two config dicts."""
-    return {**base, **override}
-
-# Shell handles I/O
-def load_config(path: str) -> dict:
-    raw = open(path).read()            # impure: I/O (thin shell)
-    return parse_config(raw)           # pure core`,
+// Shell handles I/O
+std::unordered_map<std::string, std::string> loadConfig(const std::string& path) {
+    std::ifstream file(path);                        // impure: I/O (thin shell)
+    std::string raw((std::istreambuf_iterator<char>(file)),
+                     std::istreambuf_iterator<char>());
+    return parseConfig(raw);                         // pure core
+}`,
     },
     {
       language: "rust",

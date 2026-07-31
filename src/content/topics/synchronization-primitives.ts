@@ -71,49 +71,73 @@ int main(void) {
 # print(f"Counter = {counter}")  # always 200000`,
     },
     {
-      language: "python",
-      caption: "Producer-consumer pattern using semaphores and a mutex",
-      source: `import threading
-import time
-import random
-from collections import deque
+      language: "cpp",
+      caption: "Producer-consumer pattern using semaphores and a mutex in C++",
+      source: `#include <iostream>
+#include <thread>
+#include <mutex>
+#include <semaphore>
+#include <deque>
+#include <string>
+#include <chrono>
+#include <random>
+#include <vector>
 
-BUFFER_SIZE = 5
+constexpr int BUFFER_SIZE = 5;
 
-buffer = deque()
-mutex = threading.Lock()                          # protects the buffer
-empty = threading.Semaphore(BUFFER_SIZE)           # counts empty slots
-full  = threading.Semaphore(0)                     # counts full slots
+std::deque<std::string> buffer;
+std::mutex mtx;                                         // protects the buffer
+std::counting_semaphore<BUFFER_SIZE> empty_slots(BUFFER_SIZE);  // counts empty slots
+std::counting_semaphore<BUFFER_SIZE> full_slots(0);             // counts full slots
 
-def producer(name, count):
-    for i in range(count):
-        item = f"{name}-item-{i}"
-        empty.acquire()       # wait for an empty slot (decrements empty)
-        with mutex:           # exclusive access to buffer
-            buffer.append(item)
-            print(f"  {name} produced {item}  (buffer: {len(buffer)})")
-        full.release()        # signal that a slot is now full
-        time.sleep(random.uniform(0.01, 0.05))
+void producer(const std::string& name, int count) {
+    std::mt19937 rng(std::random_device{}());
+    std::uniform_int_distribution<int> dist(10, 50);
 
-def consumer(name, count):
-    for _ in range(count):
-        full.acquire()        # wait for a full slot (decrements full)
-        with mutex:           # exclusive access to buffer
-            item = buffer.popleft()
-            print(f"  {name} consumed {item}  (buffer: {len(buffer)})")
-        empty.release()       # signal that a slot is now empty
-        time.sleep(random.uniform(0.01, 0.08))
+    for (int i = 0; i < count; ++i) {
+        std::string item = name + "-item-" + std::to_string(i);
+        empty_slots.acquire();           // wait for an empty slot (decrements empty)
+        {
+            std::lock_guard<std::mutex> lock(mtx);  // exclusive access to buffer
+            buffer.push_back(item);
+            std::cout << "  " << name << " produced " << item
+                      << "  (buffer: " << buffer.size() << ")\\n";
+        }
+        full_slots.release();            // signal that a slot is now full
+        std::this_thread::sleep_for(std::chrono::milliseconds(dist(rng)));
+    }
+}
 
-# Two producers (6 items each) and two consumers (6 items each)
-threads = [
-    threading.Thread(target=producer, args=("P1", 6)),
-    threading.Thread(target=producer, args=("P2", 6)),
-    threading.Thread(target=consumer, args=("C1", 6)),
-    threading.Thread(target=consumer, args=("C2", 6)),
-]
-for t in threads: t.start()
-for t in threads: t.join()
-print("All items produced and consumed.")`,
+void consumer(const std::string& name, int count) {
+    std::mt19937 rng(std::random_device{}());
+    std::uniform_int_distribution<int> dist(10, 80);
+
+    for (int i = 0; i < count; ++i) {
+        full_slots.acquire();            // wait for a full slot (decrements full)
+        std::string item;
+        {
+            std::lock_guard<std::mutex> lock(mtx);  // exclusive access to buffer
+            item = buffer.front();
+            buffer.pop_front();
+            std::cout << "  " << name << " consumed " << item
+                      << "  (buffer: " << buffer.size() << ")\\n";
+        }
+        empty_slots.release();           // signal that a slot is now empty
+        std::this_thread::sleep_for(std::chrono::milliseconds(dist(rng)));
+    }
+}
+
+// Two producers (6 items each) and two consumers (6 items each)
+int main() {
+    std::vector<std::thread> threads;
+    threads.emplace_back(producer, "P1", 6);
+    threads.emplace_back(producer, "P2", 6);
+    threads.emplace_back(consumer, "C1", 6);
+    threads.emplace_back(consumer, "C2", 6);
+
+    for (auto& t : threads) t.join();
+    std::cout << "All items produced and consumed.\\n";
+}`,
     },
     {
       language: "c",

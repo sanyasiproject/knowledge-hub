@@ -175,141 +175,154 @@ test("sortedMerge preserves all elements", () => {
 });`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption:
-        "Hypothesis: stateful testing of a cache with an oracle (dict) model",
-      source: `from hypothesis import given, settings, note
-from hypothesis import strategies as st
-from hypothesis.stateful import (
-    RuleBasedStateMachine, rule, precondition,
-    initialize, invariant
-)
-from collections import OrderedDict
+        "Stateful testing of an LRU cache with an oracle model and RLE roundtrip property",
+      source: `#include <iostream>
+#include <list>
+#include <unordered_map>
+#include <vector>
+#include <string>
+#include <cassert>
+#include <random>
+#include <utility>
 
+// --- LRU Cache implementation to test ---
+class LRUCache {
+public:
+    explicit LRUCache(int capacity) : capacity_(capacity) {}
 
-class LRUCache:
-    """Simple LRU cache implementation to test."""
-    def __init__(self, capacity: int):
-        self.capacity = capacity
-        self._store: OrderedDict = OrderedDict()
+    std::string* get(const std::string& key) {
+        auto it = map_.find(key);
+        if (it == map_.end()) return nullptr;
+        order_.splice(order_.begin(), order_, it->second);
+        return &(it->second->second);
+    }
 
-    def get(self, key: str) -> str | None:
-        if key in self._store:
-            self._store.move_to_end(key)
-            return self._store[key]
-        return None
+    void put(const std::string& key, const std::string& value) {
+        auto it = map_.find(key);
+        if (it != map_.end()) {
+            it->second->second = value;
+            order_.splice(order_.begin(), order_, it->second);
+        } else {
+            order_.emplace_front(key, value);
+            map_[key] = order_.begin();
+            if (static_cast<int>(map_.size()) > capacity_) {
+                map_.erase(order_.back().first);
+                order_.pop_back();
+            }
+        }
+    }
 
-    def put(self, key: str, value: str) -> None:
-        if key in self._store:
-            self._store.move_to_end(key)
-        self._store[key] = value
-        if len(self._store) > self.capacity:
-            self._store.popitem(last=False)
+    int size() const { return static_cast<int>(map_.size()); }
 
-    def size(self) -> int:
-        return len(self._store)
+private:
+    int capacity_;
+    std::list<std::pair<std::string, std::string>> order_;
+    std::unordered_map<std::string, decltype(order_)::iterator> map_;
+};
 
+// --- Stateful test: random get/put sequences verified against a model ---
+void statefulLRUTest(int numOperations, int capacity, std::mt19937& rng) {
+    LRUCache cache(capacity);
 
-class LRUCacheStateMachine(RuleBasedStateMachine):
-    """
-    Stateful test: generate random sequences of get/put
-    operations and verify against a reference model (plain dict
-    with manual LRU eviction).
-    """
+    // Model: vector of (key, value) pairs in access order (front = most recent)
+    std::vector<std::pair<std::string, std::string>> model;
+    std::string keys[] = {"a", "b", "c", "d", "e"};
+    std::string vals[] = {"x", "y", "z", "1", "2"};
+    std::uniform_int_distribution<int> keyDist(0, 4);
+    std::uniform_int_distribution<int> valDist(0, 4);
+    std::uniform_int_distribution<int> opDist(0, 1);
 
-    @initialize(capacity=st.integers(min_value=1, max_value=5))
-    def init_cache(self, capacity):
-        self.capacity = capacity
-        self.cache = LRUCache(capacity)
-        # Model: ordered dict tracking access order
-        self.model: OrderedDict = OrderedDict()
+    for (int op = 0; op < numOperations; ++op) {
+        std::string key = keys[keyDist(rng)];
 
-    @rule(key=st.text(min_size=1, max_size=3,
-                      alphabet="abcde"),
-          value=st.text(min_size=1, max_size=5,
-                        alphabet="xyz12"))
-    def put(self, key, value):
-        # Apply to real implementation
-        self.cache.put(key, value)
-        # Apply to model
-        if key in self.model:
-            self.model.move_to_end(key)
-        self.model[key] = value
-        if len(self.model) > self.capacity:
-            self.model.popitem(last=False)
+        if (opDist(rng) == 0) {  // PUT
+            std::string value = vals[valDist(rng)];
+            cache.put(key, value);
+            // Update model: remove existing, add to front, evict if over capacity
+            std::erase_if(model, [&](auto& p) { return p.first == key; });
+            model.insert(model.begin(), {key, value});
+            if (static_cast<int>(model.size()) > capacity) model.pop_back();
+        } else {  // GET
+            auto* realResult = cache.get(key);
+            // Find in model
+            std::string* modelResult = nullptr;
+            for (auto& p : model) {
+                if (p.first == key) { modelResult = &p.second; break; }
+            }
+            // Oracle check: real matches model
+            assert((realResult == nullptr) == (modelResult == nullptr));
+            if (realResult && modelResult) assert(*realResult == *modelResult);
+            // Move to front in model
+            if (modelResult) {
+                auto val = *modelResult;
+                std::erase_if(model, [&](auto& p) { return p.first == key; });
+                model.insert(model.begin(), {key, val});
+            }
+        }
+        // Invariant: size is bounded
+        assert(cache.size() <= capacity);
+        assert(cache.size() == static_cast<int>(model.size()));
+    }
+}
 
-    @rule(key=st.text(min_size=1, max_size=3,
-                      alphabet="abcde"))
-    def get(self, key):
-        real_result = self.cache.get(key)
-        model_result = self.model.get(key)
-        if key in self.model:
-            self.model.move_to_end(key)
-        # Oracle check: real matches model
-        assert real_result == model_result, (
-            f"get({key!r}): cache={real_result!r}, "
-            f"model={model_result!r}"
-        )
+// --- RLE roundtrip property ---
+using RLE = std::vector<std::pair<int, int>>;
 
-    @invariant()
-    def size_bounded(self):
-        assert self.cache.size() <= self.capacity, (
-            f"Cache size {self.cache.size()} exceeds "
-            f"capacity {self.capacity}"
-        )
+RLE runLengthEncode(const std::vector<int>& data) {
+    if (data.empty()) return {};
+    RLE result;
+    int current = data[0], count = 1;
+    for (size_t i = 1; i < data.size(); ++i) {
+        if (data[i] == current) {
+            ++count;
+        } else {
+            result.push_back({current, count});
+            current = data[i];
+            count = 1;
+        }
+    }
+    result.push_back({current, count});
+    return result;
+}
 
-    @invariant()
-    def model_matches(self):
-        assert self.cache.size() == len(self.model), (
-            f"Size mismatch: cache={self.cache.size()}, "
-            f"model={len(self.model)}"
-        )
+std::vector<int> runLengthDecode(const RLE& encoded) {
+    std::vector<int> result;
+    for (auto& [val, count] : encoded) {
+        for (int i = 0; i < count; ++i) result.push_back(val);
+    }
+    return result;
+}
 
+void testRLERoundtrip(std::mt19937& rng) {
+    std::uniform_int_distribution<int> valDist(0, 5);
+    std::uniform_int_distribution<int> lenDist(0, 50);
 
-# Run the stateful test
-TestLRUCache = LRUCacheStateMachine.TestCase
-TestLRUCache.settings = settings(
-    max_examples=200, stateful_step_count=30
-)
+    for (int trial = 0; trial < 1000; ++trial) {
+        int len = lenDist(rng);
+        std::vector<int> data(len);
+        for (auto& v : data) v = valDist(rng);
 
+        auto encoded = runLengthEncode(data);
+        auto decoded = runLengthDecode(encoded);
+        assert(decoded == data);  // Roundtrip property
 
-# --- Non-stateful property: roundtrip for a custom codec ---
-def run_length_encode(data: list[int]) -> list[tuple[int, int]]:
-    """Encode consecutive runs: [1,1,2,3,3,3] -> [(1,2),(2,1),(3,3)]"""
-    if not data:
-        return []
-    result = []
-    current, count = data[0], 1
-    for val in data[1:]:
-        if val == current:
-            count += 1
-        else:
-            result.append((current, count))
-            current, count = val, 1
-    result.append((current, count))
-    return result
+        int totalLen = 0;
+        for (auto& [val, count] : encoded) totalLen += count;
+        assert(totalLen == static_cast<int>(data.size()));  // Length property
+    }
+}
 
-
-def run_length_decode(encoded: list[tuple[int, int]]) -> list[int]:
-    return [val for val, count in encoded for _ in range(count)]
-
-
-@given(st.lists(st.integers(min_value=0, max_value=5),
-                min_size=0, max_size=50))
-def test_rle_roundtrip(data):
-    """Encode then decode should return the original list."""
-    encoded = run_length_encode(data)
-    decoded = run_length_decode(encoded)
-    assert decoded == data
-
-
-@given(st.lists(st.integers(min_value=0, max_value=5),
-                min_size=1, max_size=50))
-def test_rle_idempotent_length(data):
-    """Total of all run lengths equals original list length."""
-    encoded = run_length_encode(data)
-    total = sum(count for _, count in encoded)
-    assert total == len(data)`,
+int main() {
+    std::mt19937 rng(42);
+    for (int cap = 1; cap <= 5; ++cap) {
+        statefulLRUTest(200, cap, rng);
+    }
+    testRLERoundtrip(rng);
+    std::cout << "All property-based tests passed." << std::endl;
+    return 0;
+}`,
     },
   ],
   diagrams: [

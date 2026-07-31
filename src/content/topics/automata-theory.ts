@@ -22,131 +22,217 @@ export const automataTheory: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "DFA and NFA simulation with subset construction",
-      source: `class DFA:
-    """Deterministic Finite Automaton."""
-    def __init__(self, states, alphabet, transitions, start, accepting):
-        self.states = states
-        self.alphabet = alphabet
-        self.delta = transitions   # dict: (state, symbol) -> state
-        self.start = start
-        self.accepting = accepting
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <set>
+#include <map>
+#include <queue>
+#include <stack>
+#include <optional>
 
-    def accepts(self, string: str) -> bool:
-        state = self.start
-        for ch in string:
-            state = self.delta.get((state, ch))
-            if state is None:
-                return False  # no transition = dead state
-        return state in self.accepting
+// Deterministic Finite Automaton
+class DFA {
+public:
+    using State = std::set<int>;  // for subset-constructed DFAs, states are sets
 
-class NFA:
-    """Nondeterministic Finite Automaton with epsilon transitions."""
-    def __init__(self, states, alphabet, transitions, start, accepting):
-        self.states = states
-        self.alphabet = alphabet
-        self.delta = transitions   # dict: (state, symbol|None) -> set of states
-        self.start = start
-        self.accepting = accepting
+    DFA(std::set<State> states, std::set<char> alphabet,
+        std::map<std::pair<State,char>, State> transitions,
+        State start, std::set<State> accepting)
+        : states_(std::move(states)), alphabet_(std::move(alphabet)),
+          delta_(std::move(transitions)), start_(std::move(start)),
+          accepting_(std::move(accepting)) {}
 
-    def epsilon_closure(self, states: set) -> frozenset:
-        stack = list(states)
-        closure = set(states)
-        while stack:
-            s = stack.pop()
-            for t in self.delta.get((s, None), set()):
-                if t not in closure:
-                    closure.add(t)
-                    stack.append(t)
-        return frozenset(closure)
+    bool accepts(const std::string& input) const {
+        State state = start_;
+        for (char ch : input) {
+            auto it = delta_.find({state, ch});
+            if (it == delta_.end()) return false;  // no transition = dead state
+            state = it->second;
+        }
+        return accepting_.count(state) > 0;
+    }
 
-    def to_dfa(self) -> DFA:
-        """Subset construction: convert NFA to equivalent DFA."""
-        start_set = self.epsilon_closure({self.start})
-        dfa_states = {start_set}
-        queue = [start_set]
-        dfa_delta = {}
-        dfa_accepting = set()
+private:
+    std::set<State> states_;
+    std::set<char> alphabet_;
+    std::map<std::pair<State,char>, State> delta_;
+    State start_;
+    std::set<State> accepting_;
+};
 
-        while queue:
-            current = queue.pop(0)
-            if current & self.accepting:
-                dfa_accepting.add(current)
-            for sym in self.alphabet:
-                next_states = set()
-                for s in current:
-                    next_states |= self.delta.get((s, sym), set())
-                next_closure = self.epsilon_closure(next_states)
-                dfa_delta[(current, sym)] = next_closure
-                if next_closure not in dfa_states:
-                    dfa_states.add(next_closure)
-                    queue.append(next_closure)
+// Nondeterministic Finite Automaton with epsilon transitions
+class NFA {
+public:
+    // Epsilon is represented by '\\0' (null character)
+    NFA(std::set<int> states, std::set<char> alphabet,
+        std::map<std::pair<int,char>, std::set<int>> transitions,
+        int start, std::set<int> accepting)
+        : states_(std::move(states)), alphabet_(std::move(alphabet)),
+          delta_(std::move(transitions)), start_(start),
+          accepting_(std::move(accepting)) {}
 
-        return DFA(dfa_states, self.alphabet, dfa_delta, start_set, dfa_accepting)
+    std::set<int> epsilonClosure(const std::set<int>& states) const {
+        std::stack<int> stk;
+        std::set<int> closure = states;
+        for (int s : states) stk.push(s);
 
-# Example: NFA for (a|b)*abb
-nfa = NFA(
-    states={0,1,2,3}, alphabet={'a','b'},
-    transitions={
-        (0,'a'): {0,1}, (0,'b'): {0},
-        (1,'b'): {2}, (2,'b'): {3},
-    },
-    start=0, accepting={3}
-)
-dfa = nfa.to_dfa()
-print(dfa.accepts("abb"))    # True
-print(dfa.accepts("aabb"))   # True
-print(dfa.accepts("ab"))     # False`,
+        while (!stk.empty()) {
+            int s = stk.top(); stk.pop();
+            auto it = delta_.find({s, '\\0'});
+            if (it != delta_.end()) {
+                for (int t : it->second) {
+                    if (closure.insert(t).second) {
+                        stk.push(t);
+                    }
+                }
+            }
+        }
+        return closure;
+    }
+
+    // Subset construction: convert NFA to equivalent DFA
+    DFA toDFA() const {
+        using State = std::set<int>;
+        State startSet = epsilonClosure({start_});
+        std::set<State> dfaStates = {startSet};
+        std::queue<State> worklist;
+        worklist.push(startSet);
+        std::map<std::pair<State,char>, State> dfaDelta;
+        std::set<State> dfaAccepting;
+
+        while (!worklist.empty()) {
+            State current = worklist.front(); worklist.pop();
+            // Check if current contains any accepting NFA state
+            for (int s : current) {
+                if (accepting_.count(s)) {
+                    dfaAccepting.insert(current);
+                    break;
+                }
+            }
+            for (char sym : alphabet_) {
+                std::set<int> nextStates;
+                for (int s : current) {
+                    auto it = delta_.find({s, sym});
+                    if (it != delta_.end()) {
+                        nextStates.insert(it->second.begin(), it->second.end());
+                    }
+                }
+                State nextClosure = epsilonClosure(nextStates);
+                dfaDelta[{current, sym}] = nextClosure;
+                if (dfaStates.insert(nextClosure).second) {
+                    worklist.push(nextClosure);
+                }
+            }
+        }
+        return DFA(dfaStates, alphabet_, dfaDelta, startSet, dfaAccepting);
+    }
+
+private:
+    std::set<int> states_;
+    std::set<char> alphabet_;
+    std::map<std::pair<int,char>, std::set<int>> delta_;
+    int start_;
+    std::set<int> accepting_;
+};
+
+// Example: NFA for (a|b)*abb
+int main() {
+    NFA nfa(
+        {0,1,2,3}, {'a','b'},
+        {
+            {{0,'a'}, {0,1}}, {{0,'b'}, {0}},
+            {{1,'b'}, {2}},   {{2,'b'}, {3}},
+        },
+        0, {3}
+    );
+    DFA dfa = nfa.toDFA();
+    std::cout << std::boolalpha;
+    std::cout << dfa.accepts("abb")  << "\\n";  // true
+    std::cout << dfa.accepts("aabb") << "\\n";  // true
+    std::cout << dfa.accepts("ab")   << "\\n";  // false
+    return 0;
+}`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "CYK parsing algorithm for context-free grammars in CNF",
-      source: `def cyk_parse(grammar: dict, start: str, string: str) -> bool:
-    """
-    CYK algorithm: O(n^3 * |G|) parser for CFGs in Chomsky Normal Form.
-    grammar: dict mapping nonterminal -> list of productions
-             each production is (A, B) for two nonterminals or (a,) for terminal
-    """
-    n = len(string)
-    if n == 0:
-        return ("",) in grammar.get(start, [])
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <set>
+#include <map>
+#include <variant>
 
-    # table[i][j] = set of nonterminals that derive string[i..j]
-    table = [[set() for _ in range(n)] for _ in range(n)]
+// A production is either a single terminal (char) or a pair of nonterminals (two strings).
+using TerminalProd   = char;
+using NonterminalProd = std::pair<std::string, std::string>;
+using Production      = std::variant<TerminalProd, NonterminalProd>;
 
-    # Base case: single characters
-    for i in range(n):
-        for var, prods in grammar.items():
-            for prod in prods:
-                if len(prod) == 1 and prod[0] == string[i]:
-                    table[i][i].add(var)
+using Grammar = std::map<std::string, std::vector<Production>>;
 
-    # Fill diagonals: substrings of length 2..n
-    for length in range(2, n + 1):
-        for i in range(n - length + 1):
-            j = i + length - 1
-            for k in range(i, j):
-                for var, prods in grammar.items():
-                    for prod in prods:
-                        if len(prod) == 2:
-                            B, C = prod
-                            if B in table[i][k] and C in table[k+1][j]:
-                                table[i][j].add(var)
+// CYK algorithm: O(n^3 * |G|) parser for CFGs in Chomsky Normal Form.
+bool cykParse(const Grammar& grammar, const std::string& start,
+              const std::string& input)
+{
+    int n = static_cast<int>(input.size());
+    if (n == 0) return false;
 
-    return start in table[0][n - 1]
+    // table[i][j] = set of nonterminals that derive input[i..j]
+    std::vector<std::vector<std::set<std::string>>> table(
+        n, std::vector<std::set<std::string>>(n));
 
-# Grammar for {a^n b^n | n >= 1} in CNF:
-# S -> AC | AB,  A -> a,  B -> b,  C -> SB
-grammar = {
-    "S": [("A","C"), ("A","B")],
-    "A": [("a",)],
-    "B": [("b",)],
-    "C": [("S","B")],
+    // Base case: single characters
+    for (int i = 0; i < n; ++i) {
+        for (const auto& [var, prods] : grammar) {
+            for (const auto& prod : prods) {
+                if (auto* tp = std::get_if<TerminalProd>(&prod)) {
+                    if (*tp == input[i])
+                        table[i][i].insert(var);
+                }
+            }
+        }
+    }
+
+    // Fill diagonals: substrings of length 2..n
+    for (int len = 2; len <= n; ++len) {
+        for (int i = 0; i <= n - len; ++i) {
+            int j = i + len - 1;
+            for (int k = i; k < j; ++k) {
+                for (const auto& [var, prods] : grammar) {
+                    for (const auto& prod : prods) {
+                        if (auto* np = std::get_if<NonterminalProd>(&prod)) {
+                            const auto& [B, C] = *np;
+                            if (table[i][k].count(B) &&
+                                table[k+1][j].count(C)) {
+                                table[i][j].insert(var);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return table[0][n - 1].count(start) > 0;
 }
-print(cyk_parse(grammar, "S", "aabb"))    # True
-print(cyk_parse(grammar, "S", "aaabbb"))  # True
-print(cyk_parse(grammar, "S", "aab"))     # False`,
+
+// Grammar for {a^n b^n | n >= 1} in CNF:
+// S -> AC | AB,  A -> a,  B -> b,  C -> SB
+int main() {
+    Grammar grammar = {
+        {"S", { NonterminalProd{"A","C"}, NonterminalProd{"A","B"} }},
+        {"A", { TerminalProd{'a'} }},
+        {"B", { TerminalProd{'b'} }},
+        {"C", { NonterminalProd{"S","B"} }},
+    };
+    std::cout << std::boolalpha;
+    std::cout << cykParse(grammar, "S", "aabb")   << "\\n"; // true
+    std::cout << cykParse(grammar, "S", "aaabbb") << "\\n"; // true
+    std::cout << cykParse(grammar, "S", "aab")    << "\\n"; // false
+    return 0;
+}`,
     },
   ],
   diagrams: [

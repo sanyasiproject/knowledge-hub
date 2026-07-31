@@ -122,6 +122,605 @@ CQRS adds architectural complexity and is not appropriate for simple CRUD applic
       back: "The client immediately reflects the expected result of a command without waiting for the read model to update. If the command fails, the UI reverts. This provides instant feedback despite eventual consistency.",
     },
   ],
+  deepDive: [
+    `## The Philosophical Foundation of CQRS
+
+**CQRS** is rooted in Bertrand Meyer's **Command-Query Separation (CQS)** principle from *Object-Oriented Software Construction* (1988), which states that every method should either be a **command** that performs an action *or* a **query** that returns data — **never both**. Greg Young elevated this to an *architectural* pattern around 2010, recognizing that in complex domains, the **write model** (optimized for *invariant enforcement*, *validation*, and *transactional consistency*) and the **read model** (optimized for *query performance*, *denormalization*, and *presentation*) have fundamentally **divergent requirements**. Forcing both into a single model creates a "**least common denominator**" design where neither reads nor writes are truly optimized. CQRS breaks this tension by giving each side its own **model**, **storage**, and **scaling strategy**. The write side uses *Domain-Driven Design* aggregates, enforcing business rules through a rich domain model, while the read side uses \`denormalized projections\` — flat, pre-joined views tailored for specific screens or API responses.`,
+
+    `## Event-Driven Synchronization and Projection Strategies
+
+The **synchronization** between write and read models is where CQRS's real architectural complexity lives. In a **synchronous projection** approach, the write transaction *atomically* updates both models — typically in the same database using *database views* or *materialized views*. This provides **strong consistency** but *tightly couples* read and write performance. The more common **asynchronous projection** approach uses an **event bus** (e.g., \`Kafka\`, \`RabbitMQ\`, \`Amazon SNS/SQS\`) to propagate domain events from the write side to one or more *projection handlers* that update read models. The **outbox pattern** is critical here: rather than publishing events directly (which risks *dual-write failures* — the database commits but the message broker publish fails), the write side stores events in an \`outbox\` table *within the same transaction*. A separate **relay process** (or *Change Data Capture* via Debezium) reads the outbox and publishes to the broker, guaranteeing **at-least-once delivery**. Projection handlers must therefore be **idempotent** — processing the same event twice should produce the same result.`,
+
+    `## Scaling, Failure Modes, and Operational Considerations
+
+CQRS enables **independent scaling**: read-heavy workloads (common in most applications where reads outnumber writes *10:1 to 1000:1*) can scale horizontally with *read replicas*, \`Elasticsearch\` clusters, or \`Redis\` caches, while the write side remains a single, consistent source of truth. However, this architecture introduces **operational complexity**. **Read model rebuilds** are necessary when projection logic changes — this requires *replaying* all events (if using event sourcing) or re-reading the write model. **Monitoring** must track *projection lag* (the delay between a write and its reflection in read models), *dead-letter queues* for failed projections, and *schema evolution* across read models. **Testing** becomes more nuanced: you need *integration tests* that verify the full command-event-projection pipeline, not just unit tests on individual components. The **eventual consistency** window must be communicated to stakeholders and handled in the *UI layer* through patterns like **optimistic updates**, **loading spinners with version checks**, or **read-your-writes** guarantees using \`causal consistency tokens\`.`,
+  ],
+
+  code: [
+    {
+      language: "cpp",
+      caption: "C++ Command Handler and Query Handler with Event Bus",
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <functional>
+#include <memory>
+#include <optional>
+
+// ─── Domain Events ───────────────────────────────────────
+struct DomainEvent {
+    std::string type;
+    std::string aggregateId;
+    virtual ~DomainEvent() = default;
+};
+
+struct OrderCreatedEvent : DomainEvent {
+    std::string customerId;
+    double totalAmount;
+    OrderCreatedEvent(const std::string& id, const std::string& custId, double amount)
+        : customerId(custId), totalAmount(amount) {
+        type = "OrderCreated";
+        aggregateId = id;
+    }
+};
+
+// ─── Event Bus ───────────────────────────────────────────
+class EventBus {
+    using Handler = std::function<void(const DomainEvent&)>;
+    std::unordered_map<std::string, std::vector<Handler>> handlers_;
+public:
+    void subscribe(const std::string& eventType, Handler handler) {
+        handlers_[eventType].push_back(std::move(handler));
+    }
+    void publish(const DomainEvent& event) {
+        auto it = handlers_.find(event.type);
+        if (it != handlers_.end()) {
+            for (auto& handler : it->second) {
+                handler(event);
+            }
+        }
+    }
+};
+
+// ─── Write Model (Command Side) ─────────────────────────
+struct Order {
+    std::string id;
+    std::string customerId;
+    double totalAmount;
+    std::string status;
+};
+
+class OrderCommandHandler {
+    std::unordered_map<std::string, Order> writeStore_;
+    EventBus& eventBus_;
+public:
+    explicit OrderCommandHandler(EventBus& bus) : eventBus_(bus) {}
+
+    // Command: returns success/failure, NOT data
+    bool handleCreateOrder(const std::string& orderId,
+                           const std::string& customerId,
+                           double amount) {
+        // Validate invariants
+        if (amount <= 0) return false;
+        if (writeStore_.count(orderId)) return false;
+
+        // Persist to write model
+        writeStore_[orderId] = {orderId, customerId, amount, "Created"};
+
+        // Publish domain event for read model projection
+        OrderCreatedEvent event(orderId, customerId, amount);
+        eventBus_.publish(event);
+        return true;
+    }
+};
+
+// ─── Read Model (Query Side) ────────────────────────────
+struct OrderReadDto {
+    std::string orderId;
+    std::string customerId;
+    double totalAmount;
+    std::string status;
+};
+
+class OrderQueryHandler {
+    std::unordered_map<std::string, OrderReadDto> readStore_;
+public:
+    // Projection: subscribes to events and updates read model
+    void onOrderCreated(const DomainEvent& baseEvent) {
+        auto& event = static_cast<const OrderCreatedEvent&>(baseEvent);
+        readStore_[event.aggregateId] = {
+            event.aggregateId,
+            event.customerId,
+            event.totalAmount,
+            "Created"
+        };
+    }
+
+    // Query: returns data, never modifies state
+    std::optional<OrderReadDto> getOrderById(const std::string& id) const {
+        auto it = readStore_.find(id);
+        if (it != readStore_.end()) return it->second;
+        return std::nullopt;
+    }
+
+    std::vector<OrderReadDto> getOrdersByCustomer(const std::string& custId) const {
+        std::vector<OrderReadDto> result;
+        for (auto& [_, dto] : readStore_) {
+            if (dto.customerId == custId) result.push_back(dto);
+        }
+        return result;
+    }
+};
+
+int main() {
+    EventBus bus;
+    OrderCommandHandler commandHandler(bus);
+    OrderQueryHandler queryHandler;
+
+    // Wire up projection
+    bus.subscribe("OrderCreated",
+        [&](const DomainEvent& e) { queryHandler.onOrderCreated(e); });
+
+    // Execute command
+    commandHandler.handleCreateOrder("ORD-001", "CUST-42", 149.99);
+
+    // Execute query
+    auto order = queryHandler.getOrderById("ORD-001");
+    if (order) {
+        std::cout << "Order: " << order->orderId
+                  << " | Customer: " << order->customerId
+                  << " | Amount: " << order->totalAmount << std::endl;
+    }
+    return 0;
+}`,
+    },
+    {
+      language: "typescript",
+      caption: "Node.js/Express CQRS API with Separate Command and Query Routes",
+      source: `import express, { Request, Response } from "express";
+import { EventEmitter } from "events";
+
+// ─── Event Bus ───────────────────────────────────────────
+const eventBus = new EventEmitter();
+
+// ─── Write Model (Command Side) ─────────────────────────
+interface Order {
+  id: string;
+  customerId: string;
+  items: { productId: string; quantity: number; price: number }[];
+  totalAmount: number;
+  status: "pending" | "confirmed" | "shipped" | "cancelled";
+  createdAt: Date;
+}
+
+// In-memory write store (replace with PostgreSQL in production)
+const writeStore = new Map<string, Order>();
+
+// Command handlers — validate, persist, emit events
+function handleCreateOrder(cmd: {
+  orderId: string;
+  customerId: string;
+  items: { productId: string; quantity: number; price: number }[];
+}): { success: boolean; error?: string } {
+  // Invariant checks
+  if (writeStore.has(cmd.orderId)) {
+    return { success: false, error: "Order already exists" };
+  }
+  if (!cmd.items.length) {
+    return { success: false, error: "Order must have at least one item" };
+  }
+
+  const totalAmount = cmd.items.reduce(
+    (sum, item) => sum + item.price * item.quantity, 0
+  );
+
+  const order: Order = {
+    id: cmd.orderId,
+    customerId: cmd.customerId,
+    items: cmd.items,
+    totalAmount,
+    status: "pending",
+    createdAt: new Date(),
+  };
+
+  // Persist to write store
+  writeStore.set(order.id, order);
+
+  // Publish domain event (async projection)
+  eventBus.emit("OrderCreated", {
+    orderId: order.id,
+    customerId: order.customerId,
+    totalAmount: order.totalAmount,
+    itemCount: order.items.length,
+    createdAt: order.createdAt,
+  });
+
+  return { success: true };
+}
+
+// ─── Read Model (Query Side) ────────────────────────────
+interface OrderSummaryDto {
+  orderId: string;
+  customerId: string;
+  totalAmount: number;
+  itemCount: number;
+  status: string;
+  createdAt: string;
+}
+
+// Denormalized read store (replace with Elasticsearch/Redis)
+const readStore = new Map<string, OrderSummaryDto>();
+const customerOrderIndex = new Map<string, Set<string>>();
+
+// Projection handler — subscribes to events, updates read model
+eventBus.on("OrderCreated", (event: any) => {
+  const summary: OrderSummaryDto = {
+    orderId: event.orderId,
+    customerId: event.customerId,
+    totalAmount: event.totalAmount,
+    itemCount: event.itemCount,
+    status: "pending",
+    createdAt: event.createdAt.toISOString(),
+  };
+
+  readStore.set(event.orderId, summary);
+
+  // Maintain customer index for fast lookups
+  if (!customerOrderIndex.has(event.customerId)) {
+    customerOrderIndex.set(event.customerId, new Set());
+  }
+  customerOrderIndex.get(event.customerId)!.add(event.orderId);
+});
+
+// ─── Express API ─────────────────────────────────────────
+const app = express();
+app.use(express.json());
+
+// COMMAND endpoint — POST only, returns success/failure
+app.post("/commands/create-order", (req: Request, res: Response) => {
+  const result = handleCreateOrder(req.body);
+  if (result.success) {
+    res.status(202).json({ status: "accepted" });
+  } else {
+    res.status(400).json({ error: result.error });
+  }
+});
+
+// QUERY endpoints — GET only, read from read model
+app.get("/queries/orders/:orderId", (req: Request, res: Response) => {
+  const order = readStore.get(req.params.orderId);
+  if (!order) return res.status(404).json({ error: "Not found" });
+  res.json(order);
+});
+
+app.get("/queries/customers/:customerId/orders", (req: Request, res: Response) => {
+  const orderIds = customerOrderIndex.get(req.params.customerId);
+  if (!orderIds) return res.json([]);
+  const orders = [...orderIds]
+    .map((id) => readStore.get(id))
+    .filter(Boolean);
+  res.json(orders);
+});
+
+app.listen(3000, () => console.log("CQRS API running on port 3000"));`,
+    },
+    {
+      language: "cpp",
+      caption: "C++ Outbox Pattern with Idempotent Projection Handler",
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <unordered_set>
+#include <queue>
+#include <chrono>
+
+// ─── Outbox Entry ────────────────────────────────────────
+struct OutboxEntry {
+    std::string eventId;
+    std::string eventType;
+    std::string aggregateId;
+    std::string payload;  // JSON in production
+    bool published = false;
+};
+
+// ─── Write Side with Outbox ─────────────────────────────
+class WriteModelWithOutbox {
+    std::unordered_map<std::string, double> accounts_;  // accountId -> balance
+    std::vector<OutboxEntry> outbox_;
+    int eventCounter_ = 0;
+
+    std::string nextEventId() {
+        return "evt-" + std::to_string(++eventCounter_);
+    }
+public:
+    // Command: transfer money (writes to state + outbox atomically)
+    bool handleTransfer(const std::string& fromId,
+                        const std::string& toId,
+                        double amount) {
+        // Validate
+        if (accounts_[fromId] < amount) return false;
+
+        // Atomic write: state change + outbox entry
+        accounts_[fromId] -= amount;
+        accounts_[toId] += amount;
+
+        outbox_.push_back({
+            nextEventId(), "MoneyTransferred", fromId,
+            "from:" + fromId + ",to:" + toId + ",amount:" + std::to_string(amount)
+        });
+        return true;
+    }
+
+    void seedAccount(const std::string& id, double balance) {
+        accounts_[id] = balance;
+    }
+
+    // Outbox relay: reads unpublished entries
+    std::vector<OutboxEntry> getUnpublishedEvents() {
+        std::vector<OutboxEntry> result;
+        for (auto& entry : outbox_) {
+            if (!entry.published) {
+                result.push_back(entry);
+                entry.published = true;
+            }
+        }
+        return result;
+    }
+};
+
+// ─── Idempotent Projection Handler ──────────────────────
+class TransferReadModel {
+    struct TransferDto {
+        std::string fromAccount;
+        std::string toAccount;
+        double amount;
+    };
+    std::vector<TransferDto> transfers_;
+    std::unordered_set<std::string> processedEventIds_;  // idempotency check
+public:
+    void handleEvent(const OutboxEntry& entry) {
+        // Idempotency: skip already-processed events
+        if (processedEventIds_.count(entry.eventId)) {
+            std::cout << "  [SKIP] Duplicate event: " << entry.eventId << std::endl;
+            return;
+        }
+        processedEventIds_.insert(entry.eventId);
+
+        // Parse and project (simplified; use JSON parser in production)
+        transfers_.push_back({"parsed-from", "parsed-to", 0.0});
+        std::cout << "  [PROJECTED] " << entry.eventId
+                  << " -> " << entry.payload << std::endl;
+    }
+
+    size_t transferCount() const { return transfers_.size(); }
+};
+
+int main() {
+    WriteModelWithOutbox writeModel;
+    TransferReadModel readModel;
+
+    writeModel.seedAccount("ACC-1", 1000.0);
+    writeModel.seedAccount("ACC-2", 500.0);
+
+    // Execute command
+    writeModel.handleTransfer("ACC-1", "ACC-2", 250.0);
+
+    // Outbox relay publishes events
+    auto events = writeModel.getUnpublishedEvents();
+    std::cout << "Publishing " << events.size() << " events:" << std::endl;
+    for (auto& evt : events) {
+        readModel.handleEvent(evt);
+        // Simulate redelivery (idempotency test)
+        readModel.handleEvent(evt);
+    }
+
+    std::cout << "Total projected transfers: "
+              << readModel.transferCount() << std::endl;
+    return 0;
+}`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "CQRS Architecture Overview",
+      kind: "architecture",
+      caption: "High-level view of CQRS with separate command and query paths, event bus, and multiple read model projections.",
+      mermaid: `flowchart TB
+    Client["Client / UI"]
+
+    subgraph CommandSide["Command Side (Write)"]
+        CmdAPI["Command API"]
+        CmdHandler["Command Handler"]
+        Validation["Validation & Business Rules"]
+        WriteDB[("Write Database\n(Normalized)")]
+        Outbox[("Outbox Table")]
+    end
+
+    subgraph EventInfra["Event Infrastructure"]
+        Relay["Outbox Relay / CDC"]
+        EventBus["Event Bus\n(Kafka / RabbitMQ)"]
+    end
+
+    subgraph QuerySide["Query Side (Read)"]
+        Proj1["Projection Handler\n(Orders)"]
+        Proj2["Projection Handler\n(Search)"]
+        Proj3["Projection Handler\n(Analytics)"]
+        ReadDB1[("PostgreSQL\nRead Replica")]
+        ReadDB2[("Elasticsearch\nSearch Index")]
+        ReadDB3[("ClickHouse\nAnalytics")]
+        QueryAPI["Query API"]
+    end
+
+    Client -->|"POST /commands"| CmdAPI
+    CmdAPI --> CmdHandler
+    CmdHandler --> Validation
+    Validation --> WriteDB
+    Validation --> Outbox
+    Outbox --> Relay
+    Relay --> EventBus
+    EventBus --> Proj1
+    EventBus --> Proj2
+    EventBus --> Proj3
+    Proj1 --> ReadDB1
+    Proj2 --> ReadDB2
+    Proj3 --> ReadDB3
+    Client -->|"GET /queries"| QueryAPI
+    QueryAPI --> ReadDB1
+    QueryAPI --> ReadDB2
+    QueryAPI --> ReadDB3`,
+    },
+    {
+      title: "CQRS Command Processing Flow",
+      kind: "sequence",
+      caption: "Sequence diagram showing the lifecycle of a command from client submission through event projection to read model update.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant CA as Command API
+    participant CH as Command Handler
+    participant WDB as Write DB
+    participant OB as Outbox
+    participant EB as Event Bus
+    participant PH as Projection Handler
+    participant RDB as Read DB
+    participant QA as Query API
+
+    C->>CA: POST /commands/create-order
+    CA->>CH: CreateOrderCommand
+    CH->>CH: Validate business rules
+    CH->>WDB: BEGIN TRANSACTION
+    CH->>WDB: INSERT order
+    CH->>OB: INSERT outbox event
+    CH->>WDB: COMMIT
+    CH-->>CA: 202 Accepted
+    CA-->>C: { status: "accepted" }
+
+    Note over OB,EB: Async: Outbox Relay polls
+
+    OB->>EB: Publish OrderCreated event
+    EB->>PH: Deliver event
+    PH->>PH: Check idempotency key
+    PH->>RDB: UPSERT read model
+
+    Note over C,QA: Later: Client queries
+
+    C->>QA: GET /queries/orders/ORD-001
+    QA->>RDB: SELECT from read model
+    RDB-->>QA: OrderSummaryDto
+    QA-->>C: { orderId, status, ... }`,
+    },
+    {
+      title: "CQRS State Transitions",
+      kind: "state",
+      caption: "State machine showing how a command flows through validation, persistence, event publication, and projection states.",
+      mermaid: `stateDiagram-v2
+    [*] --> CommandReceived
+    CommandReceived --> Validating: Parse & validate
+    Validating --> Rejected: Validation fails
+    Validating --> Persisting: Validation passes
+
+    Rejected --> [*]: Return 400 error
+
+    Persisting --> WritePersisted: Write DB commit
+    WritePersisted --> OutboxStored: Event in outbox
+
+    OutboxStored --> EventPublished: Relay publishes
+    EventPublished --> Projecting: Handler receives
+
+    Projecting --> ProjectionFailed: Error in handler
+    Projecting --> ReadModelUpdated: Projection complete
+
+    ProjectionFailed --> Projecting: Retry with backoff
+    ReadModelUpdated --> [*]: Query returns updated data`,
+    },
+  ],
+
+  comparison: {
+    columns: [
+      "Aspect",
+      "Traditional CRUD",
+      "CQRS (without Event Sourcing)",
+      "CQRS + Event Sourcing",
+    ],
+    rows: [
+      [
+        "**Data Model**",
+        "Single *normalized* model for reads and writes",
+        "Separate **write model** (normalized) and **read model** (denormalized)",
+        "Write model is an **event store**; read models are *projections* from events",
+      ],
+      [
+        "**Consistency**",
+        "**Strong consistency** — read-after-write guaranteed",
+        "**Eventual consistency** between write and read models",
+        "**Eventual consistency** — projections lag behind event store",
+      ],
+      [
+        "**Scalability**",
+        "Read and write scale *together* (vertical)",
+        "Read and write scale **independently** (horizontal reads)",
+        "Reads scale **independently**; event store is *append-only* and highly scalable",
+      ],
+      [
+        "**Query Performance**",
+        "May require *complex joins* across normalized tables",
+        "**Pre-joined**, denormalized read models — *no joins needed*",
+        "Projections can be **rebuilt** and *optimized* for any query pattern",
+      ],
+      [
+        "**Audit Trail**",
+        "Requires *separate audit logging* — only current state stored",
+        "Partial audit via **outbox events** — not a complete history",
+        "**Full audit trail** — every state change is an *immutable event*",
+      ],
+      [
+        "**Complexity**",
+        "**Low** — single model, single database, *simple CRUD operations*",
+        "**Medium** — event bus, projection handlers, *consistency management*",
+        "**High** — event store, *snapshots*, projection rebuilds, *versioning*",
+      ],
+      [
+        "**Storage**",
+        "Single database (e.g., `PostgreSQL`)",
+        "**Polyglot**: `SQL` for writes, `Elasticsearch`/`Redis` for reads",
+        "**Event store** + multiple *projection databases* — most storage-intensive",
+      ],
+      [
+        "**Rebuild Capability**",
+        "Cannot rebuild — *current state only*",
+        "Read models can be **rebuilt from write DB** (with limitations)",
+        "Read models fully **rebuildable** by *replaying all events*",
+      ],
+    ],
+  },
+
+  exercises: [
+    "**Design a CQRS System**: You are building an e-commerce platform where reads outnumber writes *100:1*. Design the **command side** (order creation, payment processing, inventory updates) and the **query side** (product catalog search, order history, analytics dashboard). Specify which *storage technology* you would use for each read model and justify your choices. Draw the **event flow** from a `CreateOrder` command through to the read model update.",
+    "**Implement Idempotent Projections**: Given an event bus that guarantees **at-least-once delivery**, implement a projection handler in your language of choice that handles `OrderCreated`, `OrderShipped`, and `OrderCancelled` events *idempotently*. Ensure that processing the same event twice does not corrupt the read model. Test with a scenario where `OrderCreated` is delivered *three times* followed by `OrderShipped`.",
+    "**Handle Eventual Consistency in the UI**: A user submits a form to create a new task in a project management app. After the command succeeds, the user is redirected to the task list — but the *read model has not been updated yet*. Implement **three different strategies** to handle this: (1) `read-your-writes` with version tokens, (2) *optimistic UI update*, and (3) **polling with exponential backoff**. Compare the *trade-offs* of each approach.",
+    "**Outbox Pattern Implementation**: Implement the **outbox pattern** for a banking application that processes *money transfers*. The write side must atomically persist the transfer and the outbox event in a **single database transaction**. Build the *relay process* that reads unpublished events and publishes them to a message broker. Handle the case where the relay process *crashes and restarts* — ensure no events are lost or duplicated.",
+    "**CQRS Read Model Migration**: Your CQRS system has been running for 6 months with a `PostgreSQL` read model for order queries. Product wants to add **full-text search** across order descriptions, customer names, and product details. Design the *migration plan*: how do you add an `Elasticsearch` read model, **backfill** it with existing data, and ensure it stays *synchronized* with the write side going forward? Consider the impact on existing query endpoints.",
+  ],
+
+  cheatSheet: [
+    "**Commands** change state and return *success/failure* only. **Queries** return data and *never* modify state. A method that does both violates **CQS**.",
+    "Use the **outbox pattern** to avoid *dual-write failures*: persist the event in an `outbox` table within the **same transaction** as the state change, then relay it asynchronously.",
+    "**Projection handlers must be idempotent** — with *at-least-once delivery*, the same event may arrive multiple times. Use an `eventId` or `sequence number` to detect and skip duplicates.",
+    "Read models are **disposable** — they can be *deleted and rebuilt* from the event source or write-side change log. Design them as **denormalized views** tailored to specific query patterns.",
+    "**Eventual consistency** is the core trade-off. Handle it with: *optimistic UI*, `read-your-writes` consistency (version tokens), **polling/SSE/WebSocket**, or *causal consistency* tokens.",
+    "CQRS **does not require event sourcing**. You can use a traditional *relational database* for writes and propagate changes via **CDC** (Change Data Capture) or application-level domain events.",
+  ],
+
+  revisionNotes: [
+    "**Core Principle**: CQRS separates the *write model* (commands — validate and persist state changes) from the *read model* (queries — return denormalized, pre-joined data). Each model can use **different databases**, *different schemas*, and **scale independently**.",
+    "**Event Propagation**: Write-side changes flow to read models via **domain events**. The **outbox pattern** ensures reliable delivery: events are stored in an `outbox` table *atomically* with the write, then relayed to the event bus by a separate process. This avoids *distributed transaction* complexity.",
+    "**Consistency Trade-off**: CQRS with async projections means **eventual consistency** — the read model *lags behind* the write model. Mitigation strategies include `read-your-writes` guarantees (version tokens), *optimistic UI updates*, and **polling with backoff**. Synchronous projections provide strong consistency but *couple read/write performance*.",
+    "**When to Use**: CQRS is justified when (1) read/write workloads have *vastly different scaling needs*, (2) read and write models have **fundamentally different shapes**, (3) *multiple read representations* are needed (search, analytics, API), or (4) combined with **event sourcing** where projections naturally form the read side.",
+    "**Key Implementation Details**: Projection handlers must be **idempotent** (same event processed twice produces same result). Read models are *disposable and rebuildable*. The **outbox relay** must handle crashes gracefully — use `last-processed-offset` tracking. Monitor *projection lag* and *dead-letter queues* in production.",
+  ],
+
   glossary: [
     {
       term: "CQRS",

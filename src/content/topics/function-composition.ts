@@ -124,94 +124,123 @@ const result = [1, 2, 3, 4, 5].reduce(
 console.log(result); // [4, 8]`,
     },
     {
-      language: "python",
-      caption: "Compose, curry, and partial in Python using functools",
-      source: `from functools import reduce, partial, wraps
-from typing import Callable, TypeVar, Any
+      language: "cpp",
+      caption: "Compose, pipe, and partial application in C++ using templates and lambdas",
+      source: `#include <algorithm>
+#include <functional>
+#include <iostream>
+#include <numeric>
+#include <string>
+#include <vector>
 
-A = TypeVar("A")
-B = TypeVar("B")
-C = TypeVar("C")
+// --- compose: right-to-left composition of two functions ---
+template <typename F, typename G>
+auto compose(F f, G g) {
+    return [f, g](auto x) { return f(g(x)); };
+}
 
-# --- compose and pipe ---
-def compose(*fns: Callable) -> Callable:
-    """Right-to-left function composition."""
-    def composed(x: Any) -> Any:
-        return reduce(lambda acc, f: f(acc), reversed(fns), x)
-    return composed
+// --- pipe: left-to-right composition of two functions ---
+template <typename F, typename G>
+auto pipe(F f, G g) {
+    return [f, g](auto x) { return g(f(x)); };
+}
 
-def pipe(*fns: Callable) -> Callable:
-    """Left-to-right function composition."""
-    def piped(x: Any) -> Any:
-        return reduce(lambda acc, f: f(acc), fns, x)
-    return piped
+// --- Variadic compose: compose(f, g, h)(x) = f(g(h(x))) ---
+template <typename F>
+auto compose_all(F f) { return f; }
 
-# --- auto-curry decorator ---
-def curry(fn: Callable) -> Callable:
-    """Auto-curry: call with fewer args returns a partially applied function."""
-    import inspect
-    arity = len(inspect.signature(fn).parameters)
+template <typename F, typename... Fs>
+auto compose_all(F f, Fs... rest) {
+    return [f, rest...](auto x) {
+        return f(compose_all(rest...)(x));
+    };
+}
 
-    @wraps(fn)
-    def curried(*args: Any) -> Any:
-        if len(args) >= arity:
-            return fn(*args)
-        return curry(partial(fn, *args))
+// --- Variadic pipe: pipe_all(f, g, h)(x) = h(g(f(x))) ---
+template <typename F>
+auto pipe_all(F f) { return f; }
 
-    return curried
+template <typename F, typename... Fs>
+auto pipe_all(F f, Fs... rest) {
+    return [f, rest...](auto x) {
+        return pipe_all(rest...)(f(x));
+    };
+}
 
-# --- Usage ---
-@curry
-def add(a: int, b: int) -> int:
-    return a + b
+// --- Curried functions via nested lambdas ---
+auto add = [](int a) {
+    return [a](int b) { return a + b; };
+};
 
-@curry
-def multiply(a: int, b: int) -> int:
-    return a * b
+auto multiply = [](int a) {
+    return [a](int b) { return a * b; };
+};
 
-add_10 = add(10)           # partial application via curry
-double = multiply(2)
+int main() {
+    // Partial application via currying
+    auto add_10 = add(10);      // fixes first argument
+    auto doubler = multiply(2);
 
-transform = pipe(add_10, double)
-print(transform(5))        # (5 + 10) * 2 = 30
+    // Pipe: left-to-right composition
+    auto transform = pipe(add_10, doubler);
+    std::cout << transform(5) << "\\n"; // (5 + 10) * 2 = 30
 
-# Point-free string processing
-strip = str.strip
-lower = str.lower
+    // --- String processing pipeline ---
+    auto trim = [](std::string s) {
+        auto start = s.find_first_not_of(" ");
+        auto end   = s.find_last_not_of(" ");
+        return (start == std::string::npos) ? "" : s.substr(start, end - start + 1);
+    };
+    auto to_lower = [](std::string s) {
+        std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+        return s;
+    };
+    auto replace_spaces = [](std::string s) {
+        std::replace(s.begin(), s.end(), ' ', '-');
+        return s;
+    };
 
-@curry
-def replace(old: str, new: str, s: str) -> str:
-    return s.replace(old, new)
+    auto slugify = pipe_all(trim, to_lower, replace_spaces);
+    std::cout << slugify(std::string("  Hello World  ")) << "\\n"; // "hello-world"
 
-@curry
-def split(sep: str, s: str) -> list[str]:
-    return s.split(sep)
+    // --- Transducer-like pattern: single-pass map + filter ---
+    auto xmap = [](auto f) {
+        return [f](auto step) {
+            return [f, step](auto acc, auto val) {
+                return step(acc, f(val));
+            };
+        };
+    };
+    auto xfilter = [](auto pred) {
+        return [pred](auto step) {
+            return [pred, step](auto acc, auto val) {
+                return pred(val) ? step(acc, val) : acc;
+            };
+        };
+    };
 
-slugify = pipe(
-    strip,
-    lower,
-    partial(replace, " ", "-"),
-)
-print(slugify("  Hello World  "))  # "hello-world"
+    // compose transducers: double then keep multiples of 4
+    auto xform = compose(
+        xmap([](int n) { return n * 2; }),
+        xfilter([](int n) { return n % 4 == 0; })
+    );
 
-# --- Transducers in Python ---
-def xmap(f):
-    def transducer(step):
-        def reducer(acc, val):
-            return step(acc, f(val))
-        return reducer
-    return transducer
+    std::vector<int> data = {1, 2, 3, 4, 5};
+    auto appender = [](std::vector<int> acc, int val) {
+        acc.push_back(val);
+        return acc;
+    };
 
-def xfilter(pred):
-    def transducer(step):
-        def reducer(acc, val):
-            return step(acc, val) if pred(val) else acc
-        return reducer
-    return transducer
+    auto result = std::accumulate(
+        data.begin(), data.end(),
+        std::vector<int>{},
+        xform(appender)
+    );
+    for (int v : result) std::cout << v << " "; // 4 8
+    std::cout << "\\n";
 
-xform = compose(xmap(lambda n: n * 2), xfilter(lambda n: n % 4 == 0))
-result = reduce(xform(lambda acc, v: acc + [v]), [1, 2, 3, 4, 5], [])
-print(result)  # [4, 8]`,
+    return 0;
+}`,
     },
     {
       language: "haskell",
@@ -454,6 +483,13 @@ result = foldr (xform (:)) [] [1, 2, 3, 4, 5]
     "JS/TS: Ramda R.compose/R.pipe/R.curry, fp-ts flow/pipe, lodash/fp",
   ],
 
+  exercises: [
+    "Implement a **slugify pipeline** using `pipe` in TypeScript: `trim` -> `toLowerCase` -> replace spaces with hyphens -> remove non-alphanumeric characters (except hyphens). Write each step as a *curried* function and compose them point-free. Test with input `'  Hello, World!  '` and verify the output is `'hello-world'`.",
+    "Build a **transducer** in TypeScript that composes `xmap(x => x * 3)`, `xfilter(x => x > 10)`, and `xmap(x => x.toString())` into a single pass over an array of numbers. Run it on `[1, 2, 3, 4, 5]` using `Array.prototype.reduce`. Compare the result and performance characteristics against the equivalent chained `.map().filter().map()` approach.",
+    "Write a `compose` function in C++ using **templates and lambdas** that composes two unary functions: `compose(f, g)(x) = f(g(x))`. Then extend it to a *variadic* version that composes N functions using fold expressions (C++17). Demonstrate it with a pipeline that converts a `std::string` to lowercase, trims whitespace, and reverses it.",
+    "Implement **Kleisli composition** for `std::optional` in C++: write a function `kleisli` that takes two functions `f: A -> optional<B>` and `g: B -> optional<C>` and returns `A -> optional<C>`. Use it to compose `safeDivide(100, x)` and `safeSqrt(x)` where each returns `std::nullopt` on invalid input. Verify that the composed function short-circuits on `0`.",
+    "Refactor an imperative data processing function into a **point-free pipeline** using Ramda or fp-ts. The function should: parse a JSON string, extract the `users` array, filter for `active: true`, sort by `name`, and return an array of email addresses. Identify where *currying* and *partial application* enable the point-free style.",
+  ],
   resources: [
     { label: "Professor Frisby's Mostly Adequate Guide to FP (Ch. 5-6: Compose & Curry)", kind: "book", note: "Free online book covering composition and currying with practical JavaScript examples" },
     { label: "Haskell Wiki: Function Composition", kind: "docs", note: "Definitive reference for (.), ($), point-free style, and eta-reduction in Haskell" },

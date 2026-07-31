@@ -81,39 +81,56 @@ channel.basicConsume("order-queue", false, new DefaultConsumer(channel) {
 });`,
     },
     {
-      language: "python",
+      language: "cpp",
       caption: "Kafka consumer with controlled poll rate and batch processing",
-      source: `from kafka import KafkaConsumer
-import time
+      source: `#include <librdkafka/rdkafkacpp.h>
+#include <iostream>
+#include <thread>
+#include <chrono>
 
-consumer = KafkaConsumer(
-    'sensor-data',
-    bootstrap_servers='localhost:9092',
-    group_id='analytics',
-    enable_auto_commit=False,
-    max_poll_records=100,       # Backpressure: limit batch size
-    fetch_max_bytes=1048576,    # 1 MB max per fetch
-    max_poll_interval_ms=300000 # 5 min max between polls
-)
+// Simplified Kafka consumer with pull-based backpressure
+// Using librdkafka C++ API
 
-while True:
-    # Pull-based: consumer controls rate by polling frequency
-    records = consumer.poll(timeout_ms=1000)
+int main() {
+    RdKafka::Conf* conf = RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL);
+    std::string errstr;
 
-    if not records:
-        continue
+    conf->set("bootstrap.servers", "localhost:9092", errstr);
+    conf->set("group.id", "analytics", errstr);
+    conf->set("enable.auto.commit", "false", errstr);
+    conf->set("max.poll.records", "100", errstr);       // Backpressure: limit batch size
+    conf->set("fetch.max.bytes", "1048576", errstr);     // 1 MB max per fetch
 
-    for tp, messages in records.items():
-        for msg in messages:
-            process_sensor_reading(msg.value)
+    RdKafka::KafkaConsumer* consumer =
+        RdKafka::KafkaConsumer::create(conf, errstr);
+    delete conf;
 
-    # Commit only after successful processing
-    consumer.commit()
+    std::vector<std::string> topics = {"sensor-data"};
+    consumer->subscribe(topics);
 
-    # Optional: adaptive throttling based on processing time
-    batch_size = sum(len(msgs) for msgs in records.values())
-    if batch_size >= 100:
-        time.sleep(0.5)  # Slow down if consistently hitting max batch`,
+    while (true) {
+        // Pull-based: consumer controls rate by polling frequency
+        RdKafka::Message* msg = consumer->consume(1000);  // timeout 1s
+
+        if (msg->err() == RdKafka::ERR_NO_ERROR) {
+            // Process the sensor reading
+            process_sensor_reading(msg->payload(), msg->len());
+
+            // Commit only after successful processing
+            consumer->commitSync();
+        }
+
+        delete msg;
+
+        // Optional: adaptive throttling based on processing time
+        // Slow down if consistently hitting max batch
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    consumer->close();
+    delete consumer;
+    return 0;
+}`,
     },
     {
       language: "typescript",
@@ -339,5 +356,13 @@ await pipeline(source, processor, sink);`,
     { term: "Token bucket", definition: "Rate-limiting algorithm that allows bursts up to a configured bucket size and then enforces a steady rate." },
     { term: "highWaterMark", definition: "In Node.js streams, the buffer threshold above which the stream signals the producer to pause." },
     { term: "Flow control", definition: "General term for mechanisms that regulate the rate of data transfer between producer and consumer." },
+  ],
+
+  exercises: [
+    "You have a **data pipeline**: an HTTP ingestion endpoint receives 50,000 events/sec, writes to a Kafka topic, and a consumer service processes events and writes to PostgreSQL (which can handle 5,000 inserts/sec). Identify *every point* where backpressure can occur in this pipeline. For each point, propose a specific mechanism (e.g., `basic.qos`, `max.poll.records`, connection pool limits) and explain the trade-off between **data loss** and **latency**.",
+    "Implement a **bounded producer-consumer queue** in C++ using `std::mutex`, `std::condition_variable`, and a fixed-size `std::deque`. The producer should *block* when the queue is full (backpressure). Measure the throughput difference between a bounded queue of size 10, 100, and 1000. At what point does increasing the buffer size stop improving throughput, and why?",
+    "Compare **three overflow strategies** for a message buffer: *drop-oldest*, *drop-newest*, and *block-sender*. For each strategy, give a real-world scenario where it is the best choice (e.g., live video streaming, financial transactions, IoT sensor data). Implement all three as variants of a `template<typename T> class BackpressureBuffer` in C++.",
+    "A **Reactive Streams** publisher emits items at variable rates (bursts of 10,000/sec, then idle). The subscriber calls `subscription.request(100)` after processing each batch. Design the buffering and demand-signaling strategy so the system handles bursts *without dropping data* and without unbounded memory growth. What role does the `onBackpressureBuffer(maxSize, overflowStrategy)` operator play?",
+    "Your Kafka consumer group has **consumer lag** growing steadily at 500 messages/sec across 12 partitions. Walk through a systematic **diagnosis and remediation** process: How do you determine whether the bottleneck is *deserialization*, *processing logic*, *database writes*, or *insufficient consumers*? What Kafka consumer configs (`max.poll.records`, `fetch.max.bytes`, `max.poll.interval.ms`) would you tune, and in what order?"
   ],
 };

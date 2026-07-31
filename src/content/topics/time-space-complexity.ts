@@ -22,88 +22,105 @@ export const timeSpaceComplexity: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Analyzing time complexity of common patterns",
-      source: `# Pattern 1: Simple loop — O(n)
-def linear_search(arr, target):
-    for x in arr:           # n iterations
-        if x == target:
-            return True
-    return False
+      source: `#include <vector>
+#include <utility>
+#include <algorithm>
 
-# Pattern 2: Nested loops — O(n^2)
-def all_pairs(arr):
-    pairs = []
-    for i in range(len(arr)):         # n
-        for j in range(i+1, len(arr)):  # n-1, n-2, ... => sum = n(n-1)/2
-            pairs.append((arr[i], arr[j]))
-    return pairs
+// Pattern 1: Simple loop -- O(n)
+bool linear_search(const std::vector<int>& arr, int target) {
+    for (int x : arr) {           // n iterations
+        if (x == target) return true;
+    }
+    return false;
+}
 
-# Pattern 3: Logarithmic — O(log n)
-def binary_search(arr, target):
-    lo, hi = 0, len(arr) - 1
-    while lo <= hi:                   # halves each time => log n
-        mid = (lo + hi) // 2
-        if arr[mid] == target:
-            return mid
-        elif arr[mid] < target:
-            lo = mid + 1
-        else:
-            hi = mid - 1
-    return -1
+// Pattern 2: Nested loops -- O(n^2)
+std::vector<std::pair<int,int>> all_pairs(const std::vector<int>& arr) {
+    std::vector<std::pair<int,int>> pairs;
+    for (size_t i = 0; i < arr.size(); ++i) {           // n
+        for (size_t j = i + 1; j < arr.size(); ++j) {   // n-1, n-2, ... => n(n-1)/2
+            pairs.emplace_back(arr[i], arr[j]);
+        }
+    }
+    return pairs;
+}
 
-# Pattern 4: Divide and conquer — O(n log n)
-def merge_sort(arr):
-    if len(arr) <= 1:
-        return arr
-    mid = len(arr) // 2
-    left = merge_sort(arr[:mid])      # T(n/2)
-    right = merge_sort(arr[mid:])     # T(n/2)
-    return merge(left, right)         # O(n) merge step
+// Pattern 3: Logarithmic -- O(log n)
+int binary_search(const std::vector<int>& arr, int target) {
+    int lo = 0, hi = static_cast<int>(arr.size()) - 1;
+    while (lo <= hi) {                   // halves each time => log n
+        int mid = lo + (hi - lo) / 2;
+        if (arr[mid] == target) return mid;
+        else if (arr[mid] < target) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return -1;
+}
 
-def merge(left, right):
-    result = []
-    i = j = 0
-    while i < len(left) and j < len(right):
-        if left[i] <= right[j]:
-            result.append(left[i]); i += 1
-        else:
-            result.append(right[j]); j += 1
-    result.extend(left[i:])
-    result.extend(right[j:])
-    return result`,
+// Pattern 4: Divide and conquer -- O(n log n)
+std::vector<int> merge(const std::vector<int>& left,
+                       const std::vector<int>& right) {
+    std::vector<int> result;
+    size_t i = 0, j = 0;
+    while (i < left.size() && j < right.size()) {
+        if (left[i] <= right[j]) { result.push_back(left[i++]); }
+        else                     { result.push_back(right[j++]); }
+    }
+    while (i < left.size()) result.push_back(left[i++]);
+    while (j < right.size()) result.push_back(right[j++]);
+    return result;
+}
+
+std::vector<int> merge_sort(std::vector<int> arr) {
+    if (arr.size() <= 1) return arr;
+    size_t mid = arr.size() / 2;
+    std::vector<int> left(arr.begin(), arr.begin() + mid);    // T(n/2)
+    std::vector<int> right(arr.begin() + mid, arr.end());     // T(n/2)
+    return merge(merge_sort(left), merge_sort(right));        // O(n) merge step
+}`,
     },
     {
-      language: "python",
-      caption: "Space complexity examples — stack frames vs auxiliary space",
-      source: `# O(n) auxiliary space — new array created
-def reverse_copy(arr):
-    return arr[::-1]          # creates a new list of size n
+      language: "cpp",
+      caption: "Space complexity examples -- stack frames vs auxiliary space",
+      source: `#include <vector>
+#include <algorithm>
 
-# O(1) auxiliary space — in-place reversal
-def reverse_inplace(arr):
-    lo, hi = 0, len(arr) - 1
-    while lo < hi:
-        arr[lo], arr[hi] = arr[hi], arr[lo]
-        lo += 1; hi -= 1
+// O(n) auxiliary space -- new array created
+std::vector<int> reverse_copy(const std::vector<int>& arr) {
+    return std::vector<int>(arr.rbegin(), arr.rend());  // new vector of size n
+}
 
-# O(n) stack space — linear recursion
-def factorial(n):
-    if n <= 1: return 1
-    return n * factorial(n - 1)   # n stack frames
+// O(1) auxiliary space -- in-place reversal
+void reverse_inplace(std::vector<int>& arr) {
+    int lo = 0, hi = static_cast<int>(arr.size()) - 1;
+    while (lo < hi) {
+        std::swap(arr[lo], arr[hi]);
+        ++lo; --hi;
+    }
+}
 
-# O(log n) stack space — balanced recursive splitting
-def sum_array(arr, lo, hi):
-    if lo == hi: return arr[lo]
-    mid = (lo + hi) // 2
-    return sum_array(arr, lo, mid) + sum_array(arr, mid+1, hi)
-    # depth = log n, only one branch active at a time
+// O(n) stack space -- linear recursion
+long long factorial(int n) {
+    if (n <= 1) return 1;
+    return n * factorial(n - 1);   // n stack frames
+}
 
-# O(2^n) time but O(n) space — branching recursion
-def fib(n):
-    if n <= 1: return n
-    return fib(n-1) + fib(n-2)
-    # 2^n calls total, but max stack depth is n`,
+// O(log n) stack space -- balanced recursive splitting
+int sum_array(const std::vector<int>& arr, int lo, int hi) {
+    if (lo == hi) return arr[lo];
+    int mid = lo + (hi - lo) / 2;
+    return sum_array(arr, lo, mid) + sum_array(arr, mid + 1, hi);
+    // depth = log n, only one branch active at a time
+}
+
+// O(2^n) time but O(n) space -- branching recursion
+int fib(int n) {
+    if (n <= 1) return n;
+    return fib(n - 1) + fib(n - 2);
+    // 2^n calls total, but max stack depth is n
+}`,
     },
   ],
   diagrams: [

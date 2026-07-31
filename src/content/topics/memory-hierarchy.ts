@@ -65,59 +65,95 @@ int main(void) {
 }`,
     },
     {
-      language: "python",
-      caption: "Simulating a set-associative cache",
-      source: `from collections import OrderedDict
+      language: "cpp",
+      caption: "Simulating a set-associative cache in C++",
+      source: `// N-way set-associative cache simulator with LRU replacement.
+// Uses a doubly-linked list per set for O(1) LRU tracking.
 
-class SetAssociativeCache:
-    """N-way set-associative cache simulator with LRU replacement."""
+#include <iostream>
+#include <vector>
+#include <list>
+#include <unordered_map>
+#include <cstdint>
+#include <iomanip>
 
-    def __init__(self, num_sets: int, ways: int, line_size: int = 64):
-        self.num_sets = num_sets
-        self.ways = ways
-        self.line_size = line_size
-        # Each set is an OrderedDict (LRU order) mapping tag -> data
-        self.sets: list[OrderedDict] = [OrderedDict() for _ in range(num_sets)]
-        self.hits = 0
-        self.misses = 0
+class SetAssociativeCache {
+public:
+    SetAssociativeCache(int num_sets, int ways, int line_size = 64)
+        : num_sets_(num_sets), ways_(ways), line_size_(line_size),
+          hits_(0), misses_(0),
+          sets_(num_sets), maps_(num_sets) {}
 
-    def _parse_address(self, addr: int) -> tuple[int, int]:
-        block_addr = addr // self.line_size
-        set_index = block_addr % self.num_sets
-        tag = block_addr // self.num_sets
-        return set_index, tag
+    bool access(uint64_t addr) {
+        auto [set_idx, tag] = parse_address(addr);
+        auto& lru_list = sets_[set_idx];   // front = LRU, back = MRU
+        auto& tag_map  = maps_[set_idx];
 
-    def access(self, addr: int) -> bool:
-        set_idx, tag = self._parse_address(addr)
-        cache_set = self.sets[set_idx]
+        auto it = tag_map.find(tag);
+        if (it != tag_map.end()) {
+            // Cache hit: move to back (most recently used)
+            lru_list.splice(lru_list.end(), lru_list, it->second);
+            ++hits_;
+            return true;
+        }
 
-        if tag in cache_set:
-            cache_set.move_to_end(tag)  # Mark as most recently used
-            self.hits += 1
-            return True  # Hit
-        else:
-            self.misses += 1
-            if len(cache_set) >= self.ways:
-                cache_set.popitem(last=False)  # Evict LRU entry
-            cache_set[tag] = True  # Insert new line
-            return False  # Miss
+        // Cache miss
+        ++misses_;
+        if (static_cast<int>(lru_list.size()) >= ways_) {
+            // Evict LRU entry (front of list)
+            uint64_t evict_tag = lru_list.front();
+            tag_map.erase(evict_tag);
+            lru_list.pop_front();
+        }
+        // Insert new line at back (most recently used)
+        lru_list.push_back(tag);
+        tag_map[tag] = std::prev(lru_list.end());
+        return false;
+    }
 
-    @property
-    def hit_rate(self) -> float:
-        total = self.hits + self.misses
-        return self.hits / total if total > 0 else 0.0
+    int hits()   const { return hits_; }
+    int misses() const { return misses_; }
 
-# Simulate: 4-way set-associative, 16 sets, 64-byte lines
-cache = SetAssociativeCache(num_sets=16, ways=4, line_size=64)
+    double hit_rate() const {
+        int total = hits_ + misses_;
+        return total > 0 ? static_cast<double>(hits_) / total : 0.0;
+    }
 
-# Sequential access pattern (good locality)
-for addr in range(0, 4096, 4):   # stride-4 through 4 KB
-    cache.access(addr)
-for addr in range(0, 4096, 4):   # repeat — should all hit
-    cache.access(addr)
+private:
+    int num_sets_, ways_, line_size_;
+    int hits_, misses_;
 
-print(f"Hits: {cache.hits}, Misses: {cache.misses}")
-print(f"Hit rate: {cache.hit_rate:.1%}")`,
+    // Each set: a list for LRU order, a map for O(1) tag lookup
+    std::vector<std::list<uint64_t>> sets_;
+    std::vector<std::unordered_map<uint64_t, std::list<uint64_t>::iterator>> maps_;
+
+    std::pair<int, uint64_t> parse_address(uint64_t addr) const {
+        uint64_t block_addr = addr / line_size_;
+        int set_index = static_cast<int>(block_addr % num_sets_);
+        uint64_t tag = block_addr / num_sets_;
+        return {set_index, tag};
+    }
+};
+
+int main() {
+    // 4-way set-associative, 16 sets, 64-byte cache lines
+    SetAssociativeCache cache(16, 4, 64);
+
+    // Sequential access pattern (good spatial locality)
+    for (uint64_t addr = 0; addr < 4096; addr += 4)
+        cache.access(addr);
+
+    // Repeat — should all hit from cache
+    for (uint64_t addr = 0; addr < 4096; addr += 4)
+        cache.access(addr);
+
+    std::cout << "Hits: " << cache.hits()
+              << ", Misses: " << cache.misses() << std::endl;
+    std::cout << "Hit rate: " << std::fixed << std::setprecision(1)
+              << (cache.hit_rate() * 100.0) << "%" << std::endl;
+
+    return 0;
+}`,
     },
   ],
   diagrams: [

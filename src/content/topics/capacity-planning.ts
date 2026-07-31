@@ -203,4 +203,457 @@ Reserved instances and savings plans reduce cost for baseline capacity; auto-sca
         "The practice of projecting future traffic demand using historical trends, business forecasts, and seasonal patterns to inform capacity decisions.",
     },
   ],
+
+  deepDive: [
+    `**Capacity planning at hyperscale** is a discipline that separates *resilient* global platforms from those that crumble under growth. Companies like **Google** use the **Borg** cluster manager to perform *bin-packing* — fitting workloads onto machines like a three-dimensional puzzle of CPU, memory, and disk — achieving utilization rates above **60%** while maintaining strict **resource quotas** per team. **Amazon** employs *cell-based architecture*, isolating blast radius so that capacity exhaustion in one cell cannot cascade. **Netflix** pioneered *chaos engineering* alongside capacity planning, using tools like \`Chaos Monkey\` to validate that capacity buffers survive real-world failure modes. At this scale, capacity planning becomes a *statistical* exercise: you are not planning for a single server but for **probability distributions** across thousands of machines, where even a 0.1% tail event affects millions of users.`,
+
+    `**Advanced load testing** goes far beyond running a simple script against an endpoint. *Distributed load generation* — coordinating hundreds of load generators across multiple regions using tools like \`k6 Cloud\`, \`Locust\` in distributed mode, or **Gatling Enterprise** — is essential for simulating realistic global traffic patterns. **Traffic replay** from production logs (using tools like \`GoReplay\` or \`Shadowtraffic\`) captures the *actual distribution* of request types, sizes, and timing that synthetic tests miss. The **coordinated omission problem**, first described by *Gil Tene*, occurs when load generators *slow down* their request rate as the system under test slows down, producing \`artificially optimistic\` latency measurements. Tools like \`wrk2\` and \`k6\` use *open-loop* designs that maintain constant request rate regardless of response time. Integrating **performance regression detection** into CI — comparing p99 latency and throughput against baselines with statistical significance tests — catches degradations *before* they reach production.`,
+
+    `**Cost-capacity optimization** bridges capacity planning with **FinOps** principles, treating infrastructure spend as a *first-class engineering metric*. **Right-sizing recommendations** from tools like \`AWS Compute Optimizer\`, \`Google Recommender\`, or open-source \`Goldilocks\` analyze actual resource consumption versus provisioned capacity, often finding **30-50% overprovisioning**. For load testing environments, *spot instances* and **preemptible VMs** can reduce costs by **60-90%** — the ephemeral nature of load tests makes them ideal candidates. **Serverless capacity planning** shifts the focus from instance counts to *concurrency limits*, \`cold start\` latency budgets, and per-invocation cost modeling. **Edge computing** adds another dimension: capacity must be planned per *point of presence* (PoP), balancing the cost of edge nodes against latency reduction. The goal is a **capacity-cost curve** — understanding exactly how much each additional unit of capacity costs at different scale points, enabling *informed* trade-off decisions between performance, reliability, and spend.`,
+  ],
+
+  code: [
+    {
+      language: "javascript",
+      caption: "k6 load test script with **staged ramp-up**, *thresholds*, and `custom metrics`",
+      source: `import http from 'k6/http';
+import { check, sleep } from 'k6';
+import { Rate, Trend } from 'k6/metrics';
+
+// Custom metrics for capacity analysis
+const errorRate = new Rate('errors');
+const apiDuration = new Trend('api_duration', true);
+
+export const options = {
+  // Staged ramp-up simulates realistic traffic growth
+  stages: [
+    { duration: '2m', target: 100 },   // Ramp to 100 VUs
+    { duration: '5m', target: 100 },   // Hold at 100 VUs (baseline)
+    { duration: '3m', target: 500 },   // Ramp to 500 VUs (peak)
+    { duration: '5m', target: 500 },   // Hold at peak
+    { duration: '2m', target: 0 },     // Ramp down
+  ],
+  thresholds: {
+    http_req_duration: ['p(95)<300', 'p(99)<1000'],  // Latency SLOs
+    errors: ['rate<0.01'],                             // <1% error rate
+    api_duration: ['avg<200', 'p(90)<400'],
+  },
+};
+
+export default function () {
+  const res = http.get('https://api.example.com/products', {
+    headers: { 'Authorization': 'Bearer \${__ENV.API_TOKEN}' },
+    tags: { endpoint: 'products' },
+  });
+
+  apiDuration.add(res.timings.duration);
+  errorRate.add(res.status >= 400);
+
+  check(res, {
+    'status is 200': (r) => r.status === 200,
+    'response time < 300ms': (r) => r.timings.duration < 300,
+    'body contains data': (r) => r.json().data !== undefined,
+  });
+
+  sleep(Math.random() * 3 + 1); // Realistic think time
+}`,
+    },
+    {
+      language: "hcl",
+      caption: "Terraform **auto-scaling policy** with *predictive scaling* and `target tracking`",
+      source: `resource "aws_autoscaling_group" "app" {
+  name                = "app-asg"
+  min_size            = 2
+  max_size            = 50
+  desired_capacity    = 4
+  vpc_zone_identifier = var.private_subnet_ids
+  health_check_type   = "ELB"
+  health_check_grace_period = 300
+
+  launch_template {
+    id      = aws_launch_template.app.id
+    version = "$Latest"
+  }
+
+  # Scale out aggressively, scale in conservatively
+  instance_refresh {
+    strategy = "Rolling"
+    preferences {
+      min_healthy_percentage = 80
+    }
+  }
+}
+
+# Target tracking: maintain 60% average CPU
+resource "aws_autoscaling_policy" "cpu_target" {
+  name                   = "cpu-target-tracking"
+  autoscaling_group_name = aws_autoscaling_group.app.name
+  policy_type            = "TargetTrackingScaling"
+
+  target_tracking_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ASGAverageCPUUtilization"
+    }
+    target_value     = 60.0
+    scale_in_cooldown  = 300  # Conservative scale-in (5 min)
+    scale_out_cooldown = 60   # Aggressive scale-out (1 min)
+  }
+}
+
+# Predictive scaling based on historical patterns
+resource "aws_autoscaling_policy" "predictive" {
+  name                   = "predictive-scaling"
+  autoscaling_group_name = aws_autoscaling_group.app.name
+  policy_type            = "PredictiveScaling"
+
+  predictive_scaling_configuration {
+    metric_specification {
+      target_value = 60
+      predefined_load_metric_specification {
+        predefined_metric_type = "ASGTotalCPUUtilization"
+        resource_label         = "app-production"
+      }
+      predefined_scaling_metric_specification {
+        predefined_metric_type = "ASGAverageCPUUtilization"
+      }
+    }
+    mode                          = "ForecastAndScale"
+    scheduling_buffer_time        = 300
+  }
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "**Capacity runway calculator** with *growth modeling* and `exhaustion date` forecasting",
+      source: `#include <iostream>
+#include <vector>
+#include <string>
+#include <cmath>
+#include <algorithm>
+#include <iomanip>
+#include <sstream>
+#include <ctime>
+#include <limits>
+
+struct CapacityMetrics {
+    std::string resource_name;
+    double current_usage;   // e.g., 3500 RPS
+    double max_capacity;    // e.g., 5000 RPS
+    std::string unit;       // e.g., "RPS", "GB", "connections"
+};
+
+struct DataPoint {
+    int day_offset;   // days since first measurement
+    double value;
+};
+
+// Simple linear regression: fits y = m*x + c using least squares
+struct LinFit { double m; double c; };
+
+LinFit linear_fit(const std::vector<DataPoint>& pts) {
+    double sx = 0, sy = 0, sxx = 0, sxy = 0;
+    int n = static_cast<int>(pts.size());
+    for (auto& p : pts) {
+        sx  += p.day_offset;
+        sy  += p.value;
+        sxx += p.day_offset * p.day_offset;
+        sxy += p.day_offset * p.value;
+    }
+    double denom = n * sxx - sx * sx;
+    double m = (n * sxy - sx * sy) / denom;
+    double c = (sy - m * sx) / n;
+    return {m, c};
+}
+
+struct RunwayResult {
+    std::string resource;
+    double utilization_pct;
+    double effective_capacity;
+    std::string unit;
+    int runway_days;
+    std::string exhaust_date;
+    std::string growth_model;
+    double daily_growth_rate;
+    std::string recommendation;
+};
+
+// Format a std::tm as YYYY-MM-DD
+std::string format_date(std::tm t) {
+    char buf[11];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d", &t);
+    return buf;
+}
+
+RunwayResult calculate_runway(
+    const CapacityMetrics& metrics,
+    const std::vector<DataPoint>& history,
+    const std::tm& last_date,
+    const std::string& growth_model = "linear",
+    double headroom_pct = 0.20)
+{
+    double effective_cap = metrics.max_capacity * (1.0 - headroom_pct);
+
+    double days_to_exhaust = 0;
+    double daily_growth = 0;
+
+    if (growth_model == "exponential") {
+        // Fit log(value) = b*day + log_a  =>  value = a * e^(b*day)
+        std::vector<DataPoint> log_pts;
+        for (auto& p : history)
+            log_pts.push_back({p.day_offset, std::log(p.value + 1)});
+        auto [b, log_a] = linear_fit(log_pts);
+        double a = std::exp(log_a);
+        if (b <= 0) {
+            RunwayResult r;
+            r.runway_days = std::numeric_limits<int>::max();
+            r.growth_model = "no growth";
+            return r;
+        }
+        days_to_exhaust = std::log(effective_cap / a) / b;
+        daily_growth = (std::exp(b) - 1.0) * 100.0;
+    } else {
+        auto [m, c] = linear_fit(history);
+        if (m <= 0) {
+            RunwayResult r;
+            r.runway_days = std::numeric_limits<int>::max();
+            r.growth_model = "no growth";
+            return r;
+        }
+        days_to_exhaust = (effective_cap - c) / m;
+        daily_growth = m;
+    }
+
+    int last_day = history.back().day_offset;
+    int remaining = std::max(0, static_cast<int>(std::round(days_to_exhaust - last_day)));
+
+    // Compute exhaust date
+    std::tm exhaust = last_date;
+    std::time_t t = std::mktime(&exhaust);
+    t += remaining * 86400;
+    std::tm* ed = std::localtime(&t);
+
+    double utilization = metrics.current_usage / metrics.max_capacity * 100.0;
+    std::string rec = remaining < 30  ? "CRITICAL: < 30 days runway"
+                    : remaining < 90  ? "WARNING: < 90 days runway"
+                    :                   "OK: sufficient runway";
+
+    return {
+        metrics.resource_name, utilization, effective_cap, metrics.unit,
+        remaining, format_date(*ed), growth_model, daily_growth, rec
+    };
+}
+
+int main() {
+    // Historical usage data (day_offset from Jan 1, value)
+    std::vector<DataPoint> history = {
+        {0,   2000},   // Jan 1
+        {31,  2300},   // Feb 1
+        {59,  2650},   // Mar 1
+        {90,  3100},   // Apr 1
+        {120, 3500},   // May 1
+    };
+    std::tm last_date = {};
+    last_date.tm_year = 2025 - 1900; last_date.tm_mon = 4; last_date.tm_mday = 1;
+
+    CapacityMetrics metrics{"API Gateway", 3500, 5000, "RPS"};
+    auto r = calculate_runway(metrics, history, last_date, "exponential");
+
+    std::cout << "  resource: "            << r.resource            << "\\n"
+              << "  current_utilization: "  << std::fixed << std::setprecision(1)
+                                            << r.utilization_pct << "%\\n"
+              << "  effective_capacity: "   << std::setprecision(0)
+                                            << r.effective_capacity << " " << r.unit << "\\n"
+              << "  runway_days: "          << r.runway_days         << "\\n"
+              << "  exhaust_date: "         << r.exhaust_date        << "\\n"
+              << "  growth_model: "         << r.growth_model        << "\\n"
+              << "  daily_growth_rate: "    << std::setprecision(2)
+                                            << r.daily_growth_rate   << "\\n"
+              << "  recommendation: "       << r.recommendation      << "\\n";
+    return 0;
+}`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "Capacity Planning Cycle",
+      kind: "flow",
+      caption: "The **continuous capacity planning cycle** — from *measurement* through *validation* and back, ensuring infrastructure stays ahead of demand.",
+      mermaid: `flowchart TD
+    A["📊 Measure Current State\\n- Baseline throughput\\n- Latency percentiles\\n- Resource utilization"] --> B["📈 Model Demand Growth\\n- Historical trends\\n- Business forecasts\\n- Seasonal patterns"]
+    B --> C["🔍 Identify Bottlenecks\\n- CPU / Memory\\n- Database connections\\n- Network bandwidth"]
+    C --> D["📋 Plan Capacity Additions\\n- Define headroom targets\\n- Select scaling strategy\\n- Budget allocation"]
+    D --> E["🧪 Validate with Load Tests\\n- Smoke → Load → Stress\\n- Soak tests for leaks\\n- Spike tests for surges"]
+    E --> F{"✅ SLOs Met?"}
+    F -->|Yes| G["🚀 Deploy & Monitor\\n- Auto-scaling policies\\n- Alerting thresholds\\n- Cost tracking"]
+    F -->|No| H["🔧 Optimize & Tune\\n- Right-size instances\\n- Cache optimization\\n- Query tuning"]
+    H --> D
+    G --> I["📅 Quarterly Review\\n- Re-evaluate projections\\n- Update growth models\\n- Adjust headroom"]
+    I --> A`,
+    },
+    {
+      title: "Auto-Scaling Architecture",
+      kind: "architecture",
+      caption: "**Production auto-scaling architecture** showing *target tracking*, predictive scaling, and the relationship between **stateless** and *stateful* tiers.",
+      mermaid: `flowchart LR
+    subgraph Monitoring["Monitoring & Metrics"]
+        CW["CloudWatch\\nMetrics"]
+        PROM["Prometheus\\nCustom Metrics"]
+    end
+
+    subgraph Scaling["Scaling Engine"]
+        TT["Target Tracking\\nCPU @ 60%"]
+        PS["Predictive Scaling\\nML-based forecast"]
+        STEP["Step Scaling\\nRequest count"]
+    end
+
+    subgraph StatelessTier["Stateless Tier (Auto-Scaled)"]
+        ASG["Auto Scaling Group\\nmin: 2 / max: 50"]
+        EC2A["Instance A"]
+        EC2B["Instance B"]
+        EC2C["Instance C"]
+        EC2D["Instance ...N"]
+    end
+
+    subgraph StatefulTier["Stateful Tier (Planned Capacity)"]
+        RDS["RDS Primary\\n+ Read Replicas"]
+        REDIS["ElastiCache\\nRedis Cluster"]
+        SQS["SQS / Kafka\\nMessage Queue"]
+    end
+
+    subgraph Traffic["Traffic Layer"]
+        ALB["Application\\nLoad Balancer"]
+        CF["CloudFront\\nCDN"]
+    end
+
+    CF --> ALB
+    ALB --> ASG
+    ASG --> EC2A & EC2B & EC2C & EC2D
+    EC2A & EC2B & EC2C & EC2D --> RDS & REDIS & SQS
+    CW & PROM --> TT & PS & STEP
+    TT & PS & STEP --> ASG`,
+    },
+    {
+      title: "Capacity Runway Visualization",
+      kind: "flow",
+      caption: "**Growth modeling** and *capacity runway* — visualizing how current usage trends toward the **exhaustion threshold** across different growth scenarios.",
+      mermaid: `flowchart TD
+    subgraph CurrentState["📊 Current State"]
+        USAGE["Current Usage\\n3,500 RPS"]
+        CAP["Provisioned Capacity\\n5,000 RPS"]
+        UTIL["Utilization: 70%"]
+    end
+
+    subgraph GrowthModels["📈 Growth Scenarios"]
+        LIN["Linear Growth\\n+300 RPS/month"]
+        EXP["Exponential Growth\\n+15%/month"]
+        EVT["Event-Driven Spike\\n+2x on launch day"]
+    end
+
+    subgraph Thresholds["⚠️ Capacity Thresholds"]
+        WARN["Warning: 80% utilization\\n4,000 RPS"]
+        CRIT["Critical: 90% utilization\\n4,500 RPS"]
+        MAX["Max Capacity\\n5,000 RPS"]
+    end
+
+    subgraph Actions["🔧 Actions by Runway"]
+        OK["> 90 days runway\\nMonitor & optimize"]
+        PLAN["30-90 days runway\\nBegin procurement"]
+        URGENT["< 30 days runway\\nEmergency scale-up"]
+    end
+
+    USAGE --> LIN & EXP & EVT
+    LIN --> WARN
+    EXP --> CRIT
+    EVT --> MAX
+    WARN --> OK
+    CRIT --> PLAN
+    MAX --> URGENT`,
+    },
+  ],
+
+  comparison: {
+    columns: [
+      "Tool",
+      "Language",
+      "Protocol Support",
+      "Distributed Mode",
+      "Cloud Integration",
+      "Best For",
+    ],
+    rows: [
+      [
+        "**k6**",
+        "*JavaScript* / TypeScript",
+        "HTTP, WebSocket, gRPC, `SQL`",
+        "Built-in via `k6 Cloud` or Kubernetes operator",
+        "Grafana Cloud, **AWS**, Azure, GCP",
+        "Developer-centric load testing with *CI/CD integration*",
+      ],
+      [
+        "**Locust**",
+        "*Python*",
+        "HTTP (extensible to any protocol)",
+        "Built-in **master/worker** architecture",
+        "Any cloud via `Docker` / Kubernetes",
+        "Teams with *Python* expertise needing **custom protocols**",
+      ],
+      [
+        "**Gatling**",
+        "*Scala* / Java / Kotlin",
+        "HTTP, WebSocket, `JMS`, MQTT",
+        "**Gatling Enterprise** for distributed runs",
+        "Gatling Cloud, CI/CD pipelines",
+        "JVM teams needing *detailed HTML reports* and **CI integration**",
+      ],
+      [
+        "**JMeter**",
+        "*Java* (GUI + XML)",
+        "HTTP, FTP, JDBC, `LDAP`, SOAP, JMS",
+        "Built-in **remote testing** via RMI",
+        "BlazeMeter, Azure Load Testing",
+        "*Protocol diversity* and teams preferring **GUI-based** test design",
+      ],
+      [
+        "**wrk2**",
+        "*C* (Lua scripting)",
+        "HTTP only",
+        "Manual (multiple instances)",
+        "None (self-hosted)",
+        "**Precise latency measurement** with *constant-rate* load (avoids coordinated omission)",
+      ],
+      [
+        "**Artillery**",
+        "*JavaScript* / YAML",
+        "HTTP, WebSocket, `Socket.io`, gRPC",
+        "**Artillery Cloud** or `AWS Lambda`-based",
+        "AWS Lambda, Artillery Cloud",
+        "*Serverless* distributed load testing with **YAML-first** configuration",
+      ],
+    ],
+  },
+
+  exercises: [
+    "**Run a staged load test** using `k6` against a sample API: configure a *ramp-up* from 10 to 200 virtual users over 5 minutes, set **p95 latency < 500ms** and *error rate < 1%* thresholds, then analyze the results to identify the **saturation point** where latency begins to degrade.",
+    "**Calculate the capacity runway** for a service currently handling *8,000 RPS* with a provisioned capacity of *12,000 RPS*, given monthly traffic growth of **12%**. Determine the *exhaustion date*, recommended **headroom buffer**, and the date by which new capacity must be ordered assuming a 6-week procurement lead time.",
+    "**Design an auto-scaling policy** for a web application tier: define *target tracking* metrics (CPU, request count, custom metrics), set **scale-out** and *scale-in* cooldown periods, configure `predictive scaling` based on weekly traffic patterns, and calculate the **cost differential** between reserved and on-demand instances at baseline vs. peak.",
+    "**Benchmark a PostgreSQL database** using `pgbench`: initialize with a *scale factor* matching production data volume, run read-heavy and write-heavy workloads, measure **TPS**, *latency percentiles*, and `connection pool` saturation, then determine the maximum number of application instances the database can support.",
+    "**Create a 12-month growth model** for a SaaS platform using *three scenarios* (conservative: **10%** monthly growth, expected: **20%**, aggressive: **35%**). For each scenario, calculate the *capacity runway* for compute, database, and cache tiers, and produce a **FinOps budget forecast** showing monthly infrastructure spend.",
+  ],
+
+  cheatSheet: [
+    "**Utilization formula**: `utilization = (current_usage / max_capacity) * 100%` — target **< 70%** for stateless, **< 50%** for stateful services",
+    "**Capacity runway**: `runway_days = (effective_capacity - current_usage) / daily_growth_rate` — maintain **> 90 days** for critical resources",
+    "**Little's Law**: `L = λ × W` — *concurrent requests* (L) = *arrival rate* (λ) × *average response time* (W) — essential for connection pool sizing",
+    "**Headroom targets**: *20-30%* for auto-scalable stateless tiers, **50%+** for databases and stateful services, `100%+` (N+1 redundancy) for single points of failure",
+    "**k6 quick commands**: `k6 run script.js` (local), `k6 cloud script.js` (distributed), `k6 run --vus 100 --duration 5m script.js` (*quick stress test*)",
+    "**Auto-scaling rule of thumb**: scale **out** at *60% CPU* with **60s cooldown**, scale *in* at *30% CPU* with `300s cooldown` — aggressive out, conservative in",
+  ],
+
+  revisionNotes: [
+    "**Capacity planning is continuous**, not a one-time exercise — the cycle of *measure → model → plan → validate → deploy → review* repeats **quarterly** or after significant architecture changes. Always distinguish between **stateless** tiers (horizontally auto-scalable) and *stateful* tiers (databases, caches) that require **manual capacity planning** with longer lead times.",
+    "**Load testing types** form a progression: *smoke* (verify basic function), **load** (validate at expected peak), *stress* (find breaking point), **soak** (detect memory leaks over hours), *spike* (test sudden surges). The **coordinated omission problem** is a critical concept — use `open-loop` generators like *k6* or *wrk2* that maintain constant request rate regardless of server response time.",
+    "**Headroom and runway** are the two key planning metrics. *Headroom* is the buffer between current peak and provisioned capacity (**20-30%** for auto-scalable, **50%+** for stateful). *Runway* is the time until exhaustion at projected growth. Use **Little's Law** (`L = λ × W`) for connection pool and concurrency calculations — it appears frequently in *system design interviews*.",
+    "**Cost-capacity optimization** ties capacity planning to **FinOps**: use *right-sizing tools* to eliminate overprovisioning (typically **30-50%** waste), leverage `spot instances` for load testing environments, and build a **capacity-cost curve** showing the marginal cost of each additional unit of capacity. For *serverless*, plan around **concurrency limits** and *cold start* budgets rather than instance counts.",
+  ],
 };

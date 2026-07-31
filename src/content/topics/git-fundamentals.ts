@@ -137,6 +137,218 @@ export const gitFundamentals: TopicContent = {
       back: "Removes the file from the index (stops tracking it) without deleting it from the working tree. Useful for files that were accidentally committed before being added to .gitignore.",
     },
   ],
+  deepDive: [
+    "## Git's Internal Object Model\n\nAt its core, Git is a **content-addressable filesystem** — every piece of data is stored as an *object* identified by a **SHA-1 hash** of its contents. There are four object types: **blob** (file content without metadata), **tree** (a directory listing mapping filenames to blob or tree SHAs), **commit** (a snapshot pointing to a tree, parent commit(s), author, committer, and message), and **tag** (a named reference to another object, typically a commit). When you run `git add`, Git compresses the file content into a *blob object* in `.git/objects/`. When you `git commit`, Git creates a *tree object* capturing the index state and a *commit object* referencing that tree. Because objects are immutable and content-addressed, identical content is stored exactly once — this is how Git achieves both **deduplication** and **integrity verification**. You can inspect any object with `git cat-file -p <sha>` to see its raw content.",
+
+    "## Merge Strategies and Conflict Resolution\n\nGit supports multiple **merge strategies**, each suited to different scenarios. The default **recursive** strategy (now called `ort` in modern Git) handles most two-branch merges by finding the *best common ancestor* and performing a three-way merge. When the same lines are modified in both branches, Git marks the file with **conflict markers** (`<<<<<<<`, `=======`, `>>>>>>>`) and halts the merge for manual resolution. The **fast-forward** strategy applies when the target branch has not diverged — Git simply moves the branch pointer forward without creating a merge commit, keeping history linear. You can force a merge commit even in fast-forward cases with `git merge --no-ff`, which is useful for preserving *feature branch topology* in the history graph. For complex merges involving more than two branches, Git provides the **octopus** strategy. Understanding these strategies helps you choose between `git merge` (preserves branch history, creates merge commits) and `git rebase` (replays commits on top of the target, producing a *linear history* at the cost of rewriting commit SHAs).",
+
+    "## Reflog, Garbage Collection, and Data Recovery\n\nOne of Git's most powerful safety nets is the **reflog** — a local log recording every change to `HEAD` and branch tips, retained for **90 days** by default. Even after a destructive `git reset --hard` or a botched `git rebase`, the \"lost\" commits still exist as *unreachable objects* in the repository. Running `git reflog` shows the history of HEAD movements, and you can recover any previous state with `git checkout <reflog-entry>` or `git reset --hard <sha>`. Git periodically runs **garbage collection** (`git gc`) to compress objects into *packfiles* and remove unreachable objects older than the reflog retention period. You can trigger it manually with `git gc --prune=now`, but be aware this permanently removes unreachable objects. The combination of content-addressed storage, the reflog, and deferred garbage collection means that Git is remarkably forgiving — **data loss requires deliberate effort**, not accidental commands.",
+  ],
+
+  code: [
+    {
+      language: "bash",
+      caption: "Essential Git workflow: init, stage, commit, branch, merge",
+      source: `# Initialize a new repository
+git init my-project && cd my-project
+
+# Configure identity for this repo
+git config user.name "Dev User"
+git config user.email "dev@example.com"
+
+# Create initial files and make the first commit
+echo "# My Project" > README.md
+git add README.md
+git commit -m "Initial commit: add README"
+
+# Create and switch to a feature branch
+git checkout -b feature/add-login
+
+# Make changes and commit
+echo "login() { ... }" > auth.cpp
+git add auth.cpp
+git commit -m "Add login function skeleton"
+
+# Switch back to main and merge
+git checkout main
+git merge feature/add-login
+
+# View the commit graph
+git log --oneline --graph --all
+
+# Push to remote
+git remote add origin https://github.com/user/my-project.git
+git push -u origin main`,
+    },
+    {
+      language: "bash",
+      caption: "C++ project Git workflow: branching, .gitignore, tagging a release",
+      source: `# Clone an existing C++ project
+git clone https://github.com/team/cpp-engine.git
+cd cpp-engine
+
+# Set up .gitignore for C++ build artifacts
+cat > .gitignore << 'EOF'
+# Build output
+build/
+*.o
+*.obj
+*.exe
+*.out
+*.a
+*.so
+*.dylib
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+CMakeCache.txt
+CMakeFiles/
+EOF
+
+git add .gitignore
+git commit -m "Add .gitignore for C++ build artifacts"
+
+# Create a feature branch for a new rendering module
+git checkout -b feature/renderer
+
+# Develop iteratively with granular commits
+echo "#include \\"renderer.h\\"" > src/renderer.cpp
+echo "#pragma once" > include/renderer.h
+git add src/renderer.cpp include/renderer.h
+git commit -m "Add renderer module skeleton"
+
+# Build and test (not tracked by git)
+mkdir -p build && cd build
+cmake .. && make -j\$(nproc)
+cd ..
+
+# Interactive staging: review and stage hunks selectively
+git add -p src/renderer.cpp
+
+# Rebase onto latest main before merging
+git fetch origin
+git rebase origin/main
+
+# Merge with a merge commit for clear history
+git checkout main
+git merge --no-ff feature/renderer -m "Merge feature/renderer: add rendering module"
+
+# Tag the release
+git tag -a v1.2.0 -m "Release v1.2.0: renderer module"
+git push origin main --tags`,
+    },
+    {
+      language: "bash",
+      caption: "Undoing mistakes and data recovery with reflog",
+      source: `# Oops: committed to the wrong branch
+# Step 1: Note the commit SHA
+git log --oneline -1
+# e.g., output: a1b2c3d Fix: correct buffer overflow
+
+# Step 2: Undo the commit but keep changes staged
+git reset --soft HEAD~1
+
+# Step 3: Stash the changes and switch branches
+git stash
+git checkout feature/bugfix
+git stash pop
+git commit -m "Fix: correct buffer overflow"
+
+# Recovering from a hard reset using reflog
+git reset --hard HEAD~3   # Accidentally wiped 3 commits!
+git reflog                # Find the lost commit SHA
+# e.g., output: a1b2c3d HEAD@{1}: commit: important work
+git reset --hard a1b2c3d  # Restore to that point
+
+# Reverting a pushed commit safely
+git revert abc1234 --no-edit
+git push origin main
+
+# Cherry-pick a specific commit from another branch
+git cherry-pick def5678`,
+    },
+  ],
+
+  diagrams: [
+    {
+      title: "Git Branching and Merge Workflow",
+      kind: "flow",
+      caption: "A typical feature-branch workflow showing branch creation, parallel development, and merge back to main.",
+      mermaid: `gitGraph
+  commit id: "Initial commit"
+  commit id: "Add README"
+  branch feature/login
+  checkout feature/login
+  commit id: "Add auth module"
+  commit id: "Add login form"
+  checkout main
+  commit id: "Update docs"
+  merge feature/login id: "Merge login feature"
+  commit id: "Release v1.0"`,
+    },
+    {
+      title: "Git Three-Tree Architecture",
+      kind: "flow",
+      caption: "How files flow between the working tree, staging area (index), and the repository (HEAD) through Git commands.",
+      mermaid: `flowchart LR
+  WT["**Working Tree**\\n(files on disk)"]
+  IDX["**Staging Area**\\n(index)"]
+  REPO["**Repository**\\n(HEAD / commits)"]
+  REMOTE["**Remote**\\n(origin)"]
+
+  WT -->|"git add"| IDX
+  IDX -->|"git commit"| REPO
+  REPO -->|"git push"| REMOTE
+  REMOTE -->|"git fetch"| REPO
+  REPO -->|"git checkout / restore"| WT
+  IDX -->|"git restore --staged"| WT
+  REMOTE -->|"git pull (fetch+merge)"| WT`,
+    },
+  ],
+
+  comparison: {
+    columns: ["Feature", "**Git**", "**SVN (Subversion)**", "**Mercurial (Hg)**"],
+    rows: [
+      ["Architecture", "*Distributed* — full repo clone", "*Centralized* — single server", "*Distributed* — full repo clone"],
+      ["Branching", "Lightweight pointer; `git branch` is instant", "Directory copy; expensive on large repos", "Named branches or bookmarks; heavier than Git"],
+      ["Speed", "Very fast (local operations)", "Slower (server round-trips for log, diff)", "Fast (comparable to Git for most operations)"],
+      ["Staging area", "Yes — explicit `git add` to index", "No — commits track working copy directly", "No — uses `hg record` for partial commits"],
+      ["History rewriting", "`rebase`, `amend`, `filter-branch`", "Not supported (history is immutable)", "Limited (`hg histedit`, evolve extension)"],
+      ["Learning curve", "Steeper (many concepts and commands)", "Simpler (linear workflow)", "Moderate (simpler than Git, fewer footguns)"],
+      ["Merge handling", "Recursive/ort strategy; excellent", "Three-way merge; adequate", "Good; premerge and internal:merge"],
+      ["Ecosystem", "Dominant: GitHub, GitLab, Bitbucket", "Apache; legacy enterprise use", "Smaller community; used by some large projects"],
+    ],
+  },
+
+  exercises: [
+    "**Repository Archaeology**: Clone any open-source repository and use `git log --oneline --graph --all` to visualize the commit graph. Identify at least one *merge commit*, one *fast-forward merge*, and a *branch point*. Use `git show <sha>` to inspect the merge commit's two parents.",
+    "**Conflict Resolution Lab**: Create a repo with a file `config.txt`. Make two branches (`branch-a` and `branch-b`) that both modify the **same line** of `config.txt`. Merge `branch-a` into `main`, then attempt to merge `branch-b`. Resolve the resulting conflict, examining the `<<<<<<<`, `=======`, `>>>>>>>` markers, and complete the merge with `git add` and `git commit`.",
+    "**Reflog Rescue Mission**: Create a series of 5 commits, then run `git reset --hard HEAD~3` to \"lose\" three commits. Use `git reflog` to find the lost commits and restore them with `git reset --hard <sha>`. Verify the full history is back with `git log --oneline`.",
+    "**C++ Build Artifact Hygiene**: Set up a C++ project with a `CMakeLists.txt`, create a proper `.gitignore` that excludes `build/`, `*.o`, and IDE files. Accidentally `git add build/main.o`, then fix it using `git rm --cached build/main.o`. Verify with `git status` that the file is untracked but still on disk.",
+    "**Interactive Rebase Practice**: Create a feature branch with 5 commits including one typo-fix commit and one \"WIP\" commit. Use `git rebase -i HEAD~5` to *squash* the typo fix into the relevant commit, *reword* a poorly written message, and *drop* the WIP commit. Push the cleaned-up branch and compare the before/after history.",
+  ],
+
+  cheatSheet: [
+    "`git init` / `git clone <url>` — Create a new repo or copy an existing one with full history",
+    "`git add <files>` / `git add -p` — Stage all changes in files, or **interactively select hunks** to stage",
+    "`git commit -m \"msg\"` / `git commit --amend` — Create a commit, or **rewrite the last commit** (pre-push only)",
+    "`git branch <name>` / `git checkout -b <name>` — Create a branch / create **and** switch to it in one command",
+    "`git merge <branch>` / `git rebase <branch>` — Integrate changes: merge preserves topology, rebase linearizes history",
+    "`git stash` / `git stash pop` — **Shelve** uncommitted changes temporarily and restore them later",
+    "`git log --oneline --graph --all` — Compact visual history of **all branches** as an ASCII DAG",
+    "`git reflog` — Show the local history of HEAD movements — your **safety net** for recovering lost commits",
+  ],
+
+  revisionNotes: [
+    "Git's **three-tree model** (working tree, index, HEAD) is the foundation of everything — `git status` compares all three, `git add` moves data from working tree to index, `git commit` moves index to a new commit under HEAD.",
+    "**Commits are immutable snapshots**, not diffs. Each commit stores a full tree object referencing all files. Git computes diffs on the fly. Commits form a *DAG* (directed acyclic graph) via parent pointers.",
+    "**Merge vs. Rebase**: `git merge` creates a merge commit preserving branch topology (non-linear history). `git rebase` replays commits on top of the target branch for *linear history* but rewrites SHAs — never rebase commits already pushed to shared branches.",
+    "**Undoing work safely**: Use `git revert` for public/pushed commits (creates an inverse commit). Use `git reset` for local/unpushed commits (`--soft` keeps staged, `--mixed` unstages, `--hard` discards all). The **reflog** retains every HEAD movement for 90 days — your escape hatch after mistakes.",
+    "**Remote workflow**: `git fetch` downloads without modifying your branches (safe). `git pull` = fetch + merge (or rebase). Always `git fetch` + inspect before integrating. Remote-tracking branches (`origin/main`) are updated on fetch and are read-only locally.",
+  ],
+
   glossary: [
     {
       term: "Working tree",

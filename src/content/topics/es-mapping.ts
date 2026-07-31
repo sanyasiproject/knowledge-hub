@@ -295,12 +295,12 @@ POST /orders/_search
     },
     {
       title: "Multi-Field Indexing",
-      kind: "structure",
+      kind: "architecture",
       caption: "A single source value 'New York City' is indexed three ways: as text field (tokens: [new, york, city] for full-text search), as keyword sub-field (exact value for sorting/aggregation), and optionally as autocomplete sub-field (edge ngrams: [ne, new, new_, ...])."
     },
     {
       title: "Object vs Nested Document Storage",
-      kind: "structure",
+      kind: "architecture",
       caption: "Object type flattens arrays: [{a:1,b:2},{a:3,b:4}] becomes a:[1,3], b:[2,4] losing cross-field correlation. Nested type stores each element as a hidden Lucene document, preserving {a:1,b:2} and {a:3,b:4} as discrete units for accurate querying."
     }
   ],
@@ -482,6 +482,13 @@ POST /orders/_search
     "ignore_above: 256 on keyword = skip indexing values longer than 256 chars"
   ],
 
+  exercises: [
+    "You have an index where `status` was auto-mapped as `text` but you need it as `keyword` for filtering and aggregations. Perform a **zero-downtime mapping migration**: create a new index `products_v2` with the correct mapping, write the `POST /_reindex` command, and switch the `products` alias. Include the alias swap command using `POST /_aliases`.",
+    "Design a mapping for a **multi-language blog** where each post has a `title` and `body` in English and Spanish. Use *multi-fields* so that each language variant is analyzed with the appropriate language analyzer (`english`, `spanish`) while also having a `keyword` sub-field. Write the full `PUT /blog` mapping.",
+    "Your team is indexing arbitrary JSON metadata from IoT devices, causing **mapping explosion** (field count exceeding 1000). Refactor the mapping to use the `flattened` field type for the metadata object. Show the before-and-after mapping, and explain what query capabilities are *lost* with flattened (no full-text search, no range queries on numeric values).",
+    "Create a **composable index template** setup for a logging platform: one *component template* for common fields (`@timestamp`, `host`, `service`), another for standard settings (3 shards, `best_compression`), and an *index template* for `logs-*` that composes both and adds `message` (text) and `level` (keyword). Write all three `PUT` requests.",
+    "Add a **runtime field** called `age_days` to an existing `orders` index that computes the number of days since `created_at` using a Painless script. Write the `PUT /orders/_mapping` request, then write a search query that filters for orders older than 30 days using the runtime field. Explain when you would *promote* this to an index-time field.",
+  ],
   resources: [
     { label: "Elasticsearch Mapping Reference", kind: "docs", note: "Official documentation covering all field types, mapping parameters, and dynamic mapping rules" },
     { label: "Elasticsearch: The Definitive Guide - Mapping chapter", kind: "book", note: "Detailed explanations of mapping concepts with practical examples and best practices" },

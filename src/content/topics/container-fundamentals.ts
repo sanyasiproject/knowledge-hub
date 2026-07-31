@@ -178,4 +178,300 @@ export const containerFundamentals: TopicContent = {
         "A container runtime sandbox by Google that provides a user-space kernel (Sentry) intercepting container syscalls, offering stronger isolation than native namespaces without the overhead of full virtualization.",
     },
   ],
+  deepDive: [
+    "**Linux namespaces** are the *foundational isolation primitive* that makes containers possible. When the container runtime calls `clone()` with namespace flags (CLONE_NEWPID, CLONE_NEWNET, CLONE_NEWNS, etc.), the kernel creates a new *isolated view* of the specified resource for the child process. The **PID namespace** is particularly elegant: the first process in a new PID namespace becomes PID 1 -- the init process for that namespace. This process is responsible for reaping zombie children, and if it exits, the kernel destroys all processes in the namespace. The **user namespace** is crucial for **rootless containers**: it maps UID 0 inside the container to an unprivileged UID (e.g., 100000) on the host via `/etc/subuid` and `/etc/subgid` mappings. This means even if a process *escapes* the container, it runs as an unprivileged user on the host. The combination of all seven namespace types creates the illusion of a standalone machine while being merely a set of restricted processes on the host.",
+    "**Cgroups v2** represents a fundamental redesign of Linux resource management. Unlike cgroups v1's *per-controller hierarchy* (separate trees for CPU, memory, I/O), v2 uses a **unified hierarchy** where all controllers share a single tree rooted at `/sys/fs/cgroup`. This seemingly simple change has profound implications: resource limits can now be *coordinated* across controllers (e.g., memory pressure can influence I/O priority), and **Pressure Stall Information (PSI)** metrics (`/proc/pressure/{cpu,memory,io}`) provide real-time visibility into whether processes are being starved. CPU limits in cgroups use the **CFS bandwidth controller**: `cpu.max` specifies `quota period` (e.g., `50000 100000` means 50ms of CPU time per 100ms period = 0.5 cores). Memory limits via `memory.max` trigger the OOM killer; `memory.high` is a *soft throttle* that slows allocations before hitting the hard limit. Kubernetes 1.25+ defaults to cgroups v2, using PSI for better **pod eviction** decisions.",
+    "The **OCI runtime specification** is what allows the container ecosystem to be *modular and interchangeable*. A container runtime receives a **filesystem bundle** (a directory containing `rootfs/` and `config.json`) and is responsible for creating the container process with the specified namespaces, cgroups, mounts, and security profiles. The `config.json` is remarkably detailed: it specifies Linux capabilities to grant or deny (e.g., drop `CAP_SYS_ADMIN`, keep `CAP_NET_BIND_SERVICE`), **seccomp** syscall filters (a BPF program that intercepts every syscall), **AppArmor** or **SELinux** labels, the **rlimits** for the process, and **lifecycle hooks** (prestart, createRuntime, poststart, poststop). This standardization means you can swap `runc` for **crun** (a C implementation, 50x faster startup), **youki** (Rust), **Kata Containers** (micro-VM), or **gVisor** (user-space kernel) without changing your container images or orchestration tooling."
+  ],
+  code: [
+    {
+      language: "bash",
+      caption: "Creating a container from scratch using Linux namespaces, cgroups, and chroot",
+      source: `#!/bin/bash
+# === Build a container from scratch — no Docker, just Linux primitives ===
+# This demonstrates what container runtimes do under the hood.
+
+set -euo pipefail
+
+ROOTFS="/tmp/mycontainer/rootfs"
+CGROUP_PATH="/sys/fs/cgroup/mycontainer"
+
+# 1. Create a minimal root filesystem (Alpine-based)
+mkdir -p "$ROOTFS"
+# Download and extract Alpine Linux minirootfs
+curl -sL https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/\\
+alpine-minirootfs-3.19.0-x86_64.tar.gz | tar xz -C "$ROOTFS"
+
+# 2. Set up cgroups v2 resource limits
+sudo mkdir -p "$CGROUP_PATH"
+echo "50000 100000" | sudo tee "$CGROUP_PATH/cpu.max"      # 0.5 CPU cores
+echo "134217728" | sudo tee "$CGROUP_PATH/memory.max"       # 128 MB hard limit
+echo "104857600" | sudo tee "$CGROUP_PATH/memory.high"      # 100 MB soft throttle
+echo "20" | sudo tee "$CGROUP_PATH/pids.max"                # Max 20 processes
+
+# 3. Launch the "container" with namespace isolation
+# unshare creates new namespaces; chroot changes the root filesystem
+sudo unshare \\
+    --pid          \\  # New PID namespace (process sees PID 1)
+    --net          \\  # New network namespace (isolated network stack)
+    --mount        \\  # New mount namespace (isolated filesystem mounts)
+    --uts          \\  # New UTS namespace (own hostname)
+    --ipc          \\  # New IPC namespace (isolated shared memory)
+    --cgroup       \\  # New cgroup namespace
+    --fork         \\  # Fork so PID 1 is the container's init
+    --mount-proc   \\  # Mount /proc inside the new PID namespace
+    chroot "$ROOTFS" /bin/sh -c '
+        hostname mycontainer          # Set container hostname (UTS namespace)
+        echo "PID inside container:"
+        ps aux                        # Only sees its own processes
+        echo "Hostname: $(hostname)"
+        echo "Network interfaces:"
+        ip addr show                  # Only sees loopback (no veth yet)
+        exec /bin/sh                  # Interactive shell
+    '
+
+# 4. Cleanup
+sudo rmdir "$CGROUP_PATH"
+sudo rm -rf /tmp/mycontainer`
+    },
+    {
+      language: "yaml",
+      caption: "Dockerfile and docker-compose.yml with security hardening: read-only rootfs, capabilities, seccomp",
+      source: `# === Dockerfile — security-hardened production container ===
+
+FROM alpine:3.19 AS builder
+RUN apk add --no-cache gcc musl-dev
+COPY app.c /build/
+RUN gcc -static -o /build/app /build/app.c    # Static binary for scratch image
+
+# Multi-stage: final image has NO shell, NO package manager
+FROM scratch
+COPY --from=builder /build/app /app
+
+# Non-root user (UID 65534 = nobody)
+USER 65534:65534
+ENTRYPOINT ["/app"]
+
+# === docker-compose.yml — runtime security constraints ===
+# version: "3.9"   (compose spec — version is optional)
+
+services:
+  secure-app:
+    build: .
+    read_only: true                    # Read-only root filesystem
+    tmpfs:
+      - /tmp:size=10m,noexec           # Writable tmp, no execution
+    security_opt:
+      - no-new-privileges:true         # Prevent privilege escalation
+      - seccomp:./seccomp-profile.json # Custom syscall filter
+      - apparmor:docker-default        # AppArmor MAC profile
+    cap_drop:
+      - ALL                            # Drop ALL Linux capabilities
+    cap_add:
+      - NET_BIND_SERVICE               # Only allow binding to ports < 1024
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"                  # CFS quota: 50ms per 100ms
+          memory: 128M                 # OOM kill at 128MB
+          pids: 20                     # Max 20 processes
+        reservations:
+          memory: 64M                  # Guaranteed 64MB
+    healthcheck:
+      test: ["/app", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3`
+    },
+    {
+      language: "bash",
+      caption: "Inspecting container internals: namespaces, cgroups, capabilities, and OverlayFS layers",
+      source: `#!/bin/bash
+# === Inspect a running container's Linux primitives ===
+
+CONTAINER="secure-app"
+PID=$(docker inspect --format '{{.State.Pid}}' "$CONTAINER")
+
+echo "=== Container PID on host: $PID ==="
+
+# 1. View the namespaces the process belongs to
+echo "--- Namespaces ---"
+ls -la /proc/$PID/ns/
+# Output shows: cgroup, ipc, mnt, net, pid, user, uts — one per namespace type
+
+# 2. View cgroup limits
+echo "--- Cgroup v2 Limits ---"
+CGROUP=$(cat /proc/$PID/cgroup | cut -d: -f3)
+echo "CPU quota: $(cat /sys/fs/cgroup$CGROUP/cpu.max)"       # e.g., 50000 100000
+echo "Memory max: $(cat /sys/fs/cgroup$CGROUP/memory.max)"   # e.g., 134217728
+echo "Memory current: $(cat /sys/fs/cgroup$CGROUP/memory.current)"
+echo "PIDs max: $(cat /sys/fs/cgroup$CGROUP/pids.max)"
+echo "PIDs current: $(cat /sys/fs/cgroup$CGROUP/pids.current)"
+
+# 3. View Linux capabilities
+echo "--- Capabilities ---"
+cat /proc/$PID/status | grep -i cap
+# CapEff shows effective capabilities in hex — decode with capsh:
+capsh --decode=$(grep CapEff /proc/$PID/status | awk '{print $2}')
+
+# 4. View OverlayFS layers
+echo "--- OverlayFS Layers ---"
+docker inspect --format '{{.GraphDriver.Data.MergedDir}}' "$CONTAINER"
+docker inspect --format '{{.GraphDriver.Data.UpperDir}}' "$CONTAINER"    # Writable layer
+docker inspect --format '{{.GraphDriver.Data.LowerDir}}' "$CONTAINER"    # Read-only image layers
+
+# 5. View seccomp status
+echo "--- Seccomp ---"
+grep Seccomp /proc/$PID/status
+# Seccomp: 2  means seccomp filter is active (BPF-based)
+
+# 6. PSI (Pressure Stall Information) — cgroups v2 only
+echo "--- Pressure Stall Info ---"
+cat /sys/fs/cgroup$CGROUP/memory.pressure
+cat /sys/fs/cgroup$CGROUP/cpu.pressure`
+    }
+  ],
+  diagrams: [
+    {
+      title: "Container vs Virtual Machine Architecture",
+      kind: "architecture" as const,
+      caption: "Structural comparison showing how containers share the host kernel while VMs each run their own",
+      mermaid: `graph TB
+    subgraph Containers["Container Architecture"]
+        direction TB
+        CA["App A"]
+        CB["App B"]
+        CC["App C"]
+        BinsA["Bins/Libs"]
+        BinsB["Bins/Libs"]
+        BinsC["Bins/Libs"]
+        CRT["Container Runtime<br/>(containerd / CRI-O)"]
+        HK["Host OS Kernel<br/>(shared)"]
+        HW1["Hardware"]
+
+        CA --- BinsA
+        CB --- BinsB
+        CC --- BinsC
+        BinsA --- CRT
+        BinsB --- CRT
+        BinsC --- CRT
+        CRT --- HK
+        HK --- HW1
+    end
+
+    subgraph VMs["Virtual Machine Architecture"]
+        direction TB
+        VA["App X"]
+        VB["App Y"]
+        GA["Guest OS<br/>(full kernel)"]
+        GB["Guest OS<br/>(full kernel)"]
+        HYP["Hypervisor<br/>(KVM / Xen)"]
+        HK2["Host OS Kernel"]
+        HW2["Hardware"]
+
+        VA --- GA
+        VB --- GB
+        GA --- HYP
+        GB --- HYP
+        HYP --- HK2
+        HK2 --- HW2
+    end`
+    },
+    {
+      title: "Linux Namespace Isolation Layers",
+      kind: "mindmap" as const,
+      caption: "The seven Linux namespace types and what each isolates for container processes",
+      mermaid: `mindmap
+  root((Container<br/>Namespaces))
+    PID
+      Own process tree
+      PID 1 = container init
+      Cannot see host processes
+    Network
+      Own interfaces
+      Own IP addresses
+      Own routing table
+      Own iptables rules
+    Mount
+      Own filesystem view
+      OverlayFS root
+      Volume mounts
+    UTS
+      Own hostname
+      Own domain name
+    IPC
+      Own shared memory
+      Own message queues
+      Own semaphores
+    User
+      UID/GID mapping
+      Rootless containers
+      root inside = unprivileged outside
+    Cgroup
+      Own cgroup root view
+      Resource limit isolation`
+    },
+    {
+      title: "OverlayFS Copy-on-Write Layer Stack",
+      kind: "flow" as const,
+      caption: "How OverlayFS merges read-only image layers with a writable container layer using copy-on-write",
+      mermaid: `flowchart TB
+    subgraph Image["Image Layers (read-only)"]
+        L1["Layer 1: Base OS<br/>/bin, /lib, /etc"]
+        L2["Layer 2: Runtime<br/>/usr/local/bin/python"]
+        L3["Layer 3: App deps<br/>/app/requirements.txt"]
+        L4["Layer 4: App code<br/>/app/main.py"]
+        L1 --> L2 --> L3 --> L4
+    end
+
+    subgraph Container["Container Layer (read-write)"]
+        UL["Upper Layer<br/>/app/main.py (modified)<br/>/tmp/cache.db (new)<br/>.wh.oldfile (whiteout)"]
+    end
+
+    L4 --> |"OverlayFS<br/>union mount"| MV["Merged View<br/>(what the container sees)"]
+    UL --> MV
+
+    MV --> R{"Read /app/main.py"}
+    R --> |"Found in upper"| UL
+    MV --> R2{"Read /bin/sh"}
+    R2 --> |"Not in upper,<br/>fall through"| L1
+    MV --> W{"Write /etc/config"}
+    W --> |"Copy-on-Write:<br/>copy from L1 to upper,<br/>then modify"| UL`
+    }
+  ],
+  comparison: {
+    columns: ["Feature", "Containers", "Virtual Machines", "Kata Containers", "gVisor"],
+    rows: [
+      ["**Isolation level**", "Process-level (namespaces + cgroups)", "*Hardware-level* (hypervisor)", "Hardware + container UX", "User-space kernel"],
+      ["**Startup time**", "*Milliseconds*", "Seconds to minutes", "~1 second", "~150ms"],
+      ["**Memory overhead**", "*MBs* (shared kernel)", "GBs (full guest OS)", "~30MB per micro-VM", "~15MB per sandbox"],
+      ["**Density per host**", "*Hundreds*", "Tens", "Tens to hundreds", "Hundreds"],
+      ["**Kernel sharing**", "Shared host kernel", "Separate guest kernel", "Separate guest kernel", "User-space Sentry kernel"],
+      ["**Security boundary**", "Weak (kernel exploit = host compromise)", "*Strong* (hypervisor boundary)", "*Strong* (VM boundary)", "Moderate (syscall interception)"],
+      ["**Performance**", "*Near-native*", "~5-10% overhead", "~1-3% overhead", "~5-15% syscall overhead"],
+      ["**OCI compatible**", "Yes", "No (different format)", "Yes", "Yes (runsc runtime)"]
+    ]
+  },
+  exercises: [
+    "**Namespace Exploration**: Run `sudo unshare --pid --fork --mount-proc /bin/bash` to create a new PID namespace. Inside, run `ps aux` and verify you only see processes in your namespace. Try `kill -9 1` from the *host* and observe what happens to the namespace. Document the relationship between PID 1 in the namespace and the actual PID on the host (find it with `grep NSpid /proc/<host_pid>/status`).",
+    "**Cgroup Resource Limiting**: Create a cgroup under `/sys/fs/cgroup/test-cgroup/`. Set `memory.max` to 50MB and `pids.max` to 5. Write your shell's PID into `cgroup.procs`, then run a memory-intensive command (e.g., `python3 -c \"x = bytearray(100*1024*1024)\"`). Observe the OOM kill. Then try forking more than 5 processes and observe the `EAGAIN` error.",
+    "**OverlayFS Hands-On**: Create a manual OverlayFS mount: make `lower/`, `upper/`, `work/`, and `merged/` directories. Place files in `lower/`. Mount with `sudo mount -t overlay overlay -o lowerdir=lower,upperdir=upper,workdir=work merged/`. Read a file from `merged/` (comes from lower). Modify it. Verify the copy-on-write by checking that the file now exists in `upper/`. Delete a lower-layer file and find the *whiteout* marker in `upper/`.",
+    "**Security Audit**: Run a container with `docker run --rm -it alpine sh`. Inside, check capabilities with `cat /proc/1/status | grep Cap`, decode with `capsh`, and list available syscalls. Then run the same container with `--cap-drop=ALL --cap-add=NET_BIND_SERVICE --security-opt=no-new-privileges` and compare. Document which capabilities were dropped and how this reduces the attack surface.",
+    "**Multi-Runtime Comparison**: Install both `runc` and `crun` (or `youki`). Create an OCI bundle manually (rootfs + config.json) and run it with each runtime. Measure startup time using `time` for 100 iterations. Compare the performance characteristics and explain why `crun` (written in C) is faster than `runc` (written in Go) for container creation."
+  ],
+  cheatSheet: [
+    "`unshare --pid --net --mount --fork /bin/sh` -- Create new **PID, network, and mount namespaces**; `--fork` ensures the shell becomes PID 1 in the new namespace",
+    "`echo 50000 100000 > /sys/fs/cgroup/mygroup/cpu.max` -- Limit a cgroup to **0.5 CPU cores** (50ms quota per 100ms period) using the CFS bandwidth controller",
+    "`docker run --cap-drop=ALL --cap-add=NET_BIND_SERVICE --read-only --security-opt=no-new-privileges myapp` -- **Hardened container**: drop all capabilities, read-only rootfs, prevent privilege escalation",
+    "`docker inspect --format '{{.GraphDriver.Data.UpperDir}}' <container>` -- Find the **writable OverlayFS layer** for a running container; all modifications live here",
+    "`grep Seccomp /proc/<pid>/status` -- Check if a process has **seccomp** filtering enabled: 0=disabled, 1=strict, 2=filter (BPF-based, used by Docker)",
+    "`cat /proc/<pid>/cgroup` -- View which **cgroup** a process belongs to; follow the path under `/sys/fs/cgroup/` to see resource limits and current usage"
+  ],
+  revisionNotes: [
+    "Containers are **isolated processes**, not lightweight VMs. They use **seven Linux namespaces** (PID, Network, Mount, UTS, IPC, User, Cgroup) for isolation and **cgroups** for resource limits. The shared host kernel is both their *strength* (performance, density) and *weakness* (security boundary).",
+    "**Cgroups v2** unified hierarchy is the modern standard (Kubernetes 1.25+ default). Key files: `cpu.max` (CFS quota), `memory.max` (hard limit, triggers OOM), `memory.high` (soft throttle), `pids.max` (fork bomb protection). **PSI metrics** provide real-time resource pressure visibility.",
+    "**OverlayFS** enables efficient image sharing: multiple containers share *read-only lower layers*, storing only unique changes in per-container *upper layers*. **Copy-on-write** means files are only duplicated when modified. Deletions create **whiteout files**. This is why container creation is nearly instant -- no filesystem copy needed.",
+    "Container security is **defense-in-depth**: drop unnecessary *Linux capabilities*, apply *seccomp* syscall filters (Docker blocks ~44 dangerous syscalls by default), use *AppArmor/SELinux* MAC policies, run *rootless* (user namespaces), and use *read-only root filesystems*. For VM-level isolation with container UX, use **Kata Containers** or **gVisor**.",
+    "The **OCI specifications** (runtime-spec, image-spec, distribution-spec) make the container ecosystem *modular*: images built with Docker run on containerd, CRI-O, or Podman. Runtimes are swappable: `runc` (reference, Go), `crun` (fast, C), `youki` (Rust), Kata (micro-VM), gVisor (user-space kernel)."
+  ],
 };

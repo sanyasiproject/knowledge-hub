@@ -97,6 +97,209 @@ export const awsDatabases: TopicContent = {
     { front: "Redshift Spectrum", back: "Query data directly in S3 from Redshift without loading it into tables. Extends Redshift to exabyte-scale data lakes using external tables." }
   ],
 
+  deepDive: [
+    "## DynamoDB Partition Strategy and Hot Key Mitigation\n\n**DynamoDB distributes data across partitions** based on a hash of the partition key. Each partition supports up to 3,000 RCUs and 1,000 WCUs. When a single partition key receives disproportionate traffic (a **hot key**), that partition throttles even if total table capacity is underutilized. Mitigation strategies: **Write sharding** appends a random suffix (e.g., `order#1234#3`) to distribute writes across partitions, with scatter-gather reads. **DynamoDB Adaptive Capacity** automatically rebalances throughput to hot partitions, but has limits. For extreme cases, **DAX (DynamoDB Accelerator)** absorbs read hot spots with microsecond-latency caching. **Single-table design** consolidates multiple entity types into one table using composite keys (e.g., PK=`CUSTOMER#123`, SK=`ORDER#2024-01-15`) — this enables transactional operations across entities and reduces the number of tables to manage. GSIs with **sparse indexes** (only items with the GSI attribute are indexed) enable efficient queries on subsets of data.",
+    "## Aurora Architecture and Multi-Master Patterns\n\n**Aurora separates compute from storage** — the storage layer is a distributed, self-healing system spanning 6 copies across 3 AZs. Storage is organized into **10 GB segments called protection groups**, each replicated 6 ways. Aurora can tolerate losing an entire AZ (2 copies) without read availability loss, and 2 copies without write availability loss. The **log-structured storage** system means only redo log records are written to the network — reducing I/O amplification by 4.5x compared to standard MySQL. **Aurora Serverless v2** scales compute in increments of 0.5 ACU (2 GB RAM each), from 0.5 to 128 ACUs, in milliseconds — ideal for dev/test, variable workloads, and multi-tenant applications. **Aurora Global Database** uses dedicated replication infrastructure for cross-region replication with < 1 second lag, enabling RPO < 1 second and RTO < 1 minute for disaster recovery.",
+    "## ElastiCache Patterns: Caching Strategies in Practice\n\n**Cache-aside (lazy loading)** is the most common pattern: the application checks the cache first, on miss reads from the database and populates the cache. This handles cache failures gracefully (degraded but functional) and only caches accessed data. **Write-through** updates the cache on every database write — ensures cache freshness but increases write latency and caches data that may never be read. **Write-behind (write-back)** writes to cache first, then asynchronously flushes to the database — lowest write latency but risk of data loss if the cache fails. **ElastiCache for Redis** supports **cluster mode** with up to 500 shards (partitions) and 1-5 replicas per shard, enabling 200+ million reads/sec and 100+ million writes/sec. Key Redis data structures for caching: **Sorted Sets** for leaderboards and rate limiting, **HyperLogLog** for unique visitor counting (12 KB per counter), and **Streams** for event logs with consumer groups."
+  ],
+
+  code: [
+    {
+      language: "hcl",
+      caption: "Terraform: RDS Aurora PostgreSQL cluster with read replicas",
+      source: `resource "aws_rds_cluster" "main" {
+  cluster_identifier     = "prod-aurora-postgres"
+  engine                 = "aurora-postgresql"
+  engine_version         = "15.4"
+  database_name          = "appdb"
+  master_username        = "admin"
+  master_password        = var.db_password
+  db_subnet_group_name   = aws_db_subnet_group.main.name
+  vpc_security_group_ids = [aws_security_group.aurora.id]
+
+  storage_encrypted = true
+  kms_key_id        = aws_kms_key.rds.arn
+
+  backup_retention_period   = 14
+  preferred_backup_window   = "03:00-04:00"
+  deletion_protection       = true
+  skip_final_snapshot       = false
+  final_snapshot_identifier = "prod-aurora-final"
+
+  serverlessv2_scaling_configuration {
+    min_capacity = 0.5
+    max_capacity = 64
+  }
+}
+
+resource "aws_rds_cluster_instance" "writer" {
+  identifier         = "prod-aurora-writer"
+  cluster_identifier = aws_rds_cluster.main.id
+  instance_class     = "db.r6g.2xlarge"
+  engine             = aws_rds_cluster.main.engine
+  engine_version     = aws_rds_cluster.main.engine_version
+}
+
+resource "aws_rds_cluster_instance" "readers" {
+  count              = 2
+  identifier         = "prod-aurora-reader-\${count.index}"
+  cluster_identifier = aws_rds_cluster.main.id
+  instance_class     = "db.serverless"
+  engine             = aws_rds_cluster.main.engine
+  engine_version     = aws_rds_cluster.main.engine_version
+}
+
+resource "aws_rds_cluster_instance" "analytics" {
+  identifier         = "prod-aurora-analytics"
+  cluster_identifier = aws_rds_cluster.main.id
+  instance_class     = "db.serverless"
+  engine             = aws_rds_cluster.main.engine
+  engine_version     = aws_rds_cluster.main.engine_version
+
+  tags = { Purpose = "analytics-queries" }
+}`
+    },
+    {
+      language: "bash",
+      caption: "AWS CLI: DynamoDB table with GSI and auto-scaling",
+      source: `# Create a DynamoDB table with on-demand billing
+aws dynamodb create-table \\
+  --table-name Orders \\
+  --attribute-definitions \\
+    AttributeName=PK,AttributeType=S \\
+    AttributeName=SK,AttributeType=S \\
+    AttributeName=GSI1PK,AttributeType=S \\
+    AttributeName=GSI1SK,AttributeType=S \\
+  --key-schema \\
+    AttributeName=PK,KeyType=HASH \\
+    AttributeName=SK,KeyType=RANGE \\
+  --global-secondary-indexes '[
+    {
+      "IndexName": "GSI1",
+      "KeySchema": [
+        {"AttributeName": "GSI1PK", "KeyType": "HASH"},
+        {"AttributeName": "GSI1SK", "KeyType": "RANGE"}
+      ],
+      "Projection": {"ProjectionType": "ALL"}
+    }
+  ]' \\
+  --billing-mode PAY_PER_REQUEST \\
+  --tags Key=Environment,Value=prod
+
+# Enable point-in-time recovery
+aws dynamodb update-continuous-backups \\
+  --table-name Orders \\
+  --point-in-time-recovery-specification PointInTimeRecoveryEnabled=true
+
+# Enable TTL on an expiry attribute
+aws dynamodb update-time-to-live \\
+  --table-name Orders \\
+  --time-to-live-specification Enabled=true,AttributeName=expiresAt`
+    },
+    {
+      language: "json",
+      caption: "DynamoDB single-table design: access patterns for e-commerce",
+      source: `{
+  "TableName": "ECommerce",
+  "KeySchema": { "PK": "HASH", "SK": "RANGE" },
+  "GSI1": { "GSI1PK": "HASH", "GSI1SK": "RANGE" },
+  "AccessPatterns": {
+    "GetCustomer":       { "PK": "CUSTOMER#123", "SK": "PROFILE" },
+    "GetCustomerOrders": { "PK": "CUSTOMER#123", "SK": "begins_with(ORDER#)" },
+    "GetOrder":          { "PK": "ORDER#456",    "SK": "METADATA" },
+    "GetOrderItems":     { "PK": "ORDER#456",    "SK": "begins_with(ITEM#)" },
+    "OrdersByDate":      { "GSI1PK": "CUSTOMER#123", "GSI1SK": "begins_with(2024-)" },
+    "OrdersByStatus":    { "GSI1PK": "STATUS#PENDING", "GSI1SK": "sortByDate" }
+  },
+  "ExampleItems": [
+    { "PK": "CUSTOMER#123", "SK": "PROFILE", "name": "Jane Doe", "email": "jane@example.com" },
+    { "PK": "CUSTOMER#123", "SK": "ORDER#2024-01-15#456", "total": 89.99, "status": "SHIPPED",
+      "GSI1PK": "CUSTOMER#123", "GSI1SK": "2024-01-15", "expiresAt": 1737936000 },
+    { "PK": "ORDER#456", "SK": "ITEM#1", "productId": "PROD#789", "quantity": 2, "price": 44.99 }
+  ]
+}`
+    }
+  ],
+
+  comparison: {
+    columns: ["Feature", "RDS/Aurora", "DynamoDB", "ElastiCache Redis", "Redshift"],
+    rows: [
+      ["Data model", "Relational (SQL)", "Key-value / document", "In-memory key-value", "Columnar (SQL)"],
+      ["Max storage", "128 TB (Aurora)", "Unlimited", "500+ GB (cluster)", "8 PB (RA3)"],
+      ["Latency", "1-10 ms", "1-10 ms (DAX: microseconds)", "Sub-millisecond", "Seconds (complex queries)"],
+      ["Scaling", "Vertical + read replicas", "Horizontal (auto-partitioning)", "Cluster mode sharding", "Node resize / elastic"],
+      ["Transactions", "Full ACID", "TransactWriteItems (25 items)", "MULTI/EXEC (single shard)", "Full ACID"],
+      ["Pricing model", "Instance hours + storage", "RCU/WCU or on-demand per request", "Node hours", "Node hours + spectrum queries"],
+      ["HA/DR", "Multi-AZ, cross-region read replicas", "Multi-AZ by default, Global Tables", "Multi-AZ replication", "Multi-AZ, cross-region snapshots"],
+      ["Best for", "Complex queries, joins, ACID transactions", "High-scale, predictable access patterns", "Session cache, leaderboards, rate limiting", "Analytics, data warehousing, BI"]
+    ]
+  },
+
+  exercises: [
+    "Design a DynamoDB single-table schema for a social media application supporting these access patterns: get user profile, list user's posts (newest first), get post with comments, list posts by hashtag (newest first), get user's followers/following. Define PK/SK structure, GSIs needed, and item examples for each entity type.",
+    "A SaaS application has 50,000 tenants sharing a single Aurora PostgreSQL cluster. During peak hours, connection count reaches 10,000+. Design a solution using RDS Proxy for connection pooling, Aurora Serverless v2 for compute scaling, and read replicas for query distribution. Specify how to route read vs write traffic and handle tenant isolation.",
+    "You need to implement a caching layer for an e-commerce product catalog. Products are updated 10 times/day but read 100,000 times/day. Design the ElastiCache architecture: choose between Redis and Memcached, select the caching strategy (cache-aside vs write-through), define TTL policies, handle cache invalidation on product updates, and plan for cache node failures.",
+    "A financial services company needs a database for transaction processing (strict ACID, 50,000 TPS) and real-time analytics on the same data. Design an architecture using Aurora PostgreSQL for OLTP, with zero-ETL integration to Redshift for analytics. Address: data consistency between systems, query routing, and cost optimization.",
+    "Your DynamoDB table experiences hot partition issues: 80% of reads target the top 100 products (out of 10 million). Current table uses product_id as partition key and has 10,000 RCUs provisioned. Design a solution using DAX, write sharding for popular items, and ElastiCache Redis for computed aggregations (like trending products). Calculate the cost comparison."
+  ],
+
+  cheatSheet: [
+    "**DynamoDB pricing**: On-demand = $1.25/million WCUs + $0.25/million RCUs. Provisioned = $0.00065/WCU-hr + $0.00013/RCU-hr. On-demand costs ~6.6x more per request but no capacity planning needed",
+    "**Aurora vs RDS**: Aurora costs ~20% more but gives 6-way replication, auto-scaling storage, faster failover (30s vs 60-120s), and up to 15 read replicas (vs 5 for RDS)",
+    "**DynamoDB item size limit**: 400 KB per item. Large items should use S3 for the payload and store the S3 key in DynamoDB. GSI inherits the base table's 400 KB limit",
+    "**ElastiCache node types**: r6g (memory-optimized) for caching, m6g (general) for complex data structures. Max ~500 GB with cluster mode. Graviton nodes are 20% cheaper",
+    "**RDS Multi-AZ**: synchronous replication, automatic failover in 1-2 minutes, failover endpoint stays the same. Read replicas are async and can be promoted manually for DR",
+    "**DynamoDB Streams + Lambda**: enable CDC (Change Data Capture) for real-time reactions to data changes. Use for denormalization, analytics pipelines, cross-region replication triggers",
+    "**Redshift Spectrum**: query S3 data directly without loading it. Combine with RA3 nodes that cache hot data on local SSDs. Use for data lakehouse architectures",
+    "**Connection pooling**: RDS Proxy pools connections, supports IAM auth, and handles failover transparently. Essential for Lambda-to-RDS (prevents connection exhaustion from concurrent invocations)"
+  ],
+
+  revisionNotes: [
+    "DynamoDB is multi-AZ by default with no configuration needed. Data is replicated across 3 AZs automatically. Global Tables add cross-region active-active replication with eventual consistency",
+    "Aurora storage auto-scales in 10 GB increments up to 128 TB. You never provision storage — you only pay for what you use. Storage is billed separately from compute",
+    "ElastiCache Redis supports persistence (RDB snapshots + AOF) but is NOT a database replacement. Use it to accelerate reads and reduce database load. Plan for cache warming after restarts",
+    "RDS automated backups: daily snapshots + transaction logs retained 0-35 days. Point-in-time recovery restores to any second within the retention window. Manual snapshots persist until deleted",
+    "DynamoDB on-demand mode is best for unpredictable workloads or new tables. Switch to provisioned mode with auto-scaling once patterns are established — it's significantly cheaper for steady-state",
+    "Redshift uses columnar storage and massively parallel processing. RA3 nodes separate compute from storage (managed S3). Concurrency Scaling adds transient clusters for read bursts at no extra cost (1 hour free/day per cluster)",
+    "DynamoDB TransactWriteItems supports up to 100 items (25 in a single call) across tables in the same region. Transactions consume 2x the WCUs of non-transactional writes",
+    "Aurora Serverless v2 scales in 0.5 ACU increments with near-instant response. Set min ACU to 0.5 for dev (costs ~$43/month) and appropriate max for production to control costs"
+  ],
+
+  resources: [
+    { label: "Alex DeBrie — The DynamoDB Book", kind: "book", note: "The definitive guide to DynamoDB single-table design, access patterns, and advanced modeling techniques" },
+    { label: "Amazon Builders' Library: Avoiding fallback in distributed systems", kind: "article", note: "Deep dive into caching strategies, cache stampede prevention, and graceful degradation patterns" },
+    { label: "AWS re:Invent — Amazon Aurora Under the Hood (DAT320)", kind: "video", note: "Internal architecture of Aurora: quorum writes, log-structured storage, and the separation of compute and storage" },
+    { label: "AWS Database Migration Service documentation", kind: "docs", note: "Official guide for migrating databases to AWS — schema conversion, continuous replication, and validation" },
+    { label: "aws-samples/aws-dynamodb-examples GitHub", kind: "repo", note: "Official AWS DynamoDB examples including single-table design patterns, streams processing, and DAX integration" }
+  ],
+
+  diagrams: [
+    {
+      title: "Aurora Storage Architecture",
+      kind: "architecture" as const,
+      caption: "6-way replication across 3 AZs with protection groups, quorum writes (4/6), and quorum reads (3/6)"
+    },
+    {
+      title: "DynamoDB Request Flow",
+      kind: "sequence" as const,
+      caption: "Sequence from application through DynamoDB request router to storage nodes, showing partition key hashing and consistent reads vs eventually consistent reads"
+    }
+  ],
+
+  animations: [
+    {
+      title: "Cache-Aside Pattern with ElastiCache",
+      steps: [
+        { label: "Application receives read request", detail: "A user requests product details for product_id=789. The application first checks ElastiCache Redis for the key 'product:789'." },
+        { label: "Cache miss", detail: "Redis returns nil — the product is not cached. This is a cache miss. The application must fall back to the primary database." },
+        { label: "Query the database", detail: "Application queries Aurora PostgreSQL: SELECT * FROM products WHERE id = 789. The database returns the full product record in ~5ms." },
+        { label: "Populate the cache", detail: "Application writes the product data to Redis: SET product:789 '{...}' EX 3600. The EX flag sets a 1-hour TTL to ensure eventual consistency with the database." },
+        { label: "Return response", detail: "Application returns the product data to the user. Total latency: ~8ms (Redis check + DB query + Redis write)." },
+        { label: "Subsequent cache hit", detail: "Next request for product_id=789 finds data in Redis (cache hit). Redis returns the cached JSON in ~0.5ms. Database is not queried. Hit rate improves over time as the working set is cached." }
+      ]
+    }
+  ],
+
   glossary: [
     { term: "RDS", definition: "Relational Database Service — managed service for MySQL, PostgreSQL, MariaDB, Oracle, and SQL Server with automated backups, patching, and high availability." },
     { term: "Aurora", definition: "AWS cloud-native relational database compatible with MySQL and PostgreSQL, offering 6-way replication, auto-scaling storage, and up to 5x performance improvement." },

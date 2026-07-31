@@ -23,131 +23,216 @@ export const ipAddressing: TopicContent = {
   ],
   code: [
     {
-      language: "python",
+      language: "cpp",
       caption: "Subnet calculator: compute network address, broadcast, host range, and usable hosts from CIDR notation",
-      source: `import struct
-import socket
+      source: `#include <iostream>
+#include <string>
+#include <cstdint>
+#include <sstream>
+#include <arpa/inet.h>
+#include <iomanip>
 
-def subnet_info(cidr: str) -> dict:
-    """Parse a CIDR string and return full subnet details."""
-    ip_str, prefix_len = cidr.split("/")
-    prefix_len = int(prefix_len)
+// Convert dotted-decimal IP string to 32-bit host-order integer
+uint32_t ip_to_int(const std::string& ip) {
+    struct in_addr addr;
+    inet_pton(AF_INET, ip.c_str(), &addr);
+    return ntohl(addr.s_addr);
+}
 
-    # Convert IP string to 32-bit integer
-    ip_int = struct.unpack("!I", socket.inet_aton(ip_str))[0]
+// Convert 32-bit host-order integer to dotted-decimal string
+std::string int_to_ip(uint32_t n) {
+    struct in_addr addr;
+    addr.s_addr = htonl(n);
+    char buf[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &addr, buf, sizeof(buf));
+    return buf;
+}
 
-    # Build subnet mask as 32-bit integer
-    if prefix_len == 0:
-        mask = 0
-    else:
-        mask = (0xFFFFFFFF << (32 - prefix_len)) & 0xFFFFFFFF
+void subnet_info(const std::string& cidr) {
+    // Parse CIDR: split on '/'
+    auto slash = cidr.find('/');
+    std::string ip_str = cidr.substr(0, slash);
+    int prefix_len = std::stoi(cidr.substr(slash + 1));
 
-    wildcard = mask ^ 0xFFFFFFFF
-    network = ip_int & mask
-    broadcast = network | wildcard
-    first_host = network + 1
-    last_host = broadcast - 1
-    usable = (1 << (32 - prefix_len)) - 2
+    uint32_t ip = ip_to_int(ip_str);
 
-    def to_dot(n):
-        return socket.inet_ntoa(struct.pack("!I", n))
+    // Build subnet mask
+    uint32_t mask = (prefix_len == 0) ? 0 : (~0U << (32 - prefix_len));
+    uint32_t wildcard   = mask ^ 0xFFFFFFFF;
+    uint32_t network    = ip & mask;
+    uint32_t broadcast  = network | wildcard;
+    uint32_t first_host = network + 1;
+    uint32_t last_host  = broadcast - 1;
+    int total  = 1 << (32 - prefix_len);
+    int usable = total - 2;
 
-    return {
-        "cidr": cidr,
-        "network": to_dot(network),
-        "broadcast": to_dot(broadcast),
-        "subnet_mask": to_dot(mask),
-        "wildcard_mask": to_dot(wildcard),
-        "first_host": to_dot(first_host) if usable > 0 else "N/A",
-        "last_host": to_dot(last_host) if usable > 0 else "N/A",
-        "usable_hosts": max(usable, 0),
-        "total_addresses": 1 << (32 - prefix_len),
+    std::cout << std::setw(16) << "cidr: " << cidr << "\\n"
+              << std::setw(16) << "network: " << int_to_ip(network) << "\\n"
+              << std::setw(16) << "broadcast: " << int_to_ip(broadcast) << "\\n"
+              << std::setw(16) << "subnet_mask: " << int_to_ip(mask) << "\\n"
+              << std::setw(16) << "wildcard_mask: " << int_to_ip(wildcard) << "\\n"
+              << std::setw(16) << "first_host: " << (usable > 0 ? int_to_ip(first_host) : "N/A") << "\\n"
+              << std::setw(16) << "last_host: " << (usable > 0 ? int_to_ip(last_host) : "N/A") << "\\n"
+              << std::setw(16) << "usable_hosts: " << std::max(usable, 0) << "\\n"
+              << std::setw(16) << "total_addresses: " << total << "\\n";
+}
+
+int main() {
+    subnet_info("192.168.10.0/26");
+    // Output:
+    //            cidr: 192.168.10.0/26
+    //         network: 192.168.10.0
+    //       broadcast: 192.168.10.63
+    //     subnet_mask: 255.255.255.192
+    //   wildcard_mask: 0.0.0.63
+    //      first_host: 192.168.10.1
+    //       last_host: 192.168.10.62
+    //    usable_hosts: 62
+    // total_addresses: 64
+    return 0;
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "Bitwise IP manipulation: check if an IP belongs to a subnet, classify private ranges",
+      source: `#include <iostream>
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <arpa/inet.h>
+
+uint32_t ip_to_int(const std::string& ip) {
+    struct in_addr addr;
+    inet_pton(AF_INET, ip.c_str(), &addr);
+    return ntohl(addr.s_addr);
+}
+
+bool ip_in_subnet(const std::string& ip, const std::string& cidr) {
+    auto slash = cidr.find('/');
+    std::string net_str = cidr.substr(0, slash);
+    int prefix = std::stoi(cidr.substr(slash + 1));
+    uint32_t mask = (prefix == 0) ? 0 : (~0U << (32 - prefix));
+    return (ip_to_int(ip) & mask) == (ip_to_int(net_str) & mask);
+}
+
+std::string classify_ip(const std::string& ip) {
+    struct { const char* cidr; const char* label; } ranges[] = {
+        {"10.0.0.0/8",      "Private (Class A)"},
+        {"172.16.0.0/12",   "Private (Class B)"},
+        {"192.168.0.0/16",  "Private (Class C)"},
+        {"127.0.0.0/8",     "Loopback"},
+        {"169.254.0.0/16",  "Link-Local (APIPA)"},
+    };
+    for (const auto& r : ranges) {
+        if (ip_in_subnet(ip, r.cidr)) return r.label;
+    }
+    return "Public";
+}
+
+int main() {
+    std::cout << std::boolalpha;
+    std::cout << ip_in_subnet("192.168.1.50", "192.168.1.0/24") << "\\n";  // true
+    std::cout << ip_in_subnet("192.168.2.1", "192.168.1.0/24") << "\\n";   // false
+    std::cout << classify_ip("10.0.3.5") << "\\n";       // Private (Class A)
+    std::cout << classify_ip("172.20.1.1") << "\\n";     // Private (Class B)
+    std::cout << classify_ip("8.8.8.8") << "\\n";        // Public
+    std::cout << classify_ip("169.254.100.1") << "\\n";  // Link-Local (APIPA)
+    return 0;
+}`,
+    },
+    {
+      language: "cpp",
+      caption: "CIDR aggregation: merge a list of contiguous prefixes into the smallest set of supernets",
+      source: `#include <iostream>
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <cstdint>
+#include <arpa/inet.h>
+
+struct CidrBlock {
+    uint32_t network;  // host-order
+    int prefix;
+
+    uint32_t end() const { return network + (1U << (32 - prefix)); }
+};
+
+uint32_t ip_to_int(const std::string& ip) {
+    struct in_addr addr;
+    inet_pton(AF_INET, ip.c_str(), &addr);
+    return ntohl(addr.s_addr);
+}
+
+std::string int_to_ip(uint32_t n) {
+    struct in_addr addr;
+    addr.s_addr = htonl(n);
+    char buf[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &addr, buf, sizeof(buf));
+    return buf;
+}
+
+CidrBlock parse_cidr(const std::string& cidr) {
+    auto slash = cidr.find('/');
+    uint32_t net = ip_to_int(cidr.substr(0, slash));
+    int prefix = std::stoi(cidr.substr(slash + 1));
+    uint32_t mask = (prefix == 0) ? 0 : (~0U << (32 - prefix));
+    return {net & mask, prefix};
+}
+
+std::vector<std::string> aggregate_cidrs(std::vector<std::string> cidr_list) {
+    // Parse and sort by network address
+    std::vector<CidrBlock> blocks;
+    for (const auto& c : cidr_list) blocks.push_back(parse_cidr(c));
+    std::sort(blocks.begin(), blocks.end(),
+        [](const CidrBlock& a, const CidrBlock& b) { return a.network < b.network; });
+
+    // Merge contiguous blocks with the same prefix into a shorter prefix
+    bool merged = true;
+    while (merged) {
+        merged = false;
+        std::vector<CidrBlock> next;
+        size_t i = 0;
+        while (i < blocks.size()) {
+            if (i + 1 < blocks.size()
+                && blocks[i].prefix == blocks[i+1].prefix
+                && blocks[i].end() == blocks[i+1].network
+                && (blocks[i].network & ~(~0U << (32 - blocks[i].prefix + 1))) == 0) {
+                // Two adjacent same-prefix blocks that align -> merge
+                next.push_back({blocks[i].network, blocks[i].prefix - 1});
+                i += 2;
+                merged = true;
+            } else {
+                next.push_back(blocks[i]);
+                ++i;
+            }
+        }
+        blocks = std::move(next);
     }
 
-# Example
-info = subnet_info("192.168.10.0/26")
-for k, v in info.items():
-    print(f"{k:>15}: {v}")
-# Output:
-#            cidr: 192.168.10.0/26
-#         network: 192.168.10.0
-#       broadcast: 192.168.10.63
-#     subnet_mask: 255.255.255.192
-#   wildcard_mask: 0.0.0.63
-#      first_host: 192.168.10.1
-#       last_host: 192.168.10.62
-#    usable_hosts: 62
-# total_addresses: 64`,
-    },
-    {
-      language: "python",
-      caption: "Bitwise IP manipulation: check if an IP belongs to a subnet, classify private ranges",
-      source: `import struct, socket
+    std::vector<std::string> result;
+    for (const auto& b : blocks) {
+        result.push_back(int_to_ip(b.network) + "/" + std::to_string(b.prefix));
+    }
+    return result;
+}
 
-def ip_to_int(ip: str) -> int:
-    return struct.unpack("!I", socket.inet_aton(ip))[0]
+int main() {
+    // Four contiguous /24s collapse into one /22
+    auto result = aggregate_cidrs({
+        "192.168.0.0/24", "192.168.1.0/24",
+        "192.168.2.0/24", "192.168.3.0/24"
+    });
+    for (const auto& r : result) std::cout << r << " ";
+    std::cout << "\\n";  // 192.168.0.0/22
 
-def int_to_ip(n: int) -> str:
-    return socket.inet_ntoa(struct.pack("!I", n))
-
-def ip_in_subnet(ip: str, cidr: str) -> bool:
-    """Check whether an IP address falls within a CIDR block."""
-    net_str, prefix = cidr.split("/")
-    prefix = int(prefix)
-    mask = (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF
-    return (ip_to_int(ip) & mask) == (ip_to_int(net_str) & mask)
-
-def classify_ip(ip: str) -> str:
-    """Classify an IPv4 address as private, loopback, link-local, or public."""
-    private_ranges = [
-        ("10.0.0.0/8", "Private (Class A)"),
-        ("172.16.0.0/12", "Private (Class B)"),
-        ("192.168.0.0/16", "Private (Class C)"),
-        ("127.0.0.0/8", "Loopback"),
-        ("169.254.0.0/16", "Link-Local (APIPA)"),
-    ]
-    for cidr, label in private_ranges:
-        if ip_in_subnet(ip, cidr):
-            return label
-    return "Public"
-
-# Examples
-print(ip_in_subnet("192.168.1.50", "192.168.1.0/24"))   # True
-print(ip_in_subnet("192.168.2.1", "192.168.1.0/24"))    # False
-print(classify_ip("10.0.3.5"))       # Private (Class A)
-print(classify_ip("172.20.1.1"))     # Private (Class B)
-print(classify_ip("8.8.8.8"))        # Public
-print(classify_ip("169.254.100.1"))  # Link-Local (APIPA)`,
-    },
-    {
-      language: "python",
-      caption: "CIDR aggregation: merge a list of contiguous prefixes into the smallest set of supernets",
-      source: `import ipaddress
-
-def aggregate_cidrs(cidr_list: list[str]) -> list[str]:
-    """Collapse a list of CIDR strings into the minimal set of supernets."""
-    networks = [ipaddress.ip_network(c, strict=False) for c in cidr_list]
-    collapsed = list(ipaddress.collapse_addresses(networks))
-    return [str(n) for n in collapsed]
-
-# Example: four contiguous /24s collapse into one /22
-prefixes = [
-    "192.168.0.0/24",
-    "192.168.1.0/24",
-    "192.168.2.0/24",
-    "192.168.3.0/24",
-]
-print(aggregate_cidrs(prefixes))
-# ['192.168.0.0/22']
-
-# Non-contiguous blocks stay separate
-mixed = [
-    "10.0.0.0/24",
-    "10.0.1.0/24",
-    "10.0.4.0/24",
-]
-print(aggregate_cidrs(mixed))
-# ['10.0.0.0/23', '10.0.4.0/24']`,
+    // Non-contiguous blocks stay separate
+    auto mixed = aggregate_cidrs({
+        "10.0.0.0/24", "10.0.1.0/24", "10.0.4.0/24"
+    });
+    for (const auto& r : mixed) std::cout << r << " ";
+    std::cout << "\\n";  // 10.0.0.0/23 10.0.4.0/24
+    return 0;
+}`,
     },
   ],
   diagrams: [
