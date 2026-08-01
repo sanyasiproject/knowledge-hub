@@ -298,28 +298,87 @@ private:
   ],
   diagrams: [
     {
-      title: "AVL Rotation Cases",
+      title: "AVL Rotation Decision Flow",
       kind: "flow",
-      caption:
-        "The four imbalance cases (LL, RR, LR, RL) and the single or double rotations that restore AVL balance.",
+      caption: "The four AVL imbalance cases detected after insertion and the single or double rotation applied to restore balance.",
+      mermaid: `flowchart TD
+    A["Insert Node"] --> B{"Check Balance Factor"}
+    B -->|"Balanced -1 to 1"| C["Done - no rotation needed"]
+    B -->|"Left Heavy plus 2"| D{"Left child balance?"}
+    B -->|"Right Heavy minus 2"| E{"Right child balance?"}
+    D -->|"Left Heavy LL"| F["Right Rotate"]
+    D -->|"Right Heavy LR"| G["Left Rotate child then Right Rotate"]
+    E -->|"Right Heavy RR"| H["Left Rotate"]
+    E -->|"Left Heavy RL"| I["Right Rotate child then Left Rotate"]
+    F --> J["Tree Balanced"]
+    G --> J
+    H --> J
+    I --> J`,
     },
     {
-      title: "Red-Black Tree Properties",
+      title: "Red-Black Insert Fix-Up States",
       kind: "state",
-      caption:
-        "State diagram showing how insertion fix-up transitions between the three cases (recolor, triangle rotation, line rotation) until the root is reached.",
+      caption: "State transitions during the Red-Black tree insertion fix-up procedure, moving from violation detection through cases until the invariant is restored.",
+      mermaid: `stateDiagram-v2
+    [*] --> Inserted
+    Inserted : New node colored red
+    CheckParent : Check parent color
+    Case1 : Case 1 - Red uncle
+    Case2 : Case 2 - Black uncle triangle
+    Case3 : Case 3 - Black uncle line
+    Done : Invariant restored
+
+    Inserted --> CheckParent
+    CheckParent --> Done : Parent is black
+    CheckParent --> Case1 : Parent and uncle are red
+    Case1 --> CheckParent : Recolor and move up to grandparent
+    Case1 --> Done : Reached root
+    CheckParent --> Case2 : Uncle black and triangle shape
+    Case2 --> Case3 : Rotate parent to form line
+    CheckParent --> Case3 : Uncle black and line shape
+    Case3 --> Done : Recolor and rotate grandparent`,
     },
     {
-      title: "B-Tree Node Split",
-      kind: "flow",
-      caption:
-        "How a full B-Tree node splits: the median key is promoted to the parent and the node is divided into two half-full nodes.",
+      title: "Balanced Tree Types Comparison",
+      kind: "architecture",
+      caption: "Relationships among balanced tree variants showing the BST family, their storage context, and key implementation tradeoffs.",
+      mermaid: `graph TD
+    BST["Binary Search Tree<br/>O(n) worst case"]
+    AVL["AVL Tree<br/>Height at most 1.44 log n<br/>Read-heavy workloads"]
+    RB["Red-Black Tree<br/>Height at most 2 log n<br/>Write-heavy - std::map"]
+    Splay["Splay Tree<br/>Amortized O(log n)<br/>Skewed access patterns"]
+    BT["B-Tree<br/>Multi-way branching<br/>Minimizes disk I/O"]
+    BPlus["B+ Tree<br/>Values only in leaves<br/>Linked leaf chain"]
+    T234["2-3-4 Tree<br/>Isomorphic to Red-Black"]
+
+    BST --> AVL
+    BST --> RB
+    BST --> Splay
+    RB -.->|"isometry"| T234
+    T234 --> BT
+    BT --> BPlus`,
     },
     {
-      title: "Balanced Tree Family Taxonomy",
-      kind: "mindmap",
-      caption:
-        "Relationships among balanced tree variants: BST -> AVL, Red-Black, Splay; B-Tree -> B+Tree, B*Tree; Red-Black <-> 2-3-4 Tree isometry.",
+      title: "B-Tree Insert and Rebalance Sequence",
+      kind: "sequence",
+      caption: "How a B-Tree insertion triggers a node split when a node is full, promoting the median key to the parent and potentially cascading to the root.",
+      mermaid: `sequenceDiagram
+    participant Client as Client
+    participant Root as Root Node
+    participant Internal as Internal Node
+    participant Leaf as Leaf Node
+
+    Client->>Root: Insert key 42
+    Root->>Internal: Descend - compare keys
+    Internal->>Leaf: Descend to correct leaf
+    Note over Leaf: Leaf is full - 2t-1 keys
+    Leaf->>Internal: Split - promote median key up
+    Note over Internal: Internal now has room
+    Internal->>Leaf: Insert into left or right half
+    Note over Internal: Internal is also full
+    Internal->>Root: Split - promote median to root
+    Root->>Root: Root gains one key
+    Note over Root: If root also full - new root created - height increases`,
     },
   ],
   animations: [

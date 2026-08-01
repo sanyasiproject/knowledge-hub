@@ -345,11 +345,50 @@ int main() {
       title: "Tiered Memory Architecture",
       kind: "architecture",
       caption: "Three-tier memory system showing data flow between context window (L1), session memory (L2), and persistent storage (L3) with promotion and eviction paths.",
+      mermaid: `graph TD
+    L1[L1 Context Window\nActive working memory\nTokens in prompt] -->|Eviction on overflow| L2
+    L2[L2 Session Memory\nRunning summaries\nScratchpad buffer] -->|Persist on session end| L3
+    L3[L3 Persistent Storage\nVector store\nKey-value facts] -->|Retrieval by similarity| L1
+    L2 -->|Inject relevant facts| L1
+    New[New Information] --> L1
+    L1 -->|Flag durable facts| L2`,
     },
     {
       title: "Planning-Execution-Replanning Cycle",
       kind: "flow",
       caption: "Cyclic flow from goal decomposition through task execution, result evaluation, and conditional replanning when failures or new information arise.",
+      mermaid: `flowchart TD
+    Goal([Receive Goal]) --> Decompose[Decompose into\nSubtasks]
+    Decompose --> Prioritize[Prioritize and\nSequence Tasks]
+    Prioritize --> Execute[Execute Next Task\nvia Tool or LLM]
+    Execute --> Observe[Observe Result]
+    Observe --> Eval{Success?}
+    Eval -->|Yes| More{More tasks?}
+    More -->|Yes| Execute
+    More -->|No| Done([Goal Complete])
+    Eval -->|No| Analyze[Analyze Failure]
+    Analyze --> Replan{Recoverable?}
+    Replan -->|Yes| Decompose
+    Replan -->|No| Escalate[Escalate to User]`,
+    },
+    {
+      title: "Memory Retrieval in Agent Loop",
+      kind: "sequence",
+      caption: "How an agent retrieves relevant memories from long-term storage and injects them into the context before generating a response.",
+      mermaid: `sequenceDiagram
+    participant U as User
+    participant A as Agent
+    participant LT as Long-Term Store
+    participant LLM as Language Model
+    U->>A: New message
+    A->>LT: Embed message, similarity search
+    LT-->>A: Top-k relevant memories
+    A->>A: Build context: system + memories + history + message
+    A->>LLM: Send constructed prompt
+    LLM-->>A: Response
+    A->>A: Identify facts worth storing
+    A->>LT: Write new memories with metadata
+    A-->>U: Return response`,
     },
   ],
   animations: [

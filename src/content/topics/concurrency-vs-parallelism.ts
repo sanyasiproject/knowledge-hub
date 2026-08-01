@@ -200,16 +200,84 @@ async function parallelCompute(): Promise<void> {
 
   diagrams: [
     {
-      title: "Concurrency vs Parallelism Execution Model",
-      kind: "architecture",
-      caption:
-        "Single-core concurrency interleaves tasks via time-slicing on one core. Multi-core parallelism runs tasks simultaneously on separate cores. Both can be combined: a multi-core system runs concurrent programs in parallel.",
+      title: "Concurrency vs Parallelism Decision Flow",
+      kind: "flow",
+      caption: "Decision tree for choosing between concurrency and parallelism based on whether tasks are I/O-bound or CPU-bound and whether multiple cores are available.",
+      mermaid: `flowchart TD
+    Start["Workload to optimize"] --> Q1{"Multiple CPU cores available?"}
+    Q1 -->|"No"| Conc["Concurrency - interleave tasks"]
+    Q1 -->|"Yes"| Q2{"Tasks are CPU-bound?"}
+    Q2 -->|"Yes"| Par["Parallelism - run tasks simultaneously"]
+    Q2 -->|"No - I/O bound"| Both["Concurrency plus Parallelism"]
+    Conc --> IOBound["Use async I/O or coroutines"]
+    Par --> Threads["Use worker threads or processes"]
+    Both --> EventPool["Event loop plus thread pool"]`,
     },
     {
-      title: "Event Loop and Thread Pool Interaction",
-      kind: "flow",
-      caption:
-        "The event loop receives I/O events, dispatches callbacks, and offloads CPU-heavy work to a thread pool. Completed results are posted back to the event loop's task queue for the main thread to process.",
+      title: "Concurrency and Parallelism Concept Map",
+      kind: "mindmap",
+      caption: "Mindmap covering concurrency, parallelism, their mechanisms, use cases, and the distinctions between them.",
+      mermaid: `mindmap
+  root["Concurrency vs Parallelism"]
+    Concurrency
+      Interleaved execution
+      Single or multi core
+      Context switching
+      Async I/O
+      Coroutines
+      Event loops
+    Parallelism
+      Simultaneous execution
+      Requires multiple cores
+      Data parallelism
+      Task parallelism
+      SIMD
+      GPU computing
+    Both combined
+      Async web servers
+      Node.js cluster
+      Go runtime`,
+    },
+    {
+      title: "Single Core vs Multi Core Execution",
+      kind: "architecture",
+      caption: "Single-core systems achieve concurrency through time-slicing; multi-core systems achieve true parallelism by running tasks on separate cores simultaneously.",
+      mermaid: `graph TB
+    subgraph SingleCore["Single Core - Concurrent"]
+        CPU1["Core 0"]
+        T1A["Task A - slice 1"]
+        T1B["Task B - slice 2"]
+        T1C["Task A - slice 3"]
+        T1D["Task B - slice 4"]
+        CPU1 --> T1A --> T1B --> T1C --> T1D
+    end
+    subgraph MultiCore["Multi Core - Parallel"]
+        CPU2["Core 0"] --> T2A["Task A"]
+        CPU3["Core 1"] --> T2B["Task B"]
+        CPU4["Core 2"] --> T2C["Task C"]
+    end`,
+    },
+    {
+      title: "Context Switch Sequence",
+      kind: "sequence",
+      caption: "The OS scheduler saves and restores CPU context when switching between concurrent tasks, enabling apparent simultaneous progress on a single core.",
+      mermaid: `sequenceDiagram
+    participant OS as OS Scheduler
+    participant CPU as CPU Core 0
+    participant A as Task A
+    participant B as Task B
+
+    OS->>CPU: Assign Task A
+    CPU->>A: Execute instructions
+    Note over CPU: Timer interrupt fires
+    CPU->>OS: Save A context
+    OS->>OS: Select next task B
+    OS->>CPU: Restore B context
+    CPU->>B: Execute instructions
+    B->>B: Blocks on I/O
+    CPU->>OS: Voluntary yield
+    OS->>CPU: Restore A context
+    CPU->>A: Resume from saved PC`,
     },
   ],
 

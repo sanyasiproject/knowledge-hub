@@ -282,83 +282,104 @@ ALTER TABLE users DROP COLUMN username;
 
   diagrams: [
     {
-      title: "CD Pipeline Flow — Commit to Production",
+      title: "CD Pipeline Flow - Commit to Production",
       kind: "flow",
-      caption: "End-to-end continuous delivery pipeline showing gates, artifact promotion, and environment progression",
+      caption: "End-to-end continuous delivery pipeline showing gates, artifact promotion, and environment progression from commit to production.",
       mermaid: `flowchart LR
-  A[Developer Commit] --> B[Build & Unit Tests]
-  B --> C{Tests Pass?}
-  C -- No --> D[Notify & Fix]
-  C -- Yes --> E[Build Immutable Artifact]
-  E --> F[Push to Artifact Registry]
-  F --> G[Deploy to Dev]
-  G --> H[Integration Tests]
-  H --> I{Tests Pass?}
-  I -- No --> D
-  I -- Yes --> J[Deploy to Staging]
-  J --> K[Smoke Tests & QA]
-  K --> L{Approved?}
-  L -- No --> D
-  L -- Yes --> M[Deploy to Production]
-  M --> N[Health Checks]
-  N --> O{Healthy?}
-  O -- No --> P[Automatic Rollback]
-  O -- Yes --> Q[Monitor & Observe]`,
+    A["Developer Commit"] --> B["Build and Unit Tests"]
+    B --> C{Tests Pass?}
+    C -- No --> D["Notify and Fix"]
+    C -- Yes --> E["Build Immutable Artifact"]
+    E --> F["Push to Artifact Registry"]
+    F --> G["Deploy to Dev"]
+    G --> H["Integration Tests"]
+    H --> I{Tests Pass?}
+    I -- No --> D
+    I -- Yes --> J["Deploy to Staging"]
+    J --> K["Smoke Tests and QA"]
+    K --> L{Approved?}
+    L -- No --> D
+    L -- Yes --> M["Deploy to Production"]
+    M --> N["Health Checks"]
+    N --> O{Healthy?}
+    O -- No --> P["Automatic Rollback"]
+    O -- Yes --> Q["Monitor and Observe"]`,
     },
     {
       title: "Blue-Green and Canary Deployment Architecture",
       kind: "architecture",
-      caption: "Blue-green uses atomic traffic switching; canary gradually shifts traffic percentage to the new version",
+      caption: "Blue-green uses atomic traffic switching for instant rollback; canary gradually shifts traffic with metric-driven promotion.",
       mermaid: `flowchart TB
-  subgraph Blue-Green Deployment
-    LB1[Load Balancer] --> BG_SWITCH{Traffic Switch}
-    BG_SWITCH -- "100%" --> BLUE[Blue Environment\nv1.2 - Current]
-    BG_SWITCH -. "0% → 100%" .-> GREEN[Green Environment\nv1.3 - New]
-    BLUE --> DB1[(Shared Database)]
-    GREEN --> DB1
-  end
+    subgraph BlueGreen["Blue-Green Deployment"]
+        LB1["Load Balancer"] --> BGS{"Traffic Switch"}
+        BGS -- "100%" --> BLUE["Blue Environment\nv1.2 Current"]
+        BGS -. "0 to 100%" .-> GREEN["Green Environment\nv1.3 New"]
+        BLUE --> DB1[("Shared Database")]
+        GREEN --> DB1
+    end
 
-  subgraph Canary Deployment
-    LB2[Load Balancer] --> SPLIT{Traffic Split}
-    SPLIT -- "95%" --> STABLE[Stable Pool\nv1.2]
-    SPLIT -- "5%" --> CANARY[Canary Pool\nv1.3]
-    STABLE --> DB2[(Shared Database)]
-    CANARY --> DB2
-    CANARY --> METRICS[Metrics Analysis]
-    METRICS -- "OK" --> PROMOTE[Promote Canary\n5% → 25% → 100%]
-    METRICS -- "Degraded" --> ROLLBACK[Rollback to Stable]
-  end`,
+    subgraph Canary["Canary Deployment"]
+        LB2["Load Balancer"] --> SPLIT{"Traffic Split"}
+        SPLIT -- "95%" --> STABLE["Stable Pool v1.2"]
+        SPLIT -- "5%" --> CAN["Canary Pool v1.3"]
+        CAN --> METRICS["Metrics Analysis\nerror rate and latency"]
+        METRICS -- "OK" --> PROMOTE["Promote 5 to 25 to 100%"]
+        METRICS -- "Degraded" --> ROLLBACK["Rollback to Stable"]
+    end`,
     },
     {
-      title: "Expand-and-Contract Database Migration Sequence",
+      title: "Expand-and-Contract Database Migration",
       kind: "sequence",
-      caption: "Three-phase migration ensuring backward compatibility at every step",
+      caption: "Three-phase migration strategy ensuring the previous application version is always compatible with the schema at every step.",
       mermaid: `sequenceDiagram
-  participant Dev as Developer
-  participant Pipeline as CD Pipeline
-  participant App_v1 as App v1 (Old Code)
-  participant App_v2 as App v2 (Dual-Write)
-  participant App_v3 as App v3 (New Code)
-  participant DB as Database
+    participant Dev as Developer
+    participant Pipeline as CD Pipeline
+    participant App2 as App v2 Dual-Write
+    participant App3 as App v3 New Only
+    participant DB as Database
 
-  Note over Dev,DB: Phase 1 — EXPAND
-  Dev->>Pipeline: Deploy migration V3 (add column)
-  Pipeline->>DB: ALTER TABLE ADD COLUMN email
-  Pipeline->>DB: Backfill email from username
-  Dev->>Pipeline: Deploy App v2 (writes to both columns)
-  Pipeline->>App_v2: Deploy dual-write code
-  App_v2->>DB: INSERT INTO users (username, email, ...)
+    Note over Dev,DB: Phase 1 - EXPAND
+    Dev->>Pipeline: Deploy migration V3
+    Pipeline->>DB: ALTER TABLE ADD COLUMN email
+    Pipeline->>DB: Backfill email from username
+    Dev->>Pipeline: Deploy App v2
+    Pipeline->>App2: Deploy dual-write code
+    App2->>DB: INSERT username and email both
 
-  Note over Dev,DB: Phase 2 — MIGRATE
-  App_v2->>DB: Verify all rows have email populated
-  App_v2->>DB: Read from email column (primary)
+    Note over Dev,DB: Phase 2 - VERIFY
+    App2->>DB: Confirm all rows have email
+    App2->>DB: Read from email column primary
 
-  Note over Dev,DB: Phase 3 — CONTRACT
-  Dev->>Pipeline: Deploy App v3 (uses email only)
-  Pipeline->>App_v3: Deploy new code
-  Dev->>Pipeline: Deploy migration V4 (drop username)
-  Pipeline->>DB: ALTER TABLE DROP COLUMN username
-  App_v3->>DB: Queries use email column only`,
+    Note over Dev,DB: Phase 3 - CONTRACT
+    Dev->>Pipeline: Deploy App v3
+    Pipeline->>App3: Deploy new-only code
+    Dev->>Pipeline: Deploy migration V4
+    Pipeline->>DB: ALTER TABLE DROP COLUMN username`,
+    },
+    {
+      title: "Deployment Pipeline State Machine",
+      kind: "state",
+      caption: "States a deployment passes through from commit to production, including rollback paths triggered by health check failures.",
+      mermaid: `stateDiagram-v2
+    [*] --> Building: Code pushed to main
+    Building --> Testing: Build artifact created
+    Testing --> SecurityScan: Unit tests pass
+    SecurityScan --> StagingDeploy: No critical CVEs
+    StagingDeploy --> SmokeTest: Deploy to staging
+
+    Testing --> Failed: Tests fail
+    SecurityScan --> Failed: Critical vulnerability found
+    SmokeTest --> Failed: Smoke tests fail
+
+    SmokeTest --> AwaitingApproval: All checks pass
+    AwaitingApproval --> ProductionDeploy: Human approves
+    ProductionDeploy --> HealthCheck: Deploy complete
+    HealthCheck --> Live: Health checks pass
+    HealthCheck --> RollingBack: Health checks fail
+    RollingBack --> Live: Previous version restored
+
+    Failed --> [*]: Notify team
+    Live --> [*]: Monitor`,
     },
   ],
 

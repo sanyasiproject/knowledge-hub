@@ -278,17 +278,77 @@ val filePrinter = LoggingPrinter(FilePrinter("/var/log/app.log"))`,
     {
       title: "Inheritance vs Composition Structure",
       kind: "architecture",
-      caption: "Inheritance creates a rigid vertical hierarchy; composition creates a flexible horizontal network of collaborating objects.",
+      caption: "Structural comparison of deep inheritance hierarchies versus flat composition with capability objects.",
+      mermaid: `graph TD
+    subgraph Inheritance["Inheritance Hierarchy"]
+        BASE["Animal"]
+        BASE --> MAMMAL["Mammal"]
+        BASE --> BIRD["Bird"]
+        MAMMAL --> DOG["Dog"]
+        MAMMAL --> CAT["Cat"]
+        BIRD --> EAGLE["Eagle"]
+        BIRD --> PENGUIN["Penguin - cannot fly!"]
+    end
+    subgraph Composition["Composition with Behaviours"]
+        ENT["Entity"]
+        CAN_FLY["Flyable"]
+        CAN_SWIM["Swimmable"]
+        CAN_RUN["Runnable"]
+        ENT_DOG["Dog: run, swim"]
+        ENT_EAGLE["Eagle: fly, run"]
+        ENT_PENG["Penguin: swim, run"]
+        CAN_RUN --> ENT_DOG & ENT_EAGLE & ENT_PENG
+        CAN_SWIM --> ENT_DOG & ENT_PENG
+        CAN_FLY --> ENT_EAGLE
+    end`,
     },
     {
-      title: "Strategy Pattern via Composition",
-      kind: "architecture",
-      caption: "Context holds a reference to a Strategy interface. Concrete strategies are pluggable at runtime without modifying Context.",
-    },
-    {
-      title: "Decorator Pattern Wrapping Chain",
+      title: "Choosing Between Composition and Inheritance",
       kind: "flow",
-      caption: "Each decorator wraps the previous component, forwarding calls through the chain and adding behavior at each layer.",
+      caption: "Decision flow for selecting composition or inheritance when modelling a relationship in code.",
+      mermaid: `flowchart TD
+    A["Need to share behaviour"] --> B{"Is-A relationship?"}
+    B -->|Yes| C{"Stable hierarchy?"}
+    B -->|No| G["Use Composition"]
+    C -->|Yes| D{"LSP holds for all subtypes?"}
+    C -->|No| G
+    D -->|Yes| E["Inheritance is reasonable"]
+    D -->|No| G
+    G --> H["Inject behaviour as interface"]
+    H --> I["Compose at construction time"]
+    E --> F["Keep hierarchy shallow max 2 levels"]`,
+    },
+    {
+      title: "Mixin and Interface Composition",
+      kind: "state",
+      caption: "How an object's effective interface is composed from multiple capability mixins at runtime.",
+      mermaid: `stateDiagram-v2
+    [*] --> Base
+    Base : Base Entity
+    Base --> WithLogging : mixin Loggable
+    WithLogging --> WithCaching : mixin Cacheable
+    WithCaching --> WithAuth : mixin Authorisable
+    WithAuth --> FullObject : all capabilities applied
+    FullObject --> [*]`,
+    },
+    {
+      title: "Composition Pattern Sequence",
+      kind: "sequence",
+      caption: "How composed behaviour objects are assembled and delegated to at runtime.",
+      mermaid: `sequenceDiagram
+    participant Client as Client
+    participant Service as OrderService
+    participant Logger as LoggingBehaviour
+    participant Validator as ValidationBehaviour
+    participant Repo as Repository
+    Client->>Service: createOrder(data)
+    Service->>Logger: log(start)
+    Service->>Validator: validate(data)
+    Validator-->>Service: valid
+    Service->>Repo: save(order)
+    Repo-->>Service: saved
+    Service->>Logger: log(success)
+    Service-->>Client: order created`,
     },
   ],
   animations: [

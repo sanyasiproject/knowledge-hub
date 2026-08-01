@@ -129,24 +129,77 @@ async function deleteUser(id) {
   ],
   diagrams: [
     {
-      title: "HTTP request/response lifecycle",
+      title: "HTTP Request-Response Lifecycle",
       kind: "sequence",
-      caption: "Client sends request, server processes and returns response — shows DNS, TCP, TLS, and HTTP layers.",
+      caption: "How an HTTP request travels from browser to server and back.",
+      mermaid: `sequenceDiagram
+    participant Browser
+    participant DNS
+    participant Server
+    Browser->>DNS: Resolve domain to IP
+    DNS-->>Browser: IP address returned
+    Browser->>Server: TCP three-way handshake
+    Server-->>Browser: TCP established
+    Browser->>Server: HTTP GET /path with headers
+    Server->>Server: Process request
+    Server-->>Browser: HTTP 200 OK with body
+    Browser->>Browser: Render response`,
     },
     {
-      title: "HTTP/2 multiplexed streams",
+      title: "HTTP Methods and Semantics",
+      kind: "mindmap",
+      caption: "HTTP methods and their safety and idempotency properties.",
+      mermaid: `mindmap
+  root((HTTP Methods))
+    Safe and Idempotent
+      GET read resource
+      HEAD metadata only
+      OPTIONS discover
+    Idempotent Not Safe
+      PUT replace resource
+      DELETE remove resource
+    Neither Safe Nor Idempotent
+      POST create or action
+      PATCH partial update
+    Caching
+      GET cacheable by default
+      POST not cached
+      PUT not cached`,
+    },
+    {
+      title: "HTTP Status Code Ranges",
       kind: "architecture",
-      caption: "Multiple logical streams interleaved as binary frames over a single TCP connection.",
+      caption: "HTTP response status code ranges and their semantic meanings.",
+      mermaid: `graph TD
+    SC[HTTP Status Codes] --> S1xx[1xx Informational]
+    SC --> S2xx[2xx Success]
+    SC --> S3xx[3xx Redirection]
+    SC --> S4xx[4xx Client Error]
+    SC --> S5xx[5xx Server Error]
+    S2xx --> S200[200 OK]
+    S2xx --> S201[201 Created]
+    S2xx --> S204[204 No Content]
+    S4xx --> S400[400 Bad Request]
+    S4xx --> S401[401 Unauthorized]
+    S4xx --> S404[404 Not Found]
+    S5xx --> S500[500 Internal Server Error]`,
     },
     {
-      title: "HTTP/3 QUIC vs TCP stack comparison",
-      kind: "network",
-      caption: "Side-by-side comparison of the HTTP/1.1 (TCP+TLS), HTTP/2 (TCP+TLS), and HTTP/3 (QUIC+UDP) protocol stacks.",
-    },
-    {
-      title: "HTTP caching decision tree",
+      title: "HTTP Protocol Evolution",
       kind: "flow",
-      caption: "How a cache decides: is it stored? is it fresh? revalidate with origin? serve stale?",
+      caption: "Key improvements across HTTP/1.1, HTTP/2, and HTTP/3.",
+      mermaid: `flowchart TD
+    A[HTTP/1.0] --> B[HTTP/1.1]
+    B --> B1[Persistent connections keep-alive]
+    B --> B2[Host header required]
+    B --> C[HTTP/2]
+    C --> C1[Multiplexed streams]
+    C --> C2[Header compression HPACK]
+    C --> C3[Server push]
+    C --> D[HTTP/3]
+    D --> D1[QUIC over UDP]
+    D --> D2[0-RTT connection resumption]
+    D --> D3[No head-of-line blocking]`,
     },
   ],
   animations: [

@@ -295,19 +295,73 @@ trait DetailedSummary: Summary + std::fmt::Display {
   ],
   diagrams: [
     {
-      title: "Interface vs Abstract Class Capabilities",
+      title: "Interface vs Abstract Class Feature Comparison",
       kind: "architecture",
-      caption: "Interfaces provide pure contracts (multiple implementation). Abstract classes provide contracts plus shared state and partial implementation (single inheritance).",
+      caption: "Interfaces provide pure contracts with no state. Abstract classes add shared state, constructors, and partial implementation at the cost of single inheritance.",
+      mermaid: `graph LR
+    subgraph Interface["Interface"]
+      IC["Contract only\nmethod signatures"]
+      IM["Multiple implementation\nallowed"]
+      IS["No instance state\nno constructors"]
+      ID["Default methods\nJava 8+"]
+    end
+    subgraph AbstractClass["Abstract Class"]
+      AC["Contract plus\npartial implementation"]
+      AS["Instance state\nand constructors"]
+      AI["Single inheritance\nonly"]
+      AT["Template Method\npattern support"]
+    end
+    Interface -->|"use for cross-cutting\ncapabilities"| USE1["Unrelated types\nsharing a contract"]
+    AbstractClass -->|"use for shared\nbase implementation"| USE2["Family of related\ntypes"]`,
     },
     {
-      title: "Structural vs Nominal Typing",
+      title: "Structural vs Nominal Typing Decision Flow",
       kind: "flow",
-      caption: "In nominal typing (Java), a class explicitly declares 'implements'. In structural typing (Go/TS), satisfying the shape is sufficient — no declaration needed.",
+      caption: "In nominal typing a class must declare implements. In structural typing having matching methods is sufficient. This affects where interfaces can be defined.",
+      mermaid: `flowchart TD
+    A["Define a type T"] --> B{"Language typing\ndiscipline?"}
+    B -->|Nominal\nJava C#| C["T must explicitly\ndeclare implements I"]
+    B -->|Structural\nGo TypeScript| D["T just needs\nmatching method signatures"]
+    C --> E["Interface defined\nby the provider\nat type definition site"]
+    D --> F["Interface can be defined\nby the consumer\nwhere it is used"]
+    E --> G["Tight coupling\nbetween type and interface"]
+    F --> H["Loose coupling\nnatural ISP"]`,
     },
     {
-      title: "Interface Segregation in Practice",
-      kind: "architecture",
-      caption: "One large interface broken into small focused ones (Reader, Writer, Closer). Types implement only what they need. Composed interfaces (ReadWriteCloser) combine them.",
+      title: "Dependency Injection via Interface",
+      kind: "sequence",
+      caption: "By depending on an interface rather than a concrete class, OrderService can work with any implementation — PostgresRepo in production, InMemoryRepo in tests.",
+      mermaid: `sequenceDiagram
+    participant App as Application
+    participant OS as OrderService
+    participant I as OrderRepository interface
+    participant PG as PostgresOrderRepo
+    participant MEM as InMemoryOrderRepo
+    App->>OS: new OrderService(repo)
+    Note over App,PG: Production
+    App->>PG: inject
+    OS->>I: save(order)
+    I->>PG: save(order)
+    PG-->>OS: saved
+    Note over App,MEM: Tests
+    App->>MEM: inject
+    OS->>I: save(order)
+    I->>MEM: save(order)
+    MEM-->>OS: saved`,
+    },
+    {
+      title: "Java Interface Evolution",
+      kind: "state",
+      caption: "Java interfaces evolved from pure abstract contracts to support default methods, private methods, and sealed restrictions across major releases.",
+      mermaid: `stateDiagram-v2
+    [*] --> Java7
+    Java7: Java 7 - Abstract only\nmethod signatures only\nany change breaks all implementors
+    Java7 --> Java8
+    Java8: Java 8 - Default methods\nbackward-compatible evolution\nstream forEach added to Collection
+    Java8 --> Java9
+    Java9: Java 9 - Private methods\nshare code between default methods\nno duplication in interface
+    Java9 --> Java17
+    Java17: Java 17 - Sealed interfaces\npermits clause restricts implementors\nexhaustive pattern matching enabled`,
     },
   ],
   animations: [

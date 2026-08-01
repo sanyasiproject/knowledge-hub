@@ -71,8 +71,69 @@ ORDER BY o.order_id, p.product_name;`
     },
   ],
   diagrams: [
-    { title: "Venn diagram of join types", kind: "architecture", caption: "INNER = intersection; LEFT = all left + intersection; RIGHT = all right + intersection; FULL OUTER = union; CROSS = Cartesian product." },
-    { title: "Join algorithm selection", kind: "flow", caption: "Small inner -> Nested Loop with index; large equality join -> Hash Join; pre-sorted -> Merge Join." },
+    {
+      title: "SQL Join Types Overview",
+      kind: "architecture",
+      caption: "Each join type controls which rows appear in the result. INNER returns only matches. LEFT keeps all left rows. FULL OUTER keeps all rows from both sides.",
+      mermaid: `graph TD
+    subgraph Types["Join Types"]
+      INNER["INNER JOIN\nonly matching rows\nexcludes unmatched from both sides"]
+      LEFT["LEFT JOIN\nall left rows\nNULL for unmatched right columns"]
+      RIGHT["RIGHT JOIN\nall right rows\nNULL for unmatched left columns"]
+      FULL["FULL OUTER JOIN\nall rows from both\nNULL where no match"]
+      CROSS["CROSS JOIN\nCartesian product\nM x N rows"]
+    end
+    INNER -->|"extend with"| LEFT
+    INNER -->|"extend with"| RIGHT
+    LEFT -->|"combine"| FULL
+    RIGHT -->|"combine"| FULL`,
+    },
+    {
+      title: "Join Algorithm Selection",
+      kind: "flow",
+      caption: "The query optimizer chooses nested loop, hash join, or merge join based on table sizes, available indexes, and whether the join condition is an equality.",
+      mermaid: `flowchart TD
+    A["Join needed"] --> B{"Equality\ncondition?"}
+    B -->|No| NL["Nested Loop Join\nonly option for\nnon-equality conditions"]
+    B -->|Yes| C{"Outer table\nsmall?"}
+    C -->|Yes| D{"Index on inner\njoin column?"}
+    D -->|Yes| E["Nested Loop\nwith Index Lookup\nbest for small outer"]
+    D -->|No| F["Hash Join\nbuild hash table\nfrom smaller side"]
+    C -->|No| G{"Both sides\nalready sorted?"}
+    G -->|Yes| H["Merge Join\nsingle pass O(n+m)\nmost efficient when sorted"]
+    G -->|No| F`,
+    },
+    {
+      title: "Anti-Join Pattern for Missing Relationships",
+      kind: "sequence",
+      caption: "The anti-join pattern finds rows in table A with no match in table B. LEFT JOIN with IS NULL check and NOT EXISTS are the two preferred approaches.",
+      mermaid: `sequenceDiagram
+    participant Q as Query Engine
+    participant C as Customers Table
+    participant O as Orders Table
+    Q->>C: scan all customers
+    C-->>Q: customer rows including Alice Bob Charlie
+    Q->>O: LEFT JOIN on customer_id
+    O-->>Q: matches for Alice and Charlie\nno match for Bob
+    Q->>Q: WHERE orders.customer_id IS NULL
+    Q-->>Q: return Bob only
+    Note over Q: NOT EXISTS alternative:\nsubquery returns no rows for Bob\nso Bob passes the WHERE NOT EXISTS filter`,
+    },
+    {
+      title: "Self-Join for Hierarchical Data",
+      kind: "network",
+      caption: "A self-join connects a table to itself using two aliases to traverse a parent-child relationship such as employees and their managers.",
+      mermaid: `graph LR
+    subgraph Employees["Employees Table"]
+      E1["emp_id=1\nname=CEO\nmanager_id=NULL"]
+      E2["emp_id=2\nname=VP Eng\nmanager_id=1"]
+      E3["emp_id=3\nname=Dev Lead\nmanager_id=2"]
+      E4["emp_id=4\nname=Engineer\nmanager_id=3"]
+    end
+    E2 -->|"reports to\nJOIN e.manager_id = m.emp_id"| E1
+    E3 -->|"reports to"| E2
+    E4 -->|"reports to"| E3`,
+    },
   ],
   animations: [
     {

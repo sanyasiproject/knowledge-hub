@@ -276,16 +276,71 @@ TEST_F(UserAPITest, GetNonexistentUserReturns404) {
   ],
   diagrams: [
     {
-      title: "Integration Test Boundaries",
+      title: "Testing Pyramid",
       kind: "architecture",
-      caption:
-        "Shows the layers of an application and where integration tests operate: between the API layer and database, between services and external APIs, and between message producers and brokers.",
+      caption: "The testing pyramid balancing unit, integration, and end-to-end tests.",
+      mermaid: `graph TD
+    E2E[End-to-End Tests few slow expensive] --> INT[Integration Tests moderate]
+    INT --> UNIT[Unit Tests many fast cheap]
+    UNIT --> BASE[Strong foundation of fast feedback]`,
     },
     {
-      title: "Consumer-Driven Contract Testing Flow",
+      title: "Integration Test Scope Decision",
       kind: "flow",
-      caption:
-        "Illustrates how consumer tests generate contracts, contracts are published to a broker, and providers verify contracts independently.",
+      caption: "Deciding when to write integration vs unit vs end-to-end tests.",
+      mermaid: `flowchart TD
+    A[Test Scenario] --> B{Single unit in isolation?}
+    B -- Yes --> C[Unit Test with mocks and stubs]
+    B -- No --> D{Full user journey in browser?}
+    D -- Yes --> E[End-to-End Test]
+    D -- No --> F{Tests real component interactions?}
+    F -- Yes --> G[Integration Test]
+    G --> H[Use real DB via Testcontainers]
+    G --> I[Use real HTTP client]
+    G --> J[Use real message broker]`,
+    },
+    {
+      title: "Testcontainers Lifecycle",
+      kind: "sequence",
+      caption: "How Testcontainers manages real infrastructure for integration tests.",
+      mermaid: `sequenceDiagram
+    participant Test as Test Suite
+    participant TC as Testcontainers
+    participant Docker
+    participant DB as Postgres Container
+    Test->>TC: Request Postgres container
+    TC->>Docker: Pull image and start container
+    Docker->>DB: Spin up Postgres
+    DB-->>TC: Port and connection string
+    TC-->>Test: Container ready
+    Test->>DB: Run migrations
+    Test->>DB: Execute test scenarios
+    Test->>TC: Teardown after suite
+    TC->>Docker: Stop and remove container`,
+    },
+    {
+      title: "Integration Testing Strategies",
+      kind: "mindmap",
+      caption: "Strategies and tools for writing effective integration tests.",
+      mermaid: `mindmap
+  root((Integration Testing))
+    Database Tests
+      Testcontainers real DB
+      Rollback after each test
+      Migrations applied
+    HTTP API Tests
+      Supertest Node
+      RestAssured Java
+      Real server instance
+    Message Queue Tests
+      Embedded Kafka
+      RabbitMQ container
+    Contract Tests
+      Pact consumer-driven
+      Provider verification
+    Test Data
+      Fixtures and factories
+      Seed scripts`,
     },
   ],
   animations: [

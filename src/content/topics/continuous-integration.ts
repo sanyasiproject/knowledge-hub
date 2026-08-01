@@ -371,15 +371,130 @@ deploy-staging:
   },
   diagrams: [
     {
-      title: "CI Pipeline Architecture",
+      title: "CI Pipeline Flow",
       kind: "flow",
-      caption: "End-to-end flow from code push through build, test, and artifact stages with parallel execution and gating"
+      caption: "End-to-end flow from code push through parallel lint, test shards, security scan, and artifact build with gating at each stage.",
+      mermaid: `flowchart TD
+    A["Developer Push or PR"] --> B["Webhook to CI Coordinator"]
+    B --> C["Parse Pipeline DAG"]
+    C --> D["Checkout and Cache Restore"]
+    D --> E["Lint and Typecheck"]
+    D --> F["Unit Tests Shard 1"]
+    D --> G["Unit Tests Shard 2"]
+    D --> H["Security Scan"]
+    E --> I{All Pass?}
+    F --> I
+    G --> I
+    H --> I
+    I -- No --> J["Notify Developer\nBlock PR merge"]
+    I -- Yes --> K["Build Artifact"]
+    K --> L["Push to Registry"]
+    L --> M["Update Commit Status\nAllow PR merge"]`,
     },
     {
-      title: "CI Runner Execution Model",
+      title: "CI Commit to Feedback Sequence",
+      kind: "sequence",
+      caption: "Timeline from developer push through coordinator scheduling, runner execution, and status reporting back to the developer.",
+      mermaid: `sequenceDiagram
+    participant Dev as Developer
+    participant VCS as GitHub or GitLab
+    participant CI as CI Coordinator
+    participant R1 as Runner 1
+    participant R2 as Runner 2
+    participant Cache as Cache Store
+
+    Dev->>VCS: git push
+    VCS->>CI: Webhook - push event
+    CI->>CI: Parse pipeline DAG
+    CI->>R1: Schedule lint job
+    CI->>R2: Schedule test job
+    R1->>Cache: Restore node_modules
+    R2->>Cache: Restore node_modules
+    R1->>R1: Run lint and typecheck
+    R2->>R2: Run unit tests
+    R1-->>CI: Job result pass
+    R2-->>CI: Job result pass
+    CI->>CI: All dependencies met
+    CI->>R1: Schedule build job
+    R1->>R1: Build Docker image
+    R1-->>CI: Artifact pushed
+    CI->>VCS: Report commit status green
+    VCS-->>Dev: Build passed notification`,
+    },
+    {
+      title: "CI System Architecture",
       kind: "architecture",
-      caption: "How the CI coordinator dispatches jobs to ephemeral and persistent runners, including caching and artifact storage layers"
-    }
+      caption: "Components of a CI system showing the coordinator, runner pool, cache store, artifact registry, and secret management.",
+      mermaid: `flowchart TB
+    subgraph VCS["Version Control"]
+        Repo["Git Repository"]
+        Webhook["Webhook Events"]
+    end
+
+    subgraph Coordinator["CI Coordinator"]
+        Scheduler["Job Scheduler"]
+        DAG["Pipeline DAG Builder"]
+        StatusAPI["Status API"]
+    end
+
+    subgraph Runners["Runner Pool"]
+        ER["Ephemeral Runners\nclean per job"]
+        PR["Persistent Runners\ncached warm"]
+    end
+
+    subgraph Storage["Storage Layer"]
+        ArtReg["Artifact Registry\nDocker ECR"]
+        CacheStore["Dependency Cache\nkeyed by lockfile hash"]
+        SecretMgr["Secret Manager\nscoped per environment"]
+    end
+
+    Repo --> Webhook
+    Webhook --> Scheduler
+    Scheduler --> DAG
+    DAG --> ER
+    DAG --> PR
+    ER --> CacheStore
+    PR --> CacheStore
+    ER --> ArtReg
+    ER --> SecretMgr
+    Scheduler --> StatusAPI
+    StatusAPI --> Repo`,
+    },
+    {
+      title: "CI Concepts Mindmap",
+      kind: "mindmap",
+      caption: "Key concepts of continuous integration grouped by practice, pipeline mechanics, security, and quality culture.",
+      mermaid: `mindmap
+  root["Continuous Integration"]
+    Practices
+      Trunk-Based Development
+      Frequent Small Commits
+      Fix Broken Build Immediately
+      No Long-Lived Branches
+    Pipeline Mechanics
+      Lint and Typecheck
+      Unit Tests
+      Integration Tests
+      Security Scan
+      Artifact Build
+      Parallel Execution
+      Dependency Caching
+    Fast Feedback
+      Under 10 Minute Target
+      Test Splitting
+      Incremental Builds
+      Affected Test Detection
+    Security
+      Pin Actions to SHA
+      Scoped Secrets
+      OIDC Federation
+      No Injection via PR Title
+    Quality Culture
+      Green Build is Sacred
+      Flaky Tests Quarantined
+      Team Owns the Pipeline
+      Monitor Build Duration`,
+    },
   ],
   animations: [
     {

@@ -158,129 +158,73 @@ Container image security extends beyond vulnerability scanning to encompass the 
   ],
   diagrams: [
     {
-      title: "Container Image Layer Architecture",
+      title: "Container Image Layer Stack",
       kind: "architecture",
-      caption: "How image layers stack to form a container filesystem with copy-on-write",
-      mermaid: `flowchart TB
-    subgraph Image["Container Image (Read-Only)"]
-        direction TB
-        L1["Layer 1: Base OS (Alpine 3.19)\\nsha256:a1b2c3...\\n~5MB"]
-        L2["Layer 2: RUN apk add --no-cache curl\\nsha256:d4e5f6...\\n~2MB"]
-        L3["Layer 3: COPY requirements.txt .\\nsha256:g7h8i9...\\n~1KB"]
-        L4["Layer 4: RUN pip install -r requirements.txt\\nsha256:j0k1l2...\\n~50MB"]
-        L5["Layer 5: COPY . /app\\nsha256:m3n4o5...\\n~5MB"]
-        L1 --> L2 --> L3 --> L4 --> L5
-    end
-
-    subgraph Container["Container Runtime"]
-        CW["Writable Layer (Copy-on-Write)\\nEphemeral, per-container"]
-        L5 --> CW
-    end
-
-    subgraph Storage["Volumes (Bypass CoW)"]
-        V1["Volume: /app/data\\nDirect host filesystem access"]
-    end
-
-    CW -.->|"Bind mount"| V1
-
-    style L1 fill:#3498db,color:#fff
-    style L2 fill:#2980b9,color:#fff
-    style L3 fill:#2471a3,color:#fff
-    style L4 fill:#1f618d,color:#fff
-    style L5 fill:#1a5276,color:#fff
-    style CW fill:#e74c3c,color:#fff
-    style V1 fill:#27ae60,color:#fff`,
+      caption: "How Docker image layers stack from base OS up to application code.",
+      mermaid: `graph TD
+    WR[Writable Container Layer] --> APP[App Code Layer]
+    APP --> DEP[Dependencies Layer]
+    DEP --> RT[Runtime Layer Node Python etc]
+    RT --> OS[Base OS Layer alpine ubuntu]
+    OS --> SCRATCH[Scratch empty base]`,
     },
     {
-      title: "Docker Build Cache Decision Flow",
-      kind: "flow",
-      caption: "How Docker decides whether to use cached layers or rebuild during image build",
-      mermaid: `flowchart TD
-    A["Process Dockerfile Instruction"] --> B{"Instruction type?"}
-    B -->|"RUN"| C{"Instruction text\\nidentical to cache?"}
-    B -->|"COPY / ADD"| D{"Source file\\ncontent hashes match?"}
-    B -->|"ENV, WORKDIR, etc."| E{"Metadata\\nidentical?"}
-
-    C -->|Yes| F["Use cached layer"]
-    C -->|No| G["Rebuild this layer"]
-    D -->|Yes| F
-    D -->|No| G
-    E -->|Yes| F
-    E -->|No| G
-
-    G --> H["INVALIDATE all subsequent layers"]
-    H --> I["Rebuild remaining instructions"]
-
-    F --> J{"More instructions?"}
-    J -->|Yes| A
-    J -->|No| K["Build complete"]
-    I --> K
-
-    style F fill:#27ae60,color:#fff
-    style G fill:#e74c3c,color:#fff
-    style H fill:#c0392b,color:#fff`,
-    },
-    {
-      title: "Multi-Stage Build Pipeline",
-      kind: "flow",
-      caption: "How multi-stage builds separate build dependencies from runtime to minimize image size",
-      mermaid: `flowchart LR
-    subgraph Stage1["Stage 1: Builder (golang:1.22)"]
-        S1A["FROM golang:1.22 AS builder"]
-        S1B["COPY go.mod go.sum ./"]
-        S1C["RUN go mod download"]
-        S1D["COPY . ."]
-        S1E["RUN CGO_ENABLED=0 go build\\n-o /app -ldflags '-s -w'"]
-        S1A --> S1B --> S1C --> S1D --> S1E
-    end
-
-    subgraph Stage2["Stage 2: Runtime (distroless)"]
-        S2A["FROM gcr.io/distroless/static"]
-        S2B["COPY --from=builder /app /app"]
-        S2C["ENTRYPOINT \\['/app'\\]"]
-        S2A --> S2B --> S2C
-    end
-
-    S1E -->|"COPY --from=builder\\nOnly the binary"| S2B
-
-    subgraph Size["Image Size Comparison"]
-        SZ1["Builder stage: ~1.5 GB\\nGo toolchain + source + deps"]
-        SZ2["Final image: ~15 MB\\nBinary + CA certs only"]
-    end
-
-    style Stage1 fill:#e74c3c,color:#fff
-    style Stage2 fill:#27ae60,color:#fff
-    style SZ1 fill:#e74c3c,color:#fff
-    style SZ2 fill:#27ae60,color:#fff`,
-    },
-    {
-      title: "Container Registry Pull Sequence",
+      title: "Image Build Cache Behavior",
       kind: "sequence",
-      caption: "The protocol flow when pulling an image from a container registry",
+      caption: "How Docker uses layer caching to speed up subsequent builds.",
       mermaid: `sequenceDiagram
-    participant Client as Docker Client
-    participant Registry as Container Registry
-    participant Store as Local Store
-
-    Client->>Registry: GET /v2/<name>/manifests/<tag>
-    Registry-->>Client: Image Manifest (JSON)
-    Note over Client: Parse manifest:\\nlayer digests + config digest
-
-    Client->>Store: Check which layers exist locally
-    Store-->>Client: Missing layers list
-
-    loop For each missing layer
-        Client->>Registry: GET /v2/<name>/blobs/<digest>
-        Registry-->>Client: Layer tar.gz
-        Client->>Store: Store layer by digest
-        Note over Store: Verify SHA256 matches digest
+    participant Docker
+    participant Cache
+    participant Registry
+    Docker->>Docker: Read Dockerfile instructions
+    loop Each instruction
+        Docker->>Cache: Check cache by instruction hash
+        alt Cache hit
+            Cache-->>Docker: Reuse cached layer
+        else Cache miss
+            Docker->>Docker: Execute instruction
+            Docker->>Cache: Store new layer
+        end
     end
-
-    Client->>Registry: GET /v2/<name>/blobs/<config-digest>
-    Registry-->>Client: Image Config (JSON)
-
-    Client->>Store: Assemble image from layers + config
-    Note over Client: Image ready to run`,
+    Docker->>Registry: Push final image`,
+    },
+    {
+      title: "Multi-Stage Build Optimization",
+      kind: "flow",
+      caption: "Multi-stage Docker builds producing minimal production images.",
+      mermaid: `flowchart TD
+    A[Stage 1: Builder] --> B[Use full SDK image]
+    B --> C[Copy source code]
+    C --> D[Install build tools]
+    D --> E[Compile or build artifact]
+    E --> F[Stage 2: Runner]
+    F --> G[Use distroless or alpine base]
+    G --> H[Copy only compiled artifact from Stage 1]
+    H --> I[No build tools in final image]
+    I --> J[Small and secure production image]`,
+    },
+    {
+      title: "Image Layer Concepts",
+      kind: "mindmap",
+      caption: "Key concepts around container image layers and storage drivers.",
+      mermaid: `mindmap
+  root((Image Layers))
+    Union Filesystem
+      OverlayFS driver
+      Layer stacking
+      Copy-on-write semantics
+    Layer Reuse
+      Shared base layers
+      Cache efficiency
+      Smaller pulls
+    Optimization Tips
+      Order instructions by change frequency
+      Combine RUN commands
+      Use .dockerignore
+    Security
+      Minimal base images
+      Distroless images
+      Scan layers for CVEs`,
     },
   ],
   exercises: [

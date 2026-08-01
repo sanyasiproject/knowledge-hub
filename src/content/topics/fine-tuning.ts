@@ -538,85 +538,89 @@ int main() {
 
   diagrams: [
     {
-      title: "Fine-Tuning Decision Tree",
+      title: "Fine-Tuning Method Decision Tree",
       kind: "flow",
-      caption: "Choosing the right fine-tuning method based on resources, data, and requirements",
+      caption: "Choosing the right fine-tuning approach based on available data, GPU resources, and quality requirements.",
       mermaid: `flowchart TD
-    A["Start: Need to customize LLM behavior"] --> B{"Do you have task-specific\\ntraining data?"}
-    B -->|"No"| C["Use prompt engineering\\nor few-shot prompting"]
-    B -->|"Yes"| D{"Is the task knowledge-intensive\\nrequiring external context?"}
-    D -->|"Yes"| E["Use RAG\\n(Retrieval-Augmented Generation)"]
-    D -->|"No"| F{"How much GPU memory\\nis available?"}
-    F -->|"Multiple GPUs\\n(160GB+ VRAM)"| G{"Do you have 10k+\\nhigh-quality examples?"}
-    G -->|"Yes"| H["Full Fine-Tuning\\n- Maximum quality\\n- All params updated"]
-    G -->|"No"| I["LoRA Fine-Tuning\\n- Less overfitting risk\\n- Fewer params to train"]
-    F -->|"Single GPU\\n(24-80GB VRAM)"| I
-    F -->|"Consumer GPU\\n(8-24GB VRAM)"| J["QLoRA Fine-Tuning\\n- 4-bit quantized base\\n- LoRA adapters in fp16"]
-    F -->|"Minimal resources\\nor API-only"| K{"Does the provider\\noffer fine-tuning API?"}
-    K -->|"Yes"| L["API-based Fine-Tuning\\n(OpenAI, Anthropic, etc.)"]
-    K -->|"No"| C
-    H --> M["Evaluate on held-out test set"]
-    I --> M
-    J --> M
-    L --> M
-    M --> N{"Performance meets\\nrequirements?"}
-    N -->|"Yes"| O["Deploy fine-tuned model"]
-    N -->|"No"| P["Iterate: adjust data,\\nhyperparams, or method"]
-    P --> F`,
+    A["Need to customize LLM behavior"] --> B{Task-specific training data available?}
+    B -->|No| C["Prompt engineering\nor few-shot prompting"]
+    B -->|Yes| D{Knowledge-intensive with external context?}
+    D -->|Yes| E["RAG\nRetrieval-Augmented Generation"]
+    D -->|No| F{GPU memory available?}
+    F -->|"160GB+ multi-GPU"| G{More than 10k quality examples?}
+    G -->|Yes| H["Full Fine-Tuning\nall params updated"]
+    G -->|No| I["LoRA Fine-Tuning\nlow-rank adapters only"]
+    F -->|"24-80GB single GPU"| I
+    F -->|"8-24GB consumer GPU"| J["QLoRA Fine-Tuning\n4-bit base + LoRA adapters"]
+    F -->|"API only"| K["API-based Fine-Tuning"]
+    H --> L["Evaluate on held-out test set"]
+    I --> L
+    J --> L
+    K --> L`,
     },
     {
-      title: "LoRA Weight Injection in Transformer Layers",
+      title: "LoRA Adapter Architecture",
       kind: "architecture",
-      caption: "How LoRA adapters are injected alongside frozen pretrained weights in each transformer layer",
-      mermaid: `flowchart LR
-    subgraph Input
-        X["Input\\nActivation\\nx"]
-    end
+      caption: "LoRA injects low-rank adapter matrices alongside frozen pretrained weights; only the adapters are trained.",
+      mermaid: `graph LR
+    X["Input Activation x"]
+    X --> W0["Pretrained Weight W0\nFrozen - not updated"]
+    X --> A["Down-Project A\nr x d - Trainable"]
+    A --> B["Up-Project B\nd x r - Trainable"]
+    B --> SCALE["Scale by alpha / r"]
+    W0 -->|"W0 times x"| SUM["Element-wise Addition"]
+    SCALE -->|"scaled B A x"| SUM
+    SUM --> H["Output Activation h"]`,
+    },
+    {
+      title: "Fine-Tuning Training Pipeline",
+      kind: "sequence",
+      caption: "Sequence of steps from dataset preparation through training to deployment.",
+      mermaid: `sequenceDiagram
+    participant DS as Dataset
+    participant PREP as Preprocessing
+    participant MODEL as Base Model
+    participant TRAIN as Trainer
+    participant EVAL as Evaluator
 
-    subgraph FrozenPath["Frozen Pretrained Path"]
-        W0["Pretrained Weight\\nW0 (d x d)\\n❄️ Frozen"]
-    end
-
-    subgraph LoRAPath["LoRA Adapter Path (Trainable)"]
-        A_mat["Down-Project\\nA (r x d)\\n🔥 Trainable"]
-        B_mat["Up-Project\\nB (d x r)\\n🔥 Trainable"]
-        Scale["Scale by\\nα / r"]
-    end
-
-    subgraph Output
-        Sum["Element-wise\\nAddition (+)"]
-        H["Output\\nActivation\\nh"]
-    end
-
-    X --> W0
-    W0 -->|"W0 · x"| Sum
-
-    X --> A_mat
-    A_mat -->|"r-dim vector"| B_mat
-    B_mat -->|"B·A·x"| Scale
-    Scale -->|"(α/r)·B·A·x"| Sum
-
-    Sum -->|"h = W0·x + (α/r)·B·A·x"| H
-
-    subgraph TransformerBlock["Full Transformer Block"]
-        direction TB
-        QProj["Q Projection\\n+ LoRA"]
-        KProj["K Projection\\n+ LoRA"]
-        VProj["V Projection\\n+ LoRA"]
-        OProj["O Projection\\n+ LoRA"]
-        Attn["Multi-Head\\nAttention"]
-        FFN1["Gate/Up Projection\\n+ LoRA"]
-        FFN2["Down Projection\\n+ LoRA"]
-        LN1["LayerNorm"]
-        LN2["LayerNorm"]
-
-        LN1 --> QProj & KProj & VProj
-        QProj & KProj & VProj --> Attn
-        Attn --> OProj
-        OProj --> LN2
-        LN2 --> FFN1
-        FFN1 --> FFN2
-    end`,
+    DS->>PREP: Raw task examples
+    PREP->>PREP: Tokenize and format prompts
+    PREP->>TRAIN: Train / val / test splits
+    TRAIN->>MODEL: Load pretrained weights
+    MODEL-->>TRAIN: Weights loaded
+    TRAIN->>TRAIN: Forward pass + compute loss
+    TRAIN->>TRAIN: Backprop + update adapter weights
+    TRAIN->>EVAL: Checkpoint after each epoch
+    EVAL-->>TRAIN: Validation metrics
+    TRAIN->>EVAL: Final checkpoint
+    EVAL-->>TRAIN: Test set metrics`,
+    },
+    {
+      title: "Fine-Tuning Approaches Overview",
+      kind: "mindmap",
+      caption: "Key fine-tuning methods, their tradeoffs, and when to apply each.",
+      mermaid: `mindmap
+  root((Fine-Tuning))
+    Full Fine-Tuning
+      All params updated
+      Maximum quality
+      Highest memory cost
+    LoRA
+      Low-rank adapters
+      0.1-1 percent of params
+      Mergeable at inference
+    QLoRA
+      4-bit quantized base
+      LoRA adapters in fp16
+      Consumer GPU viable
+    RLHF
+      Reward model
+      PPO training
+      Alignment focused
+    Data Quality
+      Instruction formatting
+      Diversity
+      Deduplication`,
     },
   ],
 

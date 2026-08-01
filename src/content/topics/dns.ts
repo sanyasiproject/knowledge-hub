@@ -242,24 +242,89 @@ std::string resolve(const std::string& domain) {
   ],
   diagrams: [
     {
-      title: "DNS resolution hierarchy",
+      title: "DNS Resolution Hierarchy",
       kind: "architecture",
-      caption: "The hierarchical structure from root servers through TLD servers to authoritative nameservers, with recursive resolvers acting as intermediaries for clients.",
+      mermaid: `graph TD
+    Client["Client Application"]
+    Stub["OS Stub Resolver\nLocal Cache"]
+    Recursive["Recursive Resolver\n8.8.8.8 or ISP"]
+    Root["Root Name Servers\n13 Identities - Anycast"]
+    TLD["TLD Name Server\n.com .org .net"]
+    Auth["Authoritative Name Server\nexample.com"]
+    Client --> Stub
+    Stub -->|Cache Miss| Recursive
+    Recursive -->|Iterative Query| Root
+    Root -->|Referral to TLD| Recursive
+    Recursive -->|Iterative Query| TLD
+    TLD -->|Referral to Auth| Recursive
+    Recursive -->|Iterative Query| Auth
+    Auth -->|Authoritative Answer| Recursive
+    Recursive -->|Cached Answer| Stub
+    Stub --> Client`,
+      caption: "The DNS hierarchy from client stub resolver through recursive resolver performing iterative queries up to authoritative servers.",
     },
     {
-      title: "Recursive DNS query flow",
+      title: "Recursive DNS Query Sequence",
       kind: "sequence",
-      caption: "Sequence of messages: client to recursive resolver, resolver to root, root referral to TLD, TLD referral to authoritative, authoritative answer back through the resolver to the client.",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant Resolver as Recursive Resolver
+    participant Root as Root Server
+    participant TLD as .com TLD Server
+    participant Auth as Authoritative NS
+    Client->>Resolver: Query www.example.com
+    Note over Resolver: Check cache - MISS
+    Resolver->>Root: Query www.example.com
+    Root-->>Resolver: Referral - query .com TLD
+    Resolver->>TLD: Query www.example.com
+    TLD-->>Resolver: Referral - query ns1.example.com
+    Resolver->>Auth: Query www.example.com
+    Auth-->>Resolver: A record 93.184.216.34 TTL 300
+    Note over Resolver: Cache result for 300s
+    Resolver-->>Client: 93.184.216.34`,
+      caption: "Full iterative resolution: resolver walks the hierarchy from root to TLD to authoritative, caching each answer by TTL.",
     },
     {
-      title: "DNS record type taxonomy",
+      title: "DNS Record Type Taxonomy",
       kind: "mindmap",
-      caption: "Map of DNS record types grouped by function: address records (A, AAAA), alias/delegation (CNAME, NS, DNAME), mail (MX), security (DNSKEY, DS, RRSIG, TLSA), service discovery (SRV), and metadata (TXT, SOA, PTR).",
+      mermaid: `mindmap
+  root((DNS Records))
+    Address
+      A - IPv4 address
+      AAAA - IPv6 address
+      PTR - Reverse lookup
+    Delegation
+      NS - Name server
+      SOA - Zone authority
+      CNAME - Alias name
+    Mail
+      MX - Mail exchange
+      TXT - SPF and DKIM
+    Security
+      DNSKEY - Public key
+      DS - Key hash in parent
+      RRSIG - Record signature
+    Services
+      SRV - Service location
+      TXT - Domain verification`,
+      caption: "DNS record types grouped by function: address mapping, zone delegation, mail routing, DNSSEC security, and service discovery.",
     },
     {
-      title: "DNSSEC chain of trust",
+      title: "DNSSEC Chain of Trust",
       kind: "flow",
-      caption: "Trust flows from the root KSK through DS records in each parent zone down to the DNSKEY and RRSIG records in the target zone, forming a verifiable signature chain.",
+      mermaid: `flowchart TD
+    TA["Root Trust Anchor\nKSK hash pre-installed"]
+    RootKSK["Root KSK\nSigns DNSKEY RRset"]
+    RootZSK["Root ZSK\nSigns zone records including DS"]
+    ComDS["DS record for .com\nin root zone"]
+    ComKSK["com KSK\nVerified by DS hash"]
+    ComZSK["com ZSK\nSigns DS for example.com"]
+    ExDS["DS record for example.com\nin .com zone"]
+    ExKSK["example.com KSK\nVerified by DS hash"]
+    ExZSK["example.com ZSK\nSigns A record RRSIG"]
+    Answer["A record + RRSIG\nVerified - AD flag set"]
+    TA --> RootKSK --> RootZSK --> ComDS --> ComKSK --> ComZSK --> ExDS --> ExKSK --> ExZSK --> Answer`,
+      caption: "DNSSEC trust chain: each zone's KSK is verified by a DS record in the parent, forming a cryptographic chain from the root trust anchor to the final record.",
     },
   ],
   animations: [

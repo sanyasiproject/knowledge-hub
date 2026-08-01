@@ -350,22 +350,71 @@ int main() {
 
   diagrams: [
     {
-      title: "Race Condition Timeline",
-      kind: "sequence" as const,
-      caption:
-        "Two threads performing read-modify-write on a shared counter, illustrating how interleaving causes a lost update",
+      title: "Lost Update Race Condition",
+      kind: "sequence",
+      caption: "Two threads read the same value, both increment locally, and one write overwrites the other, causing a lost update.",
+      mermaid: `sequenceDiagram
+    participant T1 as Thread 1
+    participant MEM as Shared Memory
+    participant T2 as Thread 2
+    T1->>MEM: read counter = 5
+    T2->>MEM: read counter = 5
+    T1->>T1: local = 5 + 1 = 6
+    T2->>T2: local = 5 + 1 = 6
+    T1->>MEM: write counter = 6
+    T2->>MEM: write counter = 6
+    Note over MEM: Counter is 6, not 7 — lost update`,
     },
     {
-      title: "Critical Section and Mutual Exclusion",
-      kind: "state" as const,
-      caption:
-        "State transitions of a mutex showing how threads enter and exit critical sections, preventing concurrent access to shared resources",
+      title: "Mutex Critical Section",
+      kind: "state",
+      caption: "A mutex enforces mutual exclusion. Only one thread can be in the critical section at a time; others block until the lock is released.",
+      mermaid: `stateDiagram-v2
+    [*] --> Unlocked
+    Unlocked --> Locked : Thread acquires lock
+    Locked --> Locked : Other threads block
+    Locked --> Unlocked : Thread releases lock
+    Unlocked --> Locked : Next thread acquires`,
     },
     {
-      title: "Race Condition Detection Ecosystem",
-      kind: "mindmap" as const,
-      caption:
-        "Overview of static and dynamic analysis tools, testing strategies, and language-level features for detecting and preventing race conditions",
+      title: "Optimistic vs Pessimistic Locking",
+      kind: "flow",
+      caption: "Optimistic locking reads freely and validates at write time via version check. Pessimistic locking acquires a lock before reading to prevent conflicts entirely.",
+      mermaid: `flowchart TD
+    A([Access shared resource]) --> B{Strategy?}
+    B -->|Optimistic| C[Read data + version]
+    B -->|Pessimistic| D[Acquire lock]
+    C --> E[Modify locally]
+    E --> F{Version unchanged?}
+    F -->|Yes| G[Write + increment version]
+    F -->|No| H[Retry from read]
+    D --> I[Read and modify]
+    I --> J[Write]
+    J --> K[Release lock]`,
+    },
+    {
+      title: "Race Condition Prevention Techniques",
+      kind: "mindmap",
+      caption: "Overview of techniques to prevent race conditions grouped by approach: synchronization primitives, atomic operations, immutability, and architecture.",
+      mermaid: `mindmap
+  root((Race Condition Prevention))
+    Synchronization
+      Mutex / Lock
+      Read-Write Lock
+      Semaphore
+      Monitor
+    Atomic Operations
+      CAS Compare-And-Swap
+      Atomic integers
+      Lock-free queues
+    Immutability
+      Immutable data structures
+      Copy-on-write
+      Functional style
+    Architecture
+      Actor model
+      Message passing
+      Single-threaded event loop`,
     },
   ],
 

@@ -106,8 +106,75 @@ ORDER BY node, total_cost;`
     },
   ],
   diagrams: [
-    { title: "Recursive CTE execution", kind: "flow", caption: "Anchor produces initial rows -> recursive step processes them -> new rows feed back into recursive step -> repeat until no new rows." },
-    { title: "CTE materialization vs inlining", kind: "architecture", caption: "Materialized: CTE computed once, stored, outer query reads result. Inlined: CTE merged into outer query, enabling predicate pushdown." },
+    {
+      title: "Recursive CTE Execution Flow",
+      kind: "flow",
+      caption: "How a recursive CTE iterates: anchor produces the initial rows, recursive step processes them, new rows feed back until the recursive step returns empty.",
+      mermaid: `flowchart TD
+    A[Start] --> B[Execute Anchor Member]
+    B --> C[Working Table = Anchor Results]
+    C --> D{Working Table Empty?}
+    D -->|Yes| G[Return UNION ALL of All Iterations]
+    D -->|No| E[Execute Recursive Member Using Working Table]
+    E --> F[Append New Rows to Result]
+    F --> C`,
+    },
+    {
+      title: "CTE Materialization vs Inlining",
+      kind: "architecture",
+      caption: "Materialized CTEs are computed once and stored as a temp buffer. Inlined CTEs are merged into the outer query, enabling predicate pushdown.",
+      mermaid: `graph TD
+    subgraph Materialized ["Materialized CTE"]
+        A1[WITH cte AS query] --> B1[Compute CTE Once]
+        B1 --> C1[Store in Temp Buffer]
+        C1 --> D1[Outer Query Reads Buffer]
+        D1 --> E1[No Predicate Pushdown]
+    end
+    subgraph Inlined ["Inlined CTE"]
+        A2[WITH cte AS query] --> B2[Merge Into Outer Plan]
+        B2 --> C2[Optimizer Sees Full Query]
+        C2 --> D2[Predicate Pushdown Enabled]
+    end`,
+    },
+    {
+      title: "Recursive CTE for Org Chart Traversal",
+      kind: "sequence",
+      caption: "Step-by-step database execution of a recursive CTE walking an employee hierarchy from CEO down to leaf nodes.",
+      mermaid: `sequenceDiagram
+    participant Q as Query Engine
+    participant W as Working Table
+    participant R as Result Set
+    Q->>W: Anchor: SELECT CEO where manager_id IS NULL
+    W->>R: Add CEO row depth=0
+    Q->>W: Recursive: JOIN employees ON manager_id IN Working Table
+    W->>R: Add depth=1 rows (VPs)
+    Q->>W: Recursive: JOIN employees ON manager_id IN Working Table
+    W->>R: Add depth=2 rows (Managers)
+    Q->>W: Recursive iteration returns 0 rows
+    W->>R: Terminate - return all accumulated rows`,
+    },
+    {
+      title: "CTE vs Subquery vs Temp Table",
+      kind: "mindmap",
+      caption: "Comparison of CTE, subquery, and temp table across scope, reusability, recursion support, and optimization behavior.",
+      mermaid: `mindmap
+  root[SQL Result Sets]
+    CTE
+      Single query scope
+      Named and reusable within query
+      Supports recursion
+      May inline or materialize
+    Subquery
+      Inline, anonymous
+      Cannot reference itself
+      Always evaluated inline
+      Must repeat if reused
+    Temp Table
+      Session scope
+      Persists across queries
+      Always materialized
+      Manual cleanup needed`,
+    },
   ],
   animations: [
     {

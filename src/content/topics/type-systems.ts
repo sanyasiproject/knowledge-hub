@@ -260,19 +260,79 @@ fn change(s: &mut String) {
   ],
   diagrams: [
     {
-      title: "Type System Taxonomy",
+      title: "Type System Dimensions",
       kind: "mindmap",
-      caption: "Classification tree: Static vs Dynamic (when checked), Strong vs Weak (how strict), Nominal vs Structural (how compatibility is determined), with language examples at each leaf.",
+      caption: "Key axes along which programming language type systems vary and the resulting trade-offs.",
+      mermaid: `mindmap
+  root((Type Systems))
+    Static vs Dynamic
+      Static: compile-time check
+        Java, TypeScript, Rust
+      Dynamic: runtime check
+        Python, JavaScript, Ruby
+    Strong vs Weak
+      Strong: no implicit coercion
+        Python, Haskell
+      Weak: implicit conversions
+        C, JavaScript
+    Nominal vs Structural
+      Nominal: by name
+        Java, C++
+      Structural: by shape
+        TypeScript, Go`,
     },
     {
-      title: "Type Checking Pipeline",
+      title: "Type Checking Flow",
       kind: "flow",
-      caption: "Source code flows through lexing, parsing, name resolution, type inference, type checking, and finally code generation. Errors at the type-checking stage prevent compilation.",
+      caption: "How a static type checker validates a program from source through type inference to type-safe output.",
+      mermaid: `flowchart TD
+    A["Source Code"] --> B["Parser
+AST generation"]
+    B --> C["Type Inference
+Infer missing annotations"]
+    C --> D["Type Checker
+verify constraints"]
+    D --> E{Type errors?}
+    E -->|Yes| F["Report errors
+with locations"]
+    F --> A
+    E -->|No| G["Type-annotated AST"]
+    G --> H["Code generation
+or interpreter"]`,
     },
     {
-      title: "Variance in Generic Types",
+      title: "Variance in Generics",
       kind: "architecture",
-      caption: "Covariance (Producer<Dog> is a subtype of Producer<Animal>), contravariance (Consumer<Animal> is a subtype of Consumer<Dog>), and invariance (MutableList<Dog> is unrelated to MutableList<Animal>).",
+      caption: "Covariance, contravariance, and invariance for generic type parameters in subtype relationships.",
+      mermaid: `graph TD
+    V["Variance"] --> CO["Covariant
+out T
+List-of-Cat is List-of-Animal"]
+    V --> CN["Contravariant
+in T
+Consumer-of-Animal is Consumer-of-Cat"]
+    V --> IN["Invariant
+Mutable-List cannot substitute
+due to write safety"]
+    CO --> Prod["Producers and read-only"]
+    CN --> Cons["Consumers and write-only"]
+    IN --> Mut["Mutable containers"]`,
+    },
+    {
+      title: "Type System Feature Comparison",
+      kind: "sequence",
+      caption: "How the same program behaves across Python, TypeScript, and Haskell at compile and runtime.",
+      mermaid: `sequenceDiagram
+    participant P as Python
+    participant TS as TypeScript
+    participant H as Haskell
+    Note over P: x = "hello" + 1
+    P-->>P: TypeError at RUNTIME
+    Note over TS: const x: string = "hello" + 1
+    TS-->>TS: Error at COMPILE TIME
+    Note over H: x = "hello" + 1
+    H-->>H: Type error at COMPILE TIME
+no implicit coercion`,
     },
   ],
   animations: [

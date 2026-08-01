@@ -554,91 +554,83 @@ validate_steady_state`,
   ],
   diagrams: [
     {
-      title: "Chaos Experiment Lifecycle",
+      title: "Chaos Experiment Workflow",
       kind: "flow",
-      caption: "The scientific method applied to chaos engineering -- from hypothesis to learning",
+      caption: "The structured workflow for designing, running, and learning from a chaos engineering experiment.",
       mermaid: `flowchart TD
-    A[Define Steady State] -->|Measurable metrics| B[Form Hypothesis]
-    B -->|What should happen under failure| C[Design Experiment]
-    C -->|Blast radius + abort conditions| D{Run Experiment}
-    D -->|Monitor in real-time| E{Hypothesis Held?}
-    E -->|Yes| F[Confidence Increased]
-    E -->|No| G[Weakness Discovered]
-    G --> H[Fix the Weakness]
-    H --> I[Re-run Experiment]
-    I --> D
-    F --> J[Expand Blast Radius]
-    J --> B
-
-    style A fill:#228B22,color:#fff
-    style G fill:#DC143C,color:#fff
-    style F fill:#4169E1,color:#fff`,
+    A["Define Steady State"] --> B["Hypothesize Failure Impact"]
+    B --> C["Design Experiment"]
+    C --> D{"Production Safe?"}
+    D -->|No| E["Run in Staging"]
+    D -->|Yes| F["Run in Production with Limits"]
+    E --> G["Observe Metrics"]
+    F --> G
+    G --> H{"Hypothesis Confirmed?"}
+    H -->|Yes| I["System is Resilient"]
+    H -->|No| J["Identify Weakness"]
+    J --> K["Fix and Harden"]
+    K --> A`,
     },
     {
-      title: "Blast Radius Progression",
-      kind: "flow",
-      caption: "Gradually expanding the scope of chaos experiments from safe to production-wide",
-      mermaid: `flowchart LR
-    subgraph L1["Level 1: Safe"]
-      A1[Tabletop Exercise]
-      A2[Dev Environment]
-    end
-
-    subgraph L2["Level 2: Low Risk"]
-      B1[Staging Environment]
-      B2[Single Test Instance]
-    end
-
-    subgraph L3["Level 3: Controlled"]
-      C1["Canary Production (1%)"]
-      C2[Single AZ]
-    end
-
-    subgraph L4["Level 4: Broad"]
-      D1["Multi-AZ Production"]
-      D2[Full Traffic]
-    end
-
-    L1 -->|Build confidence| L2
-    L2 -->|Validate tooling| L3
-    L3 -->|Proven resilience| L4`,
+      title: "Chaos Experiment Execution",
+      kind: "sequence",
+      caption: "Sequence of events between the chaos platform, target service, and observability stack during an experiment.",
+      mermaid: `sequenceDiagram
+    participant Eng as Engineer
+    participant CP as Chaos Platform
+    participant SUT as System Under Test
+    participant Obs as Observability
+    Eng->>CP: Define experiment config
+    Eng->>Obs: Confirm baseline metrics
+    Eng->>CP: Start experiment
+    CP->>SUT: Inject fault (latency/error/kill)
+    SUT-->>Obs: Degraded metrics emitted
+    Obs-->>Eng: Alerts triggered
+    Eng->>Obs: Monitor steady-state deviation
+    Eng->>CP: Stop experiment
+    CP->>SUT: Remove fault injection
+    SUT-->>Obs: Recovery metrics
+    Eng->>Obs: Analyse results and document`,
     },
     {
-      title: "Chaos Engineering Maturity Model",
+      title: "Failure Injection Categories",
+      kind: "mindmap",
+      caption: "Taxonomy of failure types that can be injected during chaos engineering experiments.",
+      mermaid: `mindmap
+  root((Chaos Failures))
+    Network
+      Latency injection
+      Packet loss
+      Partition
+      Bandwidth limit
+    Compute
+      CPU stress
+      Memory pressure
+      Process kill
+      Disk full
+    Dependencies
+      Third-party timeout
+      DNS failure
+      Certificate expiry
+    Application
+      Exception injection
+      Slow response
+      Bad data`,
+    },
+    {
+      title: "Chaos Maturity Model",
       kind: "state",
-      caption: "Progression from awareness to continuous automated chaos in production",
+      caption: "Progression through chaos engineering maturity levels from ad-hoc testing to fully automated game days.",
       mermaid: `stateDiagram-v2
-    [*] --> AdHoc
-    AdHoc --> Exploratory: First experiments in staging
-    Exploratory --> Systematic: Regular scheduled experiments
-    Systematic --> Automated: Chaos in CI/CD pipeline
-    Automated --> Continuous: Always-on production chaos
-
-    state AdHoc {
-      [*] --> Tabletop_Exercises
-      Tabletop_Exercises --> Failure_Awareness
-    }
-
-    state Exploratory {
-      [*] --> Manual_Staging_Tests
-      Manual_Staging_Tests --> Tool_Evaluation
-    }
-
-    state Systematic {
-      [*] --> Scheduled_Production
-      Scheduled_Production --> Blast_Radius_Control
-      Blast_Radius_Control --> Postmortem_Analysis
-    }
-
-    state Automated {
-      [*] --> CI_CD_Integration
-      CI_CD_Integration --> Automated_Rollback
-    }
-
-    state Continuous {
-      [*] --> Always_On_Chaos
-      Always_On_Chaos --> Self_Healing
-    }`,
+    [*] --> Level1
+    Level1 : Level 1 - Manual Tests
+    Level2 : Level 2 - Staging Chaos
+    Level3 : Level 3 - Production Chaos
+    Level4 : Level 4 - Continuous Chaos
+    Level1 --> Level2 : runbooks and monitoring in place
+    Level2 --> Level3 : resilience patterns validated
+    Level3 --> Level4 : auto gamedays scheduled
+    Level4 --> Level4 : ongoing feedback loop`,
     },
   ],
   comparison: {

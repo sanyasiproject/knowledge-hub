@@ -166,14 +166,69 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Complexity class containment: P ⊆ NP ⊆ PSPACE ⊆ EXP",
+      title: "Complexity Class Containment",
       kind: "mindmap",
-      caption: "Euler diagram showing the relationship between complexity classes. NP-complete problems sit at the boundary of NP. If P = NP, the P and NP regions merge.",
+      caption: "Euler diagram of complexity classes: P is inside NP, NP-complete at the boundary, NP inside PSPACE inside EXP.",
+      mermaid: `mindmap
+    root["EXP exponential time"]
+      PSPACE polynomial space
+        NP nondeterministic poly
+          NP-complete
+            SAT Boolean satisfiability
+            TSP Traveling Salesman
+            Clique
+          NP-hard harder than NP
+          P deterministic poly
+            Sorting
+            Shortest path
+            Primality testing`,
     },
     {
-      title: "Classic NP-completeness reduction chain",
+      title: "NP-Completeness Reduction Chain",
       kind: "flow",
-      caption: "SAT → 3-SAT → Clique → Vertex Cover → Hamiltonian Cycle → TSP (decision). Each arrow is a polynomial-time reduction proving the target NP-complete.",
+      caption: "Polynomial-time reductions proving each problem NP-complete via chain from SAT.",
+      mermaid: `flowchart LR
+    SAT["SAT\nBoolean formula satisfiability"] -->|reduces to| THREESAT["3-SAT\nclauses of exactly 3 literals"]
+    THREESAT -->|reduces to| Clique["Clique\nfind k-clique in graph"]
+    Clique -->|reduces to| VC["Vertex Cover\ncover all edges with k vertices"]
+    VC -->|reduces to| HC["Hamiltonian Cycle\nvisit all vertices once"]
+    HC -->|reduces to| TSP["TSP Decision\ntour of cost at most k"]`,
+    },
+    {
+      title: "P vs NP Problem Classes",
+      kind: "architecture",
+      caption: "Distinguishing P problems (fast to solve) from NP problems (fast to verify, unknown to solve fast).",
+      mermaid: `graph TD
+    subgraph P["Class P - polynomial time solve"]
+      P1["Sorting O n log n"]
+      P2["Shortest path O V+E log V"]
+      P3["Primality testing O log^6 n"]
+    end
+    subgraph NP["Class NP - polynomial time verify"]
+      NP1["SAT: verify assignment in O n"]
+      NP2["Clique: verify subset in O k^2"]
+      NP3["TSP: verify tour in O n"]
+    end
+    P -->|P is subset of NP| NP
+    Q{"P equals NP?"} -->|unknown - biggest open problem| NP`,
+    },
+    {
+      title: "Approximation Algorithm Strategy",
+      kind: "sequence",
+      caption: "For NP-hard problems in practice, use approximation algorithms or heuristics.",
+      mermaid: `sequenceDiagram
+    participant Dev as Developer
+    participant Prob as NP-Hard Problem
+    participant Approx as Approximation Alg
+    participant Heuristic as Heuristic
+
+    Dev->>Prob: need solution to TSP n=1000
+    Prob-->>Dev: exact solution is intractable
+    Dev->>Approx: try 2-approximation Christofides
+    Approx-->>Dev: tour within 1.5x optimal in poly time
+    Dev->>Heuristic: try greedy nearest neighbor
+    Heuristic-->>Dev: fast solution often within 20-25% optimal
+    Dev->>Dev: choose based on quality vs speed tradeoff`,
     },
   ],
   animations: [

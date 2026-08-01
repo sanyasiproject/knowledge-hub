@@ -428,41 +428,69 @@ console.log(JSON.stringify(result, null, 2));`,
     {
       title: "Structured Output Pipeline",
       kind: "flow",
-      caption: "End-to-end flow from unstructured input through schema-validated structured output with retry logic",
+      caption: "End-to-end flow from unstructured input through schema-validated structured output with retry logic.",
       mermaid: `flowchart TD
-    A[Unstructured Input Text] --> B[Construct Prompt with Schema]
-    B --> C[Send to LLM with JSON Mode]
-    C --> D[Parse Response as JSON]
+    A["Unstructured Input Text"] --> B["Construct Prompt with Schema"]
+    B --> C["Send to LLM with JSON Mode"]
+    C --> D["Parse Response as JSON"]
     D --> E{Valid JSON?}
-    E -- No --> F[Retry with Error Feedback]
+    E -->|No| F["Retry with Error Feedback"]
     F --> C
-    E -- Yes --> G[Validate Against Schema]
+    E -->|Yes| G["Validate Against Schema"]
     G --> H{Schema Valid?}
-    H -- No --> I{Retries Left?}
-    I -- Yes --> J[Send Validation Error to LLM]
-    J --> C
-    I -- No --> K[Fallback: Log & Alert]
-    H -- Yes --> L[Use Structured Data]
-    L --> M[Downstream System / API / DB]`,
+    H -->|No| F
+    H -->|Yes| I["Return Typed Object"]`,
     },
     {
-      title: "Function Calling Sequence",
+      title: "Schema Definition Approaches",
+      kind: "architecture",
+      caption: "Different ways to define output schemas for LLMs including JSON Schema, Pydantic, and Zod.",
+      mermaid: `graph TD
+    Root["Output Schema"] --> JS["JSON Schema
+properties + types"]
+    Root --> PY["Pydantic Model
+Python dataclass"]
+    Root --> ZD["Zod Schema
+TypeScript runtime"]
+    JS --> LLM["LLM JSON Mode"]
+    PY --> LLM
+    ZD --> LLM
+    LLM --> V["Validation Layer"]
+    V --> App["Application Logic"]`,
+    },
+    {
+      title: "Tool Call vs JSON Mode",
+      kind: "mindmap",
+      caption: "Comparing two approaches to get structured data from an LLM.",
+      mermaid: `mindmap
+  root((Structured Output))
+    JSON Mode
+      Guarantee valid JSON
+      Free-form structure
+      Parse manually
+      Simple use cases
+    Tool Calling
+      Strongly typed schema
+      Named parameters
+      Model selects tool
+      Complex workflows
+      Multiple actions`,
+    },
+    {
+      title: "Structured Output Sequence",
       kind: "sequence",
-      caption: "The complete lifecycle of a function calling interaction between user, model, and application",
+      caption: "Interaction between application, LLM API, and validation layer when extracting structured data.",
       mermaid: `sequenceDiagram
-    participant U as User
     participant App as Application
-    participant LLM as Language Model
-    participant API as External API
-
-    U->>App: "What is the weather in Tokyo?"
-    App->>LLM: User message + tool definitions
-    LLM-->>App: tool_use: get_weather({location: "Tokyo"})
-    App->>API: GET /weather?city=Tokyo
-    API-->>App: {temp: 22, condition: "sunny"}
-    App->>LLM: tool_result: {temp: 22, condition: "sunny"}
-    LLM-->>App: "It is 22C and sunny in Tokyo"
-    App->>U: "It is 22C and sunny in Tokyo"`,
+    participant API as LLM API
+    participant Val as Validator
+    App->>API: POST /chat with JSON schema
+    API-->>App: JSON string response
+    App->>Val: parse and validate JSON
+    Val-->>App: typed object or error
+    App->>API: retry with error context
+    API-->>App: corrected JSON
+    Val-->>App: valid typed object`,
     },
   ],
   comparison: {

@@ -325,85 +325,78 @@ private:
 
   diagrams: [
     {
-      title: "Git Fast-Forward vs Three-Way Merge",
-      kind: "flow",
-      caption: "Visual comparison of fast-forward merge (linear) and three-way merge (diverged branches)",
-      mermaid: `flowchart LR
-  subgraph FF["Fast-Forward Merge"]
-    A1((A)) --> B1((B)) --> C1((C)) --> D1((D)) --> E1((E))
-    C1 -. "main was here" .-> C1
-    E1 -. "main moves here" .-> E1
-  end
-  subgraph TW["Three-Way Merge"]
-    A2((A)) --> B2((B)) --> C2((C)) --> F2((F)) --> G2((G))
-    C2 --> D2((D)) --> E2((E)) --> G2
-    G2 -. "merge commit" .-> G2
-  end`,
-    },
-    {
       title: "Git Flow Branching Model",
-      kind: "flow",
-      caption: "The standard Git Flow workflow showing branch relationships and merge directions",
-      mermaid: `flowchart TB
-  main["main\n(production)"] --- hotfix["hotfix/*"]
-  main --- release["release/*"]
-  develop["develop\n(integration)"] --- feature["feature/*"]
-  develop --- release
-  hotfix -->|"merge"| main
-  hotfix -->|"merge"| develop
-  feature -->|"merge"| develop
-  develop -->|"branch"| release
-  release -->|"merge"| main
-  release -->|"merge"| develop
-  main -->|"branch"| hotfix
-  develop -->|"branch"| feature`,
+      kind: "architecture",
+      caption: "The standard Git Flow topology: main, develop, feature, release, and hotfix branches and their merge directions.",
+      mermaid: `graph TD
+    main["main - production"]
+    develop["develop - integration"]
+    feature["feature branches"]
+    release["release branches"]
+    hotfix["hotfix branches"]
+    develop --> feature
+    feature -->|merge back| develop
+    develop --> release
+    release -->|merge| main
+    release -->|merge| develop
+    main --> hotfix
+    hotfix -->|merge| main
+    hotfix -->|merge| develop`,
     },
     {
       title: "Merge Conflict Resolution Flow",
       kind: "flow",
-      caption: "Step-by-step decision flow for resolving merge conflicts",
+      caption: "Decision flow for detecting and resolving merge conflicts step by step.",
       mermaid: `flowchart TD
-  Start["git merge feature"] --> Check{"Conflicts?"}
-  Check -->|No| Done["Merge complete\n(auto or ff)"]
-  Check -->|Yes| Status["git status\n(identify conflicted files)"]
-  Status --> Open["Open file\nResolve markers"]
-  Open --> Choose{"Resolution\nmethod?"}
-  Choose -->|Manual edit| Edit["Edit file\nRemove markers"]
-  Choose -->|Accept ours| Ours["git checkout --ours file"]
-  Choose -->|Accept theirs| Theirs["git checkout --theirs file"]
-  Choose -->|Visual tool| Tool["git mergetool"]
-  Edit --> Stage["git add resolved files"]
-  Ours --> Stage
-  Theirs --> Stage
-  Tool --> Stage
-  Stage --> More{"More\nconflicts?"}
-  More -->|Yes| Open
-  More -->|No| Commit["git commit"]
-  Commit --> Done2["Merge complete"]`,
+    A([git merge feature]) --> B{Conflicts?}
+    B -->|No| C([Merge complete])
+    B -->|Yes| D[git status - find conflicted files]
+    D --> E[Open file and resolve markers]
+    E --> F{Method?}
+    F -->|Manual edit| G[Edit file and remove markers]
+    F -->|Accept ours| H[git checkout --ours file]
+    F -->|Accept theirs| I[git checkout --theirs file]
+    G --> J[git add resolved file]
+    H --> J
+    I --> J
+    J --> K{More conflicts?}
+    K -->|Yes| E
+    K -->|No| L[git commit]
+    L --> C`,
     },
     {
       title: "Rebase vs Merge Sequence",
       kind: "sequence",
-      caption: "Sequence diagram showing the difference between merge and rebase workflows",
+      caption: "How merge creates a merge commit with two parents, while rebase replays commits to produce a linear history.",
       mermaid: `sequenceDiagram
-  participant M as main
-  participant F as feature
-  Note over M,F: Both branches diverge
-  M->>M: commit C3
-  F->>F: commit C4
-  F->>F: commit C5
-  rect rgb(200, 220, 255)
-    Note over M,F: Merge workflow
-    F->>M: git merge feature
-    M->>M: merge commit M1 (parents: C3, C5)
-  end
-  rect rgb(220, 255, 200)
-    Note over M,F: Rebase workflow
-    F->>F: git rebase main
-    Note over F: C4, C5 replayed as C4', C5'
-    F->>M: git merge feature (fast-forward)
-    Note over M: Linear history: C3 → C4' → C5'
-  end`,
+    participant main
+    participant feature
+    main->>main: commit C3
+    feature->>feature: commit C4
+    feature->>feature: commit C5
+    Note over main,feature: Merge path
+    feature->>main: git merge feature
+    main->>main: merge commit M1 with parents C3 and C5
+    Note over main,feature: Rebase path
+    feature->>feature: git rebase main
+    Note over feature: C4 and C5 replayed as C4-prime and C5-prime
+    feature->>main: git merge feature - fast forward
+    Note over main: Linear history C3 then C4-prime then C5-prime`,
+    },
+    {
+      title: "Branch Lifecycle State Machine",
+      kind: "state",
+      caption: "States a branch passes through from creation to deletion in a typical Git workflow.",
+      mermaid: `stateDiagram-v2
+    [*] --> Created : git switch -c branch
+    Created --> Active : first commit
+    Active --> Active : more commits
+    Active --> OpenPR : push and open pull request
+    OpenPR --> UnderReview : reviewer assigned
+    UnderReview --> Active : changes requested
+    UnderReview --> Merged : approved and merged
+    Merged --> Deleted : git branch -d
+    Deleted --> [*]`,
     },
   ],
 

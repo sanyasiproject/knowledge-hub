@@ -172,19 +172,84 @@ export const topicsPartitions: TopicContent = {
   ],
   diagrams: [
     {
-      title: "Topic Partitioning Architecture",
+      title: "Kafka Topics and Partitions Layout",
       kind: "architecture",
-      caption: "A topic with 4 partitions distributed across 3 brokers, each partition with a leader and 2 followers.",
+      caption: "How a Kafka topic is divided into partitions distributed across brokers for parallelism.",
+      mermaid: `graph TD
+    Topic["Topic: orders"] --> P0["Partition 0
+Broker 1"]
+    Topic --> P1["Partition 1
+Broker 2"]
+    Topic --> P2["Partition 2
+Broker 3"]
+    P0 --> R0["Replica on Broker 2"]
+    P1 --> R1["Replica on Broker 3"]
+    P2 --> R2["Replica on Broker 1"]
+    Prod["Producer"] -->|key hash| P0
+    Prod -->|key hash| P1
+    CG["Consumer Group"] --> C1["Consumer 1
+P0"]
+    CG --> C2["Consumer 2
+P1"]
+    CG --> C3["Consumer 3
+P2"]`,
     },
     {
-      title: "Key-Based Partition Assignment",
+      title: "Producer to Consumer Message Flow",
+      kind: "sequence",
+      caption: "End-to-end flow of a message from producer through broker partition to consumer.",
+      mermaid: `sequenceDiagram
+    participant P as Producer
+    participant B as Broker Leader
+    participant R as Replica
+    participant C as Consumer
+    P->>B: Produce msg with key
+    B->>B: Write to partition log
+    B->>R: Replicate to followers
+    R-->>B: ACK replication
+    B-->>P: ACK to producer
+    C->>B: Fetch from offset N
+    B-->>C: Return messages
+    C->>C: Commit offset N+1`,
+    },
+    {
+      title: "Partition Assignment Flow",
       kind: "flow",
-      caption: "Messages with the same key always route to the same partition via hash(key) % numPartitions.",
+      caption: "How Kafka assigns partitions to consumers in a consumer group on join and rebalance.",
+      mermaid: `flowchart TD
+    A["New consumer joins group"] --> B["Group coordinator notified"]
+    B --> C["Trigger rebalance"]
+    C --> D["All consumers rejoin"]
+    D --> E["Leader consumer runs
+partition assignor"]
+    E --> F["Round-robin or sticky
+assignment"]
+    F --> G["Distribute partition
+assignments"]
+    G --> H["Consumers resume
+from committed offsets"]`,
     },
     {
-      title: "Hot Partition Imbalance",
-      kind: "architecture",
-      caption: "Skewed key distribution causes one partition to handle disproportionate load while others are underutilized.",
+      title: "Topic Configuration Concepts",
+      kind: "mindmap",
+      caption: "Key configuration parameters that govern topic behavior, retention, and replication.",
+      mermaid: `mindmap
+  root((Topic Config))
+    Partitions
+      Parallelism degree
+      Cannot decrease
+      Key-based routing
+    Replication Factor
+      Fault tolerance
+      ISR tracking
+      Minimum 3 in prod
+    Retention
+      Time-based
+      Size-based
+      Compaction
+    Segment Size
+      Log rolling
+      Index granularity`,
     },
   ],
   animations: [

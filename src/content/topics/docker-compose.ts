@@ -312,79 +312,81 @@ CMD ["nginx", "-g", "daemon off;"]`,
   ],
   diagrams: [
     {
-      title: "MERN Stack Compose Architecture",
+      title: "Multi-Service Compose Architecture",
       kind: "architecture",
-      caption: "Service topology showing network segmentation, volume mounts, and dependency flow",
       mermaid: `graph TB
-  subgraph "Frontend Network"
-    NGINX["**nginx** :80<br/>Reverse Proxy"]
-    CLIENT["**client** :5173<br/>React Dev Server"]
-    API_F["**api** :3000<br/>Express API"]
-  end
-
-  subgraph "Backend Network"
-    API_B["**api** :3000<br/>Express API"]
-    MONGO["**mongo** :27017<br/>MongoDB 7"]
-    ME["**mongo-express** :8081<br/>Debug UI"]
-  end
-
-  subgraph "Volumes"
-    VOL[("mongo-data")]
-  end
-
-  subgraph "Secrets"
-    SEC[/"mongo_password.txt"/]
-  end
-
-  NGINX --> CLIENT
-  NGINX --> API_F
-  API_B -->|depends_on: healthy| MONGO
-  ME -.->|profile: debug| MONGO
-  MONGO --- VOL
-  MONGO --- SEC
-  ME --- SEC`,
+    subgraph FrontendNet["Frontend Network"]
+      NGINX["nginx :80\nReverse Proxy"]
+      CLIENT["client :5173\nReact Dev Server"]
+      API_F["api :3000\nExpress API"]
+    end
+    subgraph BackendNet["Backend Network"]
+      API_B["api :3000\nExpress API"]
+      MONGO["mongo :27017\nMongoDB"]
+      ME["mongo-express :8081\nDebug UI"]
+    end
+    subgraph Storage["Volumes and Secrets"]
+      VOL[("mongo-data")]
+      SEC[/"mongo_password"/]
+    end
+    NGINX --> CLIENT
+    NGINX --> API_F
+    API_B -->|depends_on healthy| MONGO
+    ME -.->|profile: debug| MONGO
+    MONGO --- VOL
+    MONGO --- SEC`,
+      caption: "Two isolated networks share the API service; volumes persist MongoDB data; secrets inject credentials without environment variables.",
     },
     {
       title: "Docker Compose Up Lifecycle",
       kind: "flow",
-      caption: "The sequence of steps when running docker compose up with build and health checks",
       mermaid: `flowchart TD
-  A["**docker compose up --build**"] --> B["Parse compose.yaml"]
-  B --> C{"Services with<br/>build key?"}
-  C -->|Yes| D["Resolve build context<br/>and Dockerfile"]
-  C -->|No| E["Pull image<br/>from registry"]
-  D --> F["Build image<br/>(BuildKit)"]
-  F --> G["Tag image with<br/>project prefix"]
-  E --> H["Create networks"]
-  G --> H
-  H --> I["Create volumes"]
-  I --> J["Sort services by<br/>depends_on DAG"]
-  J --> K["Start dependency<br/>services first"]
-  K --> L{"Health check<br/>defined?"}
-  L -->|Yes| M["Wait for<br/>service_healthy"]
-  L -->|No| N["Container started =<br/>dependency met"]
-  M --> O["Start dependent<br/>services"]
-  N --> O
-  O --> P["All services running"]
-  P --> Q{"Watch mode<br/>enabled?"}
-  Q -->|Yes| R["Monitor file changes<br/>sync / rebuild / restart"]
-  Q -->|No| S["Attach to logs"]`,
+    A["docker compose up"] --> B["Parse compose.yaml"]
+    B --> C{"Build key present?"}
+    C -->|Yes| D["BuildKit builds image"]
+    C -->|No| E["Pull image from registry"]
+    D --> F["Create networks"]
+    E --> F
+    F --> G["Create volumes"]
+    G --> H["Sort by depends_on DAG"]
+    H --> I["Start dependency services"]
+    I --> J{"Health check defined?"}
+    J -->|Yes| K["Wait for service_healthy"]
+    J -->|No| L["Started = dependency met"]
+    K --> M["Start dependent services"]
+    L --> M
+    M --> N["All services running"]`,
+      caption: "Compose orchestrates build, image pull, network creation, volume creation, and dependency-ordered service startup.",
     },
     {
-      title: "Compose Watch Decision Flow",
+      title: "Compose Watch Action Decision",
       kind: "flow",
-      caption: "How Compose Watch selects sync, rebuild, or sync+restart based on file change type",
       mermaid: `flowchart LR
-  A["File change<br/>detected"] --> B{"Matches which<br/>watch rule?"}
-  B -->|"Source code<br/>(src/)"|C["**action: sync**"]
-  B -->|"Dependency file<br/>(package.json)"|D["**action: rebuild**"]
-  B -->|"Config file<br/>(.env, config/)"|E["**action: sync+restart**"]
-  C --> F["Copy changed file<br/>to container target"]
-  F --> G["Hot reload picks<br/>up change"]
-  D --> H["Rebuild Docker<br/>image"]
-  H --> I["Recreate and<br/>restart container"]
-  E --> J["Copy file to<br/>container target"]
-  J --> K["Restart container<br/>process"]`,
+    A["File change detected"] --> B{"Which watch rule matches?"}
+    B -->|"src/ - source code"| C["action: sync"]
+    B -->|"package.json - deps"| D["action: rebuild"]
+    B -->|".env or config/"| E["action: sync+restart"]
+    C --> F["Copy file to container\nHot reload picks up change"]
+    D --> G["Rebuild Docker image\nRecreate container"]
+    E --> H["Copy file to container\nRestart process"]`,
+      caption: "Compose Watch selects sync for source changes, rebuild for dependency changes, and sync+restart for config file changes.",
+    },
+    {
+      title: "Service Health Check State Machine",
+      kind: "state",
+      mermaid: `stateDiagram-v2
+    [*] --> Starting : container created
+    Starting --> Healthy : health check passes
+    Starting --> Unhealthy : retries exhausted
+    Healthy --> Unhealthy : check fails
+    Unhealthy --> Healthy : check passes again
+    Healthy --> [*] : container stopped
+    Unhealthy --> [*] : container stopped
+    note right of Healthy
+      depends_on: condition
+      service_healthy unblocked
+    end note`,
+      caption: "Container health states control when dependent services start; Compose blocks dependents until the dependency is Healthy.",
     },
   ],
   comparison: {

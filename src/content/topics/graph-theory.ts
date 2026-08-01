@@ -159,16 +159,72 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Graph representations: adjacency matrix vs adjacency list",
-      kind: "architecture",
-      caption:
-        "Side-by-side comparison showing the same 5-vertex graph stored as a matrix and as an adjacency list, highlighting space trade-offs.",
+      title: "Graph Types Taxonomy",
+      kind: "mindmap",
+      caption: "Classification of graphs by direction, weight, and special properties.",
+      mermaid: `mindmap
+  root((Graph Types))
+    By Direction
+      Undirected
+      Directed DAG
+      Directed cyclic
+    By Weight
+      Unweighted
+      Weighted edges
+    By Connectivity
+      Connected
+      Disconnected
+      Strongly connected
+    Special
+      Tree
+      Bipartite
+      Complete graph`,
     },
     {
-      title: "BFS vs DFS traversal order",
+      title: "Shortest Path Algorithm Selection",
       kind: "flow",
-      caption:
-        "The same graph traversed by BFS (level-by-level) and DFS (depth-first), showing the order in which vertices are visited.",
+      caption: "Choosing the right shortest path algorithm based on graph properties.",
+      mermaid: `flowchart TD
+    A[Find Shortest Path] --> B{Negative weights?}
+    B -- Yes --> C{Negative cycles?}
+    C -- Yes --> D[No solution - Bellman-Ford detects]
+    C -- No --> E[Bellman-Ford O of VE]
+    B -- No --> F{Single source?}
+    F -- Yes --> G{Unweighted?}
+    G -- Yes --> H[BFS O of V plus E]
+    G -- No --> I[Dijkstra O of E log V]
+    F -- No --> J[Floyd-Warshall O of V cubed]`,
+    },
+    {
+      title: "BFS vs DFS Mechanics",
+      kind: "architecture",
+      caption: "Contrasting BFS queue-based and DFS stack-based traversal mechanics.",
+      mermaid: `graph TD
+    subgraph BFS Breadth First
+        BQ[Queue FIFO] --> BN[Dequeue and visit node]
+        BN --> BE[Enqueue unvisited neighbors]
+        BE --> BQ
+        BN --> BL[Explores level by level]
+    end
+    subgraph DFS Depth First
+        DS[Stack or recursion] --> DN[Pop and visit node]
+        DN --> DP[Push unvisited neighbors]
+        DP --> DS
+        DN --> DD[Explores depth first]
+    end`,
+    },
+    {
+      title: "Graph Algorithm Use Cases",
+      kind: "network",
+      caption: "Sample weighted graph for algorithm demonstrations.",
+      mermaid: `graph LR
+    A -- 4 --- B
+    A -- 2 --- C
+    B -- 5 --- C
+    B -- 10 --- D
+    C -- 3 --- D
+    C -- 8 --- E
+    D -- 7 --- E`,
     },
   ],
   animations: [

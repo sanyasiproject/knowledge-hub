@@ -277,54 +277,75 @@ kubectl run curlpod --rm -it --image=curlimages/curl --restart=Never -- \\
   ],
   diagrams: [
     {
-      title: "Kubernetes Service Traffic Flow",
+      title: "Kubernetes Service Types and Traffic Flow",
       kind: "flow",
-      caption: "How external traffic flows through **LoadBalancer**, *NodePort*, *ClusterIP*, and **kube-proxy** to reach Pod endpoints",
+      caption: "External traffic enters via LoadBalancer, which routes to NodePort on every node, which forwards to ClusterIP, where kube-proxy distributes to pod endpoints.",
       mermaid: `flowchart TB
-  Client["External Client"] -->|DNS resolves to LB IP| LB["Cloud Load Balancer\n(LoadBalancer Service)"]
-  LB -->|Routes to NodePort| NP["NodePort\n(port 30000-32767\non every node)"]
-  NP -->|Forwards to ClusterIP| CIP["ClusterIP\n(Virtual IP)"]
-  CIP -->|kube-proxy rules\niptables / IPVS| KP{"kube-proxy\nLoad Balancing"}
-  KP -->|Round-robin / Least-conn| P1["Pod 1\n10.244.1.5:8080"]
-  KP --> P2["Pod 2\n10.244.2.8:8080"]
-  KP --> P3["Pod 3\n10.244.3.3:8080"]
-
-  subgraph Internal Traffic
-    SVC["Internal Service\n(ClusterIP only)"] -->|DNS: svc.ns.svc.cluster.local| CIP2["ClusterIP"]
-    CIP2 -->|kube-proxy| KP2{"Load Balance"}
-    KP2 --> P4["Backend Pod"]
-  end`,
+    EXT["External Client"] -->|DNS to LB IP| LB["Cloud Load Balancer\nLoadBalancer Service"]
+    LB -->|NodePort on any node| NP["NodePort 30000-32767\non every node"]
+    NP -->|kube-proxy DNAT| CIP["ClusterIP\nVirtual IP - iptables or IPVS"]
+    CIP --> P1["Pod 1\n10.244.1.5"]
+    CIP --> P2["Pod 2\n10.244.2.8"]
+    CIP --> P3["Pod 3\n10.244.3.3"]
+    subgraph Internal["Internal Service Discovery"]
+      SVC2["Service my-svc\nClusterIP only"] -->|svc.ns.svc.cluster.local| CIP2["ClusterIP"]
+      CIP2 --> P4["Backend Pod"]
+    end`,
     },
     {
-      title: "CNI Plugin Network Architecture",
+      title: "DNS-Based Service Discovery",
+      kind: "sequence",
+      caption: "CoreDNS resolves service names to ClusterIPs. Pods use search domains so short names work within the same namespace without the full FQDN.",
+      mermaid: `sequenceDiagram
+    participant Pod as App Pod
+    participant DNS as CoreDNS
+    participant SVC as Service ClusterIP
+    participant Back as Backend Pod
+    Pod->>DNS: resolve my-service
+    Note over Pod,DNS: /etc/resolv.conf search domain\nmy-service -> my-service.default.svc.cluster.local
+    DNS-->>Pod: ClusterIP 10.96.100.5
+    Pod->>SVC: HTTP request to 10.96.100.5:80
+    SVC->>SVC: kube-proxy iptables DNAT
+    SVC->>Back: forward to 10.244.2.8:8080
+    Back-->>Pod: HTTP response`,
+    },
+    {
+      title: "NetworkPolicy Zero-Trust Model",
       kind: "architecture",
-      caption: "Comparison of **Flannel** (VXLAN overlay), **Calico** (BGP routing), and **Cilium** (eBPF) network architectures",
-      mermaid: `flowchart LR
-  subgraph Flannel["Flannel (Overlay)"]
-    direction TB
-    FP1["Pod A\n10.244.1.2"] --> FV1["veth pair"]
-    FV1 --> FB["cni0 bridge"]
-    FB --> FVXLAN["VXLAN\nflannel.1"]
-    FVXLAN -->|UDP encap| FNET["Node Network"]
-  end
-
-  subgraph Calico["Calico (BGP)"]
-    direction TB
-    CP1["Pod B\n10.244.2.3"] --> CV1["veth pair"]
-    CV1 --> CR["Routing Table\n(BGP-distributed)"]
-    CR -->|Direct routing\nno encap| CNET["Node Network"]
-  end
-
-  subgraph Cilium["Cilium (eBPF)"]
-    direction TB
-    EP1["Pod C\n10.244.3.4"] --> EV1["veth pair"]
-    EV1 --> EBP["eBPF Programs\n(TC / XDP hooks)"]
-    EBP -->|Kernel-level\nprocessing| ENET["Node Network"]
-  end
-
-  FNET -.->|Underlay| Switch["Physical / Virtual\nNetwork"]
-  CNET -.-> Switch
-  ENET -.-> Switch`,
+      caption: "A default-deny policy blocks all traffic to selected pods. Explicit allow policies are added for each legitimate path. The CNI plugin enforces the rules at the kernel level.",
+      mermaid: `graph LR
+    subgraph NS["Namespace: production"]
+      FE["frontend pod\nlabel: app=frontend"]
+      API["api pod\nlabel: app=api"]
+      DB["database pod\nlabel: app=db"]
+    end
+    ING["Ingress Controller\nnamespace: ingress-nginx"]
+    ING -->|allowed by NetworkPolicy\nport 80 from ingress-nginx ns| FE
+    FE -->|allowed by NetworkPolicy\nport 3000 to app=api| API
+    API -->|allowed by NetworkPolicy\nport 5432 to app=db| DB
+    BAD["Other pods"] -. blocked by default-deny .- FE
+    BAD -. blocked .- DB
+    NOTE["Default deny policy\nselects all pods\nblocks all ingress and egress\nDNS egress explicitly allowed"]`,
+    },
+    {
+      title: "Ingress and Gateway API Routing",
+      kind: "network",
+      caption: "Ingress routes HTTP traffic by host and path. The newer Gateway API separates concerns: GatewayClass for infra, Gateway for listeners, HTTPRoute for app routing rules.",
+      mermaid: `graph TD
+    subgraph Ingress["Ingress - Single Resource"]
+      IC["Ingress Controller\nNGINX Traefik"]
+      IR["Ingress Resource\napi.example.com -> api-svc\nexample.com/static -> cdn-svc"]
+      IC --> IR
+    end
+    subgraph GatewayAPI["Gateway API - Role-Oriented"]
+      GC["GatewayClass\ninfrastructure provider"]
+      GW["Gateway\noperator configures listeners\nHTTPS port 443"]
+      HR["HTTPRoute\ndeveloper defines routes\nweighted 90/10 canary split"]
+      GC --> GW
+      GW --> HR
+    end
+    HR -->|routes to| SVC1["stable-svc 90%"]
+    HR -->|routes to| SVC2["canary-svc 10%"]`,
     },
   ],
   comparison: {

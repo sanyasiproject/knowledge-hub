@@ -82,8 +82,70 @@ CREATE TABLE sections (
     },
   ],
   diagrams: [
-    { title: "Normal forms hierarchy", kind: "flow", caption: "1NF -> 2NF -> 3NF -> BCNF -> 4NF -> 5NF, each subsuming the previous." },
-    { title: "Decomposition for 3NF", kind: "flow", caption: "Original table decomposed into multiple tables by functional dependencies, with lossless join guarantee." },
+    {
+      title: "Normal Forms Hierarchy",
+      kind: "flow",
+      caption: "Progression from 1NF to BCNF, each step eliminating a specific type of dependency anomaly.",
+      mermaid: `flowchart TD
+    UNF["Unnormalized Form\nrepeating groups"] --> NF1["1NF\natomic values, no repeating groups"]
+    NF1 --> NF2["2NF\nno partial dependencies on composite key"]
+    NF2 --> NF3["3NF\nno transitive dependencies"]
+    NF3 --> BCNF["BCNF\nevery determinant is a candidate key"]
+    BCNF --> NF4["4NF\nno multi-valued dependencies"]
+    NF4 --> NF5["5NF\nno join dependencies"]`,
+    },
+    {
+      title: "1NF to 3NF Decomposition",
+      kind: "sequence",
+      caption: "Step-by-step decomposition of a flat table into normalized tables eliminating redundancy.",
+      mermaid: `sequenceDiagram
+    participant Dev as Designer
+    participant T as Original Table
+    participant S as Students Table
+    participant C as Courses Table
+    participant E as Enrollments Table
+
+    Dev->>T: identify functional dependencies
+    T-->>Dev: student_id -> name, course_id -> name, composite -> grade
+    Dev->>S: extract students student_id name
+    Dev->>C: extract courses course_id name
+    Dev->>E: extract enrollments student_id course_id grade
+    Dev->>Dev: verify lossless join
+    Note over S,E: No redundancy, no update anomalies`,
+    },
+    {
+      title: "Functional Dependency Graph",
+      kind: "network",
+      caption: "Shows which columns determine which other columns in an unnormalized table.",
+      mermaid: `graph LR
+    StudentID["student_id"] -->|determines| Name["student_name"]
+    CourseID["course_id"] -->|determines| CourseName["course_name"]
+    CourseID -->|determines| Credits["credits"]
+    StudentID -->|partial key| Grade["grade"]
+    CourseID -->|partial key| Grade
+    Name -->|transitive| Dept["dept_name"]
+    style Name fill:#fff3cd
+    style CourseName fill:#fff3cd`,
+    },
+    {
+      title: "Normalization Trade-offs",
+      kind: "mindmap",
+      caption: "Benefits of normalization and when denormalization is appropriate.",
+      mermaid: `mindmap
+    root["Normalization"]
+      Benefits
+        Eliminates redundancy
+        Prevents update anomalies
+        Reduces storage
+      Costs
+        More joins required
+        More complex queries
+        Higher join latency
+      Denormalize When
+        Read-heavy workloads
+        Reporting and analytics
+        OLAP data warehouses`,
+    },
   ],
   animations: [
     {

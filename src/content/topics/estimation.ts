@@ -536,60 +536,60 @@ int main() {
     {
       title: "Estimation Framework Flow",
       kind: "flow",
-      caption:
-        "The step-by-step process for performing back-of-the-envelope estimation in system design interviews.",
+      caption: "Step-by-step process for back-of-the-envelope estimation in system design interviews.",
       mermaid: `flowchart TD
     A["1. Clarify Requirements"] --> B["2. State Assumptions"]
     B --> C["3. Identify Key Metrics"]
-    C --> D{"Which metrics?"}
-    D --> E["QPS Estimation"]
-    D --> F["Storage Estimation"]
-    D --> G["Bandwidth Estimation"]
-    E --> H["DAU x actions / 86400"]
-    F --> I["items x size x retention"]
-    G --> J["QPS x response size"]
-    H --> K["Apply peak factor 2-3x"]
-    I --> L["Apply replication 3x"]
-    J --> M["Apply peak factor 2-3x"]
-    K --> N["4. Sanity Check Results"]
-    L --> N
-    M --> N
-    N --> O["5. Derive Infrastructure Needs"]
-    O --> P["Servers / Shards / CDN"]`,
+    C --> D{Which metrics?}
+    D --> E["QPS Estimation\nDAU x actions / 86400"]
+    D --> F["Storage Estimation\nitems x size x retention"]
+    D --> G["Bandwidth Estimation\nQPS x response size"]
+    E --> H["Apply peak factor 2-3x"]
+    F --> I["Apply replication 3x"]
+    G --> J["Apply peak factor 2-3x"]
+    H --> K["4. Sanity Check Results"]
+    I --> K
+    J --> K
+    K --> L["5. Derive Infrastructure\nServers / Shards / CDN"]`,
     },
     {
-      title: "Estimation Categories Mindmap",
+      title: "Estimation Categories",
       kind: "mindmap",
-      caption:
-        "A comprehensive map of the key categories and sub-metrics involved in system design estimation.",
+      caption: "Key categories and sub-metrics involved in system design estimation.",
       mermaid: `mindmap
   root((Estimation))
     QPS
       Read QPS
       Write QPS
       Peak vs Average
-      Read/Write Ratio
     Storage
       Raw Data Size
-      Metadata Overhead
       Replication Factor
       Retention Period
-      Compression
     Bandwidth
       Ingress
       Egress
       CDN Offload
-      Media vs Text
     Infrastructure
-      Number of Servers
+      Server Count
       Database Shards
       Cache Nodes
-      Load Balancers
     Reference Numbers
       Powers of 2
       Latency Hierarchy
-      Seconds per Day
-      Requests to QPS`,
+      Seconds per Day`,
+    },
+    {
+      title: "QPS to Infrastructure Derivation",
+      kind: "architecture",
+      caption: "How estimated QPS drives server count, caching, and sharding architectural decisions.",
+      mermaid: `graph LR
+    DAU["DAU\ne.g. 100M users"] --> QPS["Avg QPS\nDAU x actions / 86400"]
+    QPS --> PEAK["Peak QPS\nAvg x 2-3x"]
+    PEAK --> SERVERS["Server Count\nPeak QPS / QPS per server + 50% headroom"]
+    PEAK --> CACHE["Cache Tier\nread-heavy ratio"]
+    QPS --> STORAGE["Daily Storage\nQPS x record size x 86400"]
+    STORAGE --> SHARDS["DB Shards\nstorage exceeds single node"]`,
     },
   ],
   comparison: {

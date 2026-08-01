@@ -244,19 +244,71 @@ async function warmCache(): Promise<void> {
   ],
   diagrams: [
     {
-      title: "Cache-Aside (Lazy Loading) Flow",
+      title: "Cache-Aside Read and Write Sequence",
       kind: "sequence",
-      caption: "Application checks cache on read. On miss, queries database and populates cache. On write, updates database and invalidates cache.",
+      caption: "On read: check cache, fall back to DB on miss, populate cache. On write: update DB then invalidate cache.",
+      mermaid: `sequenceDiagram
+    participant App
+    participant Cache
+    participant DB
+    Note over App,DB: Read path
+    App->>Cache: GET user:42
+    Cache-->>App: MISS
+    App->>DB: SELECT user WHERE id=42
+    DB-->>App: user row
+    App->>Cache: SET user:42 data EX 300
+    Note over App,DB: Write path
+    App->>DB: UPDATE user SET name=Alice WHERE id=42
+    DB-->>App: OK
+    App->>Cache: DEL user:42`,
     },
     {
-      title: "Write-Through vs Write-Behind",
+      title: "Write-Through vs Write-Behind Flow",
       kind: "flow",
-      caption: "Write-through updates cache and DB synchronously. Write-behind updates cache immediately and asynchronously flushes to DB via background worker.",
+      caption: "Write-through updates cache and DB synchronously; write-behind updates cache immediately and flushes to DB asynchronously.",
+      mermaid: `flowchart TD
+    W([Write request]) --> WT[Write-Through]
+    W --> WB[Write-Behind]
+    WT --> WT1[Update cache]
+    WT1 --> WT2[Update DB synchronously]
+    WT2 --> WT3([Return OK - both consistent])
+    WB --> WB1[Update cache immediately]
+    WB1 --> WB2([Return OK - fast])
+    WB1 --> WB3[Queue dirty entries]
+    WB3 --> WB4[Background worker flushes to DB]`,
     },
     {
       title: "Multi-Tier Caching Architecture",
       kind: "architecture",
-      caption: "L1 in-process cache (ms TTL) -> L2 Redis (minute TTL) -> Database. Each tier reduces load on the next.",
+      caption: "L1 in-process cache, L2 Redis, and the database form a hierarchy where each tier absorbs load before it reaches the next.",
+      mermaid: `graph TD
+    App["Application"]
+    L1["L1 in-process cache - sub-millisecond TTL"]
+    L2["L2 Redis - minute TTL"]
+    DB["Database"]
+    App --> L1
+    L1 -->|miss| L2
+    L2 -->|miss| DB
+    DB -->|populate| L2
+    L2 -->|populate| L1`,
+    },
+    {
+      title: "Read-Through vs Cache-Aside Architecture",
+      kind: "architecture",
+      caption: "Cache-aside: application manages cache directly. Read-through: cache sits in front and fetches from DB automatically on miss.",
+      mermaid: `graph LR
+    AppCA["App - cache-aside"]
+    CacheCA["Cache"]
+    DBCA["Database"]
+    AppCA -->|1 check cache| CacheCA
+    AppCA -->|2 on miss query DB| DBCA
+    AppCA -->|3 populate cache| CacheCA
+    AppRT["App - read-through"]
+    CacheRT["Cache - read-through provider"]
+    DBRT["Database"]
+    AppRT -->|1 always read from cache| CacheRT
+    CacheRT -->|2 on miss fetch from DB| DBRT
+    DBRT -->|3 return and cache| CacheRT`,
     },
   ],
   animations: [

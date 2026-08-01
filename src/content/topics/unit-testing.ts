@@ -237,10 +237,79 @@ TEST_F(InventoryManagerTest, AddDuplicateSkuUpdatesQuantity) {
   ],
   diagrams: [
     {
-      title: "Unit Test Isolation Architecture",
+      title: "Unit Test Anatomy",
       kind: "architecture",
-      caption:
-        "Shows how the system under test is isolated from real dependencies using test doubles, with the test harness orchestrating setup, execution, and verification.",
+      caption: "Structure of a well-written unit test following the Arrange-Act-Assert pattern.",
+      mermaid: `graph TD
+    UT["Unit Test"] --> ARR["Arrange
+set up SUT and dependencies
+create test doubles"]
+    UT --> ACT["Act
+call the method under test
+one action per test"]
+    UT --> ASS["Assert
+verify output or state
+one logical assertion"]
+    ARR --> SUT["System Under Test"]
+    ACT --> SUT
+    SUT --> ASS`,
+    },
+    {
+      title: "Unit Testing Best Practices",
+      kind: "mindmap",
+      caption: "Key properties and best practices that make unit tests valuable, maintainable, and trustworthy.",
+      mermaid: `mindmap
+  root((Unit Testing))
+    FIRST Properties
+      Fast - milliseconds
+      Isolated - no IO
+      Repeatable - deterministic
+      Self-validating - pass or fail
+      Timely - written with code
+    Good Test Design
+      One assertion per test
+      Descriptive test names
+      No logic in tests
+      Test behavior not internals
+    Avoid
+      Shared mutable state
+      Test interdependence
+      Over-mocking`,
+    },
+    {
+      title: "Test Isolation with Mocks",
+      kind: "sequence",
+      caption: "How mocks replace real dependencies to isolate the unit under test from external systems.",
+      mermaid: `sequenceDiagram
+    participant T as Test
+    participant SUT as OrderService
+    participant M as Mock Repository
+    participant M2 as Mock EmailService
+    T->>M: stub findById returns order
+    T->>M2: expect sendConfirmation called once
+    T->>SUT: placeOrder(customerId, items)
+    SUT->>M: findById(customerId)
+    M-->>SUT: stubbed order
+    SUT->>M2: sendConfirmation(order)
+    T->>M2: verify expectations`,
+    },
+    {
+      title: "Unit Test Workflow",
+      kind: "flow",
+      caption: "Developer workflow integrating unit tests via TDD or test-after with CI enforcement.",
+      mermaid: `flowchart TD
+    A(["Write or modify code"]) --> B{TDD approach?}
+    B -->|Yes| C["Write failing test first"]
+    C --> D["Write minimal code to pass"]
+    B -->|No| E["Write code first"]
+    E --> F["Write tests after"]
+    D --> G["Run test suite"]
+    F --> G
+    G --> H{All tests pass?}
+    H -->|No| I["Fix failing tests or code"]
+    I --> G
+    H -->|Yes| J["Commit and push"]
+    J --> K["CI runs full suite"]`,
     },
   ],
   animations: [

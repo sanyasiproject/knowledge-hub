@@ -257,7 +257,7 @@ kubectl create job test-job --from=cronjob/backup # Manual CronJob trigger`,
     participant RS1 as Old ReplicaSet
     participant RS2 as New ReplicaSet
     participant P as Readiness Probe
-    D->>RS2: Create new ReplicaSet (replicas=0)
+    D->>RS2: Create new ReplicaSet replicas=0
     D->>RS2: Scale up to 1
     RS2->>P: Pod starts, probe check
     P-->>RS2: Ready
@@ -278,11 +278,11 @@ kubectl create job test-job --from=cronjob/backup # Manual CronJob trigger`,
       caption: "A Pod transitions through Pending, Running, and terminal states (Succeeded or Failed).",
       mermaid: `stateDiagram-v2
     [*] --> Pending
-    Pending --> Running: Scheduled & containers started
+    Pending --> Running: Scheduled and containers started
     Running --> Succeeded: All containers exit 0
     Running --> Failed: Container exits non-zero
     Running --> Unknown: Node unreachable
-    Pending --> Failed: Image pull error / insufficient resources
+    Pending --> Failed: Image pull error or insufficient resources
     Failed --> [*]
     Succeeded --> [*]
     Unknown --> Running: Node reconnects
@@ -292,15 +292,30 @@ kubectl create job test-job --from=cronjob/backup # Manual CronJob trigger`,
       title: "Kubernetes Workload Controllers Hierarchy",
       kind: "architecture",
       caption: "Higher-level controllers manage lower-level resources, ultimately managing Pods.",
-      mermaid: `flowchart TD
+      mermaid: `graph TD
     CJ[CronJob] --> J[Job]
-    J --> P1[Pod]
+    J --> P1[Pod - batch]
     Deploy[Deployment] --> RS[ReplicaSet]
-    RS --> P2[Pod]
-    SS[StatefulSet] --> P3[Pod with stable identity]
+    RS --> P2[Pod - stateless]
+    SS[StatefulSet] --> P3[Pod - stable identity]
     SS --> PVC[PersistentVolumeClaim]
-    DS[DaemonSet] --> P4[Pod per node]
+    DS[DaemonSet] --> P4[Pod - per node]
     P3 --> PVC`,
+    },
+    {
+      title: "Workload Controller Selection",
+      kind: "flow",
+      caption: "Decision tree for choosing the right Kubernetes workload controller based on the application characteristics.",
+      mermaid: `flowchart TD
+    Start([What is your workload?]) --> Q1{Does each instance need\nstable identity or storage?}
+    Q1 -->|Yes| SS[StatefulSet\nDatabases, Kafka, ZooKeeper]
+    Q1 -->|No| Q2{Should it run on\nevery node?}
+    Q2 -->|Yes| DS[DaemonSet\nLog collectors, monitoring agents]
+    Q2 -->|No| Q3{Does it run to completion\nor run indefinitely?}
+    Q3 -->|Runs to completion| Q4{Scheduled or on-demand?}
+    Q3 -->|Runs indefinitely| Deploy[Deployment\nAPIs, web apps, microservices]
+    Q4 -->|Scheduled| CJ[CronJob\nBackups, cleanup, reports]
+    Q4 -->|On-demand| Job[Job\nMigrations, batch processing]`,
     },
   ],
   comparison: {

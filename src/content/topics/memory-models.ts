@@ -268,17 +268,81 @@ int main(void) {
     {
       title: "Process Virtual Address Space Layout",
       kind: "architecture",
-      caption: "From low addresses to high: Text (code), Data (initialized globals), BSS (zero-initialized globals), Heap (grows upward via malloc/new), free space, Stack (grows downward). Thread stacks are separate; the heap is shared.",
+      caption: "Virtual address space from low to high addresses showing all segments, heap growth direction, and per-thread stacks.",
+      mermaid: `graph TD
+    HIGH["High Addresses - Kernel Space reserved"]
+    TSTK["Thread Stacks - one per thread grows downward"]
+    MMAP["Memory-Mapped Region - shared libs and mmap"]
+    HEAP["Heap - grows upward via malloc and new - shared across threads"]
+    BSS["BSS - zero-initialised global and static variables"]
+    DATA["Data - initialised global and static variables"]
+    TEXT["Text - read-only executable code"]
+    LOW["Low Addresses - NULL page - unmapped to catch null dereference"]
+    HIGH --> TSTK --> MMAP --> HEAP --> BSS --> DATA --> TEXT --> LOW`,
     },
     {
-      title: "Cache Coherence (MESI Protocol) State Machine",
-      kind: "state",
-      caption: "Cache line states: Modified (dirty, exclusive), Exclusive (clean, exclusive), Shared (clean, multiple copies), Invalid (stale). Transitions triggered by local reads/writes and remote snoops.",
-    },
-    {
-      title: "Happens-Before Relationships in the Java Memory Model",
+      title: "Happens-Before in Java Memory Model",
       kind: "sequence",
-      caption: "Thread A writes to a volatile variable, creating a happens-before edge. Thread B reads the volatile variable and is guaranteed to see all of Thread A's preceding writes, not just the volatile one.",
+      caption: "How a volatile write by Thread A establishes a happens-before edge ensuring Thread B sees all preceding writes.",
+      mermaid: `sequenceDiagram
+    participant A as Thread A - Producer
+    participant JMM as Java Memory Model
+    participant B as Thread B - Consumer
+
+    A->>A: data = 42
+    A->>A: result = compute()
+    A->>JMM: volatile flag = true - release write
+    Note over A,JMM: All prior writes flushed before volatile store
+    B->>JMM: read volatile flag - acquire read
+    Note over B,JMM: Spin until flag is true
+    JMM-->>B: flag = true
+    B->>B: read data
+    B->>B: read result
+    Note over B: Guaranteed to see data=42 and result via happens-before`,
+    },
+    {
+      title: "Store Buffer Reordering on Weak Memory Models",
+      kind: "flow",
+      caption: "How store buffers on ARM can cause writes to appear out of order to other cores, and how a memory barrier prevents this.",
+      mermaid: `flowchart TD
+    A["Core 0: Write X = 1"] --> B["Write enters Core 0 store buffer - not yet visible"]
+    B --> C["Core 0: Write Y = 1"] --> D["Write enters store buffer"]
+    D --> E["Core 1: Read Y"]
+    E --> F{"Y visible\nfrom store buffer?"}
+    F -->|Yes Y=1 committed first| G["Core 1 reads Y = 1"]
+    F -->|No| H["Core 1 reads Y = 0"]
+    G --> I["Core 1: Read X"]
+    I --> J["X may still be 0 - still in Core 0 store buffer"]
+    J --> K["Inconsistency - saw Y=1 but X=0"]
+    L["Insert DMB barrier between writes on Core 0"] --> M["Store buffer drains in order before barrier completes"]
+    M --> N["Core 1 sees X=1 before Y=1 - consistent"]`,
+    },
+    {
+      title: "Memory Ordering Levels",
+      kind: "mindmap",
+      caption: "C++ memory ordering levels from most relaxed to sequentially consistent with guarantees and typical use cases.",
+      mermaid: `mindmap
+  root((C++ Memory Ordering))
+    memory_order_relaxed
+      No synchronisation guarantee
+      Only atomicity
+      Use for counters with no ordering needed
+    memory_order_acquire
+      Load with acquire semantics
+      No reads or writes reordered before this load
+      Pairs with a release store
+    memory_order_release
+      Store with release semantics
+      No reads or writes reordered after this store
+      Pairs with an acquire load
+    memory_order_acq_rel
+      Read-modify-write operations
+      Both acquire and release
+      fetch_add on shared counters
+    memory_order_seq_cst
+      Total global order across all threads
+      Most expensive - default for std::atomic
+      Use when unsure`,
     },
   ],
   animations: [

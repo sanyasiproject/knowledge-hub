@@ -426,83 +426,69 @@ namespace SharedKernel {
 
   diagrams: [
     {
-      title: "Context Map -- E-Commerce System",
+      title: "Context Map — E-Commerce System",
       kind: "architecture",
-      caption: "Shows bounded contexts and their integration relationships (ACL, Shared Kernel, Conformist, Open Host Service)",
-      mermaid: `graph TB
-    subgraph "E-Commerce System Context Map"
-        CAT["**Catalog** Context<br/>(Core Domain)"]
-        PRC["**Pricing** Context"]
-        ORD["**Ordering** Context"]
-        INV["**Inventory** Context"]
-        PAY["**Payments** Context"]
-        SHIP["**Shipping** Context"]
-        ERP["**Legacy ERP**<br/>(External)"]
-        STRIPE["**Stripe**<br/>(Third Party)"]
-    end
-
-    CAT -- "Shared Kernel<br/>(SKU, Money)" --- PRC
-    CAT -- "Open Host Service<br/>(Product API)" --> ORD
-    CAT -- "Open Host Service<br/>(Product API)" --> INV
-    ORD -- "Customer-Supplier<br/>(Domain Events)" --> SHIP
+      caption: "Bounded contexts and their integration relationships: Shared Kernel, Open Host Service, ACL, and Conformist.",
+      mermaid: `graph TD
+    CAT["Catalog Context - Core Domain"]
+    PRC["Pricing Context"]
+    ORD["Ordering Context"]
+    INV["Inventory Context"]
+    PAY["Payments Context"]
+    SHIP["Shipping Context"]
+    ERP["Legacy ERP - External"]
+    STRIPE["Stripe - Third Party"]
+    CAT -- "Shared Kernel" --- PRC
+    CAT -- "Open Host Service" --> ORD
+    CAT -- "Open Host Service" --> INV
+    ORD -- "Customer-Supplier" --> SHIP
     ORD -- "ACL" --> ERP
     PAY -- "Conformist" --> STRIPE
-    ORD -- "Published Language<br/>(OrderPlaced event)" --> PAY
-    INV -- "ACL" --> ERP
-
-    style CAT fill:#4a9eff,color:#fff
-    style PRC fill:#34d399,color:#fff
-    style ORD fill:#f59e0b,color:#fff
-    style INV fill:#a78bfa,color:#fff
-    style PAY fill:#f87171,color:#fff
-    style SHIP fill:#38bdf8,color:#fff
-    style ERP fill:#9ca3af,color:#fff
-    style STRIPE fill:#9ca3af,color:#fff`,
+    ORD -- "Published Language" --> PAY
+    INV -- "ACL" --> ERP`,
     },
     {
-      title: "Anti-Corruption Layer -- Internal Structure",
+      title: "Anti-Corruption Layer Internal Flow",
       kind: "flow",
-      caption: "The ACL sits between the downstream context and the upstream system, translating data through Facade, Adapter, and Translator components",
+      caption: "The ACL translates the upstream foreign model into the downstream domain model through Facade, Adapter, and Translator.",
       mermaid: `flowchart LR
-    subgraph Upstream["**Upstream Context** (Legacy ERP)"]
-        API["ERP API<br/>foreign model"]
-    end
-
-    subgraph ACL["**Anti-Corruption Layer**"]
-        direction TB
-        FAC["**Facade**<br/>simplified interface"]
-        ADP["**Adapter**<br/>format conversion"]
-        TRN["**Translator**<br/>vocabulary mapping"]
-        FAC --> ADP --> TRN
-    end
-
-    subgraph Downstream["**Downstream Context** (Order Service)"]
-        DOM["Local Domain Model<br/>Order, OrderStatus, Money"]
-    end
-
-    API -->|raw ERP data| FAC
-    TRN -->|translated domain objects| DOM
-
-    style Upstream fill:#9ca3af,color:#fff
-    style ACL fill:#fbbf24,color:#000
-    style Downstream fill:#4a9eff,color:#fff`,
+    API["ERP API - foreign model"]
+    FAC["Facade - simplified interface"]
+    ADP["Adapter - format conversion"]
+    TRN["Translator - vocabulary mapping"]
+    DOM["Local Domain Model"]
+    API --> FAC --> ADP --> TRN --> DOM`,
     },
     {
-      title: "Bounded Context Lifecycle -- From Monolith to Microservices",
-      kind: "flow",
-      caption: "Evolution path: identify contexts inside a monolith, extract into modules, then promote to services when needed",
-      mermaid: `flowchart TD
-    A["**Monolith**<br/>Single deployment, tangled models"] --> B["**Event Storming**<br/>Identify domain events and clusters"]
-    B --> C["**Context Discovery**<br/>Define linguistic and model boundaries"]
-    C --> D["**Modular Monolith**<br/>Each context = one module<br/>In-process communication"]
-    D --> E{"Need independent<br/>scaling or deployment?"}
-    E -->|No| F["**Stay as Module**<br/>Lower operational cost"]
-    E -->|Yes| G["**Extract to Service**<br/>Replace in-process calls<br/>with network + events"]
-    G --> H["**Microservice**<br/>Independent deploy, own DB,<br/>team ownership"]
-
-    style A fill:#f87171,color:#fff
-    style D fill:#fbbf24,color:#000
-    style H fill:#34d399,color:#fff`,
+      title: "Bounded Context Evolution",
+      kind: "state",
+      caption: "How a context evolves from a tangled monolith module through a well-defined module to an independent microservice.",
+      mermaid: `stateDiagram-v2
+    [*] --> Monolith : start
+    Monolith --> EventStorming : run event storming workshop
+    EventStorming --> ModularMonolith : extract into bounded modules
+    ModularMonolith --> Microservice : need independent scaling
+    ModularMonolith --> ModularMonolith : team stays aligned
+    Microservice --> Microservice : own DB and deploy pipeline`,
+    },
+    {
+      title: "Ubiquitous Language Scope",
+      kind: "mindmap",
+      caption: "Each bounded context owns its own vocabulary — the same word can mean different things in different contexts.",
+      mermaid: `mindmap
+  root((Bounded Context))
+    Catalog Context
+      Product means listing with price
+      SKU identifier
+    Ordering Context
+      Product means ordered line item
+      Customer identity
+    Shipping Context
+      Product means physical parcel
+      Address destination
+    Payments Context
+      Product means chargeable amount
+      Invoice reference`,
     },
   ],
 

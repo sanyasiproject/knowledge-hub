@@ -449,22 +449,72 @@ public interface OrderRepository {
   ],
   diagrams: [
     {
-      title: "UML notation for association, aggregation, and composition",
+      title: "UML Relationship Notation",
       kind: "architecture",
-      caption:
-        "Shows the three relationship types between classes with their UML diamond notations: plain line (association), open diamond (aggregation), and filled diamond (composition), including multiplicity labels.",
+      caption: "Shows the three UML relationship types: plain line for association, open diamond for aggregation, and filled diamond for composition.",
+      mermaid: `flowchart LR
+    subgraph Association["Association - plain line"]
+        Teacher["Teacher"] --- Student["Student"]
+    end
+    subgraph Aggregation["Aggregation - open diamond"]
+        Team["Team"] o--o Player["Player"]
+    end
+    subgraph Composition["Composition - filled diamond"]
+        Order["Order"] *--* LineItem["LineItem"]
+    end`,
     },
     {
-      title: "Object lifecycle dependency graph",
+      title: "Relationship Types Mindmap",
+      kind: "mindmap",
+      caption: "Key properties distinguishing association, aggregation, and composition.",
+      mermaid: `mindmap
+  root((UML Relationships))
+    Association
+      Uses-A relationship
+      Independent lifecycles
+      Bidirectional or unidirectional
+      Plain line in UML
+    Aggregation
+      Has-A weak ownership
+      Part exists independently
+      Shared ownership possible
+      Open diamond in UML
+    Composition
+      Has-A strong ownership
+      Part owned exclusively
+      Part dies with whole
+      Filled diamond in UML`,
+    },
+    {
+      title: "Object Lifecycle Dependency",
+      kind: "sequence",
+      caption: "Illustrates how lifecycle management differs between aggregation and composition when the container is destroyed.",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant Container as Container Object
+    participant Part as Part Object
+    Client->>Part: Create part independently
+    Client->>Container: Create container
+    Client->>Container: addPart(part) [aggregation]
+    Container->>Part: Hold reference
+    Client->>Container: destroy container
+    Note over Part: Part survives - aggregation
+    Client->>Container: new Container [composition]
+    Container->>Part: Create part internally
+    Client->>Container: destroy container
+    Note over Part: Part also destroyed - composition`,
+    },
+    {
+      title: "Ownership Rules Flow",
       kind: "flow",
-      caption:
-        "Flowchart showing how object creation and destruction propagate: association has independent lifecycles, aggregation shares but does not bind, and composition cascades destruction from whole to part.",
-    },
-    {
-      title: "DDD aggregate boundary with composition vs association",
-      kind: "architecture",
-      caption:
-        "An aggregate root (Order) composes its internal entities (OrderLine, ShippingAddress) while holding association-by-ID references to external aggregates (Customer, Product), illustrating bounded transactional consistency.",
+      caption: "Decision flow for determining the correct UML relationship to model between two classes.",
+      mermaid: `flowchart TD
+    Q1{"Can part exist\\nwithout whole?"} -->|No| Comp["Composition\\nfilled diamond"]
+    Q1 -->|Yes| Q2{"Does whole\\nown the part?"}
+    Q2 -->|Yes, exclusively| Q3{"Part created\\nby whole?"}
+    Q3 -->|Yes| Comp
+    Q3 -->|No| Agg["Aggregation\\nopen diamond"]
+    Q2 -->|No, just uses it| Assoc["Association\\nplain line"]`,
     },
   ],
   animations: [

@@ -510,28 +510,73 @@ int main() {
     {
       title: "Levels of Abstraction in Software",
       kind: "architecture",
-      caption: "Layered view from hardware through OS, language runtime, libraries, application logic, API, and UI -- each layer hides the complexity below"
+      caption: "Layered view from hardware through OS, language runtime, libraries, application logic, API, and UI — each layer hides the complexity below.",
+      mermaid: `flowchart TD
+    UI["UI Layer"]
+    API["API / Interface Layer"]
+    APP["Application Logic"]
+    LIB["Libraries & Frameworks"]
+    RT["Language Runtime"]
+    OS["Operating System"]
+    HW["Hardware"]
+    UI --> API --> APP --> LIB --> RT --> OS --> HW`,
     },
     {
-      title: "Abstract Data Type (ADT) Contract",
+      title: "Abstract Data Type Contract",
       kind: "flow",
-      caption: "How an ADT specification flows from operations and axioms to multiple possible implementations, all sharing the same interface"
-    },
-    {
-      title: "Leaky Abstraction Examples",
-      kind: "mindmap",
-      caption: "Mind map of common leaky abstractions: ORM (N+1, lazy loading), TCP (latency, resets), RPC (partial failure), SQL (index dependency), filesystem (caching, locking)"
+      caption: "An ADT specification defines operations and axioms; multiple concrete implementations satisfy the same contract.",
+      mermaid: `flowchart LR
+    SPEC["ADT Specification"]
+    OPS["Operations"]
+    AX["Axioms"]
+    IMPL1["Implementation A"]
+    IMPL2["Implementation B"]
+    IMPL3["Implementation C"]
+    CLIENT["Client Code"]
+    SPEC --> OPS
+    SPEC --> AX
+    OPS --> IMPL1
+    OPS --> IMPL2
+    OPS --> IMPL3
+    CLIENT -- "uses contract" --> SPEC`,
     },
     {
       title: "Static vs Dynamic Dispatch",
       kind: "sequence",
-      caption: "Sequence diagram comparing static dispatch (compile-time method resolution, inlining) with dynamic dispatch (vtable lookup, indirect call)"
+      caption: "Static dispatch resolves method calls at compile time; dynamic dispatch uses a vtable lookup at runtime.",
+      mermaid: `sequenceDiagram
+    participant C as Caller
+    participant S as Static Dispatch
+    participant V as VTable
+    participant D as Dynamic Dispatch
+    C->>S: call concreteMethod()
+    S-->>C: direct jump (inlined)
+    C->>V: lookup virtualMethod()
+    V->>D: indirect call via pointer
+    D-->>C: result`,
     },
     {
-      title: "The Expression Problem",
-      kind: "network",
-      caption: "Two-dimensional grid showing how OOP easily adds new types (columns) while FP easily adds new operations (rows), and solutions that enable both"
-    }
+      title: "Leaky Abstraction Sources",
+      kind: "mindmap",
+      caption: "Common abstractions that expose underlying complexity when pushed past their design assumptions.",
+      mermaid: `mindmap
+  root["Leaky Abstractions"]
+    ORM
+      N+1 queries
+      Lazy loading surprises
+    TCP
+      Packet loss / retransmit
+      Latency spikes
+    RPC
+      Partial failure
+      Network timeouts
+    SQL
+      Index dependency
+      Query planner quirks
+    Filesystem
+      Caching behaviour
+      File locking`,
+    },
   ],
 
   animations: [

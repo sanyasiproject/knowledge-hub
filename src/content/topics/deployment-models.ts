@@ -297,15 +297,94 @@ aws storagegateway list-file-shares \\
 
   diagrams: [
     {
-      title: "Hybrid Cloud Architecture with AWS",
-      kind: "architecture" as const,
-      caption: "On-premises data center connected to AWS via Direct Connect (primary) and VPN (failover), with AWS Outposts for local compute and Storage Gateway for hybrid storage"
+      title: "Deployment Strategy Overview",
+      kind: "mindmap",
+      caption: "The main deployment strategies compared by risk level, downtime, rollback speed, and infrastructure cost.",
+      mermaid: `mindmap
+  root[Deployment Strategies]
+    Recreate
+      Stop old then start new
+      Simple but has downtime
+      Low cost
+    Rolling Update
+      Replace instances one by one
+      No downtime
+      Partial versions coexist briefly
+    Blue-Green
+      Two identical environments
+      Instant cutover via DNS or LB
+      Fast rollback
+      Double infrastructure cost
+    Canary
+      Route small traffic to new version
+      Gradual rollout with monitoring
+      Slow rollback if issues found
+    Feature Flags
+      Code deployed but hidden
+      Toggle without deployment
+      Runtime control`,
     },
     {
-      title: "Multi-Cloud Decision Framework",
-      kind: "flow" as const,
-      caption: "Decision tree for choosing between single cloud, hybrid cloud, and multi-cloud based on workload requirements, regulatory constraints, and organizational maturity"
-    }
+      title: "Blue-Green Deployment Flow",
+      kind: "flow",
+      caption: "Blue-green deployment: both environments run in parallel, load balancer shifts traffic to green after validation, blue is kept for fast rollback.",
+      mermaid: `flowchart TD
+    A[Deploy new version to Green env] --> B[Run smoke tests on Green]
+    B --> C{Tests pass?}
+    C -->|No| D[Abort - Blue still serves traffic]
+    C -->|Yes| E[Shift LB to send 100% traffic to Green]
+    E --> F[Monitor error rates and latency]
+    F --> G{Issues detected?}
+    G -->|Yes| H[Flip LB back to Blue - instant rollback]
+    G -->|No| I[Green becomes production]
+    I --> J[Keep Blue warm for rollback window]
+    J --> K[Tear down Blue after confidence period]`,
+    },
+    {
+      title: "Canary Deployment Sequence",
+      kind: "sequence",
+      caption: "Canary deployment gradually shifts traffic to the new version while monitoring metrics, rolling forward or back based on error rate thresholds.",
+      mermaid: `sequenceDiagram
+    participant Ops as Operator
+    participant LB as Load Balancer
+    participant V1 as Version 1 - Stable
+    participant V2 as Version 2 - Canary
+    participant Mon as Monitoring
+    Ops->>LB: Route 5% traffic to V2
+    LB->>V2: 5% of requests
+    LB->>V1: 95% of requests
+    Mon->>Mon: Observe error rate and latency
+    Ops->>Mon: Check metrics after 10 min
+    Mon-->>Ops: Error rate within threshold
+    Ops->>LB: Increase to 25% to V2
+    Mon-->>Ops: Still healthy
+    Ops->>LB: Increase to 100% to V2
+    Ops->>V1: Decommission old version`,
+    },
+    {
+      title: "Hybrid and Multi-Cloud Architecture",
+      kind: "architecture",
+      caption: "On-premises data center connected to public cloud via dedicated link for hybrid bursting, with a second cloud provider for disaster recovery.",
+      mermaid: `graph LR
+    subgraph OnPrem ["On-Premises DC"]
+        K8S["Kubernetes Cluster"]
+        DB["Primary Database"]
+    end
+    subgraph Cloud1 ["AWS - Primary Cloud"]
+        EKS["EKS - Burst Capacity"]
+        RDS["Read Replica"]
+        S3["Object Storage"]
+    end
+    subgraph Cloud2 ["GCP - DR Site"]
+        GKE["GKE - Disaster Recovery"]
+        BQ["Analytics Warehouse"]
+    end
+    K8S -->|Direct Connect| EKS
+    DB -->|Replication| RDS
+    DB -->|Async replication| GKE
+    EKS --> S3
+    S3 -->|Export| BQ`,
+    },
   ],
 
   animations: [

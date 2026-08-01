@@ -278,15 +278,75 @@ object SupervisedAccount {
 
   diagrams: [
     {
-      title: "Actor Supervision Tree Architecture",
+      title: "Actor Supervision Tree",
       kind: "architecture",
-      caption: "Hierarchical supervision in Erlang/OTP: the application supervisor manages subsystem supervisors, which in turn manage worker processes. Failure propagation flows upward -- a crashed worker is restarted by its immediate supervisor. If restarts exceed the threshold, the supervisor itself crashes, escalating to its parent."
+      caption: "Hierarchical supervision in Erlang/OTP: supervisors manage worker actors and restart them on failure, escalating up the tree if restart thresholds are exceeded.",
+      mermaid: `flowchart TD
+    APP["Application Supervisor"]
+    S1["Subsystem Supervisor A"]
+    S2["Subsystem Supervisor B"]
+    W1["Worker 1"]
+    W2["Worker 2"]
+    W3["Worker 3"]
+    W4["Worker 4"]
+    APP --> S1
+    APP --> S2
+    S1 --> W1
+    S1 --> W2
+    S2 --> W3
+    S2 --> W4`,
     },
     {
-      title: "Actor Model vs CSP Message Flow",
+      title: "Actor Message Passing",
       kind: "sequence",
-      caption: "Comparison of communication patterns: in the Actor Model, Process A sends directly to Process B's mailbox (asynchronous, no blocking). In CSP, Process A sends to Channel X, and Process B receives from Channel X (synchronous by default -- sender blocks until receiver is ready). The channel decouples sender identity from receiver identity."
-    }
+      caption: "Actors communicate exclusively via asynchronous messages deposited into mailboxes; no shared memory is accessed.",
+      mermaid: `sequenceDiagram
+    participant A as Actor A
+    participant MB_B as Mailbox B
+    participant B as Actor B
+    participant MB_C as Mailbox C
+    participant C as Actor C
+    A->>MB_B: send(msg1)
+    B->>MB_B: dequeue msg1
+    B->>MB_C: send(msg2)
+    C->>MB_C: dequeue msg2
+    C-->>A: send(reply)`,
+    },
+    {
+      title: "Actor Lifecycle States",
+      kind: "state",
+      caption: "An actor transitions through created, idle, processing, and terminated states, with failure leading to supervisor-driven restart.",
+      mermaid: `stateDiagram-v2
+    [*] --> Created : spawn
+    Created --> Idle : initialised
+    Idle --> Processing : message dequeued
+    Processing --> Idle : message handled
+    Processing --> Failed : unhandled error
+    Failed --> Idle : supervisor restarts
+    Idle --> Terminated : stop signal
+    Terminated --> [*]`,
+    },
+    {
+      title: "Actor Network Topology",
+      kind: "network",
+      caption: "A sample actor topology showing how actors form a communication graph — each node is an actor, each edge a message channel.",
+      mermaid: `flowchart LR
+    GW["Gateway Actor"]
+    AUTH["Auth Actor"]
+    ROUTER["Router Actor"]
+    SVC1["Service Actor 1"]
+    SVC2["Service Actor 2"]
+    DB["DB Proxy Actor"]
+    LOG["Logger Actor"]
+    GW --> AUTH
+    GW --> ROUTER
+    ROUTER --> SVC1
+    ROUTER --> SVC2
+    SVC1 --> DB
+    SVC2 --> DB
+    SVC1 --> LOG
+    SVC2 --> LOG`,
+    },
   ],
 
   animations: [

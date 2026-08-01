@@ -327,15 +327,105 @@ POLICY`
 
   diagrams: [
     {
-      title: "IAM Policy Evaluation Flowchart",
-      kind: "flow" as const,
-      caption: "Complete flowchart showing policy evaluation order: explicit deny check, SCP evaluation, resource policy, permission boundary, identity policy, and implicit deny"
+      title: "IAM Components Architecture",
+      kind: "architecture",
+      caption: "Key IAM building blocks: users, groups, roles, policies, and how they relate to AWS resources.",
+      mermaid: `graph TD
+    subgraph Identities["Identities"]
+      USER["IAM User\nLong-term credentials"]
+      GROUP["IAM Group\nCollection of users"]
+      ROLE["IAM Role\nTemporary credentials"]
+    end
+    subgraph Policies["Policies"]
+      MANAGED["AWS Managed Policies\nPre-built by AWS"]
+      CUSTOMER["Customer Managed Policies\nCustom JSON"]
+      INLINE["Inline Policies\nEmbedded in identity"]
+      SCP["Service Control Policies\nOrg-level guardrails"]
+      PB["Permission Boundaries\nMax allowed permissions"]
+    end
+    subgraph Resources["AWS Resources"]
+      S3["S3 Bucket"]
+      EC2I["EC2 Instance"]
+      LAMBDA["Lambda Function"]
+    end
+    USER --> GROUP
+    GROUP --> MANAGED
+    USER --> CUSTOMER
+    ROLE --> CUSTOMER
+    ROLE --> INLINE
+    SCP --> Identities
+    PB --> ROLE
+    MANAGED --> Resources
+    CUSTOMER --> Resources`,
+    },
+    {
+      title: "IAM Policy Evaluation Logic",
+      kind: "flow",
+      caption: "Complete policy evaluation order: explicit deny check, SCP, resource policy, permission boundary, then identity policy, with implicit deny as default.",
+      mermaid: `flowchart TD
+    Start["API Request Made"] --> D1{"Explicit Deny\nin any policy?"}
+    D1 -->|Yes| DENY["DENY - Access Blocked"]
+    D1 -->|No| D2{"Org SCP\nallows action?"}
+    D2 -->|No| DENY
+    D2 -->|Yes| D3{"Resource-based\npolicy allows?"}
+    D3 -->|Yes| ALLOW["ALLOW - Access Granted"]
+    D3 -->|No| D4{"Permission\nboundary set?"}
+    D4 -->|Yes| D5{"Boundary\nallows action?"}
+    D5 -->|No| DENY
+    D5 -->|Yes| D6{"Identity policy\nallows action?"}
+    D4 -->|No| D6
+    D6 -->|Yes| ALLOW
+    D6 -->|No| IDENY["DENY - Implicit Deny"]`,
     },
     {
       title: "Cross-Account Role Assumption",
-      kind: "sequence" as const,
-      caption: "Sequence diagram showing the AssumeRole flow between Account A and Account B, including STS token exchange and trust policy evaluation"
-    }
+      kind: "sequence",
+      caption: "AssumeRole flow between Account A and Account B, including STS token exchange and trust policy evaluation.",
+      mermaid: `sequenceDiagram
+    participant AppA as App in Account A
+    participant STSA as STS Account A
+    participant STSB as STS Account B
+    participant RoleB as Role in Account B
+    participant ResB as Resource in Account B
+
+    AppA->>STSA: AssumeRole arn:aws:iam::AccountB:role/MyRole
+    STSA->>STSB: Forward AssumeRole request
+    STSB->>RoleB: Check trust policy - does it trust Account A?
+    RoleB-->>STSB: Trust policy allows AccountA
+    STSB->>STSB: Check permission boundary and SCPs
+    STSB-->>AppA: Temporary credentials AccessKeyId, SecretKey, SessionToken
+    AppA->>ResB: API call with temporary credentials
+    ResB->>ResB: Evaluate role permission policies
+    ResB-->>AppA: Response`,
+    },
+    {
+      title: "IAM Core Concepts",
+      kind: "mindmap",
+      caption: "Mind map of IAM topics including identity types, policy types, security features, and best practices.",
+      mermaid: `mindmap
+  root((AWS IAM))
+    Identity Types
+      IAM Users long-term keys
+      IAM Groups organise users
+      IAM Roles temporary creds
+      Federated Identities SSO
+    Policy Types
+      Identity-based policies
+      Resource-based policies
+      SCPs org guardrails
+      Permission boundaries
+      Session policies
+    Security Features
+      MFA multi-factor auth
+      Access Analyser
+      Credential report
+      IAM Access Advisor
+    Best Practices
+      Least privilege
+      Rotate credentials
+      Use roles not users
+      Enable CloudTrail`,
+    },
   ],
 
   animations: [

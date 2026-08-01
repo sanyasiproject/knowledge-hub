@@ -312,12 +312,82 @@ int main() {
     {
       title: "Advanced RAG Pipeline Architecture",
       kind: "architecture" as const,
-      caption: "End-to-end architecture showing query rewriting, hybrid retrieval, cross-encoder reranking, and augmented generation stages with feedback loops for evaluation.",
+      caption: "End-to-end pipeline from raw query through rewriting, hybrid retrieval, reranking, context assembly, and augmented generation.",
+      mermaid: `flowchart TD
+    Q["User Query"]
+    RW["Query Rewriter"]
+    DENSE["Dense Retriever"]
+    SPARSE["Sparse Retriever"]
+    FUSE["Result Fusion"]
+    RERANK["Cross-Encoder Reranker"]
+    CTX["Context Assembler"]
+    GEN["LLM Generator"]
+    OUT["Final Answer"]
+    Q --> RW --> DENSE & SPARSE
+    DENSE --> FUSE
+    SPARSE --> FUSE
+    FUSE --> RERANK --> CTX --> GEN --> OUT`,
     },
     {
-      title: "Query Rewriting Flow",
+      title: "Query Rewriting Decision Flow",
       kind: "flow" as const,
-      caption: "Decision flow for query transformation: raw query is analyzed, then routed through decomposition, HyDE, step-back prompting, or contextual reformulation based on query characteristics.",
+      caption: "Incoming queries are classified and routed to the most appropriate transformation strategy before retrieval.",
+      mermaid: `flowchart TD
+    Q["Raw Query"]
+    ANALYZE["Analyse Query"]
+    COMPLEX{"Complex?"}
+    AMBIG{"Ambiguous?"}
+    HYDE["HyDE Generation"]
+    DECOMP["Sub-query Decomposition"]
+    STEPBACK["Step-Back Prompting"]
+    REFORM["Contextual Reformulation"]
+    RETRIEVE["Proceed to Retrieval"]
+    Q --> ANALYZE --> COMPLEX
+    COMPLEX -- "Yes" --> DECOMP --> RETRIEVE
+    COMPLEX -- "No" --> AMBIG
+    AMBIG -- "Yes" --> STEPBACK --> RETRIEVE
+    AMBIG -- "No" --> HYDE --> RETRIEVE
+    REFORM --> RETRIEVE`,
+    },
+    {
+      title: "Query-Retrieve-Augment-Generate Sequence",
+      kind: "sequence",
+      caption: "Step-by-step interaction between the user, query processor, vector store, reranker, and LLM during a RAG request.",
+      mermaid: `sequenceDiagram
+    participant U as User
+    participant QP as Query Processor
+    participant VS as Vector Store
+    participant RR as Reranker
+    participant LLM as LLM
+    U->>QP: submit question
+    QP->>VS: embed + search
+    VS-->>QP: top-k chunks
+    QP->>RR: rerank chunks
+    RR-->>QP: ordered results
+    QP->>LLM: prompt + context
+    LLM-->>U: grounded answer`,
+    },
+    {
+      title: "Advanced RAG Techniques",
+      kind: "mindmap",
+      caption: "Taxonomy of techniques that improve retrieval quality, generation grounding, and overall RAG system performance.",
+      mermaid: `mindmap
+  root["Advanced RAG"]
+    Query Enhancement
+      HyDE
+      Step-Back Prompting
+      Sub-query Decomposition
+    Retrieval
+      Hybrid Search
+      Multi-vector Retrieval
+      Contextual Chunking
+    Reranking
+      Cross-Encoder
+      Reciprocal Rank Fusion
+    Generation
+      Self-RAG
+      FLARE
+      Iterative Retrieval`,
     },
   ],
   animations: [

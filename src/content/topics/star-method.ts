@@ -479,58 +479,84 @@ ValidationResult validateMigration(/* source, target */) {
 
   diagrams: [
     {
-      title: "STAR Answer Flow",
-      kind: "flow",
-      caption: "The sequential flow of a STAR answer: Situation sets context, Task defines your role, Action details your steps (the longest phase), and Result delivers measurable impact. Feedback loop from Result back to story bank for refinement.",
-      mermaid: `flowchart TD
-    A["**SITUATION**\\n*2-3 sentences*\\n*15-20 seconds*"] --> B["**TASK**\\n*Your specific role*\\n*1-2 sentences, 10 seconds*"]
-    B --> C["**ACTION**\\n***The Core — 60% of answer***\\n*90-120 seconds*"]
-    C --> C1["*Step 1: What you did*"]
-    C --> C2["*Step 2: Your reasoning*"]
-    C --> C3["*Step 3: How you handled obstacles*"]
-    C1 & C2 & C3 --> D["**RESULT**\\n*Quantified outcome*\\n*20-30 seconds*"]
-    D --> E{"**Follow-Up Probes?**"}
-    E -->|"*'What would you*\\n*do differently?'*"| F["Deploy **expansion pack**"]
-    E -->|"*'Go deeper on X'*"| G["Add *technical detail*"]
-    E -->|"*No follow-up*"| H["**Story Complete**"]
-    F & G --> H
-    H --> I["**Refine & Update**\\n*Story Bank*"]
-    I -.->|"*Feedback loop*"| A`,
+      title: "STAR Method Framework",
+      kind: "mindmap",
+      caption: "The STAR method structure for answering behavioral interview questions: Situation, Task, Action, and Result with guidance on what to include in each part.",
+      mermaid: `mindmap
+  root((STAR Method))
+    Situation
+      Provide context
+      Keep brief - 1-2 sentences
+      Set the scene
+    Task
+      Your role and responsibility
+      What was expected of you
+      The challenge or goal
+    Action
+      Specific steps YOU took
+      Use I not we
+      Show reasoning and skills
+      3-5 concrete actions
+    Result
+      Quantify the outcome
+      What was achieved
+      What you learned
+      Impact on team or business`,
     },
     {
-      title: "Story Bank Mind Map",
-      kind: "mindmap",
-      caption: "Central node 'Story Bank' branches into common behavioral themes (Conflict, Failure, Leadership, Technical Challenge, Deadline, Collaboration, Influence). Each theme links to 1-2 prepared STAR stories, which in turn link to the competencies they demonstrate.",
-      mermaid: `mindmap
-  root(("**Story Bank**\\n*8-12 Stories*"))
-    ("**Conflict Resolution**")
-      ("*Peer disagreement story*")
-      ("*Manager conflict story*")
-      ::icon(Competency: **EQ & Diplomacy**)
-    ("**Handling Failure**")
-      ("*Technical mistake story*")
-      ("*Judgment error story*")
-      ::icon(Competency: **Growth Mindset**)
-    ("**Leadership**")
-      ("*Led without authority*")
-      ("*Mentored a teammate*")
-      ::icon(Competency: **Influence**)
-    ("**Technical Challenge**")
-      ("*Architecture decision*")
-      ("*Debugging under pressure*")
-      ::icon(Competency: **Problem Solving**)
-    ("**Tight Deadline**")
-      ("*Scope negotiation story*")
-      ("*Prioritization story*")
-      ::icon(Competency: **Strategic Thinking**)
-    ("**Collaboration**")
-      ("*Cross-functional project*")
-      ("*Stakeholder alignment*")
-      ::icon(Competency: **Communication**)
-    ("**Influence**")
-      ("*Drove adoption of new tool*")
-      ("*Changed team process*")
-      ::icon(Competency: **Persuasion**)`,
+      title: "STAR Response Structure",
+      kind: "flow",
+      caption: "How to structure a STAR answer to fit within 2-3 minutes while covering all four components with appropriate depth and specificity.",
+      mermaid: `flowchart TD
+    A([Question: Tell me about a challenge]) --> B[Situation - 15 percent of time]
+    B --> C[Brief context setting]
+    C --> D[Task - 15 percent of time]
+    D --> E[Your specific responsibility]
+    E --> F[Action - 50 percent of time]
+    F --> G[Step 1: I analyzed the problem]
+    G --> H[Step 2: I proposed a solution]
+    H --> I[Step 3: I implemented and iterated]
+    I --> J[Result - 20 percent of time]
+    J --> K[Quantified outcome]
+    K --> L([Tie back to the question])`,
+    },
+    {
+      title: "Common Behavioral Question Categories",
+      kind: "architecture",
+      caption: "Behavioral interview questions grouped by the competency they assess, helping you prepare targeted STAR stories for each category.",
+      mermaid: `graph TD
+    subgraph Leadership["Leadership and Influence"]
+      L1[Tell me about a time you led without authority]
+      L2[When did you drive alignment on a hard decision?]
+    end
+    subgraph Conflict["Conflict and Collaboration"]
+      C1[Describe a disagreement with a teammate]
+      C2[How did you handle a difficult stakeholder?]
+    end
+    subgraph Failure["Failure and Learning"]
+      F1[Tell me about a mistake you made]
+      F2[When did a project not go as planned?]
+    end
+    subgraph Impact["Impact and Delivery"]
+      I1[What is your biggest technical achievement?]
+      I2[Describe a project with ambiguous requirements]
+    end`,
+    },
+    {
+      title: "Preparing STAR Stories Bank",
+      kind: "flow",
+      caption: "Process for building a personal story bank of STAR examples that can be adapted to different behavioral questions.",
+      mermaid: `flowchart TD
+    A([Build story bank]) --> B[List significant work experiences]
+    B --> C[For each: identify the challenge or achievement]
+    C --> D[Write STAR outline in 5 bullet points]
+    D --> E[Quantify results - numbers and percentages]
+    E --> F[Tag story with competencies it demonstrates]
+    F --> G[Practice telling each in under 3 minutes]
+    G --> H{Covers all question categories?}
+    H -->|No| I[Identify gaps and add stories]
+    I --> B
+    H -->|Yes| J([Story bank ready])`,
     },
   ],
 

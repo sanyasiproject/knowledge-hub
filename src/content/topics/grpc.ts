@@ -312,87 +312,72 @@ func main() {
   ],
   diagrams: [
     {
+      title: "gRPC Request Lifecycle",
+      kind: "sequence",
+      caption: "How a gRPC unary call travels from client stub to server handler.",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant Stub as gRPC Stub
+    participant Channel as HTTP/2 Channel
+    participant Server as gRPC Server
+    participant Handler
+    Client->>Stub: Call method with request object
+    Stub->>Stub: Serialize to Protobuf bytes
+    Stub->>Channel: HTTP/2 stream with headers
+    Channel->>Server: Deliver stream
+    Server->>Handler: Dispatch to method handler
+    Handler->>Handler: Execute business logic
+    Handler-->>Server: Return response object
+    Server->>Server: Serialize to Protobuf bytes
+    Server-->>Channel: HTTP/2 response stream
+    Channel-->>Stub: Deliver response
+    Stub-->>Client: Deserialized response object`,
+    },
+    {
       title: "gRPC Communication Patterns",
-      kind: "sequence",
-      caption: "Sequence diagrams showing all four **gRPC streaming patterns**: *unary*, *server streaming*, *client streaming*, and *bidirectional streaming*.",
-      mermaid: `sequenceDiagram
-    participant C as Client
-    participant S as Server
-
-    rect rgb(200, 220, 255)
-    Note over C,S: **Unary RPC** — one request, one response
-    C->>S: CreateOrder(request)
-    S-->>C: CreateOrderResponse
-    end
-
-    rect rgb(200, 255, 220)
-    Note over C,S: **Server Streaming** — one request, stream of responses
-    C->>S: WatchOrderStatus(orderId)
-    S-->>C: StatusUpdate 1
-    S-->>C: StatusUpdate 2
-    S-->>C: StatusUpdate 3 (final)
-    end
-
-    rect rgb(255, 220, 200)
-    Note over C,S: **Client Streaming** — stream of requests, one response
-    C->>S: UploadChunk 1
-    C->>S: UploadChunk 2
-    C->>S: UploadChunk 3 (end)
-    S-->>C: UploadResult
-    end
-
-    rect rgb(255, 255, 200)
-    Note over C,S: **Bidirectional Streaming** — both sides stream
-    C->>S: ChatMessage A
-    S-->>C: ChatMessage B
-    C->>S: ChatMessage C
-    S-->>C: ChatMessage D
-    end`
+      kind: "flow",
+      caption: "The four gRPC call types and their streaming characteristics.",
+      mermaid: `flowchart TD
+    A[gRPC Call Types] --> B[Unary]
+    A --> C[Server Streaming]
+    A --> D[Client Streaming]
+    A --> E[Bidirectional Streaming]
+    B --> B1[One request one response]
+    C --> C1[One request stream of responses]
+    D --> D1[Stream of requests one response]
+    E --> E1[Full duplex stream both sides]`,
     },
     {
-      title: "gRPC Deadline Propagation Across Services",
-      kind: "sequence",
-      caption: "How a **deadline** set by the original client *propagates* through a chain of microservices via gRPC metadata, with each service calculating remaining time.",
-      mermaid: `sequenceDiagram
-    participant C as Client
-    participant A as Service A
-    participant B as Service B
-    participant DB as Database
-
-    Note over C: Sets deadline: 5s from now
-    C->>A: GetOrder(id)<br/>deadline = T+5s
-    Note over A: Time elapsed: 1s<br/>Remaining: 4s
-    A->>B: GetInventory(productId)<br/>deadline = T+5s (propagated)
-    Note over B: Time elapsed: 2s<br/>Remaining: 2s
-    B->>DB: SELECT stock<br/>deadline = T+5s
-    Note over DB: Time elapsed: 1s
-    DB-->>B: stock = 42
-    B-->>A: InventoryResponse
-    A-->>C: OrderResponse
-
-    Note over C,DB: If total > 5s → DEADLINE_EXCEEDED<br/>All downstream work cancelled`
-    },
-    {
-      title: "gRPC Load Balancing: L4 vs L7 vs Client-Side",
+      title: "gRPC vs REST Architecture",
       kind: "architecture",
-      caption: "Comparison of **L4 load balancing** (fails with HTTP/2 multiplexing), **L7 proxy** (Envoy), and *client-side load balancing* approaches for gRPC traffic.",
-      mermaid: `graph TD
-    subgraph L4Problem ["**L4 Load Balancer** *(problematic)*"]
-        CL4["Client"] -->|"single HTTP/2<br/>connection"| LB4["**TCP LB**"]
-        LB4 -->|"ALL streams<br/>go to one backend"| S4A["Server A ⚠️ overloaded"]
-        LB4 -.->|"no traffic"| S4B["Server B (idle)"]
+      caption: "Architectural differences between gRPC and REST APIs.",
+      mermaid: `graph LR
+    subgraph gRPC
+        G1[Protobuf IDL schema] --> G2[Binary serialization]
+        G2 --> G3[HTTP/2 multiplexed]
+        G3 --> G4[Streaming support]
+        G4 --> G5[Generated client stubs]
     end
-
-    subgraph L7Solution ["**L7 Proxy (Envoy)** *(correct)*"]
-        CL7["Client"] -->|"HTTP/2"| LB7["**Envoy**<br/>*understands frames*"]
-        LB7 -->|"stream 1, 3"| S7A["Server A"]
-        LB7 -->|"stream 2, 4"| S7B["Server B"]
-    end
-
-    subgraph ClientSide ["**Client-Side LB** *(built-in)*"]
-        CCS["Client<br/>*round_robin policy*"] -->|"RPC 1, 3"| SCA["Server A"]
-        CCS -->|"RPC 2, 4"| SCB["Server B"]
-    end`
+    subgraph REST
+        R1[OpenAPI optional] --> R2[JSON text serialization]
+        R2 --> R3[HTTP/1.1 or HTTP/2]
+        R3 --> R4[Request response only]
+        R4 --> R5[Manual client code]
+    end`,
+    },
+    {
+      title: "Protobuf Schema Evolution",
+      kind: "state",
+      caption: "Safe states for evolving Protobuf schemas without breaking clients.",
+      mermaid: `stateDiagram-v2
+    [*] --> v1Schema: Initial schema defined
+    v1Schema --> AddField: Add optional field with new number
+    AddField --> v2Schema: Backward compatible change
+    v2Schema --> DeprecateField: Mark field deprecated
+    DeprecateField --> ReserveNumber: Reserve field number
+    ReserveNumber --> v3Schema: Safe to remove in future
+    v2Schema --> RemoveWithoutReserve: Remove without reserving
+    RemoveWithoutReserve --> BreakingChange: Number reuse risk`,
     },
   ],
   exercises: [

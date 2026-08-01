@@ -389,19 +389,74 @@ fn main() {
   ],
   diagrams: [
     {
-      title: "Structural Sharing in Persistent Data Structures",
-      kind: "architecture",
-      caption: "When updating one element in a persistent tree, only the path from root to the changed leaf is copied. All other nodes are shared between old and new versions.",
-    },
-    {
-      title: "const/final vs True Immutability",
+      title: "Mutable vs Immutable State Updates",
       kind: "flow",
-      caption: "const/final freezes the binding (variable cannot be reassigned). Deep immutability freezes the value (object properties cannot be changed). They are independent concepts.",
+      caption: "Comparing mutable in-place mutation to immutable copy-on-modify pattern.",
+      mermaid: `flowchart TD
+    subgraph Mutable Update
+        MA[Object reference] --> MB[Modify object in place]
+        MB --> MC[Same object changed]
+        MC --> MD[All references see the change]
+    end
+    subgraph Immutable Update
+        IA[Original object] --> IB[Create new object with changes]
+        IB --> IC[Original object unchanged]
+        IC --> ID[Old references still valid]
+        IB --> IE[New reference to new object]
+    end`,
     },
     {
-      title: "Copy-on-Write Lifecycle",
-      kind: "state",
-      caption: "State transitions: Shared (multiple references, no copies) → Write attempted → Copy created for the writer → Writer mutates its copy, other references unaffected.",
+      title: "Persistent Data Structure Sharing",
+      kind: "architecture",
+      caption: "How persistent immutable structures share nodes between versions.",
+      mermaid: `graph TD
+    V1[Version 1 root] --> A1[Node A]
+    V1 --> B1[Shared Node B]
+    A1 --> C1[Shared Node C]
+    A1 --> D1[Node D]
+    V2[Version 2 root] --> A2[New Node A prime]
+    V2 --> B1
+    A2 --> C1
+    A2 --> E1[New Node E]`,
+    },
+    {
+      title: "Immutability Benefits",
+      kind: "mindmap",
+      caption: "Benefits of immutability in software design and concurrent systems.",
+      mermaid: `mindmap
+  root((Immutability Benefits))
+    Thread Safety
+      No locks needed
+      Safe concurrent reads
+    Predictability
+      No hidden side effects
+      Easy to reason about
+    Change Detection
+      Reference equality check
+      Efficient shallow diff
+    Time Travel Debug
+      Undo redo history
+      Redux DevTools
+    Caching
+      Stable cache keys
+      Safe memoization`,
+    },
+    {
+      title: "Redux Immutable State Update Flow",
+      kind: "sequence",
+      caption: "How Redux uses immutable state updates for predictable state management.",
+      mermaid: `sequenceDiagram
+    participant Component
+    participant Store
+    participant Reducer
+    Component->>Store: Dispatch action
+    Store->>Reducer: Pass current state and action
+    Reducer->>Reducer: Create new state object
+    Reducer->>Reducer: Never mutate current state
+    Reducer-->>Store: Return new state object
+    Store->>Store: Replace state reference
+    Store-->>Component: Notify subscribers
+    Component->>Component: Re-render with new state`,
     },
   ],
   animations: [

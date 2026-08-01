@@ -172,16 +172,80 @@ public:
   ],
   diagrams: [
     {
-      title: "Singly vs Doubly Linked List Node Structure",
+      title: "Singly vs Doubly Linked List",
       kind: "architecture",
-      caption:
-        "Each singly linked list node has a value and a next pointer. Doubly linked list nodes add a prev pointer, enabling bidirectional traversal and O(1) deletion with a node reference.",
+      caption: "Singly linked nodes have value and next pointer; doubly linked nodes add a prev pointer for bidirectional traversal.",
+      mermaid: `graph LR
+    subgraph Singly["Singly Linked"]
+      S1["val:1\nnext->"] --> S2["val:2\nnext->"]
+      S2 --> S3["val:3\nnext: null"]
+    end
+    subgraph Doubly["Doubly Linked"]
+      D1["<-prev\nval:1\nnext->"] --> D2["<-prev\nval:2\nnext->"]
+      D2 --> D3["<-prev\nval:3\nnext: null"]
+      D2 --> D1
+      D3 --> D2
+    end`,
     },
     {
-      title: "Floyd's Cycle Detection Pointer Movement",
+      title: "Linked List Operations",
       kind: "flow",
-      caption:
-        "Slow pointer moves one step, fast pointer moves two steps per iteration. If a cycle exists, they converge inside the cycle. Resetting slow to head and advancing both by one finds the cycle entry.",
+      caption: "Decision flow for insert and delete operations with O(1) vs O(n) cost depending on position.",
+      mermaid: `flowchart TD
+    A["Operation"] --> B{"At head?"}
+    B -->|Yes| C["O(1) - update head pointer"]
+    B -->|No| D{"At tail with tail pointer?"}
+    D -->|Yes| E["O(1) - update tail pointer"]
+    D -->|No| F["Traverse to position O(n)"]
+    F --> G["Adjust pointers around node"]
+    C --> H["Done"]
+    E --> H
+    G --> H`,
+    },
+    {
+      title: "Floyd Cycle Detection",
+      kind: "sequence",
+      caption: "Slow and fast pointers eventually meet inside a cycle; resetting slow to head finds the entry node.",
+      mermaid: `sequenceDiagram
+    participant S as Slow ptr
+    participant F as Fast ptr
+    participant L as List
+
+    Note over S,F: Phase 1 - detect cycle
+    loop until S === F
+      S->>L: move 1 step
+      F->>L: move 2 steps
+    end
+    Note over S,F: They meet inside cycle
+
+    Note over S,F: Phase 2 - find entry
+    S->>L: reset to head
+    loop until S === F
+      S->>L: move 1 step
+      F->>L: move 1 step
+    end
+    Note over S,F: S and F are at cycle entry`,
+    },
+    {
+      title: "Linked List vs Array Trade-offs",
+      kind: "mindmap",
+      caption: "Comparison of when to use linked lists versus arrays.",
+      mermaid: `mindmap
+    root["Linked List vs Array"]
+      Linked List Wins
+        O1 insert at head or tail
+        O1 delete with node reference
+        No resize needed
+        Flexible size
+      Array Wins
+        O1 random access by index
+        Better cache locality
+        Less memory overhead
+        Binary search possible
+      Use Linked List For
+        LRU cache
+        Queue or deque
+        Frequent insert at front`,
     },
   ],
   animations: [

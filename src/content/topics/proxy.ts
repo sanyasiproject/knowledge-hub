@@ -362,16 +362,71 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Proxy pattern class structure",
+      title: "Proxy Pattern Class Structure",
       kind: "architecture",
-      caption:
-        "Shows the Subject interface implemented by both RealSubject and Proxy. The Proxy holds a reference to the RealSubject and controls access to it while presenting the same interface to clients.",
+      caption: "Subject interface implemented by both RealSubject and Proxy. The Proxy holds a reference to RealSubject and controls access while presenting the same interface to clients.",
+      mermaid: `graph LR
+    Client[Client] --> Subject[Subject Interface\nrequest method]
+    Subject --> Proxy[Proxy\nholds RealSubject ref\ncontrols access]
+    Subject --> Real[RealSubject\nactual implementation]
+    Proxy --> Real
+    Proxy --> PreLogic[Pre-access logic\nauth check, cache hit, lazy init]
+    Proxy --> PostLogic[Post-access logic\nlogging, caching result]`,
     },
     {
-      title: "Proxy types and their responsibilities",
+      title: "Proxy Types and Responsibilities",
       kind: "mindmap",
-      caption:
-        "Maps the five main proxy types (Virtual, Protection, Remote, Caching, Logging) to their specific access-control responsibilities.",
+      caption: "The five main proxy types mapped to their specific responsibilities and typical use cases.",
+      mermaid: `mindmap
+  root((Proxy Types))
+    Virtual Proxy
+      Defers expensive creation
+      Creates RealSubject on first use
+      Heavy images
+      DB connections
+      Config parsers
+    Protection Proxy
+      Access control and RBAC
+      Permission checks before forwarding
+      Authentication enforcement
+      Admin-only operations
+    Remote Proxy
+      Network transparency
+      gRPC stubs
+      RMI objects
+      Hides marshaling complexity
+    Caching Proxy
+      Memoizes results
+      Avoids redundant calls
+      API response cache
+      Query result cache
+    Logging Proxy
+      Audit trail
+      Records method calls
+      Performance metrics
+      Debugging aid`,
+    },
+    {
+      title: "Virtual Proxy Lazy Loading Sequence",
+      kind: "sequence",
+      caption: "How a virtual proxy defers expensive object creation until the first method call that requires the real subject.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant P as ImageProxy
+    participant R as HighResImage - RealSubject
+    C->>P: new ImageProxy - filename.jpg
+    Note over P: Stores filename only, no loading
+    C->>P: getWidth
+    P-->>C: Return cached metadata - no load
+    C->>P: display
+    P->>P: Check: realSubject is null
+    P->>R: new HighResImage - load from disk
+    R-->>P: Loaded successfully
+    P->>R: display
+    R-->>C: Image rendered
+    C->>P: display again
+    P->>R: display - already loaded, no reload
+    R-->>C: Image rendered instantly`,
     },
   ],
   animations: [

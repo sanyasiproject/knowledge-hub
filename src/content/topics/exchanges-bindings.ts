@@ -338,59 +338,65 @@ setupAdvancedTopology().catch(console.error);`,
   diagrams: [
     {
       title: "Exchange Types and Routing Flow",
-      kind: "flow",
-      caption: "How messages flow from producers through different exchange types to queues",
-      mermaid: `flowchart LR
-  P[Producer] -->|publish| DE[Direct Exchange]
-  P -->|publish| TE[Topic Exchange]
-  P -->|publish| FE[Fanout Exchange]
-  P -->|publish| HE[Headers Exchange]
-
-  DE -->|"key = order.created"| Q1[order-processing queue]
-  DE -->|"key = order.shipped"| Q2[shipping queue]
-
-  TE -->|"order.us.*"| Q3[us-orders queue]
-  TE -->|"order.eu.*"| Q4[eu-orders queue]
-  TE -->|"order.#"| Q5[all-orders queue]
-
-  FE -->|broadcast| Q6[audit-log queue]
-  FE -->|broadcast| Q7[analytics queue]
-  FE -->|broadcast| Q8[notification queue]
-
-  HE -->|"region=us, priority=high"| Q9[priority-orders queue]`,
+      kind: "architecture",
+      caption: "How messages flow from producers through different exchange types to their bound queues.",
+      mermaid: `graph LR
+    P["Producer"] --> DE["Direct Exchange\nexact routing key match"]
+    P --> TE["Topic Exchange\nwildcard pattern match"]
+    P --> FE["Fanout Exchange\nbroadcast to all queues"]
+    DE --> Q1["order-processing queue"]
+    DE --> Q2["shipping queue"]
+    TE --> Q3["us-orders queue"]
+    TE --> Q4["eu-orders queue"]
+    TE --> Q5["all-orders queue"]
+    FE --> Q6["audit-log queue"]
+    FE --> Q7["analytics queue"]`,
     },
     {
       title: "Exchange-to-Exchange Binding Topology",
-      kind: "architecture",
-      caption: "Multi-tier routing architecture using exchange-to-exchange bindings with alternate exchange fallback",
-      mermaid: `flowchart TD
-  P[Producer] -->|publish| MAIN["orders.main\n(topic exchange)"]
-
-  MAIN -->|"order.us.#"| US["orders.region.us\n(internal direct)"]
-  MAIN -->|"order.eu.#"| EU["orders.region.eu\n(internal direct)"]
-  MAIN -.->|unroutable| ALT["orders.unroutable\n(alternate exchange - fanout)"]
-
-  US -->|"order.us.created"| Q1[us-fulfillment]
-  US -->|"order.us.cancelled"| Q2[us-cancellations]
-
-  EU -->|"order.eu.created"| Q3[eu-fulfillment]
-  EU -->|"order.eu.cancelled"| Q4[eu-cancellations]
-
-  ALT -->|broadcast| DL[dead-letters queue]`,
+      kind: "network",
+      caption: "Multi-tier routing using exchange-to-exchange bindings with alternate exchange fallback for unroutable messages.",
+      mermaid: `graph TD
+    P["Producer"] -->|"publish"| MAIN["orders.main\ntopic exchange"]
+    MAIN -->|"order.us.#"| US["orders.region.us\ndirect exchange"]
+    MAIN -->|"order.eu.#"| EU["orders.region.eu\ndirect exchange"]
+    MAIN -.->|"unroutable"| ALT["orders.unroutable\nfanout alternate exchange"]
+    US --> Q1["us-fulfillment"]
+    US --> Q2["us-cancellations"]
+    EU --> Q3["eu-fulfillment"]
+    EU --> Q4["eu-cancellations"]
+    ALT --> DL["dead-letters queue"]`,
     },
     {
-      title: "Topic Exchange Pattern Matching",
-      kind: "flow",
-      caption: "Illustrating how wildcard patterns match against routing keys in topic exchanges",
-      mermaid: `flowchart LR
-  PUB[Publisher] -->|"order.us.created"| TX[Topic Exchange]
-  PUB -->|"order.eu.cancelled"| TX
-  PUB -->|"order.us.west.created"| TX
+      title: "Message Publish and Consume Sequence",
+      kind: "sequence",
+      caption: "End-to-end sequence of publishing a message through an exchange and consuming it from a queue.",
+      mermaid: `sequenceDiagram
+    participant Prod as Producer
+    participant Exch as Exchange
+    participant Q as Queue
+    participant Cons as Consumer
 
-  TX -->|"order.*.created\n matches order.us.created\n matches order.eu.created"| Q1["created-orders queue"]
-  TX -->|"order.us.*\n matches order.us.created\n matches order.us.cancelled"| Q2["us-orders queue"]
-  TX -->|"order.#\n matches ALL order keys"| Q3["all-orders queue"]
-  TX -->|"*.*.cancelled\n matches order.eu.cancelled"| Q4["cancellations queue"]`,
+    Prod->>Exch: Publish message with routing key
+    Exch->>Exch: Match routing key against bindings
+    Exch->>Q: Route message to matching queue
+    Q->>Q: Persist message
+    Cons->>Q: Consume (subscribe or poll)
+    Q-->>Cons: Deliver message
+    Cons->>Cons: Process message
+    Cons->>Q: Acknowledge (ack)
+    Q->>Q: Remove message from queue`,
+    },
+    {
+      title: "Topic Exchange Wildcard Matching",
+      kind: "flow",
+      caption: "How star and hash wildcards in topic exchange binding keys match incoming routing keys.",
+      mermaid: `flowchart LR
+    PUB["Publisher"] -->|"order.us.created"| TX["Topic Exchange"]
+    TX -->|"order.us.* matches"| Q1["us-orders queue"]
+    TX -->|"order.# matches all order keys"| Q2["all-orders queue"]
+    TX -->|"order.*.created matches"| Q3["created-orders queue"]
+    TX -->|"*.us.* does not match order.us.west.created"| NOMATCH["No route"]`,
     },
   ],
   comparison: {

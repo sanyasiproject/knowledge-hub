@@ -143,16 +143,84 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Set Operations Venn Diagram",
+      title: "Set Operations Visualization",
       kind: "architecture",
-      caption:
-        "Visual representation of union, intersection, difference, symmetric difference, and complement using overlapping circles within a universal set.",
+      caption: "Core set theory operations: union combines all elements, intersection finds common elements, difference removes overlapping elements.",
+      mermaid: `graph TD
+    subgraph Union["Union A OR B"]
+      UA[All elements in A or B or both]
+    end
+    subgraph Intersection["Intersection A AND B"]
+      IA[Only elements in both A and B]
+    end
+    subgraph Difference["Difference A MINUS B"]
+      DA[Elements in A but not in B]
+    end
+    subgraph Complement["Complement NOT A"]
+      CA[All elements NOT in A]
+    end`,
     },
     {
-      title: "Proof Technique Decision Flowchart",
+      title: "Predicate Logic Operators",
+      kind: "architecture",
+      caption: "Logical operators and their truth table relationships used in predicate logic and programming conditionals.",
+      mermaid: `graph LR
+    subgraph AND["Conjunction - AND"]
+      A1["T AND T = T"]
+      A2["T AND F = F"]
+      A3["F AND F = F"]
+    end
+    subgraph OR["Disjunction - OR"]
+      O1["T OR T = T"]
+      O2["T OR F = T"]
+      O3["F OR F = F"]
+    end
+    subgraph NOT["Negation - NOT"]
+      N1["NOT T = F"]
+      N2["NOT F = T"]
+    end
+    subgraph IMP["Implication - IF P THEN Q"]
+      I1["T -> T = T"]
+      I2["T -> F = F"]
+      I3["F -> anything = T"]
+    end`,
+    },
+    {
+      title: "Universal and Existential Quantifiers",
       kind: "flow",
-      caption:
-        "Decision tree for choosing the right proof technique: direct proof, contrapositive, contradiction, or induction based on the statement's structure.",
+      caption: "Universal quantifier claims something is true for all elements. Existential quantifier claims something is true for at least one element.",
+      mermaid: `flowchart TD
+    A[Statement to prove] --> B{Which quantifier?}
+    B -->|For All - Universal| C[Must hold for every element in domain]
+    C --> D{Find counterexample?}
+    D -->|Yes| E[Statement is FALSE]
+    D -->|No - exhaustive proof| F[Statement is TRUE]
+    B -->|There Exists - Existential| G[Need at least one example]
+    G --> H{Found one example?}
+    H -->|Yes| I[Statement is TRUE]
+    H -->|No - exhausted search| J[Statement is FALSE]`,
+    },
+    {
+      title: "Set Theory in Programming",
+      kind: "mindmap",
+      caption: "How set theory concepts directly map to programming constructs in type systems, database queries, and data structures.",
+      mermaid: `mindmap
+  root((Set Theory in Programming))
+    Type Systems
+      Union types - A or B
+      Intersection types - A and B
+      Never type - empty set
+      Unknown type - universal set
+    SQL
+      UNION combines result sets
+      INTERSECT finds common rows
+      EXCEPT removes overlapping
+      WHERE clause is predicate
+    Collections
+      Set data structure - no duplicates
+      Filter is set comprehension
+      Map preserves cardinality
+      Reduce folds the set`,
     },
   ],
   animations: [

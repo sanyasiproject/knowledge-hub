@@ -379,25 +379,88 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Tool Call Flow",
-      kind: "flow",
-      caption: "Complete lifecycle of an MCP tool invocation from user request to result display"
-    },
-    {
-      title: "Sampling Sequence Diagram",
-      kind: "sequence",
-      caption: "Server-initiated sampling request showing client mediation and host approval"
-    },
-    {
       title: "MCP Primitives Architecture",
       kind: "architecture",
-      caption: "How tools, resources, prompts, and sampling relate within the MCP server-client architecture"
+      caption: "How tools, resources, prompts, and sampling relate within the MCP server-client architecture and their control models.",
+      mermaid: `graph TD
+    subgraph Server["MCP Server"]
+        T["Tools - model-controlled\nexecute actions and computations"]
+        R["Resources - application-controlled\nread-only data access via URI"]
+        P["Prompts - user-controlled\nreusable message templates"]
+        SA["Sampling - server-initiated\nLLM completion requests"]
+    end
+    subgraph Client["MCP Client inside Host"]
+        LLM["LLM - selects tools"]
+        APP["Application - reads resources"]
+        USR["User - picks prompts"]
+        MED["Host mediates sampling"]
+    end
+    T -->|tools/call result| LLM
+    LLM -->|tools/call request| T
+    APP -->|resources/read| R
+    USR -->|prompts/get| P
+    SA -->|sampling/createMessage| MED
+    MED -->|LLM completion| SA`,
+    },
+    {
+      title: "Tool Call Lifecycle Sequence",
+      kind: "sequence",
+      caption: "Complete sequence from tool discovery through execution and result incorporation into the LLM context.",
+      mermaid: `sequenceDiagram
+    participant U as User
+    participant H as Host LLM
+    participant C as MCP Client
+    participant S as MCP Server
+
+    C->>S: tools/list
+    S-->>C: Tool definitions with inputSchema
+    U->>H: Send message
+    H->>H: Select tool and generate arguments
+    H->>C: Request tool execution
+    C->>S: tools/call with name and arguments
+    S->>S: Validate input against JSON Schema
+    S->>S: Execute tool logic
+    S-->>C: Result content array and optional isError
+    C-->>H: Tool result in context
+    H-->>U: Final response incorporating result`,
+    },
+    {
+      title: "Server-Initiated Sampling Flow",
+      kind: "flow",
+      caption: "Flow of a server-initiated sampling request, showing host mediation and the security boundary between server and LLM.",
+      mermaid: `flowchart TD
+    A["Server needs LLM completion during tool execution"] --> B["Server sends sampling/createMessage to Client"]
+    B --> C["Host intercepts sampling request"]
+    C --> D{"Host policy\nallows request?"}
+    D -->|No| E["Host rejects - returns error to server"]
+    D -->|Yes| F["Host may modify or augment messages"]
+    F --> G["Client sends messages to LLM"]
+    G --> H["LLM produces completion"]
+    H --> I["Client returns result to Server\nwith model name and stop reason"]
+    I --> J["Server uses completion in tool result or workflow"]
+    E --> K["Server handles rejection gracefully"]`,
     },
     {
       title: "Resource Discovery and Subscription",
-      kind: "flow",
-      caption: "Flow of static listing, dynamic URI template resolution, and change subscriptions for resources"
-    }
+      kind: "sequence",
+      caption: "How a client discovers static resources, resolves URI templates, and subscribes to change notifications.",
+      mermaid: `sequenceDiagram
+    participant C as MCP Client
+    participant S as MCP Server
+
+    C->>S: resources/list
+    S-->>C: Static resource URIs and URI templates
+    C->>S: resources/read with static URI
+    S-->>C: Resource content with MIME type
+    C->>S: resources/read with template URI resolved
+    S-->>C: Dynamic resource content
+    C->>S: resources/subscribe with URI
+    S-->>C: Subscription confirmed
+    Note over S: Resource changes
+    S->>C: notifications/resources/updated with URI
+    C->>S: resources/read to fetch updated content
+    S-->>C: Fresh resource content`,
+    },
   ],
   animations: [
     {

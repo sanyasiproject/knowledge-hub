@@ -525,23 +525,77 @@ int main() {
     {
       title: "Supervisor Pattern Architecture",
       kind: "architecture",
-      caption: "Central supervisor decomposes tasks, delegates to specialist workers, and aggregates results"
+      caption: "Central supervisor decomposes tasks, delegates to specialist workers, and aggregates results.",
+      mermaid: `graph TD
+    User["User Request"] --> Sup["Supervisor Agent"]
+    Sup -->|research subtask| RA["Research Agent"]
+    Sup -->|code subtask| CA["Code Agent"]
+    Sup -->|review subtask| RevA["Review Agent"]
+    RA -->|findings| Sup
+    CA -->|implementation| Sup
+    RevA -->|feedback| Sup
+    Sup --> Out["Aggregated Response to User"]`,
     },
     {
       title: "Multi-Agent Debate Flow",
       kind: "flow",
-      caption: "Two debater agents argue positions while a judge evaluates and selects the best answer"
+      caption: "Two debater agents argue positions while a judge evaluates and selects the best answer.",
+      mermaid: `flowchart TD
+    Q["Question or Problem"] --> D1["Debater A\nargues position 1"]
+    Q --> D2["Debater B\nargues position 2"]
+    D1 -->|argument| Judge["Judge Agent"]
+    D2 -->|argument| Judge
+    Judge --> Eval{"Sufficient quality?"}
+    Eval -->|No| Rebut["Request rebuttals"]
+    Rebut --> D1
+    Rebut --> D2
+    Eval -->|Yes| V["Judge selects best answer"]
+    V --> Out["Final Response"]`,
     },
     {
-      title: "Agent Message Passing Sequence",
+      title: "Agent Message Passing",
       kind: "sequence",
-      caption: "Sequence of messages between supervisor, research agent, and code agent during task execution"
+      caption: "Message flow between supervisor, research agent, and code agent during a coding task.",
+      mermaid: `sequenceDiagram
+    participant U as User
+    participant Sup as Supervisor
+    participant RA as Research Agent
+    participant CA as Code Agent
+
+    U->>Sup: implement feature X
+    Sup->>RA: research best approach for X
+    RA->>RA: search docs and examples
+    RA-->>Sup: findings and recommendations
+    Sup->>CA: implement X using approach Y
+    CA->>CA: write and test code
+    CA-->>Sup: implementation + tests
+    Sup->>Sup: review and merge results
+    Sup-->>U: final implementation`,
     },
     {
-      title: "Multi-Agent Orchestration Patterns Mind Map",
+      title: "Multi-Agent Orchestration Patterns",
       kind: "mindmap",
-      caption: "Overview of orchestration patterns, communication topologies, and failure-handling strategies"
-    }
+      caption: "Overview of orchestration patterns, communication topologies, and failure-handling strategies.",
+      mermaid: `mindmap
+    root["Multi-Agent Systems"]
+      Orchestration Patterns
+        Supervisor-worker
+        Peer debate
+        Pipeline chain
+        Hierarchical
+      Communication
+        Message passing
+        Shared memory
+        Tool calls
+      Failure Handling
+        Retry with backoff
+        Fallback agent
+        Human escalation
+      Use Cases
+        Code generation
+        Research synthesis
+        Complex reasoning`,
+    },
   ],
   animations: [
     {

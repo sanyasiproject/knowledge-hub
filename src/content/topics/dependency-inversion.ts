@@ -225,13 +225,74 @@ const testAuth = new AuthService(
     {
       title: "Traditional vs Inverted Dependencies",
       kind: "architecture",
-      caption: "Left: OrderService depends directly on MySqlDao (high depends on low). Right: Both OrderService and PostgresRepo depend on OrderRepository interface owned by the business layer."
+      caption: "Traditional: high-level module depends on low-level module directly. Inverted: both depend on an abstraction owned by the high-level layer.",
+      mermaid: `graph TD
+    subgraph Traditional ["Traditional - Violation"]
+        OS1["OrderService - high level"] -->|depends on| DAO["MySqlDao - low level"]
+    end
+    subgraph Inverted ["DIP - Correct"]
+        OS2["OrderService - high level"] -->|depends on| IFACE["OrderRepository - interface"]
+        IMPL["PostgresRepo - low level"] -->|implements| IFACE
+    end`,
     },
     {
-      title: "Hexagonal Architecture (Ports and Adapters)",
+      title: "Dependency Injection Flow",
+      kind: "sequence",
+      caption: "Constructor injection: the composition root creates concrete dependencies and injects them into the high-level module at startup.",
+      mermaid: `sequenceDiagram
+    participant Main as Composition Root
+    participant Repo as PostgresOrderRepo
+    participant Svc as OrderService
+    participant Client
+    Main->>Repo: new PostgresOrderRepo
+    Main->>Svc: new OrderService with repo
+    Client->>Svc: placeOrder
+    Svc->>Repo: save order via interface
+    Repo-->>Svc: saved
+    Svc-->>Client: order placed`,
+    },
+    {
+      title: "Hexagonal Architecture Ports and Adapters",
       kind: "architecture",
-      caption: "Domain core defines ports (interfaces). Adapters implement ports for specific technologies. Dependencies point inward -- infrastructure depends on domain abstractions."
-    }
+      caption: "Domain core defines ports as interfaces. Adapters in the infrastructure layer implement those ports. All dependencies point inward toward the domain.",
+      mermaid: `graph LR
+    subgraph Domain ["Domain Core"]
+        D["Business Logic"]
+        P1["OrderRepository - port"]
+        P2["EventPublisher - port"]
+    end
+    subgraph Adapters ["Infrastructure Adapters"]
+        A1["PostgresOrderRepo - implements port"]
+        A2["KafkaEventPublisher - implements port"]
+        A3["REST API Controller - drives domain"]
+    end
+    A1 -->|implements| P1
+    A2 -->|implements| P2
+    A3 -->|calls| D
+    D --> P1
+    D --> P2`,
+    },
+    {
+      title: "DIP vs DI vs IoC",
+      kind: "mindmap",
+      caption: "Distinguishing the three related but distinct concepts: DIP is a principle, DI is a technique, and IoC is a broad paradigm.",
+      mermaid: `mindmap
+  root[Inversion Concepts]
+    DIP - Principle
+      Depend on abstractions
+      Interface owned by high-level module
+      Architectural guideline
+    DI - Technique
+      Provide deps from outside class
+      Constructor injection preferred
+      Setter and field injection also exist
+      Makes deps explicit and testable
+    IoC - Paradigm
+      Framework calls your code
+      Hollywood Principle
+      DI containers implement IoC
+      Event-driven systems`,
+    },
   ],
   animations: [
     {

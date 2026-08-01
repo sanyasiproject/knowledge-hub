@@ -267,82 +267,88 @@ kubectl get volumeattachment`,
   ],
   diagrams: [
     {
-      title: "PV / PVC Binding and Dynamic Provisioning Flow",
+      title: "PVC Dynamic Provisioning Flow",
       kind: "flow",
-      caption: "How a **PVC** triggers *dynamic provisioning* via a **StorageClass**, resulting in a bound **PV** backed by cloud storage.",
+      caption: "When a PVC references a StorageClass, the CSI provisioner creates a PV automatically. Without a StorageClass, Kubernetes matches against pre-existing PVs by size and access mode.",
       mermaid: `flowchart LR
-    A["PVC Created"] --> B{"StorageClass\\nSpecified?"}
-    B -- No --> C["Match existing\\nPV by size/access"]
-    B -- Yes --> D["CSI Provisioner\\ncreates volume"]
-    D --> E["PV Created\\nautomatically"]
-    C --> F{"Match\\nFound?"}
-    F -- Yes --> G["Bind PVC to PV"]
-    F -- No --> H["PVC stays\\nPending"]
+    A["PVC Created\nrequests 10Gi RWO"] --> B{"StorageClass\nspecified?"}
+    B -->|No| C["Match existing PV\nby size and access mode"]
+    B -->|Yes| D["CSI Provisioner\ncreates cloud volume"]
+    D --> E["PV Created\nautomatically"]
+    C --> F{"Match found?"}
+    F -->|Yes| G["Bind PVC to PV"]
+    F -->|No| H["PVC Pending\nno suitable PV"]
     E --> G
-    G --> I["Pod mounts\\nPVC"]
-
-    style H fill:#f66,stroke:#333
-    style I fill:#6f6,stroke:#333`,
+    G --> I["Pod mounts PVC\nas filesystem or block"]`,
     },
     {
       title: "Kubernetes Storage Architecture",
       kind: "architecture",
-      caption: "The relationship between **Pods**, **PVCs**, **PVs**, **StorageClasses**, and the underlying **CSI drivers** connecting to cloud storage backends.",
-      mermaid: `flowchart TB
-    subgraph Cluster["Kubernetes Cluster"]
-        Pod["Pod"] -->|"volumeMount"| PVC["PVC\\n(namespace-scoped)"]
-        PVC -->|"binds to"| PV["PV\\n(cluster-scoped)"]
-        PVC -.->|"references"| SC["StorageClass"]
-        SC -->|"provisions via"| CSI["CSI Driver\\n(controller + node)"]
+      caption: "Pods consume PVCs, which bind to PVs provisioned by CSI drivers backed by cloud storage. ConfigMaps and Secrets mount separately as files or environment variables.",
+      mermaid: `graph TB
+    subgraph Pod["Pod"]
+      APP["Application Container"]
+      VOL["Volumes"]
     end
-
-    subgraph Storage["Storage Backends"]
-        EBS["AWS EBS"]
-        GCE["GCE PD"]
-        NFS["NFS Server"]
-        CEPH["Ceph / Rook"]
-    end
-
-    CSI --> EBS
-    CSI --> GCE
-    CSI --> NFS
-    CSI --> CEPH
-
-    subgraph Config["Config & Secrets"]
-        CM["ConfigMap"] -->|"mount as files\\nor env vars"| Pod
-        SEC["Secret"] -->|"mount as tmpfs\\nor env vars"| Pod
-        PROJ["Projected\\nVolume"] -->|"combine sources"| Pod
-    end`,
+    PVC["PVC\nnamespace-scoped request"]
+    PV["PV\ncluster-scoped resource"]
+    SC["StorageClass\nfast-ssd or standard-hdd"]
+    CSI["CSI Driver\ncontroller plus node pods"]
+    CLOUD["Cloud Storage\nAWS EBS GCE PD Azure Disk"]
+    CM["ConfigMap\nnon-sensitive config"]
+    SEC["Secret\ncredentials keys certs\nbase64 encoded tmpfs mount"]
+    APP --> VOL
+    VOL -->|volumeMount| PVC
+    PVC -->|binds to| PV
+    PVC -.->|references| SC
+    SC -->|provisions via| CSI
+    CSI --> CLOUD
+    VOL -->|env or file mount| CM
+    VOL -->|tmpfs mount| SEC`,
+    },
+    {
+      title: "PVC Lifecycle States",
+      kind: "state",
+      caption: "A PVC transitions through Pending while waiting for a PV, Bound when matched or provisioned, Released when the pod is deleted, and then either Retained or Deleted based on reclaim policy.",
+      mermaid: `stateDiagram-v2
+    [*] --> Pending: PVC created
+    Pending: Pending\nwaiting for matching PV\nor provisioning
+    Pending --> Bound: PV found or provisioned\nbinding complete
+    Bound: Bound\nPVC and PV linked\npod can mount
+    Bound --> Released: PVC deleted by user\npod removed
+    Released: Released\nPV still exists\ndata intact
+    Released --> Retained: reclaim policy Retain\nadmin must manually clean up
+    Released --> Deleted: reclaim policy Delete\nbacking storage removed
+    Released --> Available: admin manually reclaims\nbefore Kubernetes 1.20`,
     },
     {
       title: "Secret Management Strategies",
       kind: "mindmap",
-      caption: "Layered approach to **Kubernetes secrets management** -- from basic built-in Secrets to external vault integrations and encryption at rest.",
+      caption: "Kubernetes secrets are base64 only by default. Production workloads should combine etcd encryption, RBAC, and external vaults for defense in depth.",
       mermaid: `mindmap
-  root(("Secrets\\nManagement"))
-    Built-in Secrets
-      base64 encoding
-      RBAC restrictions
-      immutable: true
-      tmpfs mounts
-    Encryption at Rest
-      EncryptionConfiguration
-      aescbc / secretbox
-      KMS providers
-    External Vaults
-      HashiCorp Vault
-      AWS Secrets Manager
-      GCP Secret Manager
-      Azure Key Vault
-    Operators & Tools
-      External Secrets Operator
-      Sealed Secrets
-      CSI Secret Store Driver
-    Best Practices
-      Audit logging
-      Namespace isolation
-      Rotate credentials
-      Never commit to Git`,
+    root((Secrets Management))
+      Built-in Kubernetes
+        base64 encoding not encryption
+        RBAC restrict get list watch
+        immutable true prevents changes
+        tmpfs mount not written to disk
+      Encryption at Rest
+        EncryptionConfiguration resource
+        aescbc or secretbox providers
+        KMS envelope encryption
+      External Vaults
+        HashiCorp Vault
+        AWS Secrets Manager
+        GCP Secret Manager
+      Operator Integration
+        External Secrets Operator
+        CSI Secret Store Driver
+        Sealed Secrets
+      Best Practices
+        Audit logs for secret access
+        Rotate credentials regularly
+        Never commit to git
+        Namespace isolation`,
     },
   ],
   comparison: {

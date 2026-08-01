@@ -504,19 +504,74 @@ runAgent("What is the weather in Tokyo and Paris?").then(console.log);`
   ],
   diagrams: [
     {
-      title: "The Agent Loop",
-      kind: "flow",
-      caption: "The core perceive-reason-plan-act-observe cycle that every agent executes. The loop continues until a stopping condition is met (task complete, error, or iteration limit)."
+      title: "AI Agent Component Architecture",
+      kind: "architecture",
+      caption: "The core components of an AI agent: perception input, memory stores, reasoning engine, planner, action executor, and environment feedback loop.",
+      mermaid: `flowchart TD
+    ENV["Environment"]
+    PERC["Perception Module"]
+    STM["Short-Term Memory"]
+    LTM["Long-Term Memory"]
+    REASON["Reasoning Engine"]
+    PLAN["Planner"]
+    TOOLS["Tool Executor"]
+    OUT["Action / Output"]
+    ENV --> PERC --> STM
+    STM --> REASON
+    LTM --> REASON
+    REASON --> PLAN --> TOOLS --> OUT
+    OUT --> ENV`,
     },
     {
-      title: "Agent States and Transitions",
+      title: "Perceive-Reason-Act Loop",
+      kind: "flow",
+      caption: "The fundamental agent loop: observe the environment, reason about state and goals, act, then observe results — repeating until the task is complete.",
+      mermaid: `flowchart TD
+    START["Receive Task"]
+    OBSERVE["Observe Environment"]
+    REASON["Reason and Plan"]
+    DONE{"Task complete?"}
+    SELECT["Select Tool / Action"]
+    EXECUTE["Execute Action"]
+    RESULT["Observe Result"]
+    END["Return Final Answer"]
+    START --> OBSERVE --> REASON --> DONE
+    DONE -- "No" --> SELECT --> EXECUTE --> RESULT --> REASON
+    DONE -- "Yes" --> END`,
+    },
+    {
+      title: "Agent Execution States",
       kind: "state",
-      caption: "State diagram showing the possible states of an agent (idle, reasoning, awaiting tool result, reflecting, completed, error) and the transitions between them."
+      caption: "States an agent instance moves through during a single task execution, including tool calls and error recovery.",
+      mermaid: `stateDiagram-v2
+    [*] --> Idle : task received
+    Idle --> Reasoning : start loop
+    Reasoning --> AwaitingTool : tool call issued
+    AwaitingTool --> Reasoning : tool result received
+    Reasoning --> Reflecting : self-critique step
+    Reflecting --> Reasoning : refine plan
+    Reasoning --> Completed : stop condition met
+    Reasoning --> Error : unrecoverable failure
+    Completed --> [*]
+    Error --> [*]`,
     },
     {
-      title: "Tool Selection Decision Flow",
-      kind: "flow",
-      caption: "How an agent decides which tool to invoke: parse the sub-task, match against tool descriptions, validate arguments, execute, and handle the result or error."
+      title: "Agent-Environment Interaction",
+      kind: "sequence",
+      caption: "End-to-end sequence of a ReAct-style agent interacting with a user, reasoning, calling a tool, and returning a grounded response.",
+      mermaid: `sequenceDiagram
+    participant U as User
+    participant A as Agent
+    participant LLM as LLM
+    participant T as Tool
+    U->>A: submit task
+    A->>LLM: thought + context
+    LLM-->>A: reasoning + tool call
+    A->>T: execute tool
+    T-->>A: tool result
+    A->>LLM: thought + result
+    LLM-->>A: final answer
+    A-->>U: response`,
     },
   ],
   animations: [

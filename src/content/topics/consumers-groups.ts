@@ -222,17 +222,85 @@ export const consumersGroups: TopicContent = {
     {
       title: "Consumer Group Partition Assignment",
       kind: "architecture",
-      caption: "6 partitions distributed among 3 consumers in a group; each consumer owns 2 partitions.",
+      caption: "Six partitions distributed across three consumers in a group, each consumer owning two partitions. The group coordinator tracks offsets per partition.",
+      mermaid: `graph TB
+    subgraph Topic["Topic - 6 partitions"]
+        P0["Partition 0"]
+        P1["Partition 1"]
+        P2["Partition 2"]
+        P3["Partition 3"]
+        P4["Partition 4"]
+        P5["Partition 5"]
+    end
+    subgraph Group["Consumer Group"]
+        CA["Consumer A"]
+        CB["Consumer B"]
+        CC["Consumer C"]
+    end
+    P0 --> CA
+    P1 --> CA
+    P2 --> CB
+    P3 --> CB
+    P4 --> CC
+    P5 --> CC
+    Coord["Group Coordinator"] --> Group`,
     },
     {
-      title: "Rebalancing Protocol Sequence",
-      kind: "sequence",
-      caption: "JoinGroup -> leader computes assignment -> SyncGroup distributes assignments -> consumers resume.",
-    },
-    {
-      title: "Eager vs Cooperative Rebalancing",
+      title: "Eager vs Cooperative Rebalancing Flow",
       kind: "flow",
-      caption: "Eager: revoke all, reassign all (stop-the-world). Cooperative: revoke only moving partitions (incremental).",
+      caption: "Eager rebalancing revokes all partitions before reassigning, causing a full stop. Cooperative rebalancing only moves partitions that need to change owners.",
+      mermaid: `flowchart TD
+    Trigger["Rebalance triggered - member join or leave"]
+    Trigger --> Q{"Strategy?"}
+    Q -->|"Eager"| ERevoke["Revoke ALL partitions from ALL consumers"]
+    ERevoke --> EStop["Full processing stop"]
+    EStop --> EAssign["Compute and distribute new assignment"]
+    EAssign --> EResume["All consumers resume"]
+    Q -->|"Cooperative"| CTarget["Compute target assignment"]
+    CTarget --> CRevoke["Revoke only partitions that must move"]
+    CRevoke --> CPartial["Non-moving partitions keep processing"]
+    CPartial --> CAssign["Assign revoked partitions to new owners"]
+    CAssign --> CResume["Full group stable again"]`,
+    },
+    {
+      title: "Consumer Group Rebalance Protocol Sequence",
+      kind: "sequence",
+      caption: "When a new consumer joins, all members rejoin the group. The elected leader computes the partition assignment and distributes it via SyncGroup.",
+      mermaid: `sequenceDiagram
+    participant A as Consumer A
+    participant B as Consumer B
+    participant C as Consumer C - new
+    participant Coord as Group Coordinator
+
+    C->>Coord: JoinGroup request
+    Coord->>A: Rebalance needed
+    Coord->>B: Rebalance needed
+    A->>Coord: JoinGroup
+    B->>Coord: JoinGroup
+    Note over Coord: Elect A as group leader
+    Coord-->>A: JoinGroup response - leader with member list
+    Coord-->>B: JoinGroup response - follower
+    Coord-->>C: JoinGroup response - follower
+    A->>A: Compute partition assignment
+    A->>Coord: SyncGroup with assignment
+    Coord-->>A: SyncGroup - owns P0 P1
+    Coord-->>B: SyncGroup - owns P2 P3
+    Coord-->>C: SyncGroup - owns P4 P5`,
+    },
+    {
+      title: "Consumer Offset State Machine",
+      kind: "state",
+      caption: "A consumer partition offset transitions through states as messages are fetched, processed, and committed, with rollback on processing failure.",
+      mermaid: `stateDiagram-v2
+    [*] --> Assigned : partition assigned during rebalance
+    Assigned --> Fetching : poll called
+    Fetching --> Processing : batch received
+    Processing --> Committing : batch processed successfully
+    Committing --> Fetching : offset committed to broker
+    Processing --> Fetching : processing failed - seek to last commit
+    Committing --> Fetching : commit failed - retry
+    Assigned --> Revoked : rebalance triggered
+    Revoked --> [*]`,
     },
   ],
   animations: [

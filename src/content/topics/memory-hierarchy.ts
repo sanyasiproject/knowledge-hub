@@ -158,16 +158,84 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Memory hierarchy pyramid",
+      title: "Memory Hierarchy Pyramid",
       kind: "architecture",
-      caption:
-        "Layered view from registers at the top (fastest, smallest, most expensive per byte) down through L1/L2/L3 caches, main memory (DRAM), SSD, and HDD (slowest, largest, cheapest per byte).",
+      caption: "Layered view from registers at the top through L1, L2, L3 caches, DRAM, SSD, and HDD showing speed, size, and cost trade-offs.",
+      mermaid: `graph TD
+    REG["Registers\nless than 1 KB - less than 1 ns - compiler managed"]
+    L1["L1 Cache per core\n32-64 KB - 1-5 cycles - hardware managed"]
+    L2["L2 Cache per core\n256 KB to 1 MB - 10-20 cycles"]
+    L3["L3 Cache shared\n8-64 MB - 30-70 cycles"]
+    DRAM["Main Memory DRAM\n8-512 GB - 100-300 cycles - OS managed"]
+    SSD["SSD Storage\n256 GB to 8 TB - 100 microseconds"]
+    HDD["HDD Storage\n1-20 TB - 10 milliseconds"]
+    REG --> L1 --> L2 --> L3 --> DRAM --> SSD --> HDD
+    style REG fill:#e53935,color:#fff
+    style L1 fill:#e64a19,color:#fff
+    style L2 fill:#f57c00,color:#fff
+    style L3 fill:#fbc02d,color:#000
+    style DRAM fill:#388e3c,color:#fff
+    style SSD fill:#1976d2,color:#fff
+    style HDD fill:#455a64,color:#fff`,
     },
     {
-      title: "Set-associative cache address mapping",
+      title: "Cache Address Decomposition Flow",
       kind: "flow",
-      caption:
-        "How a memory address is decomposed into tag, set index, and block offset fields, and how the tag is compared against entries in the selected set.",
+      caption: "How a memory address is split into tag, set index, and block offset for set-associative cache lookup and tag comparison.",
+      mermaid: `flowchart TD
+    A["64-bit Virtual or Physical Address"] --> B["Extract Block Offset\nbottom 6 bits for 64-byte cache line"]
+    B --> C["Extract Set Index\nnext bits determine which set to look in"]
+    C --> D["Extract Tag\nremaining high-order bits"]
+    D --> E["Select cache set using Set Index"]
+    E --> F["Compare Tag against all Ways in parallel"]
+    F --> G{"Tag match and\nvalid bit set?"}
+    G -->|Yes| H["Cache HIT - return data at Block Offset"]
+    G -->|No| I["Cache MISS - fetch from next level"]
+    I --> J{"Set full - all\nways occupied?"}
+    J -->|Yes| K["Evict LRU way\nwrite back if dirty"]
+    J -->|No| L["Use empty way"]
+    K --> M["Install fetched cache line"]
+    L --> M`,
+    },
+    {
+      title: "Cache Miss Classification",
+      kind: "mindmap",
+      caption: "The three Cs of cache misses and techniques to reduce each type.",
+      mermaid: `mindmap
+  root((Cache Misses))
+    Compulsory - Cold Misses
+      First access to any block
+      Unavoidable on first touch
+      Reduced by prefetching
+      Hardware and software prefetch
+    Capacity Misses
+      Working set exceeds cache size
+      Evicted blocks reused later
+      Reduced by smaller working sets
+      Loop tiling or blocking
+      Cache-oblivious algorithms
+    Conflict Misses
+      Multiple blocks map to same set
+      Cache has free space elsewhere
+      Reduced by higher associativity
+      Reduced by padding arrays
+      Cache-aware data layout`,
+    },
+    {
+      title: "MESI Cache Coherence Protocol",
+      kind: "state",
+      caption: "MESI protocol states and transitions for a cache line across local reads and writes and remote snoop events.",
+      mermaid: `stateDiagram-v2
+    [*] --> Invalid
+    Invalid --> Exclusive: Local read miss - no other copies
+    Invalid --> Shared: Local read miss - other cache has copy
+    Exclusive --> Modified: Local write
+    Exclusive --> Shared: Remote read snoop
+    Exclusive --> Invalid: Remote write snoop
+    Shared --> Modified: Local write - invalidate others
+    Shared --> Invalid: Remote write snoop
+    Modified --> Shared: Remote read - write back and share
+    Modified --> Invalid: Remote write - write back and invalidate`,
     },
   ],
   animations: [

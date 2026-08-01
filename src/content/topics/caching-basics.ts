@@ -169,7 +169,73 @@ async function updateUser(userId: string, data: Partial<User>) {
     },
   ],
   diagrams: [
-    { title: "Cache-aside data flow", kind: "sequence", caption: "App checks cache, falls back to DB on miss, then populates the cache." },
+    {
+      title: "Cache-Aside Data Flow",
+      kind: "sequence",
+      caption: "App checks cache on every read, falls back to DB on miss, then populates the cache for future requests.",
+      mermaid: `sequenceDiagram
+    participant App
+    participant Cache
+    participant DB
+    App->>Cache: GET key
+    Cache-->>App: HIT - return cached value
+    App->>Cache: GET missing-key
+    Cache-->>App: MISS
+    App->>DB: query source of truth
+    DB-->>App: data
+    App->>Cache: SET missing-key data EX ttl
+    App-->>App: serve response`,
+    },
+    {
+      title: "Cache Hit vs Miss Flow",
+      kind: "flow",
+      caption: "Decision path on every read request showing the cache hit path and the more expensive cache miss path.",
+      mermaid: `flowchart TD
+    A([Read request]) --> B{Cache hit?}
+    B -->|Yes| C([Return cached data - fast])
+    B -->|No| D[Query database]
+    D --> E[Store result in cache with TTL]
+    E --> F([Return data to caller])`,
+    },
+    {
+      title: "Cache Topology Options",
+      kind: "architecture",
+      caption: "Three common cache deployment topologies: local in-process, remote centralized, and multi-tier.",
+      mermaid: `graph TD
+    AppA["App Instance A"]
+    AppB["App Instance B"]
+    L1A["Local Cache A - in-process"]
+    L1B["Local Cache B - in-process"]
+    Redis["Redis - shared remote cache"]
+    DB["Database"]
+    AppA --> L1A
+    AppB --> L1B
+    L1A -->|miss| Redis
+    L1B -->|miss| Redis
+    Redis -->|miss| DB`,
+    },
+    {
+      title: "Cache Eviction Policy Comparison",
+      kind: "mindmap",
+      caption: "Common cache eviction policies and the access patterns they are best suited for.",
+      mermaid: `mindmap
+  root((Eviction Policies))
+    LRU
+      Evicts least recently used
+      Best for recency-skewed access
+    LFU
+      Evicts least frequently used
+      Best for frequency-skewed access
+    TTL
+      Expires after fixed time
+      Best for time-sensitive data
+    FIFO
+      Evicts oldest inserted entry
+      Simple but ignores access patterns
+    Random
+      Evicts random entry
+      Low overhead approximation`,
+    },
   ],
   interviewQA: [
     {

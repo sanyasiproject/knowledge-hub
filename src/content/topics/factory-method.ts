@@ -224,16 +224,50 @@ await processor.charge(49.99);`,
   ],
   diagrams: [
     {
-      title: "Factory Method class hierarchy",
+      title: "Factory Method Class Hierarchy",
       kind: "architecture",
-      caption:
-        "Shows the Creator base class with a factory method, ConcreteCreator subclasses, and the Product interface with ConcreteProduct implementations. The creator hierarchy parallels the product hierarchy.",
+      caption: "Creator base class declares the factory method; ConcreteCreator subclasses override it to produce ConcreteProduct instances.",
+      mermaid: `graph TD
+    Creator["Creator\n+factoryMethod()\n+operation()"]
+    ConcreteCreatorA["ConcreteCreatorA\n+factoryMethod(): ProductA"]
+    ConcreteCreatorB["ConcreteCreatorB\n+factoryMethod(): ProductB"]
+    Product["Product interface\n+use()"]
+    ProductA["ProductA\n+use()"]
+    ProductB["ProductB\n+use()"]
+    Creator --> ConcreteCreatorA
+    Creator --> ConcreteCreatorB
+    ConcreteCreatorA --> ProductA
+    ConcreteCreatorB --> ProductB
+    ProductA --> Product
+    ProductB --> Product`,
     },
     {
-      title: "Abstract Factory product families",
+      title: "Abstract Factory Product Families",
       kind: "architecture",
-      caption:
-        "Illustrates how an Abstract Factory interface groups multiple factory methods, and each Concrete Factory produces a consistent family of related products (e.g., all Windows widgets or all Mac widgets).",
+      caption: "Abstract Factory groups related factory methods; each ConcreteFactory produces a consistent family of products.",
+      mermaid: `graph TD
+    AF["AbstractFactory\n+createButton()\n+createCheckbox()"]
+    WF["WindowsFactory\n+createButton(): WinButton\n+createCheckbox(): WinCheckbox"]
+    MF["MacFactory\n+createButton(): MacButton\n+createCheckbox(): MacCheckbox"]
+    AF --> WF
+    AF --> MF
+    WF --> WB["WinButton"]
+    WF --> WC["WinCheckbox"]
+    MF --> MB["MacButton"]
+    MF --> MC["MacCheckbox"]`,
+    },
+    {
+      title: "Factory Method Object Creation Flow",
+      kind: "flow",
+      caption: "Decision flow showing how a client requests a product and how the factory method determines which concrete type to instantiate.",
+      mermaid: `flowchart TD
+    Client["Client calls creator.operation()"] --> FM["Creator.factoryMethod() called"]
+    FM --> D{Which ConcreteCreator?}
+    D -->|CreatorA| PA["new ProductA()"]
+    D -->|CreatorB| PB["new ProductB()"]
+    PA --> USE["product.use() called"]
+    PB --> USE
+    USE --> RET["Result returned to client"]`,
     },
   ],
   animations: [

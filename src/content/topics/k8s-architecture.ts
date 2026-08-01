@@ -273,101 +273,118 @@ roleRef:
     {
       title: "Kubernetes Cluster Architecture",
       kind: "architecture",
-      caption: "High-level view of control plane and worker node components with communication flows",
+      caption: "Control plane components communicate only through the API server. Worker nodes run kubelet, kube-proxy, and the container runtime. All state lives in etcd.",
       mermaid: `graph TB
-  subgraph CP["Control Plane"]
-    API["kube-apiserver<br/><i>REST gateway, auth, admission</i>"]
-    ETCD["etcd<br/><i>Raft consensus, cluster state</i>"]
-    SCHED["kube-scheduler<br/><i>Filter → Score → Bind</i>"]
-    CM["kube-controller-manager<br/><i>Deployment, ReplicaSet,<br/>Node, Job controllers</i>"]
-  end
-
-  subgraph W1["Worker Node 1"]
-    KL1["kubelet<br/><i>Pod lifecycle, CRI, probes</i>"]
-    KP1["kube-proxy<br/><i>iptables / IPVS rules</i>"]
-    CR1["containerd<br/><i>Container runtime</i>"]
-    P1["Pod A"]
-    P2["Pod B"]
-  end
-
-  subgraph W2["Worker Node 2"]
-    KL2["kubelet"]
-    KP2["kube-proxy"]
-    CR2["containerd"]
-    P3["Pod C"]
-  end
-
-  API <-->|"read/write state"| ETCD
-  SCHED -->|"watch unscheduled pods"| API
-  CM -->|"watch & reconcile"| API
-  KL1 -->|"report status & watch specs"| API
-  KL2 -->|"report status & watch specs"| API
-  KP1 -->|"watch Services/Endpoints"| API
-  KP2 -->|"watch Services/Endpoints"| API
-  KL1 --> CR1
-  KL2 --> CR2
-  CR1 --> P1
-  CR1 --> P2
-  CR2 --> P3`
+    subgraph CP["Control Plane"]
+      API["kube-apiserver\nREST gateway auth admission"]
+      ETCD["etcd\nRaft consensus cluster state"]
+      SCHED["kube-scheduler\nFilter then Score then Bind"]
+      CM["kube-controller-manager\nDeployment ReplicaSet Node Job"]
+    end
+    subgraph W1["Worker Node 1"]
+      KL1["kubelet\nPod lifecycle CRI probes"]
+      KP1["kube-proxy\niptables or IPVS rules"]
+      CR1["containerd\nContainer runtime"]
+      P1["Pod A"]
+      P2["Pod B"]
+    end
+    subgraph W2["Worker Node 2"]
+      KL2["kubelet"]
+      KP2["kube-proxy"]
+      P3["Pod C"]
+    end
+    API <-->|read write state| ETCD
+    SCHED -->|watch unscheduled pods| API
+    CM -->|watch and reconcile| API
+    KL1 -->|report status watch specs| API
+    KL2 -->|report status watch specs| API
+    KP1 -->|watch Services and Endpoints| API
+    KP2 -->|watch Services and Endpoints| API
+    KL1 --> CR1
+    CR1 --> P1
+    CR1 --> P2`,
     },
     {
       title: "kubectl apply Request Lifecycle",
-      kind: "flow",
-      caption: "Step-by-step flow from kubectl command to running containers on a worker node",
-      mermaid: `graph LR
-  A["kubectl apply"] --> B["Authentication<br/><i>certs, tokens, OIDC</i>"]
-  B --> C["Authorization<br/><i>RBAC / Webhook</i>"]
-  C --> D["Mutating<br/>Admission"]
-  D --> E["Validating<br/>Admission"]
-  E --> F["Persist to etcd"]
-  F --> G["Deployment<br/>Controller"]
-  G --> H["ReplicaSet<br/>Controller"]
-  H --> I["Scheduler<br/><i>Filter → Score</i>"]
-  I --> J["Kubelet<br/><i>pull image, start container</i>"]
-  J --> K["Container<br/>Running"]`
+      kind: "sequence",
+      caption: "A kubectl apply triggers authentication, authorization, admission webhooks, etcd persistence, and then controller reconciliation down to the kubelet starting containers.",
+      mermaid: `sequenceDiagram
+    participant K as kubectl
+    participant A as API Server
+    participant E as etcd
+    participant DC as Deployment Controller
+    participant SC as Scheduler
+    participant KL as Kubelet
+    K->>A: POST /apis/apps/v1/deployments
+    A->>A: Authenticate - certs tokens OIDC
+    A->>A: Authorize - RBAC check
+    A->>A: Mutating admission webhooks
+    A->>A: Validating admission webhooks
+    A->>E: persist Deployment object
+    E-->>A: stored at revision N
+    A-->>K: 201 Created
+    DC->>A: watch event - new Deployment
+    DC->>A: create ReplicaSet
+    SC->>A: watch event - unscheduled Pod
+    SC->>A: bind Pod to Node X
+    KL->>A: watch event - Pod assigned to me
+    KL->>KL: pull image start container
+    KL->>A: update Pod status Running`,
     },
     {
-      title: "Kubernetes Component Mind Map",
+      title: "Reconciliation Loop Pattern",
+      kind: "flow",
+      caption: "Every Kubernetes controller follows the same level-triggered loop: compare desired state to actual state, take corrective action, and repeat. This makes controllers self-healing.",
+      mermaid: `flowchart TD
+    A["Desired State in etcd\neg Deployment replicas: 3"] --> B["Controller watches\nvia informer cache"]
+    B --> C["Observe actual state\ncount running Pods"]
+    C --> D{"Desired == Actual?"}
+    D -->|Yes| E["No action needed\nwait for next change"]
+    D -->|No - too few| F["Create missing Pods"]
+    D -->|No - too many| G["Delete excess Pods"]
+    F --> H["Update actual state\nPods scheduled and running"]
+    G --> H
+    H --> C
+    E --> B`,
+    },
+    {
+      title: "Kubernetes Architecture Concepts",
       kind: "mindmap",
-      caption: "Organized breakdown of all major Kubernetes architectural components",
+      caption: "Key concepts of Kubernetes architecture organized by control plane, worker nodes, and design principles.",
       mermaid: `mindmap
-  root((K8s Architecture))
-    Control Plane
-      kube-apiserver
-        Authentication
-        Authorization / RBAC
-        Admission Controllers
-      etcd
-        Raft Consensus
-        Watch API
-        Snapshot Backups
-      kube-scheduler
-        Filtering Phase
-        Scoring Phase
-        Preemption
-      kube-controller-manager
-        Deployment Controller
-        ReplicaSet Controller
-        Node Controller
-        Job Controller
-    Worker Nodes
-      kubelet
-        CRI Interface
-        Pod Lifecycle
-        Health Probes
-      kube-proxy
-        iptables Mode
-        IPVS Mode
-        eBPF / Cilium
-      Container Runtime
-        containerd
-        CRI-O
-    Key Concepts
-      Reconciliation Loop
-      Declarative Model
-      Level-triggered Design
-      Operator Pattern`
-    }
+    root((K8s Architecture))
+      Control Plane
+        kube-apiserver
+          Single entry point for all state
+          Authentication and RBAC
+          Admission controllers
+        etcd
+          Raft consensus
+          Watch API streams changes
+          Only API server writes directly
+        kube-scheduler
+          Filter eligible nodes
+          Score and rank
+          Preemption for priority pods
+        kube-controller-manager
+          Deployment and ReplicaSet
+          Node health and eviction
+          Job and CronJob
+      Worker Nodes
+        kubelet
+          Enforces Pod specs via CRI
+          Liveness readiness probes
+          Reports node capacity
+        kube-proxy
+          iptables or IPVS rules
+          Service ClusterIP routing
+        Container Runtime
+          containerd or CRI-O
+      Design Principles
+        Declarative desired state
+        Level-triggered controllers
+        Self-healing reconciliation`,
+    },
   ],
   comparison: {
     columns: [

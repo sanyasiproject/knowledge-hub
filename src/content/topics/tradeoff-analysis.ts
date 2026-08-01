@@ -538,110 +538,83 @@ int main() {
   ],
   diagrams: [
     {
-      title: "CAP Theorem Decision Space",
+      title: "System Design Trade-off Dimensions",
       kind: "mindmap",
-      caption: "Visualizing the CAP theorem trade-off space with real-world system examples",
+      caption: "Common architectural trade-off axes encountered in system design and distributed systems.",
       mermaid: `mindmap
-  root((CAP Theorem))
-    CP Systems
-      Strong Consistency
-      May reject requests during partitions
-      Examples
-        HBase
-        MongoDB (default)
-        etcd / ZooKeeper
-        Spanner
-      Use Cases
-        Financial transactions
-        Inventory management
-        Distributed locks
-    AP Systems
-      High Availability
-      May serve stale data during partitions
-      Examples
-        Cassandra
-        DynamoDB
-        CouchDB
-        Riak
-      Use Cases
-        Social media feeds
-        Shopping carts
-        DNS
-        Session stores
-    Partition Tolerance
-      Network partitions are inevitable
-      Cannot be sacrificed in distributed systems
-      Must choose between C and A`,
+  root((Trade-offs))
+    Consistency vs Availability
+      CAP theorem
+      Strong vs eventual
+    Latency vs Throughput
+      Batching
+      Response time
+    Read vs Write Optimization
+      Indexes
+      Denormalization
+    Space vs Time
+      Caching
+      Precomputation
+    Simplicity vs Scalability
+      Monolith vs microservices
+      Premature optimization`,
     },
     {
-      title: "PACELC Decision Flow",
+      title: "CAP Theorem Decision",
       kind: "flow",
-      caption: "Decision flowchart for choosing consistency model based on PACELC",
+      caption: "How to navigate the CAP theorem when designing a distributed system under network partition.",
       mermaid: `flowchart TD
-    A[System Design Decision] --> B{Network Partition?}
-    B -->|Yes - Partition| C{Priority?}
-    C -->|Consistency| D[CP: Reject requests\\nuntil partition heals]
-    C -->|Availability| E[AP: Serve requests\\nwith possibly stale data]
-    B -->|No - Normal Operation| F{Priority?}
-    F -->|Consistency| G[EC: Synchronous replication\\nHigher latency, strong reads]
-    F -->|Latency| H[EL: Async replication\\nLower latency, eventual consistency]
-
-    D --> I[Example: Banking transfers\\nZooKeeper, etcd]
-    E --> J[Example: Social feeds\\nCassandra, DynamoDB]
-    G --> K[Example: Inventory counts\\nSpanner, CockroachDB]
-    H --> L[Example: Analytics dashboards\\nRedis replicas, CDN caches]
-
-    style D fill:#ff6b6b,color:#fff
-    style E fill:#4ecdc4,color:#fff
-    style G fill:#ff6b6b,color:#fff
-    style H fill:#4ecdc4,color:#fff`,
+    A([Network Partition Occurs]) --> B{Which guarantee
+do you prioritize?}
+    B -->|Consistency| C["Reject requests
+or block until consistent
+CP system"]
+    B -->|Availability| D["Serve stale or
+potentially inconsistent data
+AP system"]
+    C --> E["HBase, Zookeeper
+banking transactions"]
+    D --> F["DynamoDB, Cassandra
+shopping carts, DNS"]`,
     },
     {
-      title: "Latency vs. Throughput Under Load",
-      kind: "flow",
-      caption: "How latency degrades non-linearly as utilization approaches capacity (queueing theory)",
-      mermaid: `flowchart LR
-    subgraph Utilization["System Utilization"]
-        U30["30% util\\n~1.4x base latency"]
-        U50["50% util\\n~2x base latency"]
-        U70["70% util\\n~3.3x base latency"]
-        U90["90% util\\n~10x base latency"]
-        U99["99% util\\n~100x base latency"]
+      title: "Normalization vs Denormalization",
+      kind: "architecture",
+      caption: "Database design trade-off between normalized schema for write efficiency and denormalized for read speed.",
+      mermaid: `graph LR
+    subgraph Normalized
+    U["Users table"] --> O["Orders table"]
+    O --> I["Items table"]
     end
-
-    subgraph Strategy["Mitigation Strategy"]
-        S1["Load shedding at 80%"]
-        S2["Auto-scaling trigger at 60%"]
-        S3["Circuit breaker at 90%"]
-        S4["Backpressure / rate limiting"]
+    subgraph Denormalized
+    DO["orders_flat
+user_name, order_id,
+item_name, total"]
     end
-
-    U30 --> U50 --> U70 --> U90 --> U99
-    U70 -->|Trigger| S2
-    U90 -->|Trigger| S1
-    U90 -->|Trigger| S3
-    U99 -->|Trigger| S4`,
+    Normalized -->|faster writes
+no duplication| Norm["OLTP workloads"]
+    Denormalized -->|faster reads
+no joins needed| Denorm["OLAP and analytics"]`,
     },
     {
-      title: "Trade-off Decision Matrix",
-      kind: "flow",
-      caption: "Framework for evaluating architectural trade-offs systematically",
-      mermaid: `flowchart TD
-    A["1. Define Options"] --> B["2. List Evaluation Criteria"]
-    B --> C["3. Weight Criteria by Business Impact"]
-    C --> D["4. Score Each Option"]
-    D --> E{"Dominant Option?"}
-    E -->|Yes| F["Document in ADR"]
-    E -->|No - Close scores| G["Prototype / Benchmark"]
-    G --> H["Measure Real Performance"]
-    H --> F
-    F --> I["5. Record Trade-offs Accepted"]
-    I --> J["6. Define Revisit Conditions"]
-    J --> K["Periodic Review"]
-
-    style A fill:#3498db,color:#fff
-    style F fill:#2ecc71,color:#fff
-    style K fill:#e74c3c,color:#fff`,
+      title: "Caching Trade-off Sequence",
+      kind: "sequence",
+      caption: "Cache-aside pattern showing the consistency trade-off between serving stale data and cache invalidation.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant Ca as Cache
+    participant DB as Database
+    C->>Ca: GET user:123
+    Ca-->>C: MISS
+    C->>DB: SELECT user 123
+    DB-->>C: user data
+    C->>Ca: SET user:123 TTL=60s
+    Note over Ca: data may become stale
+    C->>Ca: GET user:123
+    Ca-->>C: HIT - possibly stale
+    Note over DB: user updated in DB
+    C->>Ca: DEL user:123
+    Note over Ca: next read will refresh`,
     },
   ],
   exercises: [

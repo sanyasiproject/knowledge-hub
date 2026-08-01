@@ -424,82 +424,91 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Consistency Model Spectrum",
-      kind: "flow" as const,
-      caption: "Consistency models ordered from strongest to weakest, showing the trade-off between consistency guarantees and availability/performance",
-      mermaid: `flowchart LR
-    L["Linearizability<br/><i>Strongest</i><br/>Spanner, etcd"] --> SS["Strict<br/>Serializability"]
-    SS --> SC["Sequential<br/>Consistency"]
-    SC --> CC["Causal<br/>Consistency<br/>COPS, MongoDB"]
-    CC --> RYW["Read-Your-Writes<br/><i>Session guarantee</i>"]
-    RYW --> MR["Monotonic Reads<br/><i>Session guarantee</i>"]
-    MR --> EC["Eventual<br/>Consistency<br/><i>Weakest</i><br/>DynamoDB, Cassandra"]
-
-    style L fill:#d32f2f,color:#fff
-    style EC fill:#388e3c,color:#fff
-    style CC fill:#f57c00,color:#fff`
+      title: "Consistency Model Taxonomy",
+      kind: "mindmap",
+      caption: "Consistency models grouped by strength: strong models guarantee real-time ordering, session models provide per-client guarantees, and eventual models prioritize availability.",
+      mermaid: `mindmap
+  root["Consistency Models"]
+    Strong Models
+      Linearizability
+        Real-time ordering
+        Spanner etcd
+      Strict Serializability
+        Transactions ordered
+        FaunaDB
+      Sequential Consistency
+        Global order exists
+        Lamport clocks
+    Session Models
+      Read-Your-Writes
+        See own writes
+      Monotonic Reads
+        No time travel reads
+      Monotonic Writes
+        Ordered own writes
+    Weak Models
+      Causal Consistency
+        Cause before effect
+        MongoDB sessions
+      Eventual Consistency
+        Converges over time
+        DynamoDB Cassandra`,
     },
     {
-      title: "Quorum Read/Write Protocol",
-      kind: "sequence" as const,
-      caption: "How quorum-based replication achieves strong consistency with N=3, W=2, R=2 ensuring R+W > N",
+      title: "Quorum Read and Write Sequence",
+      kind: "sequence",
+      caption: "With N=3, W=2, R=2, writing to a quorum and reading from a quorum guarantees overlap since R+W exceeds N, ensuring strong consistency.",
       mermaid: `sequenceDiagram
     participant C as Client
     participant R1 as Replica 1
     participant R2 as Replica 2
     participant R3 as Replica 3
 
-    Note over C,R3: Write x=42 (W=2 quorum)
-    C->>R1: Write(x=42, v=5)
-    C->>R2: Write(x=42, v=5)
-    C->>R3: Write(x=42, v=5)
-    R1-->>C: ACK v=5
-    R2-->>C: ACK v=5
-    Note over C: 2 ACKs received (W=2) → committed
-    R3-->>C: ACK v=5 (late, already committed)
-
-    Note over C,R3: Read x (R=2 quorum)
-    C->>R1: Read(x)
-    C->>R2: Read(x)
-    R1-->>C: x=42, v=5
-    R2-->>C: x=42, v=5
-    Note over C: Return highest version → x=42
-    Note over C,R3: R+W=4 > N=3 → guaranteed overlap`
+    Note over C,R3: Write quorum W=2
+    C->>R1: Write x=42 v=5
+    C->>R2: Write x=42 v=5
+    C->>R3: Write x=42 v=5
+    R1-->>C: ACK
+    R2-->>C: ACK
+    Note over C: 2 ACKs received - committed
+    Note over C,R3: Read quorum R=2
+    C->>R1: Read x
+    C->>R2: Read x
+    R1-->>C: x=42 v=5
+    R2-->>C: x=42 v=5
+    Note over C: Return highest version x=42`,
     },
     {
-      title: "CAP and PACELC Classification of Distributed Databases",
-      kind: "mindmap" as const,
-      caption: "Real-world distributed databases classified by their CAP and PACELC trade-off choices",
-      mermaid: `mindmap
-  root((Distributed DB<br/>Trade-offs))
-    CP Systems
-      Spanner
-        External consistency
-        TrueTime
-      etcd / ZooKeeper
-        Raft consensus
-        Leader-based reads
-      CockroachDB
-        Serializable
-        Raft per range
-    AP Systems
-      DynamoDB
-        Eventual default
-        Strong reads optional
-      Cassandra
-        Tunable consistency
-        Hinted handoff
-      Riak
-        CRDTs
-        Vector clocks
-    PACELC: Else
-      Low Latency
-        Cassandra ONE
-        DynamoDB eventual
-      Consistency
-        Spanner
-        CockroachDB`
-    }
+      title: "Eventual Consistency Convergence Flow",
+      kind: "flow",
+      caption: "In an eventually consistent system, concurrent writes on different replicas create temporary divergence that is resolved through anti-entropy and conflict resolution.",
+      mermaid: `flowchart TD
+    Client1["Client A writes x=1"] --> R1["Replica 1 x=1"]
+    Client2["Client B writes x=2"] --> R2["Replica 2 x=2"]
+    R1 -->|"gossip sync"| R2
+    R2 -->|"gossip sync"| R1
+    R1 --> CR{"Conflict resolution"}
+    R2 --> CR
+    CR -->|"LWW last write wins"| Merged1["Both replicas x=2"]
+    CR -->|"CRDT merge"| Merged2["Both replicas merged value"]
+    Merged1 --> Conv["System converged"]
+    Merged2 --> Conv`,
+    },
+    {
+      title: "CAP Theorem Database Classification",
+      kind: "architecture",
+      caption: "Distributed databases classified by their CAP trade-off: CP systems choose consistency over availability during partitions, AP systems choose availability.",
+      mermaid: `graph TB
+    CAP["CAP Theorem - pick 2 of 3"]
+    CAP --> CP["CP - Consistent and Partition-tolerant"]
+    CAP --> AP["AP - Available and Partition-tolerant"]
+    CP --> etcd["etcd - Raft consensus"]
+    CP --> Spanner["Spanner - TrueTime"]
+    CP --> Zookeeper["ZooKeeper - ZAB protocol"]
+    AP --> Cassandra["Cassandra - tunable consistency"]
+    AP --> DynamoDB["DynamoDB - eventual default"]
+    AP --> CouchDB["CouchDB - multi-master MVCC"]`,
+    },
   ],
   comparison: {
     columns: ["Property", "Linearizability", "Sequential", "Causal", "Eventual"],

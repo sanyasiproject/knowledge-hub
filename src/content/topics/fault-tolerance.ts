@@ -446,52 +446,49 @@ async function resilientCall<T>(fn: () => Promise<T>): Promise<T> {
     {
       title: "Circuit Breaker State Machine",
       kind: "state",
-      caption: "Transitions between **Closed**, **Open**, and **Half-Open** states based on failure thresholds and recovery probes.",
+      caption: "Transitions between Closed, Open, and Half-Open states based on failure thresholds and recovery probes.",
       mermaid: `stateDiagram-v2
     [*] --> Closed
-    Closed --> Open : Failure count >= threshold
+    Closed --> Open : Failure count reaches threshold
     Open --> HalfOpen : Timeout expires
-    HalfOpen --> Closed : Success count >= threshold
-    HalfOpen --> Open : Any failure
-    Closed --> Closed : Success (reset counter)
-    Open --> Open : Request (fail fast)`,
+    HalfOpen --> Closed : Probe succeeds
+    HalfOpen --> Open : Probe fails
+    Closed --> Closed : Success resets counter
+    Open --> Open : Requests fail fast`,
     },
     {
-      title: "Failover Architecture with Health Checks",
+      title: "Active-Passive Failover Architecture",
       kind: "architecture",
-      caption: "Active-passive failover topology showing **health monitor**, **primary**, **standby**, and **shared storage** interactions.",
+      caption: "Active-passive failover topology with health monitor detecting primary failure and triggering failover.",
       mermaid: `graph TB
     Client["Client Requests"] --> LB["Load Balancer"]
-    LB --> Primary["Primary Node"]
-    LB -.->|failover| Standby["Standby Node"]
-    Primary -->|sync replication| Standby
+    LB --> Primary["Primary Node\nactive"]
+    LB -.->|"failover"| Standby["Standby Node\npassive"]
+    Primary -->|"sync replication"| Standby
     Primary --> Storage["Shared Storage"]
     Standby --> Storage
-    HM["Health Monitor"] -->|heartbeat| Primary
-    HM -->|heartbeat| Standby
-    HM -->|trigger failover| LB
-    style Primary fill:#4CAF50,color:#fff
-    style Standby fill:#FF9800,color:#fff
-    style HM fill:#2196F3,color:#fff`,
+    HM["Health Monitor"] -->|"heartbeat"| Primary
+    HM -->|"heartbeat"| Standby
+    HM -->|"trigger failover"| LB`,
     },
     {
-      title: "Retry with Exponential Backoff Flow",
+      title: "Retry with Exponential Backoff",
       kind: "flow",
-      caption: "Decision flow for retrying failed requests with **exponential backoff** and **jitter** to avoid thundering herd.",
+      caption: "Decision flow for retrying failed requests with exponential backoff and jitter to prevent thundering herd.",
       mermaid: `flowchart TD
-    A["Send Request"] --> B{"Success?"}
+    A["Send Request"] --> B{Success?}
     B -->|Yes| C["Return Response"]
-    B -->|No| D{"Retries Exhausted?"}
-    D -->|Yes| E["Throw / Return Error"]
-    D -->|No| F["Calculate Delay: base * 2^attempt"]
-    F --> G["Add Random Jitter"]
-    G --> H["Wait delay + jitter"]
+    B -->|No| D{Retries Exhausted?}
+    D -->|Yes| E["Throw or Return Error"]
+    D -->|No| F["Calculate delay: base * 2 ^ attempt"]
+    F --> G["Add random jitter"]
+    G --> H["Wait for delay + jitter"]
     H --> A`,
     },
     {
-      title: "Fault Tolerance Concepts Mind Map",
+      title: "Fault Tolerance Patterns Overview",
       kind: "mindmap",
-      caption: "Overview of **fault tolerance** strategies, failure modes, and resilience patterns.",
+      caption: "Key fault tolerance strategies, failure modes, and resilience patterns at a glance.",
       mermaid: `mindmap
   root((Fault Tolerance))
     Failure Modes
@@ -503,15 +500,10 @@ async function resilientCall<T>(fn: () => Promise<T>): Promise<T> {
       Active-Active
       Active-Passive
       Quorum-based
-    Failover
-      Cold
-      Warm
-      Hot
-      DNS
     Resilience Patterns
       Circuit Breaker
       Bulkhead
-      Retry + Backoff
+      Retry and Backoff
       Load Shedding
       Fallback
     Replication

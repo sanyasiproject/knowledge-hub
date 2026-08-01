@@ -438,60 +438,65 @@ public:
   ],
   diagrams: [
     {
-      title: "Behavioral Answer Decision Flow",
+      title: "STAR Answer Framework",
       kind: "flow",
-      caption: "How to select and structure the right story for any behavioral question: from identifying the competency being tested, to choosing the best-fit story from your matrix, to structuring the answer with appropriate time allocation, to reading interviewer signals and adjusting.",
+      caption: "The STAR framework for structuring compelling answers to behavioral interview questions.",
       mermaid: `flowchart TD
-    A["**Hear the Question**"] --> B{"**Identify the\\nCompetency Being Tested**"}
-    B -->|"*Conflict*"| C["Empathy & Resolution"]
-    B -->|"*Failure*"| D["Self-Awareness & Growth"]
-    B -->|"*Leadership*"| E["Initiative & Influence"]
-    B -->|"*Pressure*"| F["Prioritization & Composure"]
-    B -->|"*Collaboration*"| G["Empathy & Translation"]
-    C --> H{"**Select Best Story\\nfrom Matrix**"}
-    D --> H
-    E --> H
-    F --> H
-    G --> H
-    H --> I["**Structure with STAR**\\n*S: 10% | T: 10%*\\n*A: 50% | R: 30%*"]
-    I --> J{"**Deliver Answer\\n(1.5-2.5 min)**"}
-    J -->|"Interviewer nodding"| K["*Continue with detail*"]
-    J -->|"Interviewer ready to speak"| L["*Wrap up concisely*"]
-    K --> M["**Land the Result**\\n*Quantified outcome*"]
-    L --> M
-    M --> N["**Check In**\\n*Offer to go deeper*"]`,
+    A["Behavioral Question"] --> B["Situation\nSet the context briefly"]
+    B --> C["Task\nDescribe your responsibility"]
+    C --> D["Action\nExplain what YOU did"]
+    D --> E["Result\nShare measurable outcome"]
+    E --> F{"Strong Answer?"}
+    F -->|No| G["Add metrics or impact"]
+    F -->|No| H["Clarify your specific role"]
+    G & H --> E
+    F -->|Yes| I["Transition to follow-up"]`,
     },
     {
-      title: "Behavioral Question Category Mindmap",
+      title: "Behavioral Question Categories",
       kind: "mindmap",
-      caption: "Central node: Behavioral Questions. Branches: Conflict (sub: peer, manager, cross-team), Failure (sub: technical, judgment, process), Leadership (sub: with authority, without authority, cultural), Pressure (sub: deadlines, ambiguity, competing priorities), Collaboration (sub: cross-functional, remote, stakeholder management). Each leaf links to the core competency being assessed.",
+      caption: "Common behavioral question themes mapped to the competencies they assess in engineering interviews.",
       mermaid: `mindmap
-  root(("**Behavioral Questions**"))
-    ("**Conflict Resolution**")
-      ("*Peer disagreements*")
-      ("*Manager conflicts*")
-      ("*Cross-team tension*")
-      ::icon(Tests: **Emotional Intelligence**)
-    ("**Handling Failure**")
-      ("*Technical mistakes*")
-      ("*Judgment errors*")
-      ("*Process failures*")
-      ::icon(Tests: **Self-Awareness**)
-    ("**Leadership & Initiative**")
-      ("*With authority*")
-      ("*Without authority*")
-      ("*Cultural leadership*")
-      ::icon(Tests: **Influence & Drive**)
-    ("**Working Under Pressure**")
-      ("*Tight deadlines*")
-      ("*Ambiguity*")
-      ("*Competing priorities*")
-      ::icon(Tests: **Strategic Thinking**)
-    ("**Cross-Team Collaboration**")
-      ("*Cross-functional projects*")
-      ("*Remote collaboration*")
-      ("*Stakeholder management*")
-      ::icon(Tests: **Empathy & Translation**)`,
+  root((Behavioral Questions))
+    Teamwork
+      Conflict resolution
+      Cross-team collaboration
+      Mentoring others
+    Leadership
+      Influencing without authority
+      Driving alignment
+      Making hard decisions
+    Problem Solving
+      Ambiguous situations
+      Technical trade-offs
+      Debugging under pressure
+    Failure and Growth
+      Biggest mistake
+      What you learned
+      Receiving feedback
+    Delivery
+      Meeting deadlines
+      Prioritization
+      Going above and beyond`,
+    },
+    {
+      title: "Interview Preparation Sequence",
+      kind: "sequence",
+      caption: "Recommended preparation sequence for practicing behavioral questions before an interview.",
+      mermaid: `sequenceDiagram
+    participant Cand as Candidate
+    participant Bank as Story Bank
+    participant Peer as Mock Interviewer
+    participant Feedback as Self Review
+    Cand->>Bank: List 10 past experiences
+    Cand->>Bank: Map to STAR format
+    Bank-->>Cand: Structured stories ready
+    Cand->>Peer: Practice 3 stories aloud
+    Peer-->>Cand: Timing and clarity feedback
+    Cand->>Feedback: Review recordings
+    Feedback-->>Cand: Identify filler words and gaps
+    Cand->>Bank: Refine and tighten stories
+    Cand->>Peer: Final run-through`,
     },
   ],
   animations: [

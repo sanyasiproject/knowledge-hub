@@ -149,16 +149,133 @@ int main() {
   ],
   diagrams: [
     {
-      title: "5-stage instruction pipeline",
-      kind: "flow",
-      caption:
-        "Classic RISC pipeline stages: Instruction Fetch (IF), Instruction Decode (ID), Execute (EX), Memory Access (MEM), and Write-Back (WB), showing how multiple instructions overlap across clock cycles.",
+      title: "CPU Internal Architecture",
+      kind: "architecture",
+      caption: "Internal structure of a modern CPU showing the ALU, control unit, register file, and cache hierarchy with their interconnections.",
+      mermaid: `flowchart TB
+    subgraph CPU["CPU Die"]
+        subgraph Frontend["Front End"]
+            ICache["L1 Instruction Cache\n32 KB"]
+            Fetch["Instruction Fetch\nBranch Predictor"]
+            Decode["Decode\nCISC to uops"]
+        end
+
+        subgraph Backend["Back End"]
+            RenameDispatch["Register Rename\nand Dispatch"]
+            RS["Reservation Stations\nwait for operands"]
+            ALU1["ALU 1\nInteger"]
+            ALU2["ALU 2\nInteger"]
+            FPU["FPU\nFloat and SIMD"]
+            LSU["Load Store Unit"]
+            ROB["Reorder Buffer\ncommit in order"]
+        end
+
+        DCache["L1 Data Cache\n32 KB"]
+        L2["L2 Cache\n256 KB"]
+    end
+
+    L3["L3 Cache - shared\n8-32 MB"]
+    DRAM["Main Memory - DRAM\nGBs"]
+
+    ICache --> Fetch --> Decode --> RenameDispatch
+    RenameDispatch --> RS
+    RS --> ALU1
+    RS --> ALU2
+    RS --> FPU
+    RS --> LSU
+    ALU1 --> ROB
+    ALU2 --> ROB
+    FPU --> ROB
+    LSU --> DCache
+    DCache --> L2 --> L3 --> DRAM`,
     },
     {
-      title: "Von Neumann vs Harvard architecture",
-      kind: "architecture",
-      caption:
-        "Side-by-side comparison showing the single-bus Von Neumann bottleneck versus the dual-bus Harvard design with separate instruction and data memories.",
+      title: "5-Stage Pipeline Execution Flow",
+      kind: "flow",
+      caption: "Classic RISC 5-stage pipeline showing how instructions overlap in IF, ID, EX, MEM, and WB stages across clock cycles.",
+      mermaid: `flowchart LR
+    subgraph Cycle1["Clock Cycle"]
+        IF["Instruction Fetch\nLoad instruction from I-Cache\nIncrement PC"]
+        ID["Instruction Decode\nRead opcode and operands\nFetch register values"]
+        EX["Execute\nALU operation\nCompute address"]
+        MEM["Memory Access\nLoad from D-Cache\nStore to D-Cache"]
+        WB["Write Back\nWrite result to\nregister file"]
+    end
+
+    IF --> ID --> EX --> MEM --> WB
+
+    subgraph Hazards["Hazard Handling"]
+        RAW["RAW Data Hazard\nForwarding from EX to EX\nor stall pipeline"]
+        Control["Control Hazard\nBranch prediction\nor flush on mispredict"]
+        Structural["Structural Hazard\nDuplicate resources\nor stall"]
+    end`,
+    },
+    {
+      title: "CPU Architecture Concepts",
+      kind: "mindmap",
+      caption: "Key CPU architecture concepts grouped by design philosophy, pipeline mechanics, hazard types, and performance techniques.",
+      mermaid: `mindmap
+  root["CPU Architecture"]
+    Design Philosophies
+      Von Neumann
+        Shared instruction and data memory
+        Single bus bottleneck
+      Harvard
+        Separate instruction and data memory
+        No bottleneck
+      Modified Harvard
+        Split L1 caches
+        Unified main memory
+    Instruction Sets
+      CISC - x86
+        Variable length instructions
+        Many addressing modes
+        Internally decoded to uops
+      RISC - ARM RISC-V
+        Fixed length 4 bytes
+        Load-store only
+        Easier to pipeline
+    Pipeline Mechanics
+      Fetch Decode Execute
+      Superscalar - multi-issue
+      Out-of-Order Execution
+      Register Renaming
+      Reorder Buffer
+    Hazards
+      Data - RAW WAR WAW
+      Control - branches
+      Structural - resource conflict
+    Performance
+      Branch Prediction
+      Hardware Prefetcher
+      Store-to-Load Forwarding
+      SIMD Parallelism`,
+    },
+    {
+      title: "Out-of-Order Execution Sequence",
+      kind: "sequence",
+      caption: "How an out-of-order CPU fetches, renames, dispatches, executes, and retires instructions while hiding latency.",
+      mermaid: `sequenceDiagram
+    participant FE as Front End
+    participant RN as Rename Unit
+    participant RS as Reservation Station
+    participant ALU as ALU
+    participant ROB as Reorder Buffer
+
+    FE->>RN: Decoded uops in program order
+    RN->>RN: Map arch regs to physical regs
+    RN->>RS: Dispatch uops with physical reg ids
+    RN->>ROB: Allocate entry - keep program order
+
+    Note over RS,ALU: Out-of-order execution
+    RS->>ALU: Issue uop when all operands ready
+    ALU->>RS: Broadcast result to waiting uops
+    ALU->>ROB: Mark entry complete
+
+    Note over ROB: In-order retirement
+    ROB->>ROB: Retire oldest completed entry
+    ROB->>ROB: Free physical register
+    ROB->>ROB: Commit architectural state`,
     },
   ],
   animations: [

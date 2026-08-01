@@ -260,18 +260,85 @@ GET /_cat/recovery/products-split?v&h=index,shard,stage,bytes_percent`
     {
       title: "Elasticsearch Cluster Architecture",
       kind: "architecture",
-      caption: "A production cluster with dedicated master nodes (3 for quorum), hot/warm/cold data nodes for tiered storage, coordinating nodes for request routing, and ingest nodes for pipeline processing. Each index is split into primary shards distributed across data nodes, with replicas on different nodes."
-    },
-    {
-      title: "Shard Allocation and Awareness",
-      kind: "architecture",
-      caption: "Shards are distributed across nodes respecting allocation awareness (e.g., availability zones). Primary shard P0 on zone-a, replica R0 on zone-b. The allocation decider framework prevents primary and replica from co-locating on the same node or zone."
+      mermaid: `graph TD
+    subgraph Masters["Master Nodes - 3 for quorum"]
+      M1["master-1"]
+      M2["master-2"]
+      M3["master-3"]
+    end
+    subgraph Hot["Hot Data Nodes - SSD"]
+      D1["data-hot-1\nPrimary shards\nActive writes"]
+      D2["data-hot-2\nPrimary shards\nActive writes"]
+    end
+    subgraph Warm["Warm Data Nodes - HDD"]
+      D3["data-warm-1\nReplica shards\nRead-heavy"]
+    end
+    subgraph Coord["Coordinating Nodes"]
+      C1["coordinating-1\nRoute requests\nMerge results"]
+    end
+    Client["Client"] --> C1
+    C1 --> D1
+    C1 --> D2
+    C1 --> D3
+    M1 <-->|Raft consensus| M2
+    M2 <-->|Raft consensus| M3`,
+      caption: "Dedicated master nodes manage cluster state; coordinating nodes route queries; hot and warm data nodes serve tiered storage tiers.",
     },
     {
       title: "Index Lifecycle Management Phases",
       kind: "flow",
-      caption: "Index progresses through phases: Hot (active writes, fast storage) -> Warm (read-only, cheaper storage) -> Cold (searchable snapshots, minimal local disk) -> Frozen (shared-cache snapshots, near-zero local storage) -> Delete (removed after retention period)."
-    }
+      mermaid: `flowchart LR
+    Hot["HOT phase\nActive writes\nFast SSD\nRollover on size or age"]
+    Warm["WARM phase\nRead-only\nShrink and forcemerge\nCheaper storage"]
+    Cold["COLD phase\nInfrequent access\nSearchable snapshots\nMinimal local disk"]
+    Frozen["FROZEN phase\nRarely accessed\nShared cache snapshots\nNear-zero local storage"]
+    Delete["DELETE phase\nRetention period expired\nIndex removed"]
+    Hot -->|Rollover threshold met| Warm
+    Warm -->|Age threshold| Cold
+    Cold -->|Age threshold| Frozen
+    Frozen -->|Retention expired| Delete`,
+      caption: "ILM automatically moves indices through tiers as data ages, balancing query performance with storage cost.",
+    },
+    {
+      title: "Shard Allocation and Failure Recovery",
+      kind: "sequence",
+      mermaid: `sequenceDiagram
+    participant Master as Master Node
+    participant N1 as Node 1
+    participant N2 as Node 2
+    participant N3 as Node 3
+    Note over N1,N3: Normal green state
+    N2->>Master: Node 2 unreachable
+    Note over Master: Cluster health turns RED
+    Master->>N3: Promote replica R1 to primary P1
+    Note over Master: Cluster health turns YELLOW
+    Master->>N1: Allocate new replica R0 on node 1
+    Master->>N3: Allocate new replica R1 on node 3
+    N1->>N1: Peer recovery from primary
+    N3->>N3: Peer recovery from primary
+    Note over Master: Cluster health returns GREEN
+    N2->>Master: Node 2 rejoins cluster
+    Master->>N2: Rebalance shards across 3 nodes`,
+      caption: "On node failure the master promotes replicas and reallocates missing shards; recovery proceeds in the background until cluster returns to green.",
+    },
+    {
+      title: "Elasticsearch Write Path",
+      kind: "flow",
+      mermaid: `flowchart TD
+    Client["Client indexing request"] --> Coord["Coordinating Node\nRoutes to primary shard"]
+    Coord --> Primary["Primary Shard Node\nValidates and indexes document"]
+    Primary --> Trans["Write to translog\nfsync if requested"]
+    Primary --> Memory["Update in-memory\nLucene index buffer"]
+    Primary --> Replica1["Replicate to Replica 1"]
+    Primary --> Replica2["Replicate to Replica 2"]
+    Replica1 --> Ack1["ACK"]
+    Replica2 --> Ack2["ACK"]
+    Ack1 --> WC{"Write concern\nmet?"}
+    Ack2 --> WC
+    WC -->|Yes| Client2["Acknowledge client"]
+    Memory -->|Refresh every 1s| Searchable["Document searchable"]`,
+      caption: "Writes go to the primary shard, replicate in parallel to replicas, and acknowledge the client when the configured write concern is satisfied.",
+    },
   ],
 
   animations: [

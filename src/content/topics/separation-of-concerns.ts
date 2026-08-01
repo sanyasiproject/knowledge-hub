@@ -236,15 +236,92 @@ int main() {
 
   diagrams: [
     {
-      title: "Horizontal vs Vertical Slicing",
+      title: "Layered Architecture Separation",
       kind: "architecture",
-      caption: "Horizontal layers slice by technical concern (presentation, business, data). Vertical slices cut through all layers per feature, creating independent feature modules."
+      caption: "Classic N-tier architecture enforcing separation of concerns: presentation, business logic, and data access layers each have distinct responsibilities.",
+      mermaid: `graph TD
+    subgraph Presentation["Presentation Layer"]
+      UI[UI Components]
+      Controller[Controllers]
+    end
+    subgraph Business["Business Logic Layer"]
+      Service[Services]
+      Domain[Domain Models]
+      Rules[Business Rules]
+    end
+    subgraph Data["Data Access Layer"]
+      Repo[Repositories]
+      ORM[ORM - Query Builder]
+      DB[(Database)]
+    end
+    Presentation --> Business
+    Business --> Data`,
     },
     {
-      title: "MVC / MVP / MVVM Pattern Comparison",
-      kind: "flow",
-      caption: "Data and control flow differences: MVC has triangular communication, MVP routes everything through the Presenter, and MVVM uses two-way data binding between View and ViewModel."
-    }
+      title: "MVC Pattern Responsibilities",
+      kind: "sequence",
+      caption: "Model-View-Controller pattern separating data management, display logic, and user interaction handling into distinct components.",
+      mermaid: `sequenceDiagram
+    participant User
+    participant View
+    participant Controller
+    participant Model
+    participant DB as Database
+
+    User->>View: Submits form
+    View->>Controller: HTTP POST /users
+    Controller->>Controller: Validate input
+    Controller->>Model: createUser(data)
+    Model->>DB: INSERT INTO users
+    DB-->>Model: New user record
+    Model-->>Controller: User object
+    Controller-->>View: Redirect with success
+    View-->>User: Success page`,
+    },
+    {
+      title: "Cross-Cutting Concerns",
+      kind: "mindmap",
+      caption: "Cross-cutting concerns span multiple layers and should be handled by dedicated infrastructure code rather than mixed into business logic.",
+      mermaid: `mindmap
+  root((Cross-Cutting Concerns))
+    Logging
+      Request tracing
+      Error logging
+      Audit trails
+    Security
+      Authentication
+      Authorization
+      Input validation
+    Caching
+      Response caching
+      Query caching
+    Error Handling
+      Global exception handling
+      Error formatting
+    Transactions
+      Transaction management
+      Rollback coordination`,
+    },
+    {
+      title: "Violation vs Clean Separation",
+      kind: "architecture",
+      caption: "Contrasting a violation of separation of concerns where business logic leaks into controllers and views, versus a clean separation.",
+      mermaid: `graph TD
+    subgraph Violation["Violation - Mixed Concerns"]
+      VC[Controller with SQL queries]
+      VV[View with business rules]
+      VM[Model with formatting logic]
+      VC --- VV --- VM
+    end
+    subgraph Clean["Clean Separation"]
+      CC[Controller - routing only]
+      CS[Service - business logic]
+      CR[Repository - data access]
+      CV[View - display only]
+      CC --> CS --> CR
+      CC --> CV
+    end`,
+    },
   ],
 
   animations: [

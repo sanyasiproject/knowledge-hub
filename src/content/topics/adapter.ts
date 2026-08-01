@@ -290,16 +290,67 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Object Adapter vs Class Adapter structure",
+      title: "Adapter Pattern Structure",
       kind: "architecture",
-      caption:
-        "Object Adapter uses composition (adapter HAS-A adaptee), while Class Adapter uses inheritance (adapter IS-A adaptee). Object Adapter is more flexible and is the preferred approach.",
+      caption: "Object Adapter uses composition (HAS-A adaptee); the client only sees the Target interface and never touches the Adaptee directly.",
+      mermaid: `flowchart LR
+    CLIENT["Client"]
+    TARGET["Target Interface"]
+    ADAPTER["Adapter"]
+    ADAPTEE["Adaptee"]
+    CLIENT -- "uses" --> TARGET
+    TARGET -- "implemented by" --> ADAPTER
+    ADAPTER -- "delegates to" --> ADAPTEE`,
     },
     {
-      title: "Adapter in hexagonal architecture",
-      kind: "architecture",
-      caption:
-        "Shows how adapters sit at the boundary between the application's ports (interfaces) and external systems, forming an anti-corruption layer that isolates the domain from infrastructure details.",
+      title: "Adapter Call Flow",
+      kind: "sequence",
+      caption: "The client calls the Target interface; the Adapter translates and delegates the call to the Adaptee's incompatible API.",
+      mermaid: `sequenceDiagram
+    participant CL as Client
+    participant AD as Adapter
+    participant AE as Adaptee
+    CL->>AD: request()
+    AD->>AE: specificRequest()
+    AE-->>AD: raw result
+    AD-->>CL: translated result`,
+    },
+    {
+      title: "Adapter in Hexagonal Architecture",
+      kind: "flow",
+      caption: "Adapters implement inbound and outbound ports, isolating domain logic from infrastructure and external systems.",
+      mermaid: `flowchart TD
+    UI["UI Adapter"]
+    REST["REST Adapter"]
+    PORT_IN["Inbound Port"]
+    DOMAIN["Domain Logic"]
+    PORT_OUT["Outbound Port"]
+    DB_AD["DB Adapter"]
+    EXT_AD["External API Adapter"]
+    UI --> PORT_IN
+    REST --> PORT_IN
+    PORT_IN --> DOMAIN
+    DOMAIN --> PORT_OUT
+    PORT_OUT --> DB_AD
+    PORT_OUT --> EXT_AD`,
+    },
+    {
+      title: "Adapter Variants",
+      kind: "mindmap",
+      caption: "The main flavours of the Adapter pattern and the contexts in which each is typically applied.",
+      mermaid: `mindmap
+  root["Adapter Pattern"]
+    Object Adapter
+      Composition
+      Runtime flexibility
+    Class Adapter
+      Multiple inheritance
+      Compile-time binding
+    Two-Way Adapter
+      Both interfaces exposed
+    Pluggable Adapter
+      Abstract hook methods
+      Framework integration`,
     },
   ],
   animations: [

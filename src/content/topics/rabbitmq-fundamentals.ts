@@ -326,85 +326,66 @@ startWorker().catch(console.error);`,
     {
       title: "RabbitMQ AMQP Architecture",
       kind: "architecture",
-      caption: "The core components of RabbitMQ: connections, channels, exchanges, bindings, queues, and consumers.",
+      caption: "Producers publish to exchanges. Exchanges route to queues via bindings. Consumers receive from queues over channels multiplexed on a single TCP connection.",
       mermaid: `graph LR
-  subgraph Client Application
-    Conn[TCP Connection]
-    Ch1[Channel 1]
-    Ch2[Channel 2]
-    Ch3[Channel 3]
-    Conn --> Ch1
-    Conn --> Ch2
-    Conn --> Ch3
-  end
-
-  subgraph RabbitMQ Broker
-    subgraph VHost /production
-      Ex1[Direct Exchange]
-      Ex2[Topic Exchange]
-      Q1[Quorum Queue]
-      Q2[Classic Queue]
-      Q3[Stream Queue]
-      Ex1 -->|binding key: order.new| Q1
-      Ex2 -->|pattern: log.*| Q2
-      Ex2 -->|pattern: event.#| Q3
+    subgraph Producer
+      P[App] --> Conn[TCP Connection]
+      Conn --> Ch[Channel]
     end
-  end
-
-  Ch1 -->|publish| Ex1
-  Ch2 -->|publish| Ex2
-  Ch3 -->|consume| Q1`,
+    Ch --> EX[Exchange]
+    EX -->|binding key| Q1[(Queue A)]
+    EX -->|binding key| Q2[(Queue B)]
+    Q1 --> Con1[Consumer 1]
+    Q2 --> Con2[Consumer 2]`,
     },
     {
-      title: "Connection and Channel Lifecycle",
+      title: "Exchange Types Routing",
+      kind: "flow",
+      caption: "Direct routes by exact routing key. Topic routes by pattern. Fanout ignores keys and broadcasts. Headers matches on message header attributes.",
+      mermaid: `flowchart TD
+    MSG[Message + routing key] --> EX{Exchange Type?}
+    EX -->|direct| D[Match exact key]
+    EX -->|topic| T[Match key pattern]
+    EX -->|fanout| F[Broadcast to all bindings]
+    EX -->|headers| H[Match header attributes]
+    D --> Q1[(Matched Queue)]
+    T --> Q2[(Pattern Queue)]
+    F --> Q3[(All Bound Queues)]
+    H --> Q4[(Header-matched Queue)]`,
+    },
+    {
+      title: "Message Lifecycle State Machine",
+      kind: "state",
+      caption: "A message moves from published through the exchange, into a queue, and transitions through ready, unacked, and acked states.",
+      mermaid: `stateDiagram-v2
+    [*] --> Published : basic.publish
+    Published --> Routed : Exchange routing
+    Routed --> Ready : Enqueued
+    Ready --> Unacked : Delivered to consumer
+    Unacked --> Acked : basic.ack
+    Unacked --> Requeued : basic.nack / requeue=true
+    Requeued --> Ready
+    Unacked --> DeadLettered : max retries or nack requeue=false
+    Acked --> [*]
+    DeadLettered --> DLX[(Dead Letter Exchange)]`,
+    },
+    {
+      title: "Channel Multiplexing",
       kind: "sequence",
-      caption: "How a client establishes a connection, opens channels, and handles errors independently per channel.",
+      caption: "Multiple logical channels share one TCP connection. Channel isolation means one slow consumer does not block another on the same connection.",
       mermaid: `sequenceDiagram
-  participant App as Client App
-  participant Broker as RabbitMQ Broker
-
-  App->>Broker: TCP connect + AMQP handshake
-  Broker-->>App: connection.tune (frame size, heartbeat)
-  App->>Broker: connection.open (vhost: /production)
-  Broker-->>App: connection.open-ok
-
-  App->>Broker: channel.open (channel 1)
-  Broker-->>App: channel.open-ok
-  App->>Broker: channel.open (channel 2)
-  Broker-->>App: channel.open-ok
-
-  App->>Broker: queue.declare on channel 1
-  Broker-->>App: queue.declare-ok
-
-  Note over App,Broker: Channel 2 error (e.g. redeclare mismatch)
-  Broker->>App: channel.close (channel 2 only)
-  Note over App: Channel 1 still active
-  App->>Broker: basic.publish on channel 1
-  Broker-->>App: basic.ack`,
-    },
-    {
-      title: "Queue Types Comparison",
-      kind: "mindmap",
-      caption: "Overview of RabbitMQ queue types and their key characteristics.",
-      mermaid: `mindmap
-  root((Queue Types))
-    Classic Queue
-      Single node
-      Fastest performance
-      No built-in replication
-      Supports all features
-    Quorum Queue
-      Raft consensus
-      Multi-node replication
-      Majority write confirmation
-      x-delivery-limit support
-      Recommended for production
-    Stream Queue
-      Append-only log
-      Offset-based consumption
-      Non-destructive reads
-      High fan-out
-      Time-based retention`,
+    participant P as Producer App
+    participant TCP as TCP Connection
+    participant Ch1 as Channel 1
+    participant Ch2 as Channel 2
+    participant Broker as RabbitMQ Broker
+    P->>TCP: open connection
+    TCP->>Ch1: channel.open
+    TCP->>Ch2: channel.open
+    P->>Ch1: basic.publish(order.created)
+    P->>Ch2: basic.publish(user.signup)
+    Broker-->>Ch1: basic.ack
+    Broker-->>Ch2: basic.ack`,
     },
   ],
   comparison: {

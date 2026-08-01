@@ -451,101 +451,79 @@ spec:
 
   diagrams: [
     {
-      title: "Horizontal vs Vertical Scaling Architecture",
+      title: "Horizontal vs Vertical Scaling",
       kind: "architecture",
-      caption: "Comparison of **scale-up** (adding resources to one machine) vs **scale-out** (adding more machines behind a load balancer)",
-      mermaid: `graph TB
-    subgraph Vertical["Vertical Scaling (Scale-Up)"]
-        direction TB
-        Client1["Client Requests"] --> SingleServer["Single Powerful Server<br/>64 CPU / 256 GB RAM / NVMe"]
-        SingleServer --> DB1["Database<br/>(local or remote)"]
-        style SingleServer fill:#4a9eff,stroke:#2d7cd4,color:#fff
+      caption: "Comparing vertical scale-up with horizontal scale-out architectures.",
+      mermaid: `graph TD
+    subgraph Vertical Scaling Scale Up
+        VS1[Small Server] --> VS2[Bigger Server]
+        VS2 --> VS3[Even Bigger Server]
+        VS3 --> VS4[Hardware Limit]
     end
-
-    subgraph Horizontal["Horizontal Scaling (Scale-Out)"]
-        direction TB
-        Client2["Client Requests"] --> LB["Load Balancer<br/>(Nginx / ALB)"]
-        LB --> S1["Instance 1<br/>8 CPU / 16 GB"]
-        LB --> S2["Instance 2<br/>8 CPU / 16 GB"]
-        LB --> S3["Instance 3<br/>8 CPU / 16 GB"]
-        LB --> S4["Instance N<br/>8 CPU / 16 GB"]
-        S1 --> SharedState["Shared State<br/>(Redis / S3 / RDS)"]
-        S2 --> SharedState
-        S3 --> SharedState
-        S4 --> SharedState
-        style LB fill:#ff6b6b,stroke:#d44,color:#fff
-        style S1 fill:#51cf66,stroke:#2b8a3e,color:#fff
-        style S2 fill:#51cf66,stroke:#2b8a3e,color:#fff
-        style S3 fill:#51cf66,stroke:#2b8a3e,color:#fff
-        style S4 fill:#51cf66,stroke:#2b8a3e,color:#fff
+    subgraph Horizontal Scaling Scale Out
+        HS1[Server 1] --> LB[Load Balancer]
+        HS2[Server 2] --> LB
+        HS3[Server 3] --> LB
+        LB --> Clients
     end`,
     },
     {
-      title: "Auto-Scaling Decision Flow",
+      title: "Scaling Strategy Decision",
       kind: "flow",
-      caption: "How an **auto-scaler** decides whether to scale out, scale in, or hold steady based on metrics and cooldown periods",
+      caption: "Decision factors when choosing between horizontal and vertical scaling.",
       mermaid: `flowchart TD
-    A["Collect Metrics<br/>(CPU, memory, latency, queue depth)"] --> B{"Metric > Scale-Out<br/>Threshold?"}
-    B -->|Yes| C{"Cooldown Period<br/>Elapsed?"}
-    C -->|Yes| D["Add Instances<br/>(scale out)"]
-    C -->|No| E["Hold — Wait for<br/>Cooldown"]
-    B -->|No| F{"Metric < Scale-In<br/>Threshold?"}
-    F -->|Yes| G{"Stabilization<br/>Window Passed?"}
-    G -->|Yes| H{"Current Replicas ><br/>Min Replicas?"}
-    H -->|Yes| I["Remove Instances<br/>(scale in)"]
-    H -->|No| J["Hold — At<br/>Minimum"]
-    G -->|No| K["Hold — Wait for<br/>Stabilization"]
-    F -->|No| L["Hold — Within<br/>Normal Range"]
-    D --> M["Update Health Checks<br/>& Service Discovery"]
-    I --> M
-    M --> A`,
+    A[Need more capacity] --> B{Stateless workload?}
+    B -- Yes --> C[Horizontal scaling preferred]
+    C --> D{Session state needed?}
+    D -- Yes --> E[Sticky sessions or shared cache]
+    D -- No --> F[Simple load balancing]
+    B -- No --> G{Can refactor to stateless?}
+    G -- Yes --> C
+    G -- No --> H[Vertical scaling required]
+    H --> I{Hardware limit reached?}
+    I -- Yes --> J[Must refactor architecture]
+    I -- No --> K[Upgrade server resources]`,
     },
     {
-      title: "Stateless Architecture for Horizontal Scaling",
-      kind: "architecture",
-      caption: "How **externalized state** enables truly stateless application instances that can be added or removed freely",
-      mermaid: `graph LR
-    subgraph Clients
-        C1["Mobile App"]
-        C2["Web Browser"]
-        C3["API Consumer"]
-    end
-
-    subgraph LB["Load Balancer Layer"]
-        ALB["Application<br/>Load Balancer"]
-    end
-
-    subgraph AppTier["Stateless App Tier (disposable)"]
-        A1["App Instance 1"]
-        A2["App Instance 2"]
-        A3["App Instance 3"]
-    end
-
-    subgraph StateTier["Externalized State"]
-        Redis["Redis Cluster<br/>(sessions, cache)"]
-        S3["Object Storage<br/>(uploads, assets)"]
-        RDS["Database<br/>(persistent data)"]
-        MQ["Message Queue<br/>(async tasks)"]
-    end
-
-    C1 --> ALB
-    C2 --> ALB
-    C3 --> ALB
-    ALB --> A1
-    ALB --> A2
-    ALB --> A3
-    A1 --> Redis
-    A1 --> S3
-    A1 --> RDS
-    A1 --> MQ
-    A2 --> Redis
-    A2 --> S3
-    A2 --> RDS
-    A2 --> MQ
-    A3 --> Redis
-    A3 --> S3
-    A3 --> RDS
-    A3 --> MQ`,
+      title: "Database Scaling Strategies",
+      kind: "mindmap",
+      caption: "Techniques for scaling databases horizontally and vertically.",
+      mermaid: `mindmap
+  root((DB Scaling))
+    Vertical
+      Bigger instance
+      More RAM
+      Faster SSD
+    Read Replicas
+      Distribute reads
+      Async replication
+    Sharding
+      Horizontal partitioning
+      Range sharding
+      Hash sharding
+    Caching Layer
+      Redis Memcached
+      Cache-aside pattern
+      Write-through
+    CQRS
+      Separate read write models
+      Event sourcing`,
+    },
+    {
+      title: "Load Balancer Routing Algorithms",
+      kind: "flow",
+      caption: "How different load balancing algorithms distribute requests to servers.",
+      mermaid: `flowchart TD
+    A[Incoming Request] --> B[Load Balancer]
+    B --> C{Algorithm?}
+    C -- Round Robin --> D[Next server in rotation]
+    C -- Least Connections --> E[Server with fewest active]
+    C -- IP Hash --> F[Hash client IP to server]
+    C -- Weighted --> G[Proportional to server capacity]
+    D --> S1[Server Pool]
+    E --> S1
+    F --> S1
+    G --> S1`,
     },
   ],
 

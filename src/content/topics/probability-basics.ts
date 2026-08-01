@@ -133,16 +133,64 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Probability distribution family tree",
+      title: "Probability Distribution Family Tree",
       kind: "mindmap",
-      caption:
-        "How common distributions relate: Bernoulli -> Binomial -> Normal (via CLT), Poisson -> Exponential, Uniform as the base case.",
+      caption: "How common distributions relate: Bernoulli to Binomial to Normal via CLT, Poisson to Exponential, Uniform as the base case.",
+      mermaid: `mindmap
+  root((Probability Distributions))
+    Discrete
+      Bernoulli
+        Single trial success or failure
+        Binomial
+          n independent Bernoulli trials
+          Normal via CLT as n grows
+      Poisson
+        Count of events in interval
+        Exponential
+          Time between Poisson events
+      Geometric
+        Trials until first success
+    Continuous
+      Uniform
+        Equal probability on interval
+      Normal / Gaussian
+        Bell curve, mean and variance
+        Standard Normal Z-score
+      Exponential
+        Memoryless waiting times
+      Beta
+        Probability of probabilities`,
     },
     {
-      title: "Conditional probability and the sample space",
+      title: "Bayes Theorem Application Flow",
       kind: "flow",
-      caption:
-        "Venn diagram showing events A and B within sample space S, illustrating P(A|B) as restricting the sample space to B.",
+      caption: "How to apply Bayes theorem to update a prior belief with new evidence and compute a posterior probability.",
+      mermaid: `flowchart TD
+    Prior[Prior P of H\nBelief before evidence] --> Likelihood[Likelihood P of E given H\nHow probable is evidence if H is true]
+    Likelihood --> Marginal[Marginal P of E\nTotal probability of evidence]
+    Marginal --> Posterior[Posterior P of H given E\nUpdated belief after evidence]
+    Posterior --> Q{More evidence available?}
+    Q -->|Yes| NewPrior[Posterior becomes new Prior]
+    NewPrior --> Likelihood
+    Q -->|No| Decision[Use posterior for decision]
+    note1[P of H given E = P of E given H times P of H divided by P of E] -.- Posterior`,
+    },
+    {
+      title: "Independence vs Conditional Dependence",
+      kind: "architecture",
+      caption: "Comparing independent events, mutually exclusive events, and conditionally dependent events in a sample space.",
+      mermaid: `graph TD
+    SS[Sample Space S] --> A[Event A]
+    SS --> B[Event B]
+    A --> AB[Intersection A and B]
+    B --> AB
+    AB --> Indep{Are A and B independent?}
+    Indep -->|P of A and B = P of A times P of B| Yes[Independent\nKnowing B tells us nothing about A]
+    Indep -->|Otherwise| No[Dependent\nKnowing B changes P of A]
+    No --> Cond[Conditional: P of A given B\n= P of A and B divided by P of B]
+    AB --> Excl{Is intersection empty?}
+    Excl -->|Yes| MutExcl[Mutually Exclusive\nCannot both occur]
+    Excl -->|No| Overlap[Can co-occur]`,
     },
   ],
   animations: [

@@ -298,16 +298,59 @@ private:
   ],
   diagrams: [
     {
-      title: "GoF Builder pattern structure",
+      title: "GoF Builder Pattern Structure",
       kind: "architecture",
-      caption:
-        "Shows the Director orchestrating the Builder interface, ConcreteBuilder implementing the steps and assembling the Product. The Director knows the construction order; the ConcreteBuilder knows the construction details.",
+      caption: "Director orchestrates a Builder interface; ConcreteBuilder assembles the Product step by step.",
+      mermaid: `graph TD
+    Director["Director\norchestrates construction order"]
+    Builder["Builder interface\nbuildPartA, buildPartB, getResult"]
+    ConcreteBuilder["ConcreteBuilder\nimplements each build step"]
+    Product["Product\nfinished complex object"]
+    Director --> Builder
+    Builder --> ConcreteBuilder
+    ConcreteBuilder --> Product`,
     },
     {
-      title: "Fluent Builder method chain flow",
+      title: "Fluent Builder Method Chain",
       kind: "flow",
-      caption:
-        "Illustrates how each setter method returns 'this', enabling chained calls that terminate with build(), which validates and constructs the immutable product.",
+      caption: "Each setter returns 'this', enabling chained calls that terminate with build(), which validates and constructs the immutable object.",
+      mermaid: `flowchart LR
+    A([new Builder]) --> B["setHost(host)\nreturns this"]
+    B --> C["setPort(port)\nreturns this"]
+    C --> D["setTls(true)\nreturns this"]
+    D --> E["setRetries(3)\nreturns this"]
+    E --> F{build()}
+    F -->|valid| G([Immutable Config])
+    F -->|invalid| H([throws IllegalStateException])`,
+    },
+    {
+      title: "Builder vs Constructor vs Factory",
+      kind: "sequence",
+      caption: "How a caller interacts with a telescoping constructor, a factory method, and a fluent builder for the same complex object.",
+      mermaid: `sequenceDiagram
+    participant Caller
+    participant TelescopingCtor
+    participant Factory
+    participant FluentBuilder
+    Caller->>TelescopingCtor: new Config(host, port, null, null, true, 3)
+    TelescopingCtor-->>Caller: Config - fragile, hard to read
+    Caller->>Factory: ConfigFactory.createTls(host, port)
+    Factory-->>Caller: Config preset - limited flexibility
+    Caller->>FluentBuilder: new Builder().host(h).port(p).tls(true).build()
+    FluentBuilder-->>Caller: Config - readable, validated, immutable`,
+    },
+    {
+      title: "Builder Construction State",
+      kind: "state",
+      caption: "Internal states a fluent builder object moves through from creation to a validated final product.",
+      mermaid: `stateDiagram-v2
+    [*] --> Empty : new Builder
+    Empty --> PartiallyConfigured : set required field
+    PartiallyConfigured --> PartiallyConfigured : set optional fields
+    PartiallyConfigured --> Validated : build() called - all required fields present
+    PartiallyConfigured --> Error : build() called - missing required field
+    Validated --> [*] : returns Product
+    Error --> [*] : throws exception`,
     },
   ],
   animations: [

@@ -478,52 +478,64 @@ public:
   ],
   diagrams: [
     {
-      title: "HR Question Evaluation Flow",
-      kind: "flow",
-      caption: "How interviewers process and score candidate responses: from initial impression through content evaluation to final assessment, showing decision points where answers succeed or fail.",
-      mermaid: `flowchart TD
-    A["**Candidate Answers**"] --> B{"**Initial Impression**\\n*First 10 seconds*"}
-    B -->|"*Confident & structured*"| C["Positive Anchor Set"]
-    B -->|"*Hesitant or rambling*"| D["Concern Flag Raised"]
-    C --> E{"**Content Evaluation**"}
-    D --> E
-    E --> F{"**Specificity Check**"}
-    F -->|"*Concrete examples*\\n*with metrics*"| G["**Strong Signal**"]
-    F -->|"*Vague or generic*"| H["**Weak Signal**\\n*Probe deeper*"]
-    G --> I{"**Relevance to Role**"}
-    H --> I
-    I -->|"*Aligned with role needs*"| J["**Positive Assessment**"]
-    I -->|"*Misaligned or off-topic*"| K["**Concern Noted**"]
-    J --> L{"**Self-Awareness Check**"}
-    K --> L
-    L -->|"*Honest reflection*\\n*growth shown*"| M["**Recommend: Proceed**"]
-    L -->|"*Defensive or*\\n*lacks insight*"| N["**Recommend: Caution**"]`,
+      title: "HR Interview Question Categories",
+      kind: "mindmap",
+      caption: "Taxonomy of common HR interview questions organized by the competency or intent being assessed.",
+      mermaid: `mindmap
+  root((HR Questions))
+    Motivation and Fit
+      Why this company
+      Why this role
+      Career goals
+      What excites you
+    Work Style
+      How you handle pressure
+      Preferred environment
+      Remote vs in-office
+    Strengths and Weaknesses
+      Top strengths
+      Areas for growth
+      How you self-improve
+    Collaboration
+      Team dynamics
+      Manager relationships
+      Giving and receiving feedback
+    Compensation
+      Salary expectations
+      Benefits priorities
+      Notice period`,
     },
     {
-      title: "Interview Answer Construction Mindmap",
-      kind: "mindmap",
-      caption: "Central node 'Strong Interview Answer' branching into: Structure (opening hook, body, closing connection), Content (specificity, relevance, quantified impact), Delivery (pace, confidence, authenticity), and Adaptation (career level, company type, role requirements).",
-      mermaid: `mindmap
-  root(("**Strong Interview Answer**"))
-    ("**Structure**")
-      ("*Opening hook*")
-      ("*Logical body*")
-      ("*Closing connection to role*")
-    ("**Content**")
-      ("*Specificity & detail*")
-      ("*Relevance to the question*")
-      ("*Quantified impact*")
-      ("*Evidence of research*")
-    ("**Delivery**")
-      ("*Appropriate pace*")
-      ("*Confident tone*")
-      ("*Authenticity*")
-      ("*60-90 second target*")
-    ("**Adaptation**")
-      ("*Career level calibration*")
-      ("*Company type fit*")
-      ("*Role requirements alignment*")
-      ("*Culture signal matching*")`,
+      title: "Answering HR Questions Flow",
+      kind: "flow",
+      caption: "Decision flow for crafting authentic and strategic answers to common HR screening questions.",
+      mermaid: `flowchart TD
+    A["HR Question Received"] --> B{"Question type?"}
+    B -->|Motivation| C["Research company values\nAlign to personal goals"]
+    B -->|Weakness| D["Choose real but manageable\nShow growth steps"]
+    B -->|Strength| E["Give specific example\nLink to role needs"]
+    B -->|Salary| F["Research market range\nGive a range not a number"]
+    C & D & E & F --> G["Structure response clearly"]
+    G --> H["Keep under 2 minutes"]
+    H --> I["Invite follow-up questions"]`,
+    },
+    {
+      title: "Offer Negotiation Sequence",
+      kind: "sequence",
+      caption: "Typical sequence of exchanges during an offer negotiation conversation with an HR recruiter.",
+      mermaid: `sequenceDiagram
+    participant Rec as Recruiter
+    participant Cand as Candidate
+    Rec->>Cand: Verbal offer extended
+    Cand->>Cand: Research market data
+    Cand->>Rec: Express enthusiasm
+    Cand->>Rec: Ask for written offer
+    Rec-->>Cand: Written offer document
+    Cand->>Rec: Request time to review
+    Cand->>Rec: Counter with data-backed ask
+    Rec->>Rec: Consult hiring manager
+    Rec-->>Cand: Revised offer or explanation
+    Cand->>Rec: Accept or continue dialogue`,
     },
   ],
   animations: [

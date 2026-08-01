@@ -517,128 +517,73 @@ public:
     {
       title: "Raft Leader Election Sequence",
       kind: "sequence",
-      caption:
-        "Sequence of messages during a Raft leader election: a follower times out, becomes a candidate, collects votes from a majority, and begins sending heartbeats as leader.",
+      caption: "A follower times out, becomes a candidate, broadcasts RequestVote, collects a majority, and transitions to leader sending heartbeats.",
       mermaid: `sequenceDiagram
-    participant F1 as Node A<br/>(Follower)
-    participant F2 as Node B<br/>(Follower)
-    participant F3 as Node C<br/>(Follower)
+    participant A as Node A - Follower
+    participant B as Node B - Follower
+    participant C as Node C - Follower
 
-    Note over F1: Election timeout expires
-    F1->>F1: Increment term to T+1<br/>Vote for self
-    Note over F1: Transition to Candidate
-
-    par RequestVote broadcast
-        F1->>F2: RequestVote(term=T+1, lastLogIdx, lastLogTerm)
-        F1->>F3: RequestVote(term=T+1, lastLogIdx, lastLogTerm)
-    end
-
-    F2->>F2: Check: term T+1 > current term?<br/>Check: log up-to-date?
-    F2->>F1: VoteGranted(term=T+1, true)
-
-    F3->>F3: Check: term T+1 > current term?<br/>Check: log up-to-date?
-    F3->>F1: VoteGranted(term=T+1, true)
-
-    Note over F1: Received majority (3/3 votes)<br/>Transition to Leader
-
-    loop Heartbeat interval
-        par AppendEntries heartbeats
-            F1->>F2: AppendEntries(term=T+1, entries=[], leaderCommit)
-            F1->>F3: AppendEntries(term=T+1, entries=[], leaderCommit)
-        end
-        F2->>F1: Success(term=T+1)
-        F3->>F1: Success(term=T+1)
+    Note over A: Election timeout expires
+    A->>A: Increment term, vote for self
+    Note over A: Transition to Candidate
+    A->>B: RequestVote term=T+1
+    A->>C: RequestVote term=T+1
+    B->>B: Check term and log freshness
+    B-->>A: VoteGranted true
+    C->>C: Check term and log freshness
+    C-->>A: VoteGranted true
+    Note over A: Majority votes received - become Leader
+    loop Heartbeat
+        A->>B: AppendEntries heartbeat
+        A->>C: AppendEntries heartbeat
     end`,
     },
     {
-      title: "Paxos Two-Phase Protocol Sequence",
-      kind: "sequence",
-      caption:
-        "The two phases of single-decree Paxos: Phase 1 (Prepare/Promise) establishes a proposal number, and Phase 2 (Accept/Accepted) gets the value chosen by a majority of acceptors.",
-      mermaid: `sequenceDiagram
-    participant P as Proposer
-    participant A1 as Acceptor 1
-    participant A2 as Acceptor 2
-    participant A3 as Acceptor 3
-    participant L as Learner
-
-    Note over P: Select proposal number N=1
-
-    rect rgb(200, 220, 255)
-        Note right of P: Phase 1 — Prepare
-        par Prepare broadcast
-            P->>A1: Prepare(N=1)
-            P->>A2: Prepare(N=1)
-            P->>A3: Prepare(N=1)
-        end
-
-        A1->>A1: N=1 > highest_promised(0)<br/>Set highest_promised=1
-        A1->>P: Promise(N=1, accepted=none)
-
-        A2->>A2: N=1 > highest_promised(0)<br/>Set highest_promised=1
-        A2->>P: Promise(N=1, accepted=none)
-
-        Note over P: Received promises from<br/>majority (2 of 3)
-    end
-
-    rect rgb(200, 255, 220)
-        Note right of P: Phase 2 — Accept
-        Note over P: No prior accepted value<br/>Use own value V="cmd-X"
-
-        par Accept broadcast
-            P->>A1: Accept(N=1, V="cmd-X")
-            P->>A2: Accept(N=1, V="cmd-X")
-            P->>A3: Accept(N=1, V="cmd-X")
-        end
-
-        A1->>A1: N=1 >= highest_promised(1)<br/>Accept proposal
-        A1->>P: Accepted(N=1)
-        A1->>L: Accepted(N=1, V="cmd-X")
-
-        A2->>A2: N=1 >= highest_promised(1)<br/>Accept proposal
-        A2->>P: Accepted(N=1)
-        A2->>L: Accepted(N=1, V="cmd-X")
-    end
-
-    Note over L: Received Accepted from majority<br/>Value "cmd-X" is CHOSEN`,
+      title: "Raft Node State Transitions",
+      kind: "state",
+      caption: "A Raft node cycles among Follower, Candidate, and Leader states driven by election timeouts, vote outcomes, and term comparisons.",
+      mermaid: `stateDiagram-v2
+    [*] --> Follower
+    Follower --> Candidate : election timeout fires
+    Candidate --> Leader : receives majority votes
+    Candidate --> Follower : discovers higher term
+    Candidate --> Candidate : election timeout - split vote
+    Leader --> Follower : discovers higher term
+    Leader --> Follower : network partition healed`,
     },
     {
-      title: "Raft Log Replication and Commit Flow",
-      kind: "sequence",
-      caption:
-        "A client request flows through the Raft leader to followers, achieving commitment once a majority acknowledges, then the response returns to the client.",
-      mermaid: `sequenceDiagram
-    participant C as Client
-    participant L as Leader<br/>(Node A)
-    participant F1 as Follower<br/>(Node B)
-    participant F2 as Follower<br/>(Node C)
-
-    C->>L: ClientRequest(command="SET x=42")
-    L->>L: Append to local log<br/>index=5, term=3
-
-    par Replicate to followers
-        L->>F1: AppendEntries(prevIdx=4, prevTerm=3,<br/>entries=[{idx:5, term:3, "SET x=42"}])
-        L->>F2: AppendEntries(prevIdx=4, prevTerm=3,<br/>entries=[{idx:5, term:3, "SET x=42"}])
-    end
-
-    F1->>F1: Consistency check passes<br/>Append entry at index 5
-    F1->>L: AppendEntriesReply(success=true, matchIndex=5)
-
-    Note over L: Entry 5 replicated on Leader + F1<br/>(majority of 3) — COMMITTED
-    L->>L: Update commitIndex=5<br/>Apply "SET x=42" to state machine
-
-    L->>C: ClientResponse(success, result)
-
-    F2->>F2: Consistency check passes<br/>Append entry at index 5
-    F2->>L: AppendEntriesReply(success=true, matchIndex=5)
-
-    par Notify followers of commit
-        L->>F1: AppendEntries(leaderCommit=5)
-        L->>F2: AppendEntries(leaderCommit=5)
-    end
-
-    F1->>F1: Advance commitIndex to 5<br/>Apply to state machine
-    F2->>F2: Advance commitIndex to 5<br/>Apply to state machine`,
+      title: "Distributed Consensus System Architecture",
+      kind: "architecture",
+      caption: "A five-node Raft cluster with one leader and four followers; clients route all writes through the leader which replicates to a quorum before committing.",
+      mermaid: `graph TD
+    Client["Client"] --> LB["Load Balancer"]
+    LB --> Leader["Leader Node 1"]
+    Leader -->|"AppendEntries"| F1["Follower Node 2"]
+    Leader -->|"AppendEntries"| F2["Follower Node 3"]
+    Leader -->|"AppendEntries"| F3["Follower Node 4"]
+    Leader -->|"AppendEntries"| F4["Follower Node 5"]
+    F1 -->|"ACK"| Leader
+    F2 -->|"ACK"| Leader
+    Leader --> SM["State Machine - committed entries"]
+    Note1["Majority = 3 of 5 nodes"]`,
+    },
+    {
+      title: "Paxos Prepare and Accept Flow",
+      kind: "flow",
+      caption: "Paxos two-phase protocol: Phase 1 obtains promises from a majority of acceptors, Phase 2 sends the Accept request to commit a value.",
+      mermaid: `flowchart TD
+    P["Proposer picks N"] --> PrepBroadcast["Broadcast Prepare N to all acceptors"]
+    PrepBroadcast --> PromiseCheck{"Majority promised?"}
+    PromiseCheck -->|"No"| HigherN["Increment N, retry"]
+    HigherN --> PrepBroadcast
+    PromiseCheck -->|"Yes"| PriorVal{"Prior accepted value?"}
+    PriorVal -->|"Yes"| UseHighest["Use highest-N prior value"]
+    PriorVal -->|"No"| UseOwn["Use proposer own value"]
+    UseHighest --> AcceptBroadcast["Broadcast Accept N value"]
+    UseOwn --> AcceptBroadcast
+    AcceptBroadcast --> AcceptCheck{"Majority accepted?"}
+    AcceptCheck -->|"Yes"| Chosen["Value chosen - notify learners"]
+    AcceptCheck -->|"No"| HigherN`,
     },
   ],
 

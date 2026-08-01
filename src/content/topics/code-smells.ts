@@ -353,15 +353,84 @@ private:
 
   diagrams: [
     {
-      title: "Code Smells Taxonomy",
+      title: "Code Smell Taxonomy",
       kind: "mindmap",
-      caption: "Mindmap organized into categories: Bloaters (Long Method, Large Class, Primitive Obsession, Long Parameter List, Data Clumps), Object-Orientation Abusers (Switch Statements, Parallel Inheritance, Refused Bequest, Temporary Field), Change Preventers (Divergent Change, Shotgun Surgery, Feature Envy), Dispensables (Lazy Class, Speculative Generality, Dead Code, Redundant Comment), Couplers (Feature Envy, Message Chains, Middle Man, Inappropriate Intimacy)."
+      caption: "Taxonomy of common code smells grouped by the type of problem they indicate in a codebase.",
+      mermaid: `mindmap
+  root((Code Smells))
+    Bloaters
+      Long method
+      Large class
+      Primitive obsession
+      Long parameter list
+      Data clumps
+    Object Orientation Abusers
+      Switch statements
+      Refused bequest
+      Alternative classes
+    Change Preventers
+      Divergent change
+      Shotgun surgery
+      Parallel inheritance
+    Dispensables
+      Dead code
+      Speculative generality
+      Duplicate code
+      Lazy class
+    Couplers
+      Feature envy
+      Inappropriate intimacy
+      Message chains`,
     },
     {
-      title: "Divergent Change vs Shotgun Surgery",
+      title: "Refactoring Decision Flow",
+      kind: "flow",
+      caption: "Decision flow for identifying a code smell and selecting the appropriate refactoring technique.",
+      mermaid: `flowchart TD
+    A["Review Code"] --> B{"Smell Detected?"}
+    B -->|No| Z["Code is Clean"]
+    B -->|Yes| C{"What type?"}
+    C -->|Long Method| D["Extract Method"]
+    C -->|Duplicate Code| E["Extract Common Function"]
+    C -->|Large Class| F["Extract Class or Module"]
+    C -->|Feature Envy| G["Move Method"]
+    C -->|Long Parameter List| H["Introduce Parameter Object"]
+    D & E & F & G & H --> I["Write Tests First"]
+    I --> J["Apply Refactoring"]
+    J --> K["Run Tests"]
+    K --> A`,
+    },
+    {
+      title: "Code Quality Metrics Architecture",
       kind: "architecture",
-      caption: "Two diagrams side by side. Left (Divergent Change): One class with arrows from three different change reasons pointing to it -- one class changed for many reasons. Right (Shotgun Surgery): One change reason with arrows pointing to many classes -- one change requires editing many classes. Both violate SRP but from opposite directions."
-    }
+      caption: "Toolchain architecture for detecting code smells and tracking quality metrics in CI.",
+      mermaid: `graph TD
+    subgraph Source["Source Control"]
+        PR["Pull Request"]
+        CODE["Codebase"]
+    end
+    subgraph Analysis["Static Analysis"]
+        LINT["Linter"]
+        SA["Static Analyser"]
+        CC["Cyclomatic Complexity"]
+        DUP["Duplication Detector"]
+    end
+    subgraph Gate["Quality Gate"]
+        GATE{"Thresholds Met?"}
+        BLOCK["Block Merge"]
+        PASS["Allow Merge"]
+    end
+    subgraph Reporting["Reporting"]
+        DASH["Quality Dashboard"]
+        TREND["Trend Charts"]
+    end
+    PR --> LINT & SA & CC & DUP
+    CODE --> SA & DUP
+    LINT & SA & CC & DUP --> GATE
+    GATE -->|No| BLOCK
+    GATE -->|Yes| PASS
+    PASS --> DASH & TREND`,
+    },
   ],
 
   animations: [

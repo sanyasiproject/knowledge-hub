@@ -444,72 +444,80 @@ module.exports.handler = middy(baseHandler)
     {
       title: "Serverless Request Flow",
       kind: "sequence",
-      caption: "End-to-end flow of an API request through a serverless stack, from client to database and back.",
+      caption: "An HTTP request triggers a serverless function via API Gateway. The function executes in an ephemeral container, interacts with managed services, and returns a response.",
       mermaid: `sequenceDiagram
     participant Client
-    participant APIGW as API Gateway
-    participant Lambda
-    participant Mongo as MongoDB Atlas
-    participant SQS
+    participant AG as API Gateway
+    participant Lambda as Function - Lambda
+    participant DB as DynamoDB
+    participant S3
 
-    Client->>APIGW: POST /orders (JSON body)
-    APIGW->>APIGW: Validate request, check API key
-    APIGW->>Lambda: Invoke CreateOrder handler
-    Lambda->>Lambda: Check warm connection cache
-    alt Cold start
-        Lambda->>Mongo: Establish new connection
-        Mongo-->>Lambda: Connection ready
-    end
-    Lambda->>Mongo: updateOne (idempotent upsert)
-    Mongo-->>Lambda: Write acknowledged
-    Lambda->>SQS: SendMessage (order.created event)
-    SQS-->>Lambda: Message accepted
-    Lambda-->>APIGW: 201 Created (JSON response)
-    APIGW-->>Client: 201 Created + headers`,
+    Client->>AG: HTTP POST /process
+    AG->>Lambda: Invoke function
+    Note over Lambda: Cold start if no warm container
+    Lambda->>DB: Read configuration
+    DB-->>Lambda: Config data
+    Lambda->>S3: Store result
+    S3-->>Lambda: Stored
+    Lambda-->>AG: 200 OK - result
+    AG-->>Client: Response`,
     },
     {
-      title: "Serverless Architecture Overview",
-      kind: "architecture",
-      caption: "High-level architecture of a serverless order processing system showing event-driven fan-out.",
+      title: "Cold Start vs Warm Start",
+      kind: "flow",
+      caption: "Serverless cold starts incur initialization overhead. Warm starts reuse existing containers, reducing latency significantly.",
       mermaid: `flowchart TD
-    Client([Client App]) -->|HTTPS| APIGW[API Gateway]
-    APIGW -->|Invoke| CreateFn[CreateOrder Lambda]
-    CreateFn -->|Write| DDB[(DynamoDB)]
-    CreateFn -->|Publish| EB[EventBridge]
-
-    EB -->|order.created| EmailFn[SendEmail Lambda]
-    EB -->|order.created| InventoryFn[UpdateInventory Lambda]
-    EB -->|order.created| AnalyticsFn[LogAnalytics Lambda]
-
-    EmailFn -->|Send| SES[Amazon SES]
-    InventoryFn -->|Update| DDB
-    AnalyticsFn -->|Put| Firehose[Kinesis Firehose]
-    Firehose -->|Deliver| S3[(S3 Data Lake)]
-
-    Schedule([CloudWatch Cron]) -->|Every 5 min| CleanupFn[Cleanup Lambda]
-    CleanupFn -->|Scan & delete| DDB
-
-    style APIGW fill:#f59e0b,color:#000
-    style DDB fill:#3b82f6,color:#fff
-    style EB fill:#8b5cf6,color:#fff
-    style S3 fill:#10b981,color:#fff`,
+    A([Function invoked]) --> B{Warm container available?}
+    B -->|Yes - warm start| C[Reuse existing container]
+    C --> D[Execute handler directly]
+    D --> E([Response - 5-50ms latency])
+    B -->|No - cold start| F[Provision container]
+    F --> G[Download function code]
+    G --> H[Initialize runtime - JVM and Node and Python]
+    H --> I[Run initialization code]
+    I --> D`,
     },
     {
-      title: "Lambda Function Lifecycle",
-      kind: "state",
-      caption: "State transitions of a Lambda execution environment from cold start through freeze and eventual reclamation.",
-      mermaid: `stateDiagram-v2
-    [*] --> Provisioning: Invocation received (no warm instance)
-    Provisioning --> Initializing: MicroVM ready
-    Initializing --> Running: Init code complete
-    Running --> Frozen: Handler returns
-    Frozen --> Running: New invocation (warm start)
-    Frozen --> Shutdown: Idle timeout (~5-15 min)
-    Shutdown --> [*]: Environment reclaimed
-
-    note right of Provisioning: Download code, start Firecracker microVM
-    note right of Initializing: Execute module-scope code, establish DB connections
-    note right of Frozen: Process + memory preserved, connections kept open`,
+      title: "Event-Driven Serverless Architecture",
+      kind: "architecture",
+      caption: "Serverless functions connected by event streams. Each function handles one responsibility and publishes events to trigger downstream functions.",
+      mermaid: `graph LR
+    Upload[S3 Upload Event] --> ResizeFn[Image Resize Function]
+    ResizeFn --> Queue[SQS Queue]
+    Queue --> ProcessFn[Process Metadata Function]
+    ProcessFn --> DB[(DynamoDB)]
+    ProcessFn --> NotifyFn[Notification Function]
+    NotifyFn --> SNS[SNS - Email and SMS]
+    API[API Gateway] --> AuthFn[Auth Function]
+    AuthFn --> CRUD[CRUD Functions]
+    CRUD --> DB`,
+    },
+    {
+      title: "Serverless vs Containers Trade-offs",
+      kind: "mindmap",
+      caption: "Comparing serverless functions and containers across operational, performance, and cost dimensions to guide architecture decisions.",
+      mermaid: `mindmap
+  root((Serverless vs Containers))
+    Serverless Functions
+      Auto-scaling to zero
+      No server management
+      Cold start latency
+      Max execution time limit
+      Pay per invocation
+    Containers
+      Always-on warm
+      Full OS control
+      Predictable latency
+      Must manage scaling
+      Pay for uptime
+    When to use Serverless
+      Event-driven workloads
+      Variable traffic
+      Short-lived tasks
+    When to use Containers
+      Long-running processes
+      Low-latency requirements
+      Stateful applications`,
     },
   ],
   comparison: {

@@ -508,109 +508,70 @@ kafka-console-consumer.sh --bootstrap-server kafka:9092 \\
 
   diagrams: [
     {
-      title: "Load Balancer Architecture with Health Checks",
-      kind: "architecture",
-      caption: "L4/L7 load balancer distributing traffic across healthy backend servers with health check monitoring",
-      mermaid: `flowchart TB
-    Client1[Client A] --> LB
-    Client2[Client B] --> LB
-    Client3[Client C] --> LB
-
-    LB[Load Balancer<br/>L7 - Nginx/HAProxy]
-
-    LB -->|/api/*| API1[API Server 1<br/>Healthy]
-    LB -->|/api/*| API2[API Server 2<br/>Healthy]
-    LB -->|/api/*| API3[API Server 3<br/>Unhealthy]
-    LB -->|/static/*| CDN[CDN Edge]
-
-    HC[Health Checker] -->|GET /health<br/>every 10s| API1
-    HC -->|GET /health<br/>every 10s| API2
-    HC -->|GET /health<br/>every 10s| API3
-
-    API1 --> DB[(Primary DB)]
-    API2 --> DB
-    API1 --> Cache[(Redis Cache)]
-    API2 --> Cache
-
-    style API3 fill:#ff6b6b,stroke:#c0392b,color:#fff
-    style LB fill:#3498db,stroke:#2980b9,color:#fff
-    style Cache fill:#f39c12,stroke:#e67e22,color:#fff`,
+      title: "System Building Blocks Network",
+      kind: "network",
+      caption: "Core infrastructure components and how they interconnect: clients, load balancer, app servers, cache, DB, CDN, and message queue.",
+      mermaid: `graph LR
+    Client["Client"] --> CDN["CDN Edge"]
+    Client --> LB["Load Balancer"]
+    CDN --> LB
+    LB --> App1["App Server 1"]
+    LB --> App2["App Server 2"]
+    App1 --> Cache["Redis Cache"]
+    App2 --> Cache
+    App1 --> DB["Primary DB"]
+    App2 --> DB
+    DB --> Replica["Read Replica"]
+    App1 --> MQ["Message Queue"]
+    App2 --> MQ
+    MQ --> Worker["Background Worker"]`,
     },
     {
-      title: "Cache-Aside Pattern Request Flow",
+      title: "Cache-Aside Request Flow",
       kind: "sequence",
-      caption: "Sequence diagram showing cache-aside (lazy loading) pattern with cache hit and cache miss paths",
+      caption: "Cache hit path returns data from Redis immediately; cache miss queries the DB and populates the cache.",
       mermaid: `sequenceDiagram
-    participant App as Application
-    participant Cache as Redis Cache
-    participant DB as Database
-
-    Note over App,DB: Cache Hit Path
+    participant App
+    participant Cache
+    participant DB
     App->>Cache: GET user:1001
-    Cache-->>App: {"name":"Alice"} (HIT)
-
-    Note over App,DB: Cache Miss Path
+    Cache-->>App: HIT - return cached data
     App->>Cache: GET user:1002
-    Cache-->>App: null (MISS)
-    App->>DB: SELECT * FROM users WHERE id=1002
-    DB-->>App: {"name":"Bob"}
-    App->>Cache: SET user:1002 {"name":"Bob"} EX 300
-    Cache-->>App: OK
-
-    Note over App,DB: Write + Invalidate Path
-    App->>DB: UPDATE users SET name='Robert' WHERE id=1002
+    Cache-->>App: MISS - null
+    App->>DB: SELECT from users WHERE id=1002
+    DB-->>App: row data
+    App->>Cache: SET user:1002 data EX 300
+    App->>DB: UPDATE users SET name=Robert WHERE id=1002
     DB-->>App: OK
-    App->>Cache: DEL user:1002
-    Cache-->>App: OK (invalidated)`,
+    App->>Cache: DEL user:1002`,
     },
     {
-      title: "Message Queue vs Event Stream Architecture",
+      title: "Load Balancer Routing Flow",
       kind: "flow",
-      caption: "Comparison of competing-consumer queue pattern (RabbitMQ/SQS) versus publish-subscribe log pattern (Kafka)",
-      mermaid: `flowchart LR
-    subgraph MQ["Message Queue (RabbitMQ/SQS)"]
-        P1[Producer] -->|publish| Q[(Queue)]
-        Q -->|consume & ack| C1[Consumer 1]
-        Q -->|consume & ack| C2[Consumer 2]
-        Q -->|consume & ack| C3[Consumer 3]
-    end
-
-    subgraph ES["Event Stream (Kafka)"]
-        EP[Producer] -->|append| T[Topic<br/>Partition 0..N]
-        T -->|read at offset| CG1[Consumer Group A<br/>Service X]
-        T -->|read at offset| CG2[Consumer Group B<br/>Service Y]
-        T -->|read at offset| CG3[Consumer Group C<br/>Analytics]
-    end
-
-    style Q fill:#e74c3c,stroke:#c0392b,color:#fff
-    style T fill:#27ae60,stroke:#229954,color:#fff`,
+      caption: "L7 load balancer routes requests by URL path, skips unhealthy servers, and forwards static assets to CDN.",
+      mermaid: `flowchart TD
+    A([Incoming Request]) --> B{L7 route check}
+    B -->|/api/*| C{Healthy server available?}
+    B -->|/static/*| D[CDN Edge]
+    C -->|Yes| E[Round-robin to App Server]
+    C -->|No| F[Return 503 Service Unavailable]
+    E --> G{Server health check}
+    G -->|Healthy| H([Process request])
+    G -->|Unhealthy| I[Mark server down]
+    I --> C`,
     },
     {
-      title: "CDN Request Flow with Origin Shield",
-      kind: "flow",
-      caption: "How a CDN serves content through edge locations with an origin shield to protect the origin server",
-      mermaid: `flowchart TB
-    User1[User - Mumbai] --> Edge1[Edge Server<br/>Mumbai]
-    User2[User - Tokyo] --> Edge2[Edge Server<br/>Tokyo]
-    User3[User - London] --> Edge3[Edge Server<br/>London]
-
-    Edge1 -->|MISS| Shield[Origin Shield<br/>US-East]
-    Edge2 -->|MISS| Shield
-    Edge3 -->|MISS| Shield
-
-    Edge1 -.->|HIT| User1
-    Edge2 -.->|HIT| User2
-    Edge3 -.->|HIT| User3
-
-    Shield -->|MISS| Origin[Origin Server]
-    Shield -.->|HIT| Edge1
-    Shield -.->|HIT| Edge2
-    Shield -.->|HIT| Edge3
-
-    Origin --> Storage[(Object Storage<br/>S3)]
-
-    style Shield fill:#9b59b6,stroke:#8e44ad,color:#fff
-    style Origin fill:#e67e22,stroke:#d35400,color:#fff`,
+      title: "Message Queue vs Event Stream",
+      kind: "architecture",
+      caption: "Queue pattern — each message consumed once by one consumer. Stream pattern — multiple consumer groups read the same log at independent offsets.",
+      mermaid: `graph TD
+    PQ["Producer"] --> Q["Queue - RabbitMQ or SQS"]
+    Q --> C1["Consumer 1 - one message"]
+    Q --> C2["Consumer 2 - different message"]
+    PE["Producer"] --> T["Topic - Kafka"]
+    T --> CGA["Consumer Group A - Service X"]
+    T --> CGB["Consumer Group B - Analytics"]
+    T --> CGC["Consumer Group C - Audit log"]`,
     },
   ],
 

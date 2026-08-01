@@ -80,14 +80,107 @@ while (true) {
   ],
   diagrams: [
     {
-      title: "Kafka architecture",
+      title: "Kafka Cluster Architecture",
       kind: "architecture",
-      caption: "Producers → Brokers (each holding partition leaders/followers) → Consumer Groups. ZooKeeper/KRaft manages metadata and leader election.",
+      caption: "Producers write to partition leaders on brokers. Followers replicate for durability. Consumer groups read independently, each maintaining their own offsets.",
+      mermaid: `graph LR
+    subgraph Producers["Producers"]
+      P1["Producer A\nkey-based routing"]
+      P2["Producer B\nround-robin"]
+    end
+    subgraph Cluster["Kafka Cluster - 3 Brokers"]
+      B1["Broker 1\nTopic A P0 leader\nTopic A P1 follower"]
+      B2["Broker 2\nTopic A P1 leader\nTopic A P0 follower"]
+      B3["Broker 3\nTopic A P2 leader\nmetadata backup"]
+    end
+    subgraph CG1["Consumer Group 1"]
+      C1["Consumer 1\nreads P0"]
+      C2["Consumer 2\nreads P1"]
+      C3["Consumer 3\nreads P2"]
+    end
+    subgraph CG2["Consumer Group 2"]
+      C4["Consumer X\nreads all partitions"]
+    end
+    P1 -->|append to leader| B1
+    P2 -->|append to leader| B2
+    B1 <-->|replicate| B2
+    B2 <-->|replicate| B3
+    B1 --> C1
+    B2 --> C2
+    B3 --> C3
+    B1 --> C4`,
     },
     {
-      title: "Topic partitioning and consumer group assignment",
-      kind: "flow",
-      caption: "Topic with 6 partitions assigned to 3 consumers in a group (2 partitions each). Adding a 4th consumer triggers rebalancing.",
+      title: "Producer Message Delivery Flow",
+      kind: "sequence",
+      caption: "A producer sends a message with acks=all. The leader appends to the log, ISR followers replicate, and the ack is returned only after all ISR members confirm.",
+      mermaid: `sequenceDiagram
+    participant Prod as Producer
+    participant Lead as Partition Leader
+    participant F1 as Follower 1 ISR
+    participant F2 as Follower 2 ISR
+    Prod->>Lead: send message key=user-123
+    Lead->>Lead: append to log at offset N
+    Lead->>F1: replicate offset N
+    Lead->>F2: replicate offset N
+    F1-->>Lead: ack replicated
+    F2-->>Lead: ack replicated
+    Lead-->>Prod: ack offset N
+    Note over Prod,Lead: acks=all ensures all ISR replicas\nhave the message before ack`,
+    },
+    {
+      title: "Consumer Group Partition Assignment",
+      kind: "network",
+      caption: "Each partition is assigned to exactly one consumer in a group. Adding or removing consumers triggers a rebalance that redistributes partitions.",
+      mermaid: `graph TD
+    subgraph Topic["Topic: user-events - 6 Partitions"]
+      P0["P0"]
+      P1["P1"]
+      P2["P2"]
+      P3["P3"]
+      P4["P4"]
+      P5["P5"]
+    end
+    subgraph Group["Consumer Group - 3 Consumers"]
+      C1["Consumer 1\nP0 P1"]
+      C2["Consumer 2\nP2 P3"]
+      C3["Consumer 3\nP4 P5"]
+    end
+    P0 --> C1
+    P1 --> C1
+    P2 --> C2
+    P3 --> C2
+    P4 --> C3
+    P5 --> C3
+    NOTE["Adding a 4th consumer triggers\nrebalance: 1-2 partitions each\nRemoving a consumer reassigns\nits partitions to survivors"]`,
+    },
+    {
+      title: "Kafka Key Concepts Overview",
+      kind: "mindmap",
+      caption: "Core Kafka concepts organized by area: storage model, delivery guarantees, retention, and performance optimizations.",
+      mermaid: `mindmap
+    root((Kafka))
+      Storage Model
+        Append-only log
+        Partitions - units of parallelism
+        Offsets - sequential position
+        Immutable segments on disk
+      Delivery Guarantees
+        acks=0 fire and forget
+        acks=1 leader only
+        acks=all all ISR replicas
+        enable.idempotence exactly-once per partition
+        ISR in-sync replicas set
+      Retention
+        Time-based default 7 days
+        Size-based byte limit
+        Compacted topics keep latest per key
+        Consumers can replay from any offset
+      Performance
+        Sequential disk IO
+        Zero-copy sendfile syscall
+        Batch compression
+        Page cache exploitation`,
     },
   ],
   animations: [

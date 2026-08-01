@@ -393,120 +393,71 @@ sh.getBalancerState();`,
 
   diagrams: [
     {
-      title: "Consistent Hashing Ring with Virtual Nodes",
+      title: "Horizontal Sharding Architecture",
       kind: "architecture",
-      caption: "Keys and virtual nodes are mapped onto a circular hash space. Each key is assigned to the next node clockwise on the ring.",
+      caption: "Data is distributed across multiple shard nodes. A routing layer maps each key to the correct shard using a sharding strategy.",
       mermaid: `graph TD
-    subgraph HashRing["Hash Ring (0 to 2^32)"]
-        direction TB
-        K1["🔑 Key: user:101<br/>hash=0x1A3F"]
-        K2["🔑 Key: user:204<br/>hash=0x5B2C"]
-        K3["🔑 Key: user:389<br/>hash=0xA7E1"]
-        K4["🔑 Key: order:772<br/>hash=0xD4F0"]
-
-        V1A["Shard-A vnode#0<br/>pos=0x0F00"]
-        V1B["Shard-A vnode#1<br/>pos=0x7200"]
-        V2A["Shard-B vnode#0<br/>pos=0x3100"]
-        V2B["Shard-B vnode#1<br/>pos=0x9E00"]
-        V3A["Shard-C vnode#0<br/>pos=0x5F00"]
-        V3B["Shard-C vnode#1<br/>pos=0xC800"]
-    end
-
-    K1 -->|"routes to"| V1A
-    K2 -->|"routes to"| V3A
-    K3 -->|"routes to"| V2B
-    K4 -->|"routes to"| V3B
-
-    V1A --- PA["Physical: Shard-A"]
-    V1B --- PA
-    V2A --- PB["Physical: Shard-B"]
-    V2B --- PB
-    V3A --- PC["Physical: Shard-C"]
-    V3B --- PC
-
-    style PA fill:#2d6a4f,color:#fff
-    style PB fill:#1b4965,color:#fff
-    style PC fill:#7b2d8e,color:#fff`,
+    Client[Application] --> Router[Shard Router]
+    Router --> S1[Shard 1 - users A-F]
+    Router --> S2[Shard 2 - users G-M]
+    Router --> S3[Shard 3 - users N-S]
+    Router --> S4[Shard 4 - users T-Z]
+    S1 --> R1[(Replica 1)]
+    S2 --> R2[(Replica 2)]
+    S3 --> R3[(Replica 3)]
+    S4 --> R4[(Replica 4)]`,
     },
     {
-      title: "Sharded Query Routing Flow",
+      title: "Hash vs Range Sharding",
       kind: "flow",
-      caption: "Application queries are routed through a shard router, which directs single-shard queries directly and performs scatter-gather for cross-shard queries.",
+      caption: "Hash sharding distributes keys evenly but loses ordering. Range sharding preserves ordering and enables range queries but can create hot shards.",
       mermaid: `flowchart TD
-    App["Application Layer"] --> Router["Shard Router / Proxy"]
-
-    Router -->|"Has shard key?"| Decision{Route Decision}
-
-    Decision -->|"Yes: single-shard"| Compute["Compute target shard<br/>hash(key) % N"]
-    Decision -->|"No: scatter-gather"| Scatter["Fan out to ALL shards"]
-
-    Compute --> S1["Shard 1"]
-    Compute --> S2["Shard 2"]
-    Compute --> S3["Shard 3"]
-
-    Scatter --> S1
-    Scatter --> S2
-    Scatter --> S3
-
-    S1 --> Merge["Merge / Aggregate<br/>Results"]
-    S2 --> Merge
-    S3 --> Merge
-
-    Merge --> App
-
-    style Router fill:#e76f51,color:#fff
-    style Decision fill:#f4a261,color:#000
-    style Merge fill:#2a9d8f,color:#fff`,
+    A([Shard key: user_id]) --> B{Sharding strategy}
+    B -->|Hash sharding| C["shard = hash(user_id) mod N"]
+    C --> D[Even distribution]
+    D --> E[No range queries across shards]
+    B -->|Range sharding| F[shard = range table lookup]
+    F --> G[Preserves ordering]
+    G --> H[Supports range scans]
+    H --> I{Traffic distribution?}
+    I -->|Uneven writes| J[Hot shard problem]
+    I -->|Uniform| K[Works well]`,
     },
     {
-      title: "MongoDB Sharded Cluster Architecture",
-      kind: "architecture",
-      caption: "A MongoDB sharded cluster consists of mongos routers, config servers storing metadata, and shard replica sets holding the data.",
-      mermaid: `graph TB
-    subgraph Clients["Client Applications"]
-        C1["App Server 1"]
-        C2["App Server 2"]
-        C3["App Server 3"]
+      title: "Consistent Hashing Ring",
+      kind: "network",
+      caption: "Consistent hashing places nodes on a virtual ring. Keys map to the nearest node clockwise. Adding or removing a node minimizes key redistribution.",
+      mermaid: `graph LR
+    subgraph Ring["Consistent Hash Ring"]
+      K1[Key A - hash 10] --> N1[Node 1 - pos 20]
+      K2[Key B - hash 35] --> N2[Node 2 - pos 50]
+      K3[Key C - hash 60] --> N3[Node 3 - pos 80]
+      K4[Key D - hash 90] --> N1
     end
+    NewNode[New Node - pos 40] -.->|Takes keys 20-40 from Node 2| N2
+    Note1[Only 1 of N keys move on node add or remove] -.-> Ring`,
+    },
+    {
+      title: "Resharding Process",
+      kind: "sequence",
+      caption: "Online resharding migrates data from existing shards to new shards without downtime using dual-write and background migration techniques.",
+      mermaid: `sequenceDiagram
+    participant App
+    participant Router
+    participant OldShard as Old Shards x4
+    participant NewShard as New Shards x8
 
-    subgraph Routers["mongos Routers"]
-        M1["mongos :27017"]
-        M2["mongos :27017"]
-    end
-
-    subgraph ConfigServers["Config Server Replica Set"]
-        CF1["Config 1"]
-        CF2["Config 2"]
-        CF3["Config 3"]
-    end
-
-    subgraph Shard1["Shard 1 Replica Set"]
-        S1P["Primary"]
-        S1S1["Secondary"]
-        S1S2["Secondary"]
-    end
-
-    subgraph Shard2["Shard 2 Replica Set"]
-        S2P["Primary"]
-        S2S1["Secondary"]
-        S2S2["Secondary"]
-    end
-
-    subgraph Shard3["Shard 3 Replica Set"]
-        S3P["Primary"]
-        S3S1["Secondary"]
-        S3S2["Secondary"]
-    end
-
-    C1 & C2 & C3 --> M1 & M2
-    M1 & M2 --> ConfigServers
-    M1 & M2 --> Shard1 & Shard2 & Shard3
-
-    style Routers fill:#e63946,color:#fff
-    style ConfigServers fill:#457b9d,color:#fff
-    style Shard1 fill:#2a9d8f,color:#fff
-    style Shard2 fill:#2a9d8f,color:#fff
-    style Shard3 fill:#2a9d8f,color:#fff`,
+    Note over App,NewShard: Phase 1 - Dual write
+    App->>Router: Write to key K
+    Router->>OldShard: Write to old shard
+    Router->>NewShard: Write to new shard
+    Note over OldShard,NewShard: Background migration copies existing data
+    Note over App,NewShard: Phase 2 - Cut over reads
+    App->>Router: Read key K
+    Router->>NewShard: Read from new shard
+    Note over App,NewShard: Phase 3 - Stop writing to old shards
+    App->>Router: Write to key K
+    Router->>NewShard: Write only to new shard`,
     },
   ],
 

@@ -436,30 +436,84 @@ pub mod auth {
 
   diagrams: [
     {
-      title: "Encapsulation Boundaries",
+      title: "Encapsulation Boundary Layers",
       kind: "architecture",
-      caption: "Layers of encapsulation from field level to module/package level, showing how each layer restricts access progressively"
-    },
-    {
-      title: "Access Modifier Visibility",
-      kind: "network",
-      caption: "Network diagram showing which scopes (same class, subclass, same package, same assembly, world) can access each modifier level in Java and C#"
-    },
-    {
-      title: "Pimpl Idiom Flow",
-      kind: "flow",
-      caption: "How the Pimpl pattern separates public interface from private implementation, showing compilation firewall benefit"
+      mermaid: `graph TD
+    subgraph Module["Module or Package boundary"]
+      subgraph Class["Class boundary"]
+        subgraph Method["Method scope"]
+          Local["Local variables\nonly this method"]
+        end
+        Private["Private fields\nonly this class"]
+        Protected["Protected fields\nclass and subclasses"]
+      end
+      Internal["Internal or package-private\nwithin module only"]
+    end
+    Public["Public API\nexposed to all callers"]
+    Module --> Public
+    Internal -.->|not visible outside| Public`,
+      caption: "Encapsulation operates at multiple levels: field visibility, class boundaries, and module exports each progressively restrict access.",
     },
     {
       title: "Property Access Lifecycle",
       kind: "sequence",
-      caption: "Sequence diagram of a property get/set operation showing validation, backing field access, and change notification"
+      mermaid: `sequenceDiagram
+    participant Caller
+    participant Property as Property Accessor
+    participant Backing as Backing Field
+    participant Observer as Change Observer
+    Caller->>Property: set value = 42
+    Property->>Property: Validate - must be positive
+    Property->>Backing: store validated value
+    Property->>Observer: notify change event
+    Observer-->>Caller: UI update triggered
+    Caller->>Property: get value
+    Property->>Backing: read backing field
+    Backing-->>Property: return 42
+    Property-->>Caller: return 42`,
+      caption: "Properties add validation, side effects, and change notification between caller and backing storage without changing the call syntax.",
     },
     {
       title: "Encapsulation Violation Consequences",
       kind: "state",
-      caption: "State diagram showing how objects transition between valid and corrupted states when encapsulation is broken"
-    }
+      mermaid: `stateDiagram-v2
+    [*] --> Valid : object constructed with invariants
+    Valid --> Valid : state change via method - invariant checked
+    Valid --> Corrupted : external code sets field directly
+    Corrupted --> Corrupted : inconsistent operations continue
+    Corrupted --> DetectedBug : assertion or null check fails
+    DetectedBug --> Investigating : developer traces root cause
+    Investigating --> Fixed : restore encapsulation
+    Fixed --> Valid : refactor removes public setter
+    note right of Corrupted
+      Transaction history
+      does not match balance
+      invariant violated
+    end note`,
+      caption: "Breaking encapsulation allows invalid state transitions; bugs manifest far from the violation making them costly to trace and fix.",
+    },
+    {
+      title: "Access Modifier Visibility by Language",
+      kind: "network",
+      mermaid: `graph LR
+    subgraph Scopes["Visibility Scopes"]
+      SameClass["Same Class"]
+      Subclass["Subclass"]
+      SamePackage["Same Package or Module"]
+      Everywhere["All Code"]
+    end
+    Private["private"] --> SameClass
+    Protected["protected"] --> SameClass
+    Protected --> Subclass
+    PackagePrivate["package-private\nor internal"] --> SameClass
+    PackagePrivate --> Subclass
+    PackagePrivate --> SamePackage
+    Public["public"] --> SameClass
+    Public --> Subclass
+    Public --> SamePackage
+    Public --> Everywhere`,
+      caption: "Access modifiers form a hierarchy of visibility; each level adds one more scope, with public granting access from anywhere in the codebase.",
+    },
   ],
 
   animations: [

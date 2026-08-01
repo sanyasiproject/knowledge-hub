@@ -481,129 +481,91 @@ value_stream:
 
   diagrams: [
     {
-      title: "CALMS Framework Mindmap",
+      title: "CALMS Framework",
       kind: "mindmap",
-      caption: "The five pillars of the CALMS framework with key practices and metrics under each pillar",
+      caption: "The five pillars of the CALMS framework: Culture, Automation, Lean, Measurement, and Sharing.",
       mermaid: `mindmap
-  root((CALMS Framework))
+  root[CALMS Framework]
     Culture
-      Shared Ownership
-      Blameless Postmortems
-      Psychological Safety
-      Cross-functional Teams
-      Westrum Typology Assessment
+      Shared ownership
+      Blameless postmortems
+      Psychological safety
     Automation
-      CI/CD Pipelines
+      CI/CD pipelines
       Infrastructure as Code
-      Automated Testing
-      Self-healing Systems
-      ChatOps
+      Automated testing
     Lean
-      Value Stream Mapping
-      WIP Limits
-      Small Batch Sizes
-      Eliminate Waste
-      Cycle Efficiency
+      Value stream mapping
+      Small batch sizes
+      Eliminate waste
     Measurement
-      DORA Metrics
-      Error Budgets
-      SLIs / SLOs / SLAs
-      Deployment Frequency
-      Lead Time & MTTR
+      DORA metrics
+      Error budgets
+      SLIs and SLOs
     Sharing
-      Runbooks & Docs
-      Tech Talks
-      Communities of Practice
-      Open Postmortem DB
-      Internal Tech Radar`,
+      Runbooks and docs
+      Communities of practice
+      Open postmortems`,
     },
     {
-      title: "The Three Ways of DevOps -- Flow Diagram",
+      title: "DevOps Delivery Pipeline",
       kind: "flow",
-      caption: "Visualizing the First Way (flow), Second Way (feedback), and Third Way (continuous learning) as an integrated system",
+      caption: "End-to-end flow from code commit through build, test, security scan, staging, and production deployment with automated rollback.",
       mermaid: `flowchart LR
-    subgraph FirstWay["The First Way: Flow →"]
-        direction LR
-        A[Plan] --> B[Code]
-        B --> C[Build]
-        C --> D[Test]
-        D --> E[Release]
-        E --> F[Deploy]
-        F --> G[Operate]
-        G --> H[Monitor]
-    end
-
-    subgraph SecondWay["The Second Way: ← Feedback"]
-        direction RL
-        H -->|Alerts & Metrics| I{Issue Detected?}
-        I -->|Yes| J[Fast Rollback]
-        I -->|No| K[Continue]
-        J --> L[Root Cause Analysis]
-        L --> A
-    end
-
-    subgraph ThirdWay["The Third Way: Continuous Learning"]
-        direction TB
-        M[Blameless Postmortems]
-        N[Chaos Engineering]
-        O[Game Days]
-        P[Innovation Time]
-        Q[Experimentation]
-    end
-
-    L --> M
-    M --> N
-    N --> O
-    O --> P
-    P --> Q
-    Q -->|Improve| A`,
+    A[Code Commit] --> B[CI Build]
+    B --> C{Tests Pass?}
+    C -->|No| D[Fail Fast - Notify Developer]
+    C -->|Yes| E[Security Scan]
+    E --> F{Scan Clean?}
+    F -->|No| D
+    F -->|Yes| G[Build Artifact]
+    G --> H[Deploy to Staging]
+    H --> I[Integration Tests]
+    I --> J{Tests Pass?}
+    J -->|No| D
+    J -->|Yes| K[Deploy to Production]
+    K --> L[Monitor Metrics]
+    L --> M{Error Rate OK?}
+    M -->|No| N[Automated Rollback]
+    M -->|Yes| O[Release Complete]`,
     },
     {
-      title: "DORA Metrics Performance Quadrant",
+      title: "DORA Four Key Metrics",
       kind: "architecture",
-      caption: "DORA performance levels mapped across the four key metrics -- deployment frequency, lead time, change failure rate, and MTTR",
-      mermaid: `block-beta
-    columns 5
-    block:header:5
-        columns 5
-        h1["Metric"]
-        h2["Elite"]
-        h3["High"]
-        h4["Medium"]
-        h5["Low"]
+      caption: "The four DORA metrics that measure software delivery performance, grouped into throughput and stability dimensions.",
+      mermaid: `graph TD
+    DORA["DORA Four Key Metrics"]
+    subgraph Throughput ["Throughput"]
+        DF["Deployment Frequency"]
+        LT["Lead Time for Changes"]
     end
-    block:row1:5
-        columns 5
-        r1c1["Deploy Frequency"]
-        r1c2["On demand\n(multiple/day)"]
-        r1c3["Weekly to\nMonthly"]
-        r1c4["Monthly to\nBi-annually"]
-        r1c5["Fewer than once\nper 6 months"]
+    subgraph Stability ["Stability"]
+        CFR["Change Failure Rate"]
+        MTTR["Mean Time to Restore"]
     end
-    block:row2:5
-        columns 5
-        r2c1["Lead Time"]
-        r2c2["Less than\n1 hour"]
-        r2c3["1 day to\n1 week"]
-        r2c4["1 week to\n1 month"]
-        r2c5["1 month to\n6 months"]
-    end
-    block:row3:5
-        columns 5
-        r3c1["Change Fail Rate"]
-        r3c2["0-5%"]
-        r3c3["5-15%"]
-        r3c4["15-30%"]
-        r3c5["30%+"]
-    end
-    block:row4:5
-        columns 5
-        r4c1["MTTR"]
-        r4c2["Less than\n1 hour"]
-        r4c3["Less than\n1 day"]
-        r4c4["Less than\n1 week"]
-        r4c5["More than\n1 week"]
-    end`,
+    DORA --> Throughput
+    DORA --> Stability
+    DF --> E["Elite: Multiple per day"]
+    LT --> E2["Elite: Less than 1 hour"]
+    CFR --> E3["Elite: 0 to 5 percent"]
+    MTTR --> E4["Elite: Less than 1 hour"]`,
+    },
+    {
+      title: "The Three Ways of DevOps",
+      kind: "sequence",
+      caption: "The First Way accelerates flow from dev to ops. The Second Way amplifies feedback loops. The Third Way builds a culture of continuous experimentation and learning.",
+      mermaid: `sequenceDiagram
+    participant Dev as Development
+    participant Ops as Operations
+    participant Mon as Monitoring
+    participant Team as Team
+    Dev->>Ops: Deploy code - First Way: Flow
+    Ops->>Mon: System runs in production
+    Mon->>Dev: Metrics and alerts - Second Way: Feedback
+    Dev->>Dev: Fix issue quickly
+    Team->>Team: Blameless postmortem - Third Way: Learning
+    Team->>Dev: Improve process and practices
+    Dev->>Ops: Next deployment is safer`,
     },
   ],
 

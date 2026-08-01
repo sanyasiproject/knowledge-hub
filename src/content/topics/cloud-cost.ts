@@ -308,15 +308,89 @@ jobs:
 
   diagrams: [
     {
-      title: "AWS Cost Optimization Decision Tree",
-      kind: "flow" as const,
-      caption: "Decision flow for optimizing compute costs: right-sizing first, then commitment selection (Savings Plans vs RIs vs Spot), then architectural optimization"
+      title: "Cloud Cost Optimization Workflow",
+      kind: "flow",
+      caption: "Iterative workflow for identifying, prioritizing, and reducing cloud spend without impacting reliability.",
+      mermaid: `flowchart TD
+    A["Export Cost Report"] --> B["Tag and Attribute Spend"]
+    B --> C["Identify Top Cost Drivers"]
+    C --> D{"Waste or Overprovisioning?"}
+    D -->|Yes| E["Right-size or Delete"]
+    D -->|No| F["Optimize Pricing Model"]
+    E --> G["Measure Savings"]
+    F --> G
+    G --> H["Set Budget Alerts"]
+    H --> I["Monthly Review"]
+    I --> A`,
     },
     {
-      title: "FinOps Lifecycle",
-      kind: "flow" as const,
-      caption: "Iterative FinOps cycle: Inform (visibility, tagging, allocation) to Optimize (right-size, commit, eliminate waste) to Operate (governance, culture, automation)"
-    }
+      title: "Cloud Cost Categories",
+      kind: "mindmap",
+      caption: "Taxonomy of cloud cost categories and the levers available to reduce each one.",
+      mermaid: `mindmap
+  root((Cloud Costs))
+    Compute
+      Right-size instances
+      Reserved instances
+      Spot and preemptible
+      Auto-scaling
+    Storage
+      Lifecycle policies
+      Compression
+      Tiered storage
+      Delete orphaned volumes
+    Network
+      Reduce data egress
+      CDN caching
+      VPC endpoints
+      Compress transfers
+    Database
+      Read replicas tuning
+      Serverless options
+      Connection pooling
+    Licensing
+      BYOL options
+      Open source alternatives`,
+    },
+    {
+      title: "FinOps Architecture",
+      kind: "architecture",
+      caption: "FinOps tooling architecture connecting cloud billing APIs with tagging, alerting, and chargeback systems.",
+      mermaid: `graph LR
+    subgraph CloudProviders["Cloud Providers"]
+        AWS["AWS Cost Explorer"]
+        GCP["GCP Billing"]
+        AZ["Azure Cost Mgmt"]
+    end
+    subgraph Aggregation["Cost Platform"]
+        ETL["ETL Pipeline"]
+        DW["Cost Data Warehouse"]
+        TAG["Tag Enrichment"]
+    end
+    subgraph Outputs["Actions and Reporting"]
+        DASH["Dashboard"]
+        ALERT["Budget Alerts"]
+        CB["Chargeback Reports"]
+        REC["Recommendations"]
+    end
+    AWS & GCP & AZ --> ETL
+    ETL --> TAG --> DW
+    DW --> DASH & ALERT & CB & REC`,
+    },
+    {
+      title: "Reserved vs On-Demand Decision",
+      kind: "state",
+      caption: "Decision states for choosing the right cloud pricing commitment tier for a workload.",
+      mermaid: `stateDiagram-v2
+    [*] --> Evaluate
+    Evaluate : Analyse workload pattern
+    Evaluate --> OnDemand : unpredictable or new
+    Evaluate --> Savings : steady-state workload
+    Evaluate --> Spot : fault-tolerant batch
+    OnDemand --> Savings : usage stabilizes
+    Savings : Reserved or Savings Plan
+    Spot --> OnDemand : latency-sensitive`,
+    },
   ],
 
   animations: [

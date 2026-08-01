@@ -331,83 +331,90 @@ async function resolveURL(shortKey, dbLookup) {
     {
       title: "URL Shortener System Architecture",
       kind: "architecture",
-      caption: "High-level architecture showing the write path (URL creation), read path (redirect), and analytics pipeline",
+      caption: "Write path handles URL creation via KGS. Read path serves redirects through a Redis cache with DB fallback. Analytics events are published asynchronously to Kafka.",
       mermaid: `graph TB
-    Client["Client / Browser"]
+    CLIENT["Client or Browser"]
     LB["Load Balancer"]
-    API1["API Server 1"]
-    API2["API Server 2"]
-    KGS["Key Generation<br/>Service (KGS)"]
-    Redis["Redis Cache<br/>(LRU, 35GB)"]
-    DB[("MongoDB / DynamoDB<br/>URL Mappings")]
-    Kafka["Kafka<br/>Click Events"]
-    Analytics["Analytics<br/>Consumer"]
-    DW[("Data Warehouse<br/>Click Aggregates")]
-
-    Client -->|"POST /api/shorten"| LB
-    Client -->|"GET /:shortKey"| LB
-    LB --> API1
-    LB --> API2
-    API1 -->|"get unique key"| KGS
-    API2 -->|"get unique key"| KGS
-    KGS -->|"batch allocate keys"| DB
-    API1 -->|"store mapping"| DB
-    API2 -->|"store mapping"| DB
-    API1 -->|"cache lookup"| Redis
-    API2 -->|"cache lookup"| Redis
-    Redis -.->|"cache miss"| DB
-    API1 -->|"publish click event"| Kafka
-    API2 -->|"publish click event"| Kafka
-    Kafka --> Analytics
-    Analytics --> DW`,
+    API["API Servers"]
+    KGS["Key Generation Service"]
+    REDIS["Redis Cache - LRU"]
+    DB["MongoDB - URL Mappings"]
+    KAFKA["Kafka - Click Events"]
+    ANALYTICS["Analytics Consumer"]
+    DW["Data Warehouse"]
+    CLIENT --> LB
+    LB --> API
+    API -->|get unique key| KGS
+    KGS -->|batch allocate| DB
+    API -->|store mapping| DB
+    API -->|cache lookup| REDIS
+    REDIS -.->|cache miss| DB
+    API -->|publish click event| KAFKA
+    KAFKA --> ANALYTICS
+    ANALYTICS --> DW`,
     },
     {
-      title: "URL Redirect Flow",
+      title: "URL Redirect Read Path",
       kind: "sequence",
-      caption: "Sequence diagram showing the read path: cache hit vs. cache miss, with async analytics",
+      caption: "On redirect request, the API checks Redis first. On cache miss it queries MongoDB, populates the cache, issues a 302 redirect, and publishes a click event asynchronously.",
       mermaid: `sequenceDiagram
     participant User
-    participant LB as Load Balancer
     participant API as API Server
     participant Cache as Redis Cache
-    participant DB as Database
+    participant DB as MongoDB
     participant MQ as Kafka
-
-    User->>LB: GET /abc123
-    LB->>API: Forward request
+    User->>API: GET /abc123
     API->>Cache: GET url:abc123
-    alt Cache Hit
-        Cache-->>API: longURL
-    else Cache Miss
-        Cache-->>API: null
-        API->>DB: find({ shortKey: "abc123" })
-        DB-->>API: { longURL, ... }
-        API->>Cache: SETEX url:abc123 longURL 3600
-    end
+    Cache-->>API: cache miss
+    API->>DB: find shortKey abc123
+    DB-->>API: longURL
+    API->>Cache: SETEX url:abc123 longURL TTL
     API-->>User: 302 Redirect to longURL
-    API->>MQ: publish clickEvent (async)
-    Note over MQ: {shortKey, timestamp,<br/>IP, userAgent, referrer}`,
+    API->>MQ: publish click event async`,
     },
     {
       title: "Key Generation Strategies",
       kind: "flow",
-      caption: "Decision flow for choosing a key generation strategy based on system requirements",
+      caption: "Decision tree for choosing a key generation approach based on uniqueness guarantees and deployment environment.",
       mermaid: `flowchart TD
-    Start["Need to generate<br/>a short key"] --> Q1{"Need guaranteed<br/>uniqueness?"}
-    Q1 -->|Yes| Q2{"Multi-server<br/>environment?"}
-    Q1 -->|No| Hash["Hash-Based<br/>MD5/SHA256 truncation<br/>+ collision check"]
-    Q2 -->|Yes| KGS["Pre-generated Key<br/>Service (KGS)<br/>Best for distributed"]
-    Q2 -->|No| Q3{"Predictability<br/>acceptable?"}
-    Q3 -->|Yes| AutoInc["Auto-Increment ID<br/>+ Base62<br/>Simple, sequential"]
-    Q3 -->|No| Random["Random Base62<br/>+ DB uniqueness check"]
-
-    KGS --> Batch["Batch allocate keys<br/>to each server"]
-    Hash --> Retry["On collision:<br/>rehash or append counter"]
-
-    style KGS fill:#2d5016,color:#fff
-    style Hash fill:#7a4f1a,color:#fff
-    style AutoInc fill:#1a3a5c,color:#fff
-    style Random fill:#5c1a3a,color:#fff`,
+    A[Need a short key] --> B{Multi-server environment?}
+    B -->|Yes| C[Key Generation Service - KGS]
+    B -->|No| D{Predictability acceptable?}
+    C --> E[Pre-generate keys in batches]
+    E --> F[Each server pulls batch of keys]
+    D -->|Yes| G[Auto-increment ID plus Base62 encode]
+    D -->|No| H[Random Base62 with DB uniqueness check]
+    H --> I{Collision?}
+    I -->|Yes| H
+    I -->|No| J[Key assigned]
+    G --> J
+    F --> J`,
+    },
+    {
+      title: "URL Shortener Data Flow Network",
+      kind: "network",
+      caption: "Network of components showing write and read data flows across client, servers, cache, storage, and analytics.",
+      mermaid: `graph LR
+    C["Client"]
+    LB["Load Balancer"]
+    API1["API Server 1"]
+    API2["API Server 2"]
+    REDIS["Redis Cache"]
+    MONGO["MongoDB"]
+    KGS["Key Gen Service"]
+    KAFKA["Kafka"]
+    DW["Data Warehouse"]
+    C --> LB
+    LB --> API1
+    LB --> API2
+    API1 --> REDIS
+    API2 --> REDIS
+    REDIS --> MONGO
+    API1 --> KGS
+    API2 --> KGS
+    KGS --> MONGO
+    API1 --> KAFKA
+    KAFKA --> DW`,
     },
   ],
   comparison: {

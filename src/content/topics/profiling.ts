@@ -330,62 +330,76 @@ void process_data(const std::vector<int>& data) {
     {
       title: "Profiling Tool Selection Flowchart",
       kind: "flow",
-      caption: "Decision tree for choosing the right C++ profiling tool based on the problem type",
+      caption: "Decision tree for choosing the right profiling tool based on the type of performance bottleneck.",
       mermaid: `flowchart TD
-    Start["**Performance Issue Detected**"] --> Q1{"What type\\nof bottleneck?"}
-    Q1 -->|CPU-bound| Q2{"Production or\\nDevelopment?"}
-    Q1 -->|Memory leak| Leak["**AddressSanitizer**\\n+ **LeakSanitizer**\\n\`-fsanitize=address,leak\`"]
-    Q1 -->|Cache misses| Cache["**Cachegrind**\\n\`valgrind --tool=cachegrind\`"]
-    Q1 -->|Thread contention| Thread["**Intel VTune**\\nor **perf lock**"]
-    Q2 -->|Production| Sampling["**perf record -g**\\n*sampling, ~2% overhead*"]
-    Q2 -->|Development| Q3{"Need exact\\ncall counts?"}
-    Q3 -->|Yes| Instr["**gprof** or **Callgrind**\\n*instrumentation-based*"]
-    Q3 -->|No| Sampling
-    style Start fill:#e3f2fd,stroke:#1565c0
-    style Sampling fill:#c8e6c9,stroke:#2e7d32
-    style Instr fill:#fff9c4,stroke:#f9a825
-    style Leak fill:#ffcdd2,stroke:#c62828
-    style Cache fill:#e1bee7,stroke:#7b1fa2
-    style Thread fill:#ffe0b2,stroke:#ef6c00`,
+    Start[Performance Issue Detected] --> Q1{What type of bottleneck?}
+    Q1 -->|CPU-bound| Q2{Production or Development?}
+    Q1 -->|Memory leak| Leak[AddressSanitizer and LeakSanitizer\n-fsanitize=address,leak]
+    Q1 -->|Cache misses| Cache[Cachegrind\nvalgrind --tool=cachegrind]
+    Q1 -->|Thread contention| Thread[Intel VTune or perf lock]
+    Q2 -->|Production| Sampling[perf record -g\nsampling ~2% overhead]
+    Q2 -->|Development| Q3{Need exact call counts?}
+    Q3 -->|Yes| Instr[gprof or Callgrind\ninstrumentation-based]
+    Q3 -->|No| Sampling`,
     },
     {
-      title: "Flame Graph Anatomy",
+      title: "Flame Graph Call Stack Structure",
       kind: "architecture",
-      caption: "How to read a flame graph: width equals time, height equals stack depth",
-      mermaid: `flowchart TB
-    subgraph FlameGraph["**Flame Graph Structure**"]
-        direction TB
-        Main["main() — 100% width"] --> ProcessReq["process_request() — 80%"]
-        Main --> Init["init() — 20%"]
-        ProcessReq --> ParseJSON["parse_json() — 45%"]
-        ProcessReq --> DBQuery["db_query() — 35%"]
-        ParseJSON --> Alloc["allocate() — 30%\\n*WIDE PLATEAU = bottleneck*"]
-        DBQuery --> NetIO["network_io() — 25%"]
-        DBQuery --> Serialize["serialize() — 10%"]
-    end
-    style Alloc fill:#ff8a80,stroke:#d32f2f
-    style NetIO fill:#ffab91,stroke:#e64a19
-    style Main fill:#bbdefb,stroke:#1565c0
-    style ProcessReq fill:#c8e6c9,stroke:#388e3c`,
+      caption: "How to read a flame graph: width equals time spent, height equals stack depth, wide plateaus indicate bottlenecks.",
+      mermaid: `graph TD
+    Main[main - 100 percent] --> ProcessReq[process_request - 80 percent]
+    Main --> Init[init - 20 percent]
+    ProcessReq --> ParseJSON[parse_json - 45 percent]
+    ProcessReq --> DBQuery[db_query - 35 percent]
+    ParseJSON --> Alloc[allocate - 30 percent\nWIDE PLATEAU - bottleneck]
+    DBQuery --> NetIO[network_io - 25 percent]
+    DBQuery --> Serialize[serialize - 10 percent]`,
     },
     {
       title: "Profiling Workflow Pipeline",
       kind: "sequence",
-      caption: "End-to-end profiling workflow from detection to verification",
+      caption: "End-to-end profiling workflow from initial detection through optimization and verification.",
       mermaid: `sequenceDiagram
     participant Dev as Developer
-    participant Perf as perf / gprof
-    participant Viz as FlameGraph / KCachegrind
+    participant Perf as perf or gprof
+    participant Viz as FlameGraph or KCachegrind
     participant Code as Source Code
-    Dev->>Perf: perf stat ./program (overview)
+    Dev->>Perf: perf stat ./program for overview
     Perf-->>Dev: IPC, cache misses, branch mispredictions
-    Dev->>Perf: perf record -g ./program (detailed)
-    Perf-->>Viz: Generate flame graph
-    Viz-->>Dev: Identify wide plateaus (hot functions)
+    Dev->>Perf: perf record -g ./program for detail
+    Perf-->>Viz: Generate flame graph data
+    Viz-->>Dev: Identify wide plateaus - hot functions
     Dev->>Code: Optimize hot path
     Dev->>Perf: Re-profile with perf stat
-    Perf-->>Dev: Compare metrics (before vs after)
-    Note over Dev,Perf: Repeat until target met`,
+    Perf-->>Dev: Compare metrics before vs after
+    Note over Dev,Perf: Repeat until performance target met`,
+    },
+    {
+      title: "Sampling vs Instrumentation Trade-offs",
+      kind: "mindmap",
+      caption: "Key differences between sampling-based and instrumentation-based profilers in terms of overhead, accuracy, and use cases.",
+      mermaid: `mindmap
+  root((Profiling Approaches))
+    Sampling
+      Low overhead 1 to 5 percent
+      Statistical approximation
+      Safe in production
+      perf record
+      Instruments all code paths
+    Instrumentation
+      Higher overhead 10 to 50x
+      Exact call counts
+      Development only
+      gprof
+      Callgrind
+      Can miss inlined code
+    Hardware Counters
+      Near zero overhead
+      CPU microarchitecture events
+      Cache hits and misses
+      Branch mispredictions
+      Intel VTune
+      perf stat`,
     },
   ],
   comparison: {

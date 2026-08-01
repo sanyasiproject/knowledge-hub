@@ -67,8 +67,73 @@ SHOW checkpoint_timeout;`
     },
   ],
   diagrams: [
-    { title: "WAL write-ahead logging flow", kind: "sequence", caption: "Transaction writes to WAL first, then to buffer pool, then checkpoint flushes to data files." },
-    { title: "Two-phase commit protocol", kind: "sequence", caption: "Coordinator sends prepare to participants, waits for votes, then sends commit or abort." },
+    {
+      title: "Transaction Lifecycle",
+      kind: "flow",
+      caption: "A transaction moves from BEGIN through operations to either COMMIT (durable) or ROLLBACK (all changes reversed).",
+      mermaid: `flowchart TD
+    BEGIN["BEGIN Transaction"]
+    OPS["Execute SQL Operations"]
+    CHECK{"Error or ROLLBACK?"}
+    WAL["Write Commit Record to WAL"]
+    FLUSH["Flush WAL to Disk"]
+    COMMIT["Transaction COMMITTED"]
+    UNDO["Apply Undo Log"]
+    ABORT["Transaction ABORTED"]
+    BEGIN --> OPS --> CHECK
+    CHECK -- "No" --> WAL --> FLUSH --> COMMIT
+    CHECK -- "Yes" --> UNDO --> ABORT`,
+    },
+    {
+      title: "ACID Properties Overview",
+      kind: "architecture",
+      caption: "The four ACID guarantees and the database mechanisms that enforce each one.",
+      mermaid: `flowchart TD
+    ACID["ACID Guarantees"]
+    A["Atomicity"]
+    C["Consistency"]
+    I["Isolation"]
+    D["Durability"]
+    UL["Undo Log"]
+    CON["Constraints + Triggers"]
+    LOCKS["Locks / MVCC"]
+    WAL["Write-Ahead Log"]
+    ACID --> A --> UL
+    ACID --> C --> CON
+    ACID --> I --> LOCKS
+    ACID --> D --> WAL`,
+    },
+    {
+      title: "Transaction States",
+      kind: "state",
+      caption: "Possible states a database transaction passes through from initiation to final outcome.",
+      mermaid: `stateDiagram-v2
+    [*] --> Active : BEGIN
+    Active --> PartiallyCommitted : all ops done
+    Active --> Failed : error / deadlock
+    PartiallyCommitted --> Committed : WAL flush ok
+    PartiallyCommitted --> Failed : flush error
+    Failed --> Aborted : rollback complete
+    Committed --> [*]
+    Aborted --> [*]`,
+    },
+    {
+      title: "Two-Phase Commit Protocol",
+      kind: "sequence",
+      caption: "Coordinator drives a prepare phase then a commit/abort phase across all participants to achieve distributed atomicity.",
+      mermaid: `sequenceDiagram
+    participant CO as Coordinator
+    participant P1 as Participant 1
+    participant P2 as Participant 2
+    CO->>P1: PREPARE
+    CO->>P2: PREPARE
+    P1-->>CO: VOTE YES
+    P2-->>CO: VOTE YES
+    CO->>P1: COMMIT
+    CO->>P2: COMMIT
+    P1-->>CO: ACK
+    P2-->>CO: ACK`,
+    },
   ],
   animations: [
     {

@@ -347,101 +347,100 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Observer Pattern Class Diagram",
-      kind: "architecture",
-      caption: "UML class diagram showing the Observer pattern with Subject (Order) and multiple concrete observers.",
-      mermaid: `classDiagram
-    class OrderObserver {
-        <<interface>>
-        +onOrderStateChange(orderId, oldState, newState) void
-    }
-
-    class InventoryObserver {
-        +onOrderStateChange(orderId, oldState, newState) void
-    }
-
-    class NotificationObserver {
-        +onOrderStateChange(orderId, oldState, newState) void
-    }
-
-    class AnalyticsObserver {
-        +onOrderStateChange(orderId, oldState, newState) void
-    }
-
-    class Order {
-        -string id
-        -string state
-        -vector~OrderObserver~ observers
-        +addObserver(OrderObserver) void
-        +removeObserver(OrderObserver) void
-        +setState(string newState) void
-        +state() string
-    }
-
-    OrderObserver <|.. InventoryObserver
-    OrderObserver <|.. NotificationObserver
-    OrderObserver <|.. AnalyticsObserver
-    Order o-- OrderObserver : notifies`,
+      title: "LLD Design Process Flow",
+      kind: "flow",
+      caption: "Step-by-step process for producing a low-level design from requirements to validated class diagrams.",
+      mermaid: `flowchart TD
+    A["Gather Requirements"] --> B["Identify Nouns as Classes"]
+    B --> C["Identify Verbs as Methods"]
+    C --> D["Apply SOLID Principles"]
+    D --> E{"Responsibilities\nwell separated?"}
+    E -->|No| F["Refactor and Split Classes"]
+    F --> D
+    E -->|Yes| G["Define Relationships\nAssociation, Aggregation, Composition"]
+    G --> H["Draw Class Diagram"]
+    H --> I["Trace Key Flows as Sequence Diagrams"]
+    I --> J{"Missing classes\nor methods?"}
+    J -->|Yes| K["Update Class Diagram"]
+    K --> I
+    J -->|No| L["Final LLD Ready"]`,
     },
     {
-      title: "Order Placement Sequence Diagram",
+      title: "Order Placement Sequence",
       kind: "sequence",
-      caption: "Sequence diagram showing how objects interact when a customer places an order, demonstrating method calls between classes.",
+      caption: "Sequence of method calls between objects when a customer places an order, showing conditional flows for payment success and failure.",
       mermaid: `sequenceDiagram
     participant C as Customer
     participant OS as OrderService
-    participant O as Order
-    participant II as InventoryService
+    participant IS as InventoryService
     participant PS as PaymentService
     participant NS as NotificationService
 
     C->>OS: placeOrder(cart, paymentInfo)
-    OS->>O: new Order(cart.items)
-    OS->>II: reserveStock(order.items)
+    OS->>IS: reserveStock(items)
     alt Stock Available
-        II-->>OS: reserved
+        IS-->>OS: reserved
         OS->>PS: processPayment(paymentInfo, total)
         alt Payment Success
-            PS-->>OS: paymentConfirmed
-            OS->>O: setState(CONFIRMED)
-            O->>NS: onOrderStateChange(CONFIRMED)
-            NS-->>C: Order confirmation email
-            OS-->>C: Order created successfully
+            PS-->>OS: confirmed
+            OS->>NS: sendConfirmation(orderId)
+            NS-->>C: Confirmation email sent
+            OS-->>C: Order created
         else Payment Failed
-            PS-->>OS: paymentFailed
-            OS->>II: releaseStock(order.items)
-            OS->>O: setState(CANCELLED)
+            PS-->>OS: failed
+            OS->>IS: releaseStock(items)
             OS-->>C: Payment failed error
         end
     else Out of Stock
-        II-->>OS: insufficientStock
+        IS-->>OS: insufficient
         OS-->>C: Out of stock error
     end`,
     },
     {
-      title: "Order Lifecycle State Diagram",
+      title: "Order Lifecycle States",
       kind: "state",
-      caption: "State machine showing all valid transitions for an Order entity in an e-commerce system.",
+      caption: "State machine showing every valid state and transition for an Order entity in an e-commerce system.",
       mermaid: `stateDiagram-v2
     [*] --> Created
     Created --> Confirmed: Payment successful
-    Created --> Cancelled: Payment failed / User cancels
-
+    Created --> Cancelled: Payment failed or user cancels
     Confirmed --> Processing: Warehouse picks order
-    Confirmed --> Cancelled: User cancels (within window)
-
+    Confirmed --> Cancelled: User cancels within window
     Processing --> Shipped: Handed to carrier
     Processing --> Cancelled: Item unavailable
-
     Shipped --> Delivered: Delivery confirmed
     Shipped --> Returned: Delivery refused
-
-    Delivered --> Returned: Return requested (within policy)
+    Delivered --> Returned: Return requested within policy
     Delivered --> [*]
-
     Returned --> Refunded: Return processed
     Refunded --> [*]
     Cancelled --> [*]`,
+    },
+    {
+      title: "SOLID Principles Mindmap",
+      kind: "mindmap",
+      caption: "Overview of the five SOLID object-oriented design principles and their key ideas.",
+      mermaid: `mindmap
+  root((SOLID))
+    S - Single Responsibility
+      One reason to change
+      Cohesive class
+      Avoid God classes
+    O - Open Closed
+      Open for extension
+      Closed for modification
+      Strategy and Decorator patterns
+    L - Liskov Substitution
+      Subtypes substitutable
+      No override that throws
+      Honour preconditions
+    I - Interface Segregation
+      Prefer narrow interfaces
+      Clients not forced to depend on unused methods
+    D - Dependency Inversion
+      Depend on abstractions
+      Inject dependencies
+      Testable and flexible`,
     },
   ],
   comparison: {

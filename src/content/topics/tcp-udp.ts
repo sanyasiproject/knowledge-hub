@@ -203,29 +203,76 @@ NS (ECN-nonce). Data Offset: header length in 32-bit words.`,
   ],
   diagrams: [
     {
-      title: "TCP Three-Way Handshake and Four-Way Teardown",
+      title: "TCP vs UDP Feature Comparison",
+      kind: "mindmap",
+      caption: "Side-by-side breakdown of TCP and UDP characteristics, reliability guarantees, and typical use cases.",
+      mermaid: `mindmap
+  root((Transport Protocols))
+    TCP
+      Reliable delivery
+      Ordered packets
+      Connection setup
+      Flow control
+      HTTP and HTTPS
+      SSH and FTP
+    UDP
+      Unreliable
+      No ordering
+      No connection
+      Low latency
+      DNS
+      Video streaming
+      Gaming`,
+    },
+    {
+      title: "TCP Data Flow with ACK",
       kind: "sequence",
-      caption: "Connection establishment (SYN, SYN-ACK, ACK) and graceful termination (FIN, ACK, FIN, ACK) between client and server, showing sequence number exchange.",
+      caption: "How TCP sender transmits segments and receives acknowledgements, with retransmission on loss.",
+      mermaid: `sequenceDiagram
+    participant Sender
+    participant Receiver
+    Sender->>Receiver: Segment 1 seq=1
+    Sender->>Receiver: Segment 2 seq=2
+    Receiver-->>Sender: ACK 3
+    Sender->>Receiver: Segment 3 seq=3
+    Note over Sender,Receiver: Segment 4 lost
+    Sender->>Receiver: Segment 4 seq=4
+    Note over Receiver: timeout or duplicate ACK
+    Sender->>Receiver: Retransmit Segment 4
+    Receiver-->>Sender: ACK 5`,
     },
     {
-      title: "TCP vs UDP Protocol Stack",
-      kind: "architecture",
-      caption: "OSI/TCP-IP layer comparison showing where TCP and UDP sit relative to IP, application protocols (HTTP, DNS, RTP), and the physical network.",
-    },
-    {
-      title: "TCP Congestion Control State Machine",
-      kind: "state",
-      caption: "States: Slow Start -> Congestion Avoidance -> Fast Recovery. Transitions on: ssthresh reached, triple duplicate ACK, timeout. Shows cwnd changes at each transition.",
-    },
-    {
-      title: "TCP Sliding Window Mechanism",
+      title: "UDP Datagram Flow",
       kind: "flow",
-      caption: "Visualization of the send window partitioned into: bytes sent and acknowledged, bytes sent but unacknowledged (in flight), bytes sendable (within window), and bytes not yet sendable (beyond window).",
+      caption: "Connectionless UDP send path showing no handshake, no acknowledgement, and fire-and-forget behavior.",
+      mermaid: `flowchart LR
+    App["Application"] --> Socket["UDP Socket"]
+    Socket --> Datagram["Create Datagram
+dest IP + port + data"]
+    Datagram --> Send["Send immediately
+no connection check"]
+    Send --> Net["Network"]
+    Net --> Recv["Receiver Socket"]
+    Recv --> App2["Receiving Application"]
+    Net -->|lost| Drop["Dropped
+no retransmit"]`,
     },
     {
-      title: "QUIC vs TCP+TLS Connection Establishment",
-      kind: "sequence",
-      caption: "Comparison of round-trips: TCP (1 RTT handshake) + TLS 1.3 (1 RTT) = 2 RTTs vs QUIC 1-RTT (new connection) or 0-RTT (resumed connection).",
+      title: "Protocol Selection Decision",
+      kind: "flow",
+      caption: "Decision process for choosing TCP or UDP based on reliability, latency, and ordering requirements.",
+      mermaid: `flowchart TD
+    A([Choose Protocol]) --> B{Need reliable delivery?}
+    B -->|Yes| C{Need ordering?}
+    B -->|No| D{Latency critical?}
+    C -->|Yes| TCP["Use TCP
+e.g. HTTP, SSH"]
+    C -->|No| QUIC["Consider QUIC
+or TCP with app logic"]
+    D -->|Yes| UDP["Use UDP
+e.g. DNS, gaming, video"]
+    D -->|No| UDP2["UDP still viable
+with app-layer retry"]`,
     },
   ],
   animations: [

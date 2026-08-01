@@ -344,112 +344,87 @@ export { rateLimiter };`,
   ],
   diagrams: [
     {
-      title: "Rate Limiter System Architecture",
+      title: "Rate Limiter Architecture",
       kind: "architecture",
-      caption: "High-level architecture showing how the rate limiter sits between clients and backend services, using Redis for distributed state.",
+      caption: "Rate limiter sits between clients and backend services. It uses Redis for distributed atomic state and returns 429 to blocked clients.",
       mermaid: `graph TB
-    Client1[Client A] -->|HTTP Request| Gateway[API Gateway]
-    Client2[Client B] -->|HTTP Request| Gateway
-    Client3[Client C] -->|HTTP Request| Gateway
-
-    Gateway -->|Check Rate Limit| RL[Rate Limiter Middleware]
-    RL -->|Atomic Read/Write| Redis[(Redis - Token Buckets)]
-
-    RL -->|Allowed| LB[Load Balancer]
-    RL -->|Rejected 429| Client1
-    RL -->|Rejected 429| Client2
-
-    LB --> S1[Service Instance 1]
-    LB --> S2[Service Instance 2]
-    LB --> S3[Service Instance 3]
-
-    Redis -.->|Lua Script: Atomic Check & Decrement| Redis
-
-    style RL fill:#f96,stroke:#333,stroke-width:2px
-    style Redis fill:#d63,stroke:#333,stroke-width:2px
-    style Gateway fill:#69f,stroke:#333,stroke-width:2px`,
+    C1["Client A"]
+    C2["Client B"]
+    GW["API Gateway"]
+    RL["Rate Limiter Middleware"]
+    REDIS["Redis - Token Buckets"]
+    LB["Load Balancer"]
+    S1["Service Instance 1"]
+    S2["Service Instance 2"]
+    C1 --> GW
+    C2 --> GW
+    GW --> RL
+    RL --> REDIS
+    RL -->|Allowed| LB
+    RL -->|429 Too Many Requests| C1
+    LB --> S1
+    LB --> S2`,
     },
     {
       title: "Token Bucket Algorithm Flow",
       kind: "flow",
-      caption: "Step-by-step decision flow for the token bucket algorithm on each incoming request.",
+      caption: "On each request the bucket is refilled by elapsed time times refill rate, then one token is consumed if available.",
       mermaid: `flowchart TD
     A[Request Arrives] --> B[Calculate elapsed time since last refill]
-    B --> C[Add elapsed * refillRate tokens]
-    C --> D{tokens > maxTokens?}
-    D -->|Yes| E[Cap tokens = maxTokens]
-    D -->|No| F[Keep current tokens]
-    E --> G{tokens >= 1?}
+    B --> C[Add elapsed times refillRate tokens]
+    C --> D{tokens greater than maxTokens?}
+    D -->|Yes| E[Cap tokens at maxTokens]
+    D -->|No| F[Keep current token count]
+    E --> G{tokens greater than or equal to 1?}
     F --> G
     G -->|Yes| H[Decrement tokens by 1]
-    H --> I[Update lastRefill timestamp]
-    I --> J[Return 200 OK - Request Allowed]
-    G -->|No| K[Calculate Retry-After header]
-    K --> L[Return 429 Too Many Requests]
-
-    style J fill:#4a4,stroke:#333,color:#fff
-    style L fill:#d44,stroke:#333,color:#fff`,
+    H --> I[Return 200 OK]
+    G -->|No| J[Return 429 Too Many Requests]`,
     },
     {
-      title: "Sliding Window Counter Visualization",
-      kind: "sequence",
-      caption: "Sequence diagram showing how the sliding window counter weights previous and current window counts to approximate a true sliding window.",
-      mermaid: `sequenceDiagram
-    participant C as Client
-    participant RL as Rate Limiter
-    participant Store as Counter Store
-
-    Note over Store: Window N-1: count=80<br/>Window N: count=30<br/>Window size: 60s
-
-    C->>RL: Request at t=40s into Window N
-    RL->>Store: Read prev_count, curr_count
-    Store-->>RL: prev=80, curr=30
-
-    Note over RL: overlap = (60-40)/60 = 0.333<br/>weighted = 80*0.333 + 30 = 56.67<br/>limit = 100 → ALLOW
-
-    RL->>Store: Increment curr_count to 31
-    RL-->>C: 200 OK (Remaining: 43)
-
-    C->>RL: Request at t=55s into Window N
-    RL->>Store: Read prev_count, curr_count
-    Store-->>RL: prev=80, curr=85
-
-    Note over RL: overlap = (60-55)/60 = 0.083<br/>weighted = 80*0.083 + 85 = 91.67<br/>limit = 100 → ALLOW
-
-    RL->>Store: Increment curr_count to 86
-    RL-->>C: 200 OK (Remaining: 8)`,
-    },
-    {
-      title: "Rate Limiting Algorithm Decision Mindmap",
+      title: "Rate Limiting Algorithm Comparison",
       kind: "mindmap",
-      caption: "A mindmap showing how to choose the right rate limiting algorithm based on requirements.",
+      caption: "Four main rate limiting algorithms compared by burst handling, memory usage, accuracy, and best use case.",
       mermaid: `mindmap
-  root((Rate Limiting))
+  root[Rate Limiting Algorithms]
     Token Bucket
-      Allows bursts
-      maxTokens = burst size
-      refillRate = sustained rate
+      Allows bursts up to maxTokens
+      O1 memory per client
       Best for APIs with spiky traffic
     Leaky Bucket
-      Smooth output rate
+      Smooth constant output rate
       No bursts allowed
-      FIFO queue based
       Best for downstream protection
-    Fixed Window
-      Simplest to implement
+    Fixed Window Counter
+      Simplest implementation
       Boundary burst problem
-      O(1) memory
-      Best for non-critical limits
-    Sliding Window Log
-      Perfect accuracy
-      O(n) memory per client
-      Stores all timestamps
-      Best when accuracy is critical
+      O1 memory per client
     Sliding Window Counter
       Near-perfect accuracy
-      O(1) memory per client
       Weighted approximation
       Best general-purpose choice`,
+    },
+    {
+      title: "Distributed Rate Limiter Sequence",
+      kind: "sequence",
+      caption: "Lua script executes atomically on Redis to check and decrement the token bucket, ensuring no race conditions across multiple API server instances.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant API as API Server
+    participant RL as Rate Limiter
+    participant R as Redis
+    C->>API: HTTP Request
+    API->>RL: Check limit for clientId
+    RL->>R: Execute Lua script atomic check and decrement
+    R-->>RL: allowed=true tokens=8
+    RL-->>API: Allowed
+    API-->>C: 200 OK with X-RateLimit headers
+    C->>API: Another request
+    API->>RL: Check limit for clientId
+    RL->>R: Execute Lua script
+    R-->>RL: allowed=false retry_after=12s
+    RL-->>API: Blocked
+    API-->>C: 429 Too Many Requests`,
     },
   ],
   comparison: {

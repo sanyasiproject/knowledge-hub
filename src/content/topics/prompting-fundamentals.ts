@@ -367,41 +367,65 @@ int main() {
     {
       title: "Prompt Structure Flow",
       kind: "flow",
-      caption: "The recommended flow for constructing a well-structured prompt, from role definition through quality verification",
+      caption: "The recommended flow for constructing a well-structured prompt, from role definition through quality verification.",
       mermaid: `flowchart TD
-    A[Define Role / Persona] --> B[Provide Context & Reference Material]
+    A[Define Role and Persona] --> B[Provide Context and Reference Material]
     B --> C[State the Task Clearly]
-    C --> D[Specify Output Format & Constraints]
+    C --> D[Specify Output Format and Constraints]
     D --> E{Examples Needed?}
-    E -- Yes --> F[Add Few-Shot Examples]
-    E -- No --> G[Add Quality Checklist]
+    E -->|Yes| F[Add Few-Shot Examples]
+    E -->|No| G[Add Quality Checklist]
     F --> G
     G --> H[Wrap User Data in Delimiters]
     H --> I[Send to Model]
     I --> J{Output Passes Validation?}
-    J -- Yes --> K[Use Output]
-    J -- No --> L[Refine Prompt & Retry]
+    J -->|Yes| K[Use Output]
+    J -->|No| L[Refine Prompt and Retry]
     L --> C`,
     },
     {
       title: "Prompt Injection Defense Architecture",
       kind: "architecture",
-      caption: "Defense-in-depth layers for protecting against prompt injection attacks",
-      mermaid: `flowchart LR
-    subgraph Input Layer
-        A[User Input] --> B[Input Validation]
-        B --> C[Sanitize & Delimit]
-    end
-    subgraph Model Layer
-        C --> D[System Prompt with Constraints]
-        D --> E[Model Processing]
-    end
-    subgraph Output Layer
-        E --> F[Output Filtering]
-        F --> G{Policy Check}
-        G -- Pass --> H[Return to User]
-        G -- Fail --> I[Block & Log]
-    end`,
+      caption: "Defense-in-depth layers for protecting against prompt injection attacks at input, model, and output layers.",
+      mermaid: `graph LR
+    UserInput[User Input] --> Validate[Input Validation\nLength and type checks]
+    Validate --> Sanitize[Sanitize and Delimit\nWrap in XML tags]
+    Sanitize --> System[System Prompt\nRole and constraints]
+    System --> Model[Model Processing]
+    Model --> Filter[Output Filtering\nKeyword checks]
+    Filter --> Policy{Policy Check}
+    Policy -->|Pass| Return[Return to User]
+    Policy -->|Fail| Block[Block and Log\nAlert security team]`,
+    },
+    {
+      title: "Prompt Component Anatomy",
+      kind: "mindmap",
+      caption: "All the building blocks of a well-formed prompt and when to include each component.",
+      mermaid: `mindmap
+  root((Prompt Components))
+    System Prompt
+      Role and persona
+      Behavioral constraints
+      Output format rules
+      Safety guardrails
+    Context
+      Background information
+      Reference documents
+      User history
+      Domain knowledge
+    Task
+      Clear action verb
+      Specific goal
+      Audience specification
+    Examples
+      Few-shot demonstrations
+      Format examples
+      Edge case handling
+    Output Spec
+      Format JSON, markdown, list
+      Length constraints
+      Required fields
+      Forbidden content`,
     },
   ],
   comparison: {

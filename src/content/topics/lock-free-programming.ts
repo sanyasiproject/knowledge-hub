@@ -387,20 +387,74 @@ unsafe impl<T: Send> Sync for MpscQueue<T> {}
     {
       title: "CAS Loop Operation Flow",
       kind: "flow" as const,
-      caption:
-        "Flowchart showing the read-compare-swap retry loop that underpins all lock-free algorithms",
+      caption: "Flowchart showing the read-compare-swap retry loop that underpins all lock-free algorithms.",
+      mermaid: `flowchart TD
+    A["Load current value into expected"] --> B["Compute desired value from expected"]
+    B --> C["Execute CAS: compare memory with expected"]
+    C --> D{"CAS succeeded?"}
+    D -->|Yes| E["Operation complete - value updated atomically"]
+    D -->|No| F["Another thread modified value"]
+    F --> G["Update expected with actual current value"]
+    G --> B`,
     },
     {
       title: "ABA Problem Sequence",
       kind: "sequence" as const,
-      caption:
-        "Sequence diagram showing how Thread 1 reads A, Thread 2 changes A->B->A, and Thread 1's CAS falsely succeeds",
+      caption: "Sequence diagram showing how Thread 1 reads A, Thread 2 changes A to B back to A, and Thread 1's CAS falsely succeeds.",
+      mermaid: `sequenceDiagram
+    participant T1 as Thread 1
+    participant Mem as Shared Memory
+    participant T2 as Thread 2
+
+    T1->>Mem: Read head = Node A (addr 0x100)
+    Note over T1: Thread 1 preempted
+    T2->>Mem: Pop Node A (free 0x100)
+    T2->>Mem: Pop Node B
+    T2->>Mem: Push new node allocated at 0x100
+    Note over Mem: head = 0x100 again but different node
+    T1->>Mem: CAS(head, 0x100, A.next)
+    Note over T1,Mem: CAS succeeds but A.next is stale pointer
+    Note over Mem: Memory corruption - dangling pointer`,
     },
     {
-      title: "Lock-Free Stack and Queue Architecture",
+      title: "Lock-Free Stack Architecture",
       kind: "architecture" as const,
-      caption:
-        "Architecture of Treiber stack (single head pointer) and Michael-Scott queue (head + tail with sentinel node)",
+      caption: "Structure of a Treiber lock-free stack using a single atomic head pointer and CAS for push and pop.",
+      mermaid: `graph TD
+    HEAD["Atomic Head Pointer"] --> N1["Node D - top of stack"]
+    N1 --> N2["Node C"]
+    N2 --> N3["Node B"]
+    N3 --> N4["Node A"]
+    N4 --> NULL["null"]
+    PUSH["push - create node, set next to head, CAS head"] --> HEAD
+    POP["pop - read head, read next, CAS head to next"] --> HEAD
+    TAG["Tagged Pointer - ptr plus version counter"] -.->|prevents ABA| HEAD`,
+    },
+    {
+      title: "Progress Guarantee Hierarchy",
+      kind: "mindmap" as const,
+      caption: "Hierarchy of progress guarantees from weakest to strongest, with key properties and typical use cases.",
+      mermaid: `mindmap
+  root((Progress Guarantees))
+    Blocking - Lock-Based
+      Mutex and spinlock
+      Deadlock possible
+      Priority inversion risk
+      Simple to reason about
+    Obstruction-Free
+      Progress if run alone
+      No deadlock
+      CAS with backoff
+    Lock-Free
+      System-wide progress
+      Some threads may starve
+      Treiber stack
+      Michael-Scott queue
+    Wait-Free
+      Per-thread bounded steps
+      No starvation
+      Highest complexity
+      Helping mechanism needed`,
     },
   ],
 

@@ -246,19 +246,72 @@ async function publishOutboxEvents(): Promise<void> {
   ],
   diagrams: [
     {
-      title: "At-Least-Once Delivery Flow",
+      title: "Delivery Guarantee Comparison",
+      kind: "mindmap",
+      caption: "The three delivery guarantees compared across loss risk, duplicate risk, complexity, and typical use cases.",
+      mermaid: `mindmap
+  root[Delivery Guarantees]
+    At-Most-Once
+      May lose messages
+      No duplicates
+      Lowest complexity
+      Metrics and logs
+    At-Least-Once
+      No message loss
+      May duplicate
+      Medium complexity
+      Orders and events
+      Requires idempotent consumer
+    Exactly-Once
+      No loss
+      No duplicates
+      Highest complexity
+      Financial ledgers
+      Kafka transactions or dedup table`,
+    },
+    {
+      title: "At-Least-Once Delivery with Retry",
       kind: "sequence",
-      caption: "Producer retries on missing ACK, consumer may process duplicate if ACK is lost after processing",
+      caption: "Producer retries on missing ACK. Consumer may process a duplicate if the ACK is lost after the consumer processes but before it acknowledges.",
+      mermaid: `sequenceDiagram
+    participant P as Producer
+    participant B as Broker
+    participant C as Consumer
+    P->>B: Send message msg-42
+    B->>C: Deliver msg-42
+    C->>C: Process msg-42
+    C-->>B: ACK lost in network
+    B-->>P: No ACK received - timeout
+    P->>B: Retry: Send msg-42 again
+    B->>C: Deliver msg-42 again
+    C->>C: Process msg-42 duplicate`,
     },
     {
       title: "Transactional Outbox Pattern",
       kind: "architecture",
-      caption: "Business data and outbox event written atomically to DB; relay process publishes to message broker",
+      caption: "Business data and outbox event are written atomically in one DB transaction. A relay process reads the outbox and publishes to the broker, achieving at-least-once event delivery.",
+      mermaid: `graph LR
+    S["Service"] -->|1 - atomic transaction| DB["Database"]
+    DB --> BT["business_data table"]
+    DB --> OT["outbox table - unpublished event"]
+    R["Relay Process"] -->|2 - poll or CDC| OT
+    R -->|3 - publish| MB["Message Broker"]
+    MB -->|4 - consume| CON["Consumer"]
+    R -->|5 - mark published| OT`,
     },
     {
-      title: "Kafka Exactly-Once Transaction Flow",
-      kind: "sequence",
-      caption: "Transaction coordinator manages two-phase commit across consumer offsets and produced messages",
+      title: "Idempotent Consumer Deduplication Flow",
+      kind: "flow",
+      caption: "Consumer checks a deduplication table before processing to skip already-seen messages, achieving effective exactly-once processing on top of at-least-once delivery.",
+      mermaid: `flowchart TD
+    A[Receive message with ID] --> B{ID in dedup table?}
+    B -->|Yes - duplicate| C[Skip processing]
+    C --> D[ACK message to broker]
+    B -->|No - new message| E[Begin DB transaction]
+    E --> F[Execute business logic]
+    F --> G[Insert message ID into dedup table]
+    G --> H[Commit transaction]
+    H --> D`,
     },
   ],
   animations: [

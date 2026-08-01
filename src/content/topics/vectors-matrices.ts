@@ -154,14 +154,76 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Matrix multiplication dimensions",
-      kind: "flow",
-      caption: "Shows how an (m×k) matrix times a (k×n) matrix produces an (m×n) result, with the dot-product computation for each output cell.",
+      title: "Vector and Matrix Operations",
+      kind: "mindmap",
+      caption: "Core linear algebra operations on vectors and matrices and their computational complexity.",
+      mermaid: `mindmap
+  root((Linear Algebra))
+    Vectors
+      Dot product O(n)
+      Magnitude O(n)
+      Normalization O(n)
+      Cross product O(1) 3D
+    Matrices
+      Addition O(n squared)
+      Multiplication O(n cubed) naive
+      Transpose O(n squared)
+      Inverse O(n cubed)
+    Decompositions
+      LU decomposition
+      SVD
+      Eigendecomposition`,
     },
     {
-      title: "Linear transformation pipeline",
+      title: "Matrix Multiplication Flow",
+      kind: "flow",
+      caption: "Step-by-step process of multiplying two matrices including dimension compatibility check.",
+      mermaid: `flowchart TD
+    A(["Multiply A m by k and B k by n"]) --> B{Dimensions compatible?
+A cols == B rows}
+    B -->|No| ERR(["Error: incompatible dimensions"])
+    B -->|Yes| C["Initialize result C m by n with zeros"]
+    C --> D["For each row i in A"]
+    D --> E["For each col j in B"]
+    E --> F["Sum A[i][k] * B[k][j] for all k"]
+    F --> G["Store in C[i][j]"]
+    G --> H{More elements?}
+    H -->|Yes| E
+    H -->|No| I(["Return C m by n"])`,
+    },
+    {
+      title: "Linear Transformation Visualization",
       kind: "architecture",
-      caption: "Model → View → Projection matrix chain in a 3-D graphics pipeline, showing how each transformation composes via matrix multiplication.",
+      caption: "How a matrix represents a linear transformation mapping input vectors to output vectors.",
+      mermaid: `graph LR
+    IV["Input Vector
+[x, y]"] --> MT["Matrix Transformation
+[a b; c d]"]
+    MT --> OV["Output Vector
+[ax+by, cx+dy]"]
+    MT --> R["Rotation
+orthogonal matrix"]
+    MT --> S["Scaling
+diagonal matrix"]
+    MT --> SH["Shear
+upper triangular"]
+    MT --> P["Projection
+rank deficient"]`,
+    },
+    {
+      title: "SVD Application in ML",
+      kind: "sequence",
+      caption: "How Singular Value Decomposition is used for dimensionality reduction in machine learning.",
+      mermaid: `sequenceDiagram
+    participant D as Data Matrix X m by n
+    participant SVD as SVD Algorithm
+    participant Red as Reduced Representation
+    D->>SVD: compute X = U S V-transpose
+    SVD-->>D: U m by m, S m by n, Vt n by n
+    Note over SVD: singular values in S sorted descending
+    D->>Red: keep top k singular values
+    Red->>Red: X_approx = U_k * S_k * Vt_k
+    Red-->>D: compressed m by k representation`,
     },
   ],
   animations: [

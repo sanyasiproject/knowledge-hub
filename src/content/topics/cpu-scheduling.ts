@@ -211,19 +211,108 @@ void cfs_simulate(Task tasks[], int n, int slice_ms) {
   ],
   diagrams: [
     {
-      title: "Process state transitions",
+      title: "CPU Scheduling Flow",
+      kind: "flow",
+      caption: "Decision flow of the CPU scheduler showing how the ready queue, scheduling algorithm, and dispatcher work together each cycle.",
+      mermaid: `flowchart TD
+    A["Scheduling Event\ntimer interrupt, IO complete,\nprocess yields or terminates"] --> B["Scheduler Invoked"]
+    B --> C{Algorithm?}
+
+    C -->|"FCFS"| D["Pick oldest arrival\nin ready queue"]
+    C -->|"SJF"| E["Pick shortest\nburst time estimate"]
+    C -->|"Round Robin"| F["Pick next in\ncircular queue"]
+    C -->|"Priority"| G["Pick highest\npriority process"]
+    C -->|"CFS"| H["Pick smallest\nvruntime in RB-tree"]
+
+    D --> I["Dispatcher"]
+    E --> I
+    F --> I
+    G --> I
+    H --> I
+
+    I --> J["Context Switch\nsave old state\nload new state"]
+    J --> K["Run selected\nprocess on CPU"]
+    K --> A`,
+    },
+    {
+      title: "Process State Machine",
       kind: "state",
-      caption: "New -> Ready -> Running -> (Waiting | Terminated). Running can be preempted back to Ready.",
+      caption: "Complete process state transitions showing all events that move a process between New, Ready, Running, Waiting, and Terminated.",
+      mermaid: `stateDiagram-v2
+    [*] --> New: Process created
+    New --> Ready: Admitted to memory
+
+    Ready --> Running: Dispatcher selects
+    Running --> Ready: Preempted by timer or higher priority
+
+    Running --> Waiting: Blocking syscall\nIO request or mutex wait
+    Waiting --> Ready: IO complete\nEvent signal or lock released
+
+    Running --> Terminated: Process exits or killed
+    Terminated --> [*]: Resources freed
+
+    note right of Running
+        Voluntary switch:
+        process blocks
+        Involuntary switch:
+        timer preemption
+    end note`,
     },
     {
-      title: "Multi-Level Feedback Queue structure",
+      title: "MLFQ and CFS Architecture",
       kind: "architecture",
-      caption: "Multiple queues at different priority levels. Processes move between queues based on CPU burst behavior.",
+      caption: "Side-by-side view of Multi-Level Feedback Queue structure and Linux CFS red-black tree, the two dominant modern scheduler designs.",
+      mermaid: `flowchart TB
+    subgraph MLFQ["Multi-Level Feedback Queue"]
+        Q0["Q0 - Highest Priority\nRound Robin quantum=8ms\nNew processes start here"]
+        Q1["Q1 - Medium Priority\nRound Robin quantum=16ms"]
+        Q2["Q2 - Lowest Priority\nFCFS - CPU-bound processes"]
+        Q0 -->|"Used full quantum"| Q1
+        Q1 -->|"Used full quantum"| Q2
+        Q0 -->|"Periodic boost"| Q0
+        Q1 -->|"Periodic boost"| Q0
+        Q2 -->|"Periodic boost"| Q0
+    end
+
+    subgraph CFS["Linux CFS Red-Black Tree"]
+        RBTree["Red-Black Tree\nkeyed by vruntime"]
+        P1["Process A\nvruntime=1200"]
+        P2["Process B\nvruntime=1500"]
+        P3["Process C\nvruntime=1800"]
+        RBTree --> P1
+        RBTree --> P2
+        RBTree --> P3
+        P1 -->|"always selected\nleftmost node"| CPU["CPU"]
+        P1 -->|"nice value\ncontrols rate"| VR["vruntime advances\nat weight-scaled rate"]
+    end`,
     },
     {
-      title: "CFS red-black tree",
-      kind: "architecture",
-      caption: "Tasks ordered by vruntime in a red-black tree. The leftmost node (smallest vruntime) is always selected next.",
+      title: "Scheduling Algorithm Comparison",
+      kind: "sequence",
+      caption: "Gantt-style sequence showing how FCFS, Round Robin, and SJF schedule the same three processes with burst times 10, 4, and 6.",
+      mermaid: `sequenceDiagram
+    participant P1 as P1 burst=10
+    participant P2 as P2 burst=4
+    participant P3 as P3 burst=6
+    participant CPU as CPU
+
+    Note over CPU: FCFS - arrives P1 P2 P3
+    CPU->>P1: t=0 to t=10 run P1
+    CPU->>P2: t=10 to t=14 run P2
+    CPU->>P3: t=14 to t=20 run P3
+
+    Note over CPU: Round Robin quantum=4
+    CPU->>P1: t=0 to t=4
+    CPU->>P2: t=4 to t=8 complete
+    CPU->>P3: t=8 to t=12
+    CPU->>P1: t=12 to t=16
+    CPU->>P3: t=16 to t=18 complete
+    CPU->>P1: t=18 to t=20 complete
+
+    Note over CPU: SJF - shortest first
+    CPU->>P2: t=0 to t=4 run shortest
+    CPU->>P3: t=4 to t=10 run next shortest
+    CPU->>P1: t=10 to t=20 run longest`,
     },
   ],
   animations: [

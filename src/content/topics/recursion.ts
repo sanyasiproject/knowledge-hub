@@ -290,15 +290,76 @@ ackermann m n = ackermann (m - 1) (ackermann m (n - 1))`
 
   diagrams: [
     {
-      title: "Recursive Call Stack for factorial(4)",
+      title: "Recursive Call Stack for factorial",
       kind: "flow",
-      caption: "Each call pushes a new frame onto the call stack. The base case returns 1, and values propagate back up as frames are popped: factorial(4) -> 4 * factorial(3) -> 3 * factorial(2) -> 2 * factorial(1) -> 1. Return path: 1 -> 2 -> 6 -> 24."
+      caption: "Each recursive call pushes a frame. The base case returns 1, and values multiply back up as frames are popped.",
+      mermaid: `flowchart TD
+    A([factorial 4]) --> B([factorial 3])
+    B --> C([factorial 2])
+    C --> D([factorial 1])
+    D --> E([base case: return 1])
+    E --> F([return 1 x 2 = 2])
+    F --> G([return 2 x 3 = 6])
+    G --> H([return 6 x 4 = 24])`,
     },
     {
-      title: "Tree Recursion Call Graph for fib(5)",
+      title: "Tree Recursion: fib Call Graph",
       kind: "architecture",
-      caption: "fib(5) branches into fib(4) and fib(3). fib(4) branches into fib(3) and fib(2). Overlapping subproblems are highlighted: fib(3) is computed twice, fib(2) three times, fib(1) five times. Total calls without memoization: 15. With memoization: 9 (each unique subproblem computed once, rest served from cache)."
-    }
+      caption: "fib(5) branches into overlapping subproblems. Without memoization, fib(3) is computed twice, fib(2) three times, causing exponential work.",
+      mermaid: `graph TD
+    F5[fib 5] --> F4[fib 4]
+    F5 --> F3a[fib 3]
+    F4 --> F3b[fib 3]
+    F4 --> F2a[fib 2]
+    F3a --> F2b[fib 2]
+    F3a --> F1a[fib 1]
+    F3b --> F2c[fib 2]
+    F3b --> F1b[fib 1]
+    F2a --> F1c[fib 1]
+    F2a --> F0a[fib 0]
+    F2b --> F1d[fib 1]
+    F2b --> F0b[fib 0]
+    F2c --> F1e[fib 1]
+    F2c --> F0c[fib 0]`,
+    },
+    {
+      title: "Tail Call Optimization",
+      kind: "state",
+      caption: "Without TCO, each recursive call adds a stack frame. With TCO, the compiler reuses the current frame, making deep recursion as efficient as a loop.",
+      mermaid: `stateDiagram-v2
+    [*] --> Calling : Recursive call
+    Calling --> FramePushed : Without TCO
+    FramePushed --> Calling : Next call
+    FramePushed --> Unwinding : Base case reached
+    Unwinding --> [*] : All frames popped
+    Calling --> FrameReused : With TCO
+    FrameReused --> Calling : Tail call in place
+    FrameReused --> [*] : Base case, return`,
+    },
+    {
+      title: "Recursion Patterns Overview",
+      kind: "mindmap",
+      caption: "Common recursive patterns and their typical use cases.",
+      mermaid: `mindmap
+  root((Recursion Patterns))
+    Linear Recursion
+      Factorial
+      Linked list traversal
+    Tree Recursion
+      Fibonacci
+      Binary tree ops
+    Divide and Conquer
+      Merge sort
+      Quick sort
+      Binary search
+    Backtracking
+      N-Queens
+      Maze solving
+      Permutations
+    Memoized Recursion
+      Dynamic programming
+      Overlapping subproblems`,
+    },
   ],
 
   animations: [

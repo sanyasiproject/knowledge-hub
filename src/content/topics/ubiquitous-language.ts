@@ -422,83 +422,87 @@ TEST_F(LoanApplicationTest,
   ],
   diagrams: [
     {
-      title: "Ubiquitous Language Flow from Discovery to Code",
-      kind: "flow",
-      caption: "How ubiquitous language flows from **discovery workshops** through **modeling** into **code and tests**, with continuous feedback loops.",
-      mermaid: `flowchart LR
-    A["Event Storming\\nWorkshop"] --> B["Domain Events\\nIdentified"]
-    B --> C["Glossary &\\nTerm Definitions"]
-    C --> D["Domain Model\\n(Classes & Types)"]
-    D --> E["Code\\n(Named in UL)"]
-    D --> F["Tests\\n(Read as specs)"]
-    E --> G["Code Review\\nwith Domain Expert"]
-    F --> G
-    G -->|"Language corrections"| C
-    G -->|"Model refinements"| D
-    style A fill:#264653,color:#fff
-    style C fill:#2a9d8f,color:#fff
-    style E fill:#e9c46a,color:#000
-    style F fill:#f4a261,color:#000
-    style G fill:#e76f51,color:#fff`,
-    },
-    {
-      title: "Bounded Context Language Boundaries",
-      kind: "architecture",
-      caption: "The same real-world concept (*Customer*) has **different meanings** in different bounded contexts, with explicit translation at boundaries.",
-      mermaid: `flowchart TB
-    subgraph Sales["Sales Context"]
-        SC["Customer\\n- contact_email\\n- deal_stage\\n- pipeline_value"]
-    end
-    subgraph Billing["Billing Context"]
-        BC["AccountHolder\\n- billing_email\\n- payment_terms\\n- credit_limit"]
-    end
-    subgraph Support["Support Context"]
-        SUP["TicketRequester\\n- issue_history\\n- satisfaction_score\\n- priority_level"]
-    end
-    Sales -->|"ACL translates\\nCustomer -> AccountHolder"| Billing
-    Sales -->|"ACL translates\\nCustomer -> TicketRequester"| Support
-    style Sales fill:#264653,color:#fff
-    style Billing fill:#2a9d8f,color:#fff
-    style Support fill:#e76f51,color:#fff`,
-    },
-    {
-      title: "Anti-Pattern vs. Good Practice in Code Naming",
+      title: "Ubiquitous Language in DDD",
       kind: "mindmap",
-      caption: "Contrasting **generic technical names** (anti-pattern) with **domain-specific names** (ubiquitous language) in code.",
+      caption: "How ubiquitous language connects domain experts, developers, and code through a shared vocabulary.",
       mermaid: `mindmap
-  root((Code Naming))
-    Anti-Pattern
-      Generic Names
-        Manager
-        Handler
-        Processor
-        Service
-      CRUD Methods
-        create
-        update
-        delete
-        process
-      Technical Terms
-        Entity
-        DTO
-        Bean
-        Record
-    Good Practice
-      Domain Nouns
-        Policy
-        Claim
-        Shipment
-        Invoice
-      Domain Verbs
-        underwrite
-        approve
-        fulfill
-        disburse
-      Domain States
-        UNDERWRITING
-        IN_REVIEW
-        DISPATCHED
-        SETTLED`,
+  root((Ubiquitous Language))
+    Domain Experts
+      Business terms
+      Processes and rules
+      Edge cases
+    Developers
+      Model in code
+      Class and method names
+      Tests as documentation
+    Shared Artifacts
+      Glossary
+      Event storming board
+      Domain model diagrams
+    Bounded Context
+      Language scoped per context
+      Shipping vs Billing Order`,
+    },
+    {
+      title: "Language Discovery Process",
+      kind: "flow",
+      caption: "Iterative process for discovering and refining the ubiquitous language with domain experts.",
+      mermaid: `flowchart TD
+    A([Start]) --> B["Domain expert workshops
+Event storming"]
+    B --> C["Extract candidate terms
+verbs and nouns"]
+    C --> D["Define terms precisely
+build glossary"]
+    D --> E["Model in code
+classes reflect terms"]
+    E --> F["Review with experts
+spot mismatches"]
+    F --> G{Language aligned?}
+    G -->|No| H["Refine terms
+update model and glossary"]
+    H --> D
+    G -->|Yes| I["Evolve continuously
+as domain grows"]`,
+    },
+    {
+      title: "Bounded Context Language Isolation",
+      kind: "architecture",
+      caption: "Same word Order meaning different things in different bounded contexts of the same system.",
+      mermaid: `graph LR
+    subgraph Sales Context
+    SO["Order
+products + customer
+credit check"]
+    end
+    subgraph Shipping Context
+    ShO["Order
+delivery address
+tracking number"]
+    end
+    subgraph Billing Context
+    BO["Order
+line items
+tax + invoice"]
+    end
+    SO -->|context map| ShO
+    ShO -->|context map| BO`,
+    },
+    {
+      title: "Code as Model Alignment",
+      kind: "sequence",
+      caption: "How a developer translates domain expert language directly into code class and method names.",
+      mermaid: `sequenceDiagram
+    participant DE as Domain Expert
+    participant Dev as Developer
+    participant Code as Codebase
+    DE->>Dev: When a customer places an order we reserve inventory
+    Dev->>Dev: identify entities: Customer, Order, Inventory
+    Dev->>Code: class Order with placeOrder() method
+    Dev->>Code: class Inventory with reserve(quantity) method
+    DE->>Dev: If payment fails we release the reservation
+    Dev->>Code: order.cancelPayment() calls inventory.release()
+    DE->>Dev: Review - yes that matches our language`,
     },
   ],
   comparison: {

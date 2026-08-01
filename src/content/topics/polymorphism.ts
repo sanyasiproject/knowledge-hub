@@ -167,14 +167,67 @@ printDescription x = putStrLn (describe x)
   ],
   diagrams: [
     {
-      title: "Vtable dispatch mechanism",
+      title: "Vtable Dispatch Mechanism",
       kind: "architecture",
       caption: "Object -> vptr -> vtable -> function pointer -> actual method implementation. Shows how virtual dispatch adds one level of indirection.",
+      mermaid: `graph LR
+    Obj[Object instance\nvptr field] --> VT[Vtable\nfor Animal class]
+    VT --> F1[speak: offset 0\nfunction pointer]
+    VT --> F2[move: offset 1\nfunction pointer]
+    F1 --> Dog[Dog::speak\nbarks]
+    F1 --> Cat[Cat::speak\nmeows]
+    F2 --> DogMove[Dog::move\nruns]
+    F2 --> CatMove[Cat::move\nslinks]
+    note1[One extra indirection\nper virtual call] -.- Obj`,
     },
     {
-      title: "Polymorphism taxonomy",
+      title: "Polymorphism Taxonomy",
       kind: "mindmap",
-      caption: "Polymorphism branches into subtype (virtual dispatch), parametric (generics), ad-hoc (overloading, type classes), coercion, and duck typing.",
+      caption: "Polymorphism branches into subtype, parametric, ad-hoc, coercion, and duck typing — each with different dispatch mechanisms.",
+      mermaid: `mindmap
+  root((Polymorphism))
+    Subtype
+      Virtual dispatch
+      Runtime vtable lookup
+      Java interfaces
+      C++ virtual functions
+    Parametric
+      Generics resolved at compile time
+      Monomorphization in Rust
+      Type erasure in Java
+      Templates in C++
+    Ad-hoc
+      Function overloading
+      Type classes in Haskell
+      Operator overloading
+    Coercion
+      Implicit type conversion
+      int to float
+      upcasting
+    Duck Typing
+      Python and JavaScript
+      No explicit interface
+      Structural matching`,
+    },
+    {
+      title: "Static vs Dynamic Dispatch",
+      kind: "sequence",
+      caption: "Comparing how the compiler and runtime resolve method calls for static dispatch (generics) vs dynamic dispatch (virtual functions).",
+      mermaid: `sequenceDiagram
+    participant Src as Source Code
+    participant Comp as Compiler
+    participant RT as Runtime
+    Note over Src,Comp: Static Dispatch (Generics / Templates)
+    Src->>Comp: max of T where T is Ord called with i32
+    Comp->>Comp: Generate max_i32 specialization
+    Comp->>Comp: Inline and optimize max_i32
+    Comp-->>RT: Direct call instruction - no indirection
+    Note over Src,RT: Dynamic Dispatch (Virtual Functions)
+    Src->>RT: animal.speak() on Animal reference
+    RT->>RT: Load vptr from object
+    RT->>RT: Look up speak in vtable
+    RT->>RT: Call through function pointer
+    RT-->>Src: Correct override executes`,
     },
   ],
   animations: [

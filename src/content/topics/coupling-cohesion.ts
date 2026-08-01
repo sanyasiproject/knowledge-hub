@@ -369,16 +369,112 @@ class InventoryService {
   ],
   diagrams: [
     {
-      title: "Coupling Spectrum: Worst to Best",
-      kind: "flow",
-      caption:
-        "Content coupling (most harmful) through common, external, control, stamp, data, to message coupling (least harmful). Each step reduces the knowledge one module has about another's internals.",
+      title: "Coupling and Cohesion Concepts",
+      kind: "mindmap",
+      caption: "Key concepts of coupling and cohesion grouped by coupling types, cohesion levels, metrics, and architectural principles.",
+      mermaid: `mindmap
+  root["Coupling and Cohesion"]
+    Coupling Types
+      Content - worst
+      Common - global state
+      External - shared protocol
+      Control - flag parameters
+      Stamp - whole object passed
+      Data - primitives only
+      Message - events only - best
+    Cohesion Levels
+      Coincidental - worst
+      Logical - similar ops
+      Temporal - same time
+      Procedural - same sequence
+      Communicational - same data
+      Sequential - pipeline
+      Functional - one task - best
+    Metrics
+      CBO - coupling between objects
+      LCOM4 - connected components
+      Afferent Ca - who depends on me
+      Efferent Ce - who I depend on
+      Instability I = Ce over Ca plus Ce
+    Principles
+      Single Responsibility
+      Interface Segregation
+      Dependency Inversion
+      Stable Dependencies
+      Stable Abstractions
+      Law of Demeter`,
     },
     {
-      title: "Instability and the Main Sequence",
+      title: "Refactoring to Loose Coupling",
       kind: "architecture",
-      caption:
-        "Packages plotted on the abstractness (A) vs. instability (I) graph. The main sequence runs from (0,1) to (1,0). Packages in the zone of pain (low I, low A) are stable and concrete — rigid. Packages in the zone of uselessness (high I, high A) are unstable and abstract — never depended upon.",
+      caption: "Architecture before and after applying dependency injection and interface extraction to reduce coupling in OrderService.",
+      mermaid: `flowchart TB
+    subgraph Before["Before - Tight Coupling"]
+        OS1["OrderService"]
+        OS1 --> MySQL["new MySQLDatabase\nconcrete instantiation"]
+        OS1 --> SMTP["new SmtpEmailSender\nconcrete instantiation"]
+        OS1 --> FedEx["if isExpress FedEx\ncontrol coupling"]
+    end
+
+    subgraph After["After - Loose Coupling"]
+        OS2["OrderService"]
+        OS2 --> IRepo["OrderRepository\ninterface"]
+        OS2 --> INotify["NotificationService\ninterface"]
+        OS2 --> IShip["ShippingStrategy\ninterface"]
+        IRepo -.->|"implements"| MySQLImpl["MySQLRepository"]
+        INotify -.->|"implements"| SMTPImpl["SmtpNotifier"]
+        IShip -.->|"implements"| ExpressImpl["ExpressShipping"]
+        IShip -.->|"implements"| StandardImpl["StandardShipping"]
+    end`,
+    },
+    {
+      title: "Coupling Spectrum Flow",
+      kind: "flow",
+      caption: "The coupling spectrum from most harmful to least harmful, showing what each type means and how to fix it.",
+      mermaid: `flowchart TD
+    A["Content Coupling\nModule modifies another's internals\nFix: use public interfaces"] --> B["Common Coupling\nShared global mutable state\nFix: pass state explicitly or use events"]
+    B --> C["External Coupling\nShared file format or protocol\nFix: version the interface"]
+    C --> D["Control Coupling\nFlag parameters dictate logic\nFix: use polymorphism or strategy pattern"]
+    D --> E["Stamp Coupling\nWhole object passed, part used\nFix: pass only needed fields"]
+    E --> F["Data Coupling\nOnly necessary primitives exchanged\nAcceptable for most collaboration"]
+    F --> G["Message Coupling\nWell-defined events, no internal knowledge\nIdeal for decoupled systems"]
+
+    style A fill:#ff6b6b
+    style B fill:#ff8e53
+    style C fill:#ffa533
+    style D fill:#ffc300
+    style E fill:#c8e63c
+    style F fill:#6bcb77
+    style G fill:#4d96ff`,
+    },
+    {
+      title: "Module Dependency Network",
+      kind: "network",
+      caption: "Example module dependency graph illustrating stable core modules with high afferent coupling and unstable leaf modules with high efferent coupling.",
+      mermaid: `flowchart LR
+    subgraph Core["Stable Core - Low I"]
+        Domain["Domain Model\nCa=8 Ce=0 I=0.0"]
+        Interfaces["Port Interfaces\nCa=6 Ce=1 I=0.14"]
+    end
+
+    subgraph AppLayer["Application Layer - Medium I"]
+        OrderSvc["OrderService\nCa=3 Ce=3 I=0.5"]
+        PaySvc["PaymentService\nCa=2 Ce=3 I=0.6"]
+    end
+
+    subgraph Infra["Infrastructure - High I"]
+        DB["Database Adapter\nCa=0 Ce=4 I=1.0"]
+        Email["Email Adapter\nCa=0 Ce=3 I=1.0"]
+        API["REST Controller\nCa=0 Ce=4 I=1.0"]
+    end
+
+    API --> OrderSvc
+    API --> PaySvc
+    OrderSvc --> Interfaces
+    PaySvc --> Interfaces
+    Interfaces --> Domain
+    DB --> Interfaces
+    Email --> Interfaces`,
     },
   ],
   animations: [

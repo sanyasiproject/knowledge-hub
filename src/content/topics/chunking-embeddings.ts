@@ -709,73 +709,89 @@ int main() {
 
   diagrams: [
     {
-      title: "RAG Chunking Pipeline",
+      title: "Chunking and Embedding Pipeline",
       kind: "flow",
-      caption: "End-to-end flow from raw document to retrieved chunks for LLM generation",
-      mermaid: `flowchart LR
-    A["📄 Raw Document"] --> B["🔪 Chunking"]
-    B --> C["🧮 Embedding"]
-    C --> D["🗄️ Vector Store"]
-    E["❓ User Query"] --> F["🧮 Query Embedding"]
-    F --> G["🔍 Similarity Search"]
-    D --> G
-    G --> H["📋 Top-K Chunks"]
-    H --> I["🤖 LLM Generation"]
-    E --> I
-    I --> J["💬 Answer"]
-
-    subgraph Indexing Pipeline
-        A
-        B
-        C
-        D
-    end
-
-    subgraph Retrieval Pipeline
-        E
-        F
-        G
-        H
-        I
-        J
-    end`,
+      caption: "End-to-end pipeline from raw documents through chunking, embedding, and storage for vector search.",
+      mermaid: `flowchart TD
+    A["Raw Documents"] --> B["Pre-process and Clean"]
+    B --> C{"Chunking Strategy"}
+    C -->|Fixed size| D["Fixed-size Chunks"]
+    C -->|Semantic| E["Sentence or Paragraph Chunks"]
+    C -->|Recursive| F["Recursive Character Split"]
+    D & E & F --> G["Add Metadata and Context"]
+    G --> H["Embedding Model"]
+    H --> I["Dense Vectors"]
+    I --> J["Vector Store"]
+    J --> K["Index Built"]`,
     },
     {
-      title: "Parent-Child Retrieval Architecture",
+      title: "Retrieval-Augmented Generation Architecture",
       kind: "architecture",
-      caption: "Small child chunks are embedded for precise retrieval; matched children map back to larger parent chunks sent to the LLM",
-      mermaid: `flowchart TB
-    DOC["📄 Source Document"] --> PS["Parent Splitter<br/>(1024 tokens)"]
-    PS --> P1["Parent Chunk 1"]
-    PS --> P2["Parent Chunk 2"]
-    PS --> P3["Parent Chunk N"]
-
-    P1 --> CS1["Child Splitter<br/>(256 tokens)"]
-    P2 --> CS2["Child Splitter<br/>(256 tokens)"]
-
-    CS1 --> C1A["Child 1a"]
-    CS1 --> C1B["Child 1b"]
-    CS1 --> C1C["Child 1c"]
-    CS2 --> C2A["Child 2a"]
-    CS2 --> C2B["Child 2b"]
-
-    C1A --> EMB["Embedding Model"]
-    C1B --> EMB
-    C1C --> EMB
-    C2A --> EMB
-    C2B --> EMB
-    EMB --> VS["Vector Store<br/>(child embeddings + parent_id)"]
-
-    P1 --> DS["Document Store<br/>(parent chunks by ID)"]
-    P2 --> DS
-    P3 --> DS
-
-    Q["User Query"] --> QE["Query Embedding"]
-    QE --> VS
-    VS -->|"top-K child matches"| LOOKUP["Parent ID Lookup"]
-    LOOKUP --> DS
-    DS -->|"full parent context"| LLM["LLM Generation"]
-    Q --> LLM`,
+      caption: "Architecture of a RAG system showing how chunked embeddings power semantic retrieval at query time.",
+      mermaid: `graph LR
+    subgraph Ingestion["Ingestion Pipeline"]
+        DOC["Documents"]
+        CHUNK["Chunker"]
+        EMBED["Embedding Model"]
+        VS["Vector Store"]
+    end
+    subgraph Query["Query Pipeline"]
+        Q["User Query"]
+        QE["Query Embedder"]
+        RET["Retriever"]
+        CTX["Context Builder"]
+        LLM["LLM"]
+        ANS["Answer"]
+    end
+    DOC --> CHUNK --> EMBED --> VS
+    Q --> QE --> RET
+    VS --> RET
+    RET --> CTX --> LLM --> ANS`,
+    },
+    {
+      title: "Chunking Strategy Comparison",
+      kind: "mindmap",
+      caption: "Overview of chunking strategies and their trade-offs for different document types.",
+      mermaid: `mindmap
+  root((Chunking Strategies))
+    Fixed Size
+      Simple to implement
+      May split sentences
+      Overlap parameter
+    Sentence-based
+      Preserves meaning
+      Variable size
+      NLP tokenizer needed
+    Recursive
+      Tries multiple separators
+      Respects structure
+      Configurable hierarchy
+    Semantic
+      Groups related content
+      Highest quality
+      Slowest to compute
+    Document-based
+      Respects headings
+      Metadata-aware`,
+    },
+    {
+      title: "Embedding Similarity Search",
+      kind: "sequence",
+      caption: "Sequence of operations when a user query is embedded and matched against stored document chunks.",
+      mermaid: `sequenceDiagram
+    participant U as User
+    participant API as API Layer
+    participant EM as Embedding Model
+    participant VS as Vector Store
+    participant LLM as Language Model
+    U->>API: Submit query
+    API->>EM: Embed query text
+    EM-->>API: Query vector
+    API->>VS: ANN search top-k
+    VS-->>API: Ranked chunks with scores
+    API->>LLM: Query + retrieved context
+    LLM-->>API: Generated answer
+    API-->>U: Return answer with sources`,
     },
   ],
 

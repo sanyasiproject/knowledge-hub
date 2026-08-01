@@ -540,48 +540,84 @@ int main() {
   ],
   diagrams: [
     {
-      title: "BPE Merge Process Step by Step",
+      title: "Tokenization Pipeline",
       kind: "flow",
-      caption: "How Byte Pair Encoding iteratively merges the most frequent adjacent pairs to build a subword vocabulary from individual characters.",
+      caption: "How raw text is converted to token IDs through vocabulary lookup and subword splitting.",
       mermaid: `flowchart TD
-    A["Start: Split corpus into<br/>individual characters"] --> B["Count all adjacent<br/>symbol pairs"]
-    B --> C{"Find most<br/>frequent pair"}
-    C --> D["Merge pair into<br/>new symbol"]
-    D --> E["Add new symbol<br/>to vocabulary"]
-    E --> F["Record merge rule<br/>(e.g., l + o → lo)"]
-    F --> G{"Vocabulary size<br/>reached target?"}
-    G -- No --> B
-    G -- Yes --> H["Final vocabulary<br/>+ ordered merge rules"]
-    H --> I["Tokenization: apply<br/>merge rules in order"]
-
-    style A fill:#4a90d9,color:#fff
-    style C fill:#e67e22,color:#fff
-    style G fill:#e67e22,color:#fff
-    style H fill:#27ae60,color:#fff
-    style I fill:#27ae60,color:#fff`,
+    A["Raw Text
+hello world"] --> B["Normalize
+lowercase, unicode"]
+    B --> C["Pre-tokenize
+split on whitespace"]
+    C --> D["Apply BPE or WordPiece
+subword splitting"]
+    D --> E["Map to token IDs
+vocabulary lookup"]
+    E --> F["Token ID sequence
+[15339, 995]"]
+    F --> G["Feed to model
+as integer tensor"]`,
     },
     {
-      title: "From Raw Text to Embedding Vector",
+      title: "Embedding Space Concepts",
+      kind: "mindmap",
+      caption: "Key properties and applications of word and sentence embeddings in NLP.",
+      mermaid: `mindmap
+  root((Embeddings))
+    Properties
+      Dense vectors
+      Semantic similarity
+      Cosine distance
+      High dimensionality
+    Word2Vec
+      Skip-gram
+      CBOW
+      Local context
+    Transformer Embeddings
+      Contextual
+      BERT and GPT
+      Positional encoding
+    Applications
+      Semantic search
+      Clustering
+      RAG retrieval`,
+    },
+    {
+      title: "Token to Embedding to Output",
+      kind: "sequence",
+      caption: "Data flow from token IDs through embedding lookup and transformer layers to output logits.",
+      mermaid: `sequenceDiagram
+    participant T as Tokenizer
+    participant E as Embedding Layer
+    participant TF as Transformer
+    participant LM as LM Head
+    T->>E: token IDs [101, 7592, 102]
+    E->>TF: dense vectors 768-dim + positional encoding
+    TF->>TF: multi-head attention x N layers
+    TF->>LM: contextual hidden states
+    LM->>LM: project to vocab size
+    LM-->>T: logits over vocabulary`,
+    },
+    {
+      title: "Semantic Similarity Architecture",
       kind: "architecture",
-      caption: "The end-to-end pipeline showing how raw text is tokenized into subword IDs, mapped to token embeddings, processed through Transformer layers, and pooled into a single sentence embedding vector.",
-      mermaid: `flowchart LR
-    A["Raw Text<br/>'The cat sat'"] --> B["Tokenizer<br/>(BPE / WordPiece)"]
-    B --> C["Token IDs<br/>[464, 3797, 3290]"]
-    C --> D["Embedding Layer<br/>(lookup table)"]
-    D --> E["Token Vectors<br/>[v1, v2, v3]<br/>each 384-dim"]
-    E --> F["Transformer<br/>Encoder Layers"]
-    F --> G["Contextualized<br/>Token Vectors"]
-    G --> H["Pooling Layer<br/>(mean / CLS)"]
-    H --> I["Sentence Embedding<br/>single 384-dim vector"]
-    I --> J["L2 Normalize"]
-    J --> K["Unit Vector<br/>ready for similarity"]
-
-    style A fill:#9b59b6,color:#fff
-    style B fill:#3498db,color:#fff
-    style D fill:#3498db,color:#fff
-    style F fill:#e74c3c,color:#fff
-    style H fill:#e67e22,color:#fff
-    style K fill:#27ae60,color:#fff`,
+      caption: "How two texts are encoded to embeddings and compared via cosine similarity for retrieval.",
+      mermaid: `graph LR
+    Q["Query Text"] --> TE["Text Encoder
+sentence-transformers"]
+    D1["Doc 1"] --> TE
+    D2["Doc 2"] --> TE
+    D3["Doc 3"] --> TE
+    TE --> QV["Query Vector
+768-dim"]
+    TE --> DV1["Doc 1 Vector"]
+    TE --> DV2["Doc 2 Vector"]
+    TE --> DV3["Doc 3 Vector"]
+    QV --> CS["Cosine Similarity"]
+    DV1 --> CS
+    DV2 --> CS
+    DV3 --> CS
+    CS --> Top["Top-K Results"]`,
     },
   ],
   comparison: {

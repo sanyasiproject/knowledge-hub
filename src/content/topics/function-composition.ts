@@ -315,12 +315,42 @@ result = foldr (xform (:)) [] [1, 2, 3, 4, 5]
     {
       title: "Compose vs Pipe Data Flow",
       kind: "flow",
-      caption: "Compose applies functions right-to-left (f . g . h)(x) = f(g(h(x))), while pipe applies left-to-right pipe(f, g, h)(x) = h(g(f(x))). Both produce the same result when the function order is reversed.",
+      caption: "Compose applies functions right-to-left while pipe applies left-to-right; both are equivalent with reversed order.",
+      mermaid: `flowchart LR
+    INPUT["Input x"]
+    subgraph PIPE["pipe(h, g, f)(x) — left to right"]
+      PH["h(x)"] --> PG["g(h(x))"] --> PF["f(g(h(x)))"]
+    end
+    subgraph COMPOSE["compose(f, g, h)(x) — right to left"]
+      CH["h(x)"] --> CG["g(h(x))"] --> CF["f(g(h(x)))"]
+    end
+    INPUT --> PIPE
+    INPUT --> COMPOSE`,
     },
     {
-      title: "Currying and Partial Application Relationship",
-      kind: "mindmap",
-      caption: "Currying transforms f(a, b, c) into f(a)(b)(c). Partial application uses curried functions to fix arguments: f(a) returns g(b, c). Currying is the mechanism; partial application is the usage pattern that enables point-free composition.",
+      title: "Currying and Partial Application",
+      kind: "architecture",
+      caption: "Currying transforms a multi-argument function into a chain of unary functions; partial application fixes early arguments.",
+      mermaid: `graph TD
+    ORIG["f(a, b, c)\nmulti-arg function"]
+    ORIG --> CURRY["Curried: f(a)(b)(c)\neach call returns a new function"]
+    CURRY --> PA["Partial Application\nconst g = f(a)\ng is waiting for b and c"]
+    PA --> POINT["Point-Free Composition\nconst transform = compose(f(a), f(b))\nno explicit data argument"]`,
+    },
+    {
+      title: "Functor Map in Composition",
+      kind: "flow",
+      caption: "How map lifts a plain function into a container context so it can participate in composed pipelines.",
+      mermaid: `flowchart TD
+    A["Plain function: f: a -> b"]
+    A --> B["map(f) lifts it\nfmap: F a -> F b"]
+    B --> C{What container?}
+    C -->|Array| D["arr.map(f)\napplied to each element"]
+    C -->|Maybe| E["Just(x).map(f) = Just(f(x))\nNothing.map(f) = Nothing"]
+    C -->|Promise| F["promise.then(f)\napplied on resolve"]
+    D --> G["Composable in pipelines\npipe(map(f), map(g))"]
+    E --> G
+    F --> G`,
     },
   ],
 

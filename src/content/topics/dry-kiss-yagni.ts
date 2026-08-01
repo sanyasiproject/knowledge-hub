@@ -190,15 +190,85 @@ public class QuoteService {
   ],
   diagrams: [
     {
-      title: "DRY / KISS / YAGNI Balance",
+      title: "DRY vs KISS vs YAGNI Interaction",
       kind: "mindmap",
-      caption: "Central node: Pragmatic Design. Three branches: DRY (eliminate knowledge duplication, but not code similarity), KISS (simplest adequate solution), YAGNI (build only what's needed now). Interactions: DRY without KISS = over-abstraction, KISS without DRY = scattered knowledge, YAGNI moderates both."
+      mermaid: `mindmap
+  root((Pragmatic Design))
+    DRY
+      Single source of truth
+      Knowledge duplication not code
+      Extract when meaning is same
+      Wrong abstraction risk
+    KISS
+      Simplest adequate solution
+      Avoid unnecessary patterns
+      Indirection has a cost
+      Inline beats over-engineered
+    YAGNI
+      Build only what is needed now
+      No speculative features
+      Easy to change beats future-proof
+      Defer infrastructure decisions
+    Interactions
+      DRY without KISS equals over-abstraction
+      KISS without DRY equals scattered knowledge
+      YAGNI moderates both extremes`,
+      caption: "The three principles form a pragmatic triangle: DRY eliminates knowledge duplication, KISS keeps solutions simple, YAGNI prevents premature investment.",
     },
     {
-      title: "The Wrong Abstraction Lifecycle",
+      title: "Wrong Abstraction Lifecycle",
       kind: "flow",
-      caption: "Similar code appears -> Developer extracts shared function -> Requirements diverge -> Conditionals/parameters grow -> Function becomes incomprehensible -> Developer is afraid to touch it -> Better path: tolerate duplication until the abstraction is clear."
-    }
+      mermaid: `flowchart TD
+    A["Similar code appears in two places"] --> B["Developer extracts shared function"]
+    B --> C["Requirements diverge over time"]
+    C --> D["Conditionals and params added\nto handle differences"]
+    D --> E["Function becomes complex\nand hard to understand"]
+    E --> F{"What happens?"}
+    F -->|Bad path| G["Developers fear touching it\nTechnical debt grows"]
+    F -->|Better path| H["Inline the abstraction\nback to call sites"]
+    H --> I["Tolerate duplication\nuntil pattern is clear"]
+    I --> J["Extract only when\nthree similar cases exist"]`,
+      caption: "Wrong abstractions grow complexity over time; the cure is to inline the abstraction and wait for a clearer pattern to emerge.",
+    },
+    {
+      title: "Rule of Three Extraction Decision",
+      kind: "state",
+      mermaid: `stateDiagram-v2
+    [*] --> FirstOccurrence : write the code
+    FirstOccurrence --> SecondOccurrence : similar code appears
+    SecondOccurrence --> Note : resist abstraction
+    Note --> ThirdOccurrence : third similar case appears
+    ThirdOccurrence --> EvaluateKnowledge : is this the same knowledge?
+    EvaluateKnowledge --> ExtractAbstraction : yes - same concept
+    EvaluateKnowledge --> KeepSeparate : no - coincidental similarity
+    ExtractAbstraction --> ValidateCleanAPI : all callers fit cleanly?
+    ValidateCleanAPI --> Done : yes
+    ValidateCleanAPI --> KeepSeparate : no - wrong abstraction`,
+      caption: "Wait for three occurrences before extracting; verify all callers fit the abstraction cleanly before committing to it.",
+    },
+    {
+      title: "Principle Violation Consequences",
+      kind: "architecture",
+      mermaid: `graph LR
+    subgraph DRY_Violation["DRY Violation"]
+      BizRule["Business Rule\nin 5 places"]
+      BugA["Bug fix in 1 place"]
+      BugB["4 places still broken"]
+      BizRule --> BugA --> BugB
+    end
+    subgraph KISS_Violation["KISS Violation"]
+      Factory["AbstractFactory\nfor 2 cases"]
+      Dev["Developer reads\n8 files to trace flow"]
+      Factory --> Dev
+    end
+    subgraph YAGNI_Violation["YAGNI Violation"]
+      Plugin["Plugin system\nnever used"]
+      Maintain["Maintained for\n3 years"]
+      Deleted["Deleted in\nrefactor"]
+      Plugin --> Maintain --> Deleted
+    end`,
+      caption: "Each principle violation has a distinct cost: DRY failures cause inconsistent bugs, KISS failures cause cognitive overhead, YAGNI failures waste maintenance effort.",
+    },
   ],
   animations: [
     {

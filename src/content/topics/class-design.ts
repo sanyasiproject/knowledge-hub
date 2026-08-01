@@ -339,87 +339,89 @@ private:
   ],
   diagrams: [
     {
-      title: "Class Design Quality Spectrum",
+      title: "Well-Designed Class Structure",
+      kind: "architecture",
+      caption: "Example class hierarchy demonstrating single responsibility, clear interfaces, and cohesive responsibilities.",
+      mermaid: `graph TD
+    subgraph Domain["Domain Layer"]
+        Order["Order\n+ id\n+ items\n+ total()"]
+        Customer["Customer\n+ id\n+ name\n+ email"]
+        Product["Product\n+ id\n+ price\n+ sku"]
+    end
+    subgraph Services["Service Layer"]
+        OS["OrderService\n+ create()\n+ cancel()"]
+        PS["PaymentService\n+ charge()\n+ refund()"]
+    end
+    subgraph Repos["Repository Layer"]
+        OR["OrderRepository\n+ save()\n+ findById()"]
+        CR["CustomerRepository\n+ save()\n+ findByEmail()"]
+    end
+    OS --> Order & Customer
+    OS --> PS
+    OS --> OR
+    OR --> Order
+    CR --> Customer
+    Order --> Product`,
+    },
+    {
+      title: "Class Design Principles Mindmap",
       kind: "mindmap",
-      caption: "The key dimensions of class design quality: **cohesion**, **coupling**, **encapsulation**, and **immutability**.",
+      caption: "Key principles guiding good class design organized around SOLID and cohesion concepts.",
       mermaid: `mindmap
   root((Class Design))
+    SOLID
+      Single Responsibility
+      Open Closed
+      Liskov Substitution
+      Interface Segregation
+      Dependency Inversion
     Cohesion
-      High cohesion
-        All methods use most fields
-        Single responsibility
-        Easy to name
-      Low cohesion
-        Unrelated methods grouped
-        God class anti-pattern
-        Hard to test in isolation
+      High cohesion goal
+      Related methods grouped
+      Avoid god classes
     Coupling
-      Loose coupling
-        Depend on interfaces
-        Dependency injection
-        Event-driven communication
-      Tight coupling
-        Direct class dependencies
-        Law of Demeter violations
-        Ripple effect changes
+      Low coupling goal
+      Depend on abstractions
+      Inject dependencies
     Encapsulation
-      Tell Dont Ask
-      Pimpl idiom
-      Information hiding
-      Defensive copies
-    Immutability
-      const members
-      constexpr construction
-      Copy-and-modify pattern
-      Thread safety`,
+      Hide internals
+      Expose minimal API
+      Immutable where possible`,
     },
     {
-      title: "Builder Pattern Flow",
+      title: "Object Lifecycle State",
+      kind: "state",
+      caption: "State transitions of a domain object from creation through active use to archival or deletion.",
+      mermaid: `stateDiagram-v2
+    [*] --> Draft
+    Draft --> Active : validate and save
+    Active --> Modified : field updated
+    Modified --> Active : changes saved
+    Active --> Suspended : admin action
+    Suspended --> Active : reinstated
+    Active --> Archived : retention policy
+    Archived --> [*]`,
+    },
+    {
+      title: "Dependency Injection Flow",
       kind: "sequence",
-      caption: "Sequence diagram showing how the **Builder pattern** constructs a complex object step by step, validating at `build()` time.",
+      caption: "How a dependency injection container assembles class dependencies at application startup.",
       mermaid: `sequenceDiagram
-    participant Client
-    participant Builder
-    participant Product
-
-    Client->>Builder: create Builder()
-    Client->>Builder: method("POST")
-    Client->>Builder: url("/api/orders")
-    Client->>Builder: header("Auth", "Bearer ...")
-    Client->>Builder: body(json_payload)
-    Client->>Builder: timeout_ms(3000)
-    Client->>Builder: build()
-    Builder->>Builder: validate required fields
-    alt Validation passes
-        Builder->>Product: construct HttpRequest
-        Builder-->>Client: return HttpRequest
-    else Validation fails
-        Builder-->>Client: throw invalid_argument
-    end`,
-    },
-    {
-      title: "Pimpl Compilation Firewall",
-      kind: "architecture",
-      caption: "The **Pimpl idiom** hides implementation details behind an opaque pointer, reducing header dependencies and recompilation.",
-      mermaid: `flowchart LR
-    subgraph "Header (.h)"
-        PubAPI["Public API\\nconnect()\\ndisconnect()\\nexecute_query()"]
-        Pimpl["unique_ptr Impl\\n(forward declared)"]
-    end
-    subgraph "Source (.cpp)"
-        ImplDef["struct Impl {\\n  pqxx::connection\\n  bool connected\\n  string conn_str\\n}"]
-        ImplMethods["Method\\nimplementations\\naccess impl_->"]
-    end
-    subgraph "Client Code"
-        ClientCode["#include header.h\\nUses public API only\\nNo knowledge of Impl"]
-    end
-    ClientCode --> PubAPI
-    PubAPI --> Pimpl
-    Pimpl -.->|"defined in .cpp"| ImplDef
-    ImplDef --> ImplMethods
-    style PubAPI fill:#2d6a4f,color:#fff
-    style Pimpl fill:#e9c46a,color:#000
-    style ImplDef fill:#e76f51,color:#fff`,
+    participant Main as Application
+    participant DI as DI Container
+    participant Repo as Repository
+    participant Svc as Service
+    participant Ctrl as Controller
+    Main->>DI: bootstrap()
+    DI->>Repo: new Repository(db)
+    DI->>Svc: new Service(repo)
+    DI->>Ctrl: new Controller(svc)
+    DI-->>Main: container ready
+    Main->>Ctrl: handle(request)
+    Ctrl->>Svc: execute()
+    Svc->>Repo: query()
+    Repo-->>Svc: result
+    Svc-->>Ctrl: response`,
     },
   ],
   comparison: {

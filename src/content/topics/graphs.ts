@@ -221,22 +221,74 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Graph representation comparison",
+      title: "Graph Representation Comparison",
       kind: "architecture",
-      caption:
-        "Side-by-side view of how the same 5-node graph is stored as an adjacency matrix, adjacency list, edge list, and CSR format.",
+      caption: "Adjacency matrix, adjacency list, and edge list representation trade-offs.",
+      mermaid: `graph TD
+    subgraph Adjacency Matrix
+        AM[NxN boolean matrix]
+        AM --> AMPro[O1 edge lookup]
+        AM --> AMCon[ON squared space]
+    end
+    subgraph Adjacency List
+        AL[Array of linked lists]
+        AL --> ALPro[O of V plus E space]
+        AL --> ALCon[O degree edge lookup]
+    end
+    subgraph Edge List
+        EL[List of edge pairs]
+        EL --> ELPro[Simple for sparse graphs]
+        EL --> ELCon[O of E edge lookup]
+    end`,
     },
     {
-      title: "BFS vs DFS traversal order",
+      title: "Graph Traversal with Visited Tracking",
       kind: "flow",
-      caption:
-        "Flow diagram showing the order in which nodes are visited during BFS (level-by-level) versus DFS (depth-first backtracking) on the same graph.",
+      caption: "BFS or DFS traversal with visited set to avoid infinite cycles.",
+      mermaid: `flowchart TD
+    A[Start node] --> B[Add to queue or stack]
+    B --> C[Mark as visited]
+    C --> D{Queue or stack empty?}
+    D -- No --> E[Dequeue or pop node]
+    E --> F[Process node]
+    F --> G[Get neighbors]
+    G --> H{Neighbor visited?}
+    H -- No --> I[Add to queue or stack and mark visited]
+    H -- Yes --> J[Skip neighbor]
+    I --> D
+    J --> D
+    D -- Yes --> K[Traversal complete]`,
     },
     {
-      title: "CSR memory layout",
-      kind: "architecture",
-      caption:
-        "How the offset and neighbors arrays are laid out contiguously in memory, with arrows showing how offset[i]..offset[i+1] indexes into the neighbors array.",
+      title: "Cycle Detection States",
+      kind: "state",
+      caption: "DFS three-color marking for detecting cycles in directed graphs.",
+      mermaid: `stateDiagram-v2
+    [*] --> White: node unvisited
+    White --> Gray: DFS enters node
+    Gray --> Black: DFS exits node fully
+    Black --> [*]: node fully processed
+    Gray --> CycleFound: back edge to Gray node detected`,
+    },
+    {
+      title: "Graph Algorithm Use Cases",
+      kind: "mindmap",
+      caption: "Common graph algorithms and their real-world applications.",
+      mermaid: `mindmap
+  root((Graph Algorithms))
+    Traversal
+      BFS shortest unweighted
+      DFS topological sort
+    Shortest Path
+      Dijkstra weighted positive
+      Bellman-Ford negative weights
+      Floyd-Warshall all pairs
+    Connectivity
+      Union-Find disjoint sets
+      Kosaraju SCC
+    Spanning Tree
+      Kruskal MST
+      Prim MST`,
     },
   ],
   animations: [

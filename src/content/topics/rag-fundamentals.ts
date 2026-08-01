@@ -482,57 +482,85 @@ int main() {
     {
       title: "RAG Pipeline Architecture",
       kind: "architecture",
-      caption:
-        "End-to-end RAG architecture showing the **offline indexing** path (top) and **online query** path (bottom) converging at the vector store.",
-      mermaid: `flowchart TB
-    subgraph Offline["Offline Indexing Pipeline"]
-        D[/"Raw Documents<br/>(PDF, HTML, MD)"/] --> C["Chunking<br/>(recursive / semantic)"]
-        C --> E["Embedding Model<br/>(text-embedding-3-small)"]
-        E --> VS[("Vector Store<br/>(MongoDB Atlas)")]
+      caption: "Offline indexing embeds documents into a vector store. Online queries embed the question, retrieve similar chunks, and augment the LLM prompt.",
+      mermaid: `graph TD
+    subgraph Offline Indexing
+      DOC[Raw Documents] --> CHUNK[Chunking]
+      CHUNK --> EMBED[Embedding Model]
+      EMBED --> VS[(Vector Store)]
     end
-
-    subgraph Online["Online Query Pipeline"]
-        Q[/"User Query"/] --> QE["Query Embedding"]
-        QE --> SR["Vector Similarity<br/>Search (ANN)"]
-        VS --> SR
-        SR --> RR["Reranker<br/>(cross-encoder)"]
-        RR --> CTX["Context Assembly<br/>(top-K chunks)"]
-        CTX --> LLM["LLM Generation<br/>(GPT-4o / Claude)"]
-        LLM --> A[/"Grounded Answer<br/>with Citations"/]
-    end
-
-    style Offline fill:#e8f4e8,stroke:#2d6a2d,color:#000
-    style Online fill:#e8f0fe,stroke:#1a56db,color:#000
-    style VS fill:#fef3c7,stroke:#d97706,color:#000`,
+    subgraph Online Query
+      Q[User Query] --> QE[Query Embedding]
+      QE --> SEARCH[ANN Search]
+      VS --> SEARCH
+      SEARCH --> CTX[Retrieved Chunks]
+      CTX --> PROMPT[Augmented Prompt]
+      PROMPT --> LLM[LLM]
+      LLM --> ANS[Answer]
+    end`,
     },
     {
-      title: "Retrieval and Reranking Flow",
+      title: "Chunking Strategy Decision Flow",
       kind: "flow",
-      caption:
-        "Detailed flow of the **multi-stage retrieval** process: from query transformation through hybrid search to final context selection.",
-      mermaid: `flowchart LR
-    Q["User Query"] --> QT{"Query<br/>Transformation?"}
-    QT -->|"HyDE"| HY["Generate Hypothetical<br/>Answer → Embed"]
-    QT -->|"Decompose"| DC["Split into<br/>Sub-queries"]
-    QT -->|"Direct"| DE["Embed Query<br/>Directly"]
-
-    HY --> HS["Hybrid Search"]
-    DC --> HS
-    DE --> HS
-
-    HS --> VS["Vector Search<br/>(top 50)"]
-    HS --> KW["Keyword/BM25<br/>Search (top 50)"]
-
-    VS --> RRF["Reciprocal Rank<br/>Fusion (RRF)"]
-    KW --> RRF
-
-    RRF --> RR["Cross-Encoder<br/>Reranker"]
-    RR --> TH{"Score ><br/>threshold?"}
-    TH -->|"Yes"| CTX["Selected Chunks<br/>(top 3-5)"]
-    TH -->|"No"| FB["Fallback:<br/>Acknowledge Gap"]
-
-    CTX --> LLM["LLM + Prompt"]
-    FB --> LLM`,
+      caption: "The chunking approach depends on document structure and retrieval granularity needs.",
+      mermaid: `flowchart TD
+    A([Document to chunk]) --> B{Structured document?}
+    B -->|Yes, headers/sections| C[Semantic / Markdown chunking]
+    B -->|No, plain prose| D{Long paragraphs?}
+    D -->|Yes| E[Recursive character splitter]
+    D -->|No| F[Fixed-size with overlap]
+    C --> G{Need parent context?}
+    G -->|Yes| H[Parent-child chunking]
+    G -->|No| I[Store as-is]
+    E --> J[Embed and index]
+    F --> J
+    H --> J
+    I --> J`,
+    },
+    {
+      title: "Retrieval and Reranking Sequence",
+      kind: "sequence",
+      caption: "Query is embedded, candidate chunks are retrieved via ANN, then a cross-encoder reranker reorders them before the LLM generates an answer.",
+      mermaid: `sequenceDiagram
+    participant U as User
+    participant APP as App
+    participant EMB as Embedding Model
+    participant VS as Vector Store
+    participant RR as Reranker
+    participant LLM as LLM
+    U->>APP: question
+    APP->>EMB: embed question
+    EMB-->>APP: query vector
+    APP->>VS: ANN search top-k=20
+    VS-->>APP: 20 candidate chunks
+    APP->>RR: rerank(question, chunks)
+    RR-->>APP: top 5 reranked chunks
+    APP->>LLM: prompt + top 5 context
+    LLM-->>APP: answer
+    APP-->>U: response`,
+    },
+    {
+      title: "RAG Failure Modes",
+      kind: "mindmap",
+      caption: "Common failure modes in RAG systems grouped by pipeline stage.",
+      mermaid: `mindmap
+  root((RAG Failures))
+    Retrieval
+      Wrong chunks returned
+      Chunk too small for context
+      Embedding model mismatch
+    Generation
+      Hallucination despite context
+      Context window overflow
+      Instruction following failure
+    Indexing
+      Poor chunking strategy
+      Stale index
+      Duplicate chunks
+    Query
+      Vague user query
+      Missing query expansion
+      Language mismatch`,
     },
   ],
 

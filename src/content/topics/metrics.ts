@@ -349,104 +349,111 @@ int main() {
     {
       title: "Prometheus Monitoring Architecture",
       kind: "architecture",
-      caption: "End-to-end Prometheus monitoring stack showing scraping, storage, alerting, and visualization",
+      caption: "End-to-end Prometheus stack showing service discovery, scraping, TSDB storage, alerting, and long-term remote storage.",
       mermaid: `graph TB
-  subgraph Targets["Instrumented Targets"]
-    A1["Service A<br/>/metrics"]
-    A2["Service B<br/>/metrics"]
-    A3["Node Exporter<br/>/metrics"]
-    A4["cAdvisor<br/>/metrics"]
-  end
-
-  subgraph Prometheus["Prometheus Server"]
-    SD["Service Discovery<br/>(Kubernetes, Consul, DNS)"]
-    SC["Scraper"]
-    TSDB["Time Series DB<br/>(Local Storage)"]
-    RE["Recording Rules<br/>Engine"]
-    AE["Alert Rules<br/>Engine"]
-    QE["PromQL<br/>Query Engine"]
-  end
-
-  subgraph Alerting["Alert Pipeline"]
-    AM["Alertmanager<br/>(Dedup, Group, Route)"]
+    subgraph Targets["Instrumented Targets"]
+        A1["Service A - /metrics"]
+        A2["Service B - /metrics"]
+        A3["Node Exporter - /metrics"]
+        A4["cAdvisor - /metrics"]
+    end
+    subgraph Prometheus["Prometheus Server"]
+        SD["Service Discovery - Kubernetes, Consul, DNS"]
+        SC["Scraper"]
+        TSDB["Time Series DB - Local Storage"]
+        AE["Alert Rules Engine"]
+        QE["PromQL Query Engine"]
+    end
+    AM["Alertmanager - Dedup, Group, Route"]
     SL["Slack"]
     PD["PagerDuty"]
-    EM["Email"]
-  end
-
-  subgraph Visualization["Visualization"]
-    GR["Grafana<br/>Dashboards"]
-    PA["Prometheus<br/>Web UI"]
-  end
-
-  subgraph LongTerm["Long-Term Storage"]
-    TH["Thanos / Cortex /<br/>Mimir"]
-    OBJ["Object Storage<br/>(S3, GCS)"]
-  end
-
-  SD -->|discover targets| SC
-  SC -->|pull /metrics| A1
-  SC -->|pull /metrics| A2
-  SC -->|pull /metrics| A3
-  SC -->|pull /metrics| A4
-  SC -->|write samples| TSDB
-  TSDB --> RE
-  TSDB --> AE
-  TSDB --> QE
-  AE -->|fire alerts| AM
-  AM --> SL
-  AM --> PD
-  AM --> EM
-  QE --> GR
-  QE --> PA
-  TSDB -->|remote write| TH
-  TH --> OBJ`,
+    GR["Grafana Dashboards"]
+    TH["Thanos or Mimir - Long-Term Storage"]
+    SD -->|discover targets| SC
+    SC -->|pull /metrics| A1
+    SC -->|pull /metrics| A2
+    SC -->|pull /metrics| A3
+    SC -->|pull /metrics| A4
+    SC -->|write samples| TSDB
+    TSDB --> AE
+    TSDB --> QE
+    AE -->|fire alerts| AM
+    AM --> SL
+    AM --> PD
+    QE --> GR
+    TSDB -->|remote write| TH`,
     },
     {
-      title: "RED and USE Methods Mindmap",
+      title: "RED and USE Methodologies Mindmap",
       kind: "mindmap",
-      caption: "Comprehensive mindmap of the RED and USE monitoring methodologies with key metrics and tools",
+      caption: "Comprehensive overview of RED and USE monitoring methodologies with key metrics for each dimension.",
       mermaid: `mindmap
-  root((Metrics<br/>Methodologies))
-    RED Method
+  root((Metrics Methodologies))
+    RED Method - for Services
       Rate
         requests per second
-        rate(http_requests_total)
         throughput by endpoint
       Errors
         error rate percentage
-        5xx / total requests
+        5xx divided by total requests
         error budget tracking
       Duration
         p50 p95 p99 latency
-        histogram_quantile
+        histogram_quantile in PromQL
         Apdex score
-    USE Method
-      Utilization
+    USE Method - for Resources
+      Utilisation
         CPU percentage
-        Memory usage
-        Disk I/O bandwidth
-        Network bandwidth
+        Memory usage percentage
+        Disk and network bandwidth
       Saturation
-        CPU run queue
+        CPU run queue depth
         Disk I/O queue depth
-        Memory swap activity
         Thread pool exhaustion
       Errors
-        Disk errors
+        Disk read and write errors
         Network packet drops
-        ECC memory corrections
         NIC errors
     SLO Framework
       SLI definition
-      Error budget
+      Error budget calculation
       Burn rate alerts
-      Multi-window detection
-    Tools
-      Prometheus
-      Grafana
-      Alertmanager
-      Thanos / Mimir`,
+      Multi-window detection`,
+    },
+    {
+      title: "Alert Routing State Machine",
+      kind: "state",
+      caption: "States an alert passes through in Alertmanager from firing through grouping, deduplication, and notification delivery.",
+      mermaid: `stateDiagram-v2
+    [*] --> Pending: Alert rule condition first met
+    Pending --> Firing: for duration exceeded
+    Pending --> Resolved: Condition clears before for duration
+    Firing --> Grouped: Alertmanager groups by labels
+    Grouped --> Inhibited: Inhibition rule matches
+    Grouped --> Silenced: Matching silence exists
+    Grouped --> Sent: Notification dispatched to receiver
+    Sent --> Repeated: Repeat interval elapsed - still firing
+    Repeated --> Sent: Resend notification
+    Firing --> Resolved: Prometheus marks alert resolved
+    Resolved --> [*]
+    Inhibited --> Grouped: Inhibiting alert clears
+    Silenced --> Grouped: Silence expires`,
+    },
+    {
+      title: "Metric Type Selection Flow",
+      kind: "flow",
+      caption: "Decision flow for choosing the correct Prometheus metric type based on what you are measuring.",
+      mermaid: `flowchart TD
+    A["What are you measuring?"] --> B{"Does the value\nonly go up?"}
+    B -->|Yes| C{"Do you need\nrate over time?"}
+    C -->|Yes| D["Counter\nUse rate() or increase() in PromQL\ne.g. http_requests_total"]
+    C -->|No| E["Counter still - rate gives you the rate"]
+    B -->|No| F{"Is it a\ncurrent snapshot?"}
+    F -->|Yes| G{"Distribution\nof values needed?"}
+    G -->|No| H["Gauge\ncurrent value up or down\ne.g. memory_bytes, connections"]
+    G -->|Yes| I{"Need exact\nquantiles?"}
+    I -->|Yes| J["Summary\npre-computed quantiles client-side\ne.g. request_duration_seconds summary"]
+    I -->|No| K["Histogram\nbuckets server-side quantile approximation\ne.g. request_duration_seconds histogram"]`,
     },
   ],
   comparison: {

@@ -171,24 +171,71 @@ ORDER BY betweenness DESC`
   ],
   diagrams: [
     {
-      title: "Property graph data model",
-      kind: "network",
-      caption: "Nodes with labels and properties connected by typed, directed relationships that also carry properties.",
-    },
-    {
-      title: "Neo4j native storage layout",
+      title: "Property Graph Data Model",
       kind: "architecture",
-      caption: "Separate store files for nodes, relationships, and properties. Fixed-size records with pointer chains enable O(1) traversal.",
+      caption: "Core components of a property graph: nodes, relationships, and properties.",
+      mermaid: `graph LR
+    Alice[Person: Alice] -->|KNOWS| Bob[Person: Bob]
+    Alice -->|WORKS_AT| Acme[Company: Acme]
+    Bob -->|WORKS_AT| Acme
+    Alice -->|LIKES| Movie[Movie: Interstellar]
+    Bob -->|LIKES| Movie`,
     },
     {
-      title: "BFS vs. DFS traversal patterns",
+      title: "Graph Query vs SQL Join",
+      kind: "sequence",
+      caption: "Comparing SQL join chains to graph traversal for relationship queries.",
+      mermaid: `sequenceDiagram
+    participant App
+    participant SQL as Relational DB
+    participant GDB as Graph DB
+    App->>SQL: Find friends of friends
+    SQL->>SQL: JOIN users ON friend_id
+    SQL->>SQL: JOIN again for second hop
+    SQL->>SQL: N joins for N hops expensive
+    SQL-->>App: Result with performance cost
+    App->>GDB: MATCH path depth 2
+    GDB->>GDB: Traverse edges directly
+    GDB-->>App: Result in constant time per hop`,
+    },
+    {
+      title: "Graph Traversal Strategies",
       kind: "flow",
-      caption: "BFS explores level by level (ideal for shortest path). DFS follows each branch to its end (ideal for cycle detection).",
+      caption: "BFS and DFS traversal strategies used in graph database queries.",
+      mermaid: `flowchart TD
+    A[Start Node] --> B{Traversal Type?}
+    B -- BFS --> C[Enqueue neighbors]
+    C --> D[Visit level by level]
+    D --> E{All visited?}
+    E -- No --> C
+    E -- Yes --> F[BFS Result]
+    B -- DFS --> G[Push to stack]
+    G --> H[Visit depth first]
+    H --> I{All visited?}
+    I -- No --> G
+    I -- Yes --> J[DFS Result]`,
     },
     {
-      title: "Neo4j causal clustering architecture",
-      kind: "architecture",
-      caption: "Core servers use Raft consensus for writes. Read replicas asynchronously replicate data and handle read traffic. Bookmarks ensure causal consistency.",
+      title: "Graph Database Use Cases",
+      kind: "mindmap",
+      caption: "Common industry applications of graph databases.",
+      mermaid: `mindmap
+  root((Graph DB Uses))
+    Social Networks
+      Friend suggestions
+      Influence analysis
+    Fraud Detection
+      Transaction rings
+      Identity linkage
+    Knowledge Graphs
+      Entity relationships
+      Semantic search
+    Recommendations
+      Collaborative filter
+      Item similarity
+    Supply Chain
+      Dependency trees
+      Impact analysis`,
     },
   ],
   animations: [

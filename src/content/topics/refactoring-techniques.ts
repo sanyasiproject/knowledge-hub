@@ -324,16 +324,73 @@ public class ReportGenerator {
 
   diagrams: [
     {
-      title: "Refactoring Decision Flowchart",
-      kind: "flow",
-      caption:
-        "How to decide whether to refactor: detect smell, check for tests, choose technique, apply incrementally, verify behavior.",
+      title: "Common Refactoring Techniques Map",
+      kind: "mindmap",
+      caption: "Key refactoring techniques grouped by their purpose: simplifying logic, improving structure, reducing duplication, and clarifying intent.",
+      mermaid: `mindmap
+  root((Refactoring Techniques))
+    Simplify Logic
+      Replace Nested Conditional with Guard Clauses
+      Decompose Conditional
+      Consolidate Duplicate Fragments
+    Improve Structure
+      Extract Method
+      Extract Class
+      Move Method
+      Inline Method
+    Reduce Duplication
+      Extract Superclass
+      Pull Up Method
+      Form Template Method
+    Clarify Intent
+      Rename Variable
+      Rename Method
+      Introduce Explaining Variable`,
     },
     {
-      title: "Code Smell to Refactoring Technique Mapping",
-      kind: "mindmap",
-      caption:
-        "Maps common code smells (Long Method, Feature Envy, Primitive Obsession, Shotgun Surgery, etc.) to the refactoring techniques that address them.",
+      title: "Extract Method Refactoring",
+      kind: "flow",
+      caption: "Step-by-step process for the Extract Method refactoring: identify a code block, create a new method, replace the block, and verify behavior is unchanged.",
+      mermaid: `flowchart TD
+    A([Identify code block to extract]) --> B[Choose descriptive method name]
+    B --> C[Create new method with parameters]
+    C --> D[Copy code block into method]
+    D --> E[Replace original block with call]
+    E --> F[Run tests]
+    F --> G{Tests pass?}
+    G -->|Yes| H[Refactoring complete]
+    G -->|No| I[Debug parameter passing]
+    I --> C`,
+    },
+    {
+      title: "Replace Conditional with Polymorphism",
+      kind: "architecture",
+      caption: "Replacing a switch or if-else chain with polymorphism: create a base class and subclasses that override behavior, removing the conditional entirely.",
+      mermaid: `graph TD
+    subgraph Before["Before - Conditional"]
+      B1[method] --> B2{type switch}
+      B2 -->|TypeA| B3[Logic A]
+      B2 -->|TypeB| B4[Logic B]
+      B2 -->|TypeC| B5[Logic C]
+    end
+    subgraph After["After - Polymorphism"]
+      A1[Base Class method] --> A2[TypeA subclass]
+      A1 --> A3[TypeB subclass]
+      A1 --> A4[TypeC subclass]
+    end`,
+    },
+    {
+      title: "Code Smell to Technique Mapping",
+      kind: "network",
+      caption: "How common code smells map to refactoring techniques that address them.",
+      mermaid: `graph LR
+    LongMethod["Long Method"] --> ExtractMethod["Extract Method"]
+    LargeClass["Large Class"] --> ExtractClass["Extract Class"]
+    DupCode["Duplicate Code"] --> ExtractSuperclass["Extract Superclass"]
+    DupCode --> PullUpMethod["Pull Up Method"]
+    LongParam["Long Parameter List"] --> IntroParamObj["Introduce Parameter Object"]
+    SwitchStatement["Switch Statements"] --> Polymorphism["Replace with Polymorphism"]
+    DataClumps["Data Clumps"] --> ExtractClass`,
     },
   ],
 

@@ -300,15 +300,81 @@ int main() {
   ],
   diagrams: [
     {
-      title: "State Pattern Class Diagram",
+      title: "State Pattern Class Structure",
       kind: "architecture",
-      caption: "Context delegates to the current State object. Each ConcreteState implements the full State interface and may trigger transitions on the Context."
+      caption: "Context delegates to current State object. Each ConcreteState implements the State interface and may trigger transitions back on the Context.",
+      mermaid: `graph TD
+    Context["Context
+-state: State
++setState()"] -->|delegates to| SI["<<interface>>
+State
++open()
++close()
++send()"]
+    SI --> CS1["ClosedState
++open()
++close()
++send()"]
+    SI --> CS2["SynSentState
++open()
++close()
++send()"]
+    SI --> CS3["EstablishedState
++open()
++close()
++send()"]
+    CS1 -->|setState| Context
+    CS2 -->|setState| Context
+    CS3 -->|setState| Context`,
     },
     {
       title: "TCP Connection State Machine",
       kind: "state",
-      caption: "Shows the states (Closed, SynSent, Established, FinWait) and transitions triggered by open, acknowledge, close events."
-    }
+      caption: "States and transitions of a TCP connection as modeled by the State pattern.",
+      mermaid: `stateDiagram-v2
+    [*] --> Closed
+    Closed --> SynSent : open / send SYN
+    SynSent --> Established : acknowledge / SYN-ACK received
+    SynSent --> Closed : close / cancel
+    Established --> FinWait : close / send FIN
+    FinWait --> Closed : acknowledge / FIN-ACK received`,
+    },
+    {
+      title: "Vending Machine State Flow",
+      kind: "flow",
+      caption: "Control flow through the vending machine states driven by coin, selection, dispense, and cancel events.",
+      mermaid: `flowchart TD
+    Idle([Idle]) -->|insertCoin| HasMoney["HasMoney
+balance > 0"]
+    HasMoney -->|insertCoin| HasMoney
+    HasMoney -->|selectProduct valid| Dispensing["Dispensing
+product selected"]
+    HasMoney -->|cancel| ReturnCoins["Return Coins"]
+    ReturnCoins --> Idle
+    Dispensing -->|dispense| ChangeCheck{Change?}
+    ChangeCheck -->|yes| ReturnChange["Return Change"]
+    ChangeCheck -->|no| Idle
+    ReturnChange --> Idle`,
+    },
+    {
+      title: "State vs Strategy Pattern",
+      kind: "mindmap",
+      caption: "Conceptual comparison between State and Strategy patterns sharing a similar structure but with different intent.",
+      mermaid: `mindmap
+  root((Behavioral Patterns))
+    State
+      Internal transitions
+      States know each other
+      Behavior evolves automatically
+      TCP connections
+      Vending machines
+    Strategy
+      External selection
+      Strategies are independent
+      Client picks algorithm
+      Sorting algorithms
+      Payment processors`,
+    },
   ],
   animations: [
     {

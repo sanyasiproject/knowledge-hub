@@ -348,16 +348,79 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Decorator pattern class structure",
+      title: "Decorator Pattern Class Structure",
       kind: "architecture",
-      caption:
-        "Shows Component interface at the top, ConcreteComponent and abstract Decorator both implementing it. Decorator holds a Component reference. ConcreteDecorators extend Decorator and add specific behavior.",
+      caption: "Component interface at the top. ConcreteComponent and abstract Decorator both implement it. Decorator holds a Component reference. ConcreteDecorators extend Decorator and add specific behavior.",
+      mermaid: `graph TD
+    I["Component Interface"]
+    CC["ConcreteComponent"]
+    D["Decorator - abstract - wraps Component"]
+    CD1["ConcreteDecoratorA - adds behavior A"]
+    CD2["ConcreteDecoratorB - adds behavior B"]
+    I --> CC
+    I --> D
+    D --> CD1
+    D --> CD2
+    D -->|holds reference| I`,
     },
     {
-      title: "Decorator chain as a linked list of wrappers",
+      title: "Decorator Chain Execution",
+      kind: "sequence",
+      caption: "Client calls the outermost decorator. Each decorator adds its behavior and delegates to the next wrapper until the ConcreteComponent handles the base operation.",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant EncDec as EncryptionDecorator
+    participant CompDec as CompressionDecorator
+    participant Base as FileDataSource
+    Client->>EncDec: writeData
+    EncDec->>EncDec: encrypt data
+    EncDec->>CompDec: writeData with encrypted data
+    CompDec->>CompDec: compress data
+    CompDec->>Base: writeData with compressed+encrypted data
+    Base->>Base: write to file
+    Base-->>CompDec: done
+    CompDec-->>EncDec: done
+    EncDec-->>Client: done`,
+    },
+    {
+      title: "Decorator vs Inheritance Combinatorial Explosion",
       kind: "flow",
-      caption:
-        "Illustrates how stacked decorators form a chain: Client -> DecoratorC -> DecoratorB -> DecoratorA -> ConcreteComponent. Each decorator calls super/inner before/after its own logic.",
+      caption: "With inheritance, n independent features require up to 2^n subclasses. With decorators, only n classes are needed and they compose freely at runtime.",
+      mermaid: `flowchart TD
+    A[Need: DataSource with optional Encrypt and Compress] --> B{Approach?}
+    B -->|Inheritance| C[PlainDataSource]
+    B -->|Inheritance| D[EncryptedDataSource]
+    B -->|Inheritance| E[CompressedDataSource]
+    B -->|Inheritance| F[EncryptedCompressedDataSource]
+    C --> X1[4 classes for 2 features]
+    B -->|Decorator| G[DataSource interface]
+    G --> H[FileDataSource base]
+    G --> I[EncryptionDecorator]
+    G --> J[CompressionDecorator]
+    I --> K[Compose at runtime - any order]
+    J --> K`,
+    },
+    {
+      title: "Decorator Pattern Variations",
+      kind: "mindmap",
+      caption: "Decorator appears across many contexts: GoF structural pattern, language annotations, and middleware chains all share the core wrapping concept.",
+      mermaid: `mindmap
+  root[Decorator Concept]
+    GoF Structural Pattern
+      Runtime object wrapping
+      Stackable composition
+      Java IO Streams
+      Web framework middleware
+    Language Decorators
+      Python at-syntax
+      TypeScript at-syntax
+      Applied at definition time
+      Metadata and transformation
+    Middleware Chains
+      Express middleware
+      Koa onion model
+      Django middleware
+      List-based dynamic composition`,
     },
   ],
   animations: [

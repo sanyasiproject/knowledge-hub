@@ -524,71 +524,39 @@ private:
     {
       title: "Entity vs Value Object Decision Flow",
       kind: "flow",
-      caption: "Use this flowchart to determine whether a domain concept should be modeled as an **Entity** or a **Value Object**.",
       mermaid: `flowchart TD
-    A["New Domain Concept"] --> B{"Does it need a\\nunique identity?"}
-    B -- Yes --> C{"Does it have a\\nlifecycle with\\nstate transitions?"}
-    B -- No --> D{"Is it defined\\nentirely by its\\nattributes?"}
-    C -- Yes --> E["Model as ENTITY"]
-    C -- No --> F{"Must two instances\\nwith same attributes\\nbe distinguishable?"}
-    F -- Yes --> E
-    F -- No --> G["Model as VALUE OBJECT"]
-    D -- Yes --> G
-    D -- No --> H{"Can it be freely\\nreplaced by another\\nwith same values?"}
-    H -- Yes --> G
-    H -- No --> E
-    style E fill:#2d6a4f,color:#fff,stroke:#1b4332
-    style G fill:#1d3557,color:#fff,stroke:#0d1b2a`,
+    A["New Domain Concept"] --> B{"Does it need a\nunique identity?"}
+    B -->|Yes| C{"Does it have a lifecycle\nwith state transitions?"}
+    B -->|No| D{"Defined entirely\nby its attributes?"}
+    C -->|Yes| E["Model as ENTITY"]
+    C -->|No| F{"Two instances with same\nattributes distinguishable?"}
+    F -->|Yes| E
+    F -->|No| G["Model as VALUE OBJECT"]
+    D -->|Yes| G
+    D -->|No| H{"Can it be replaced by\nanother with same values?"}
+    H -->|Yes| G
+    H -->|No| E`,
+      caption: "Use identity and lifecycle to distinguish entities from value objects; immutability and structural equality define value objects.",
     },
     {
-      title: "Entity and Value Object Composition in an Aggregate",
+      title: "Aggregate Composition Architecture",
       kind: "architecture",
-      caption: "Shows how an **Order** aggregate root (entity) is composed of embedded **value objects** with clear ownership boundaries.",
-      mermaid: `classDiagram
-    class Order {
-        -OrderId id
-        -OrderStatus status
-        -List~OrderLineItem~ items
-        -ShippingAddress address
-        +place(id, items, address) Order
-        +confirm() void
-        +total() Money
-        +operator==(Order) bool
-    }
-    class OrderId {
-        -string value
-        +operator==(OrderId) bool
-    }
-    class OrderLineItem {
-        -string productName
-        -Quantity quantity
-        -Money unitPrice
-        +lineTotal() Money
-        +operator==(OrderLineItem) bool
-    }
-    class ShippingAddress {
-        -string street
-        -string city
-        -PostalCode postalCode
-        -CountryCode country
-        +operator==(ShippingAddress) bool
-    }
-    class Money {
-        -double amount
-        -Currency currency
-        +add(Money) Money
-        +multiply(double) Money
-        +operator==(Money) bool
-    }
-    Order *-- OrderId : identity
-    Order *-- OrderLineItem : contains
-    Order *-- ShippingAddress : embeds
-    OrderLineItem *-- Money : uses`,
+      mermaid: `graph TD
+    subgraph Aggregate["Order Aggregate"]
+      Root["Order - Entity - Aggregate Root\nOrderId identity\nOrderStatus lifecycle"]
+      Line["OrderLineItem - Value Object\nproductName + quantity + unitPrice\nimmutable - no identity"]
+      Addr["ShippingAddress - Value Object\nstreet + city + postalCode\nreplaced not mutated"]
+      Money["Money - Value Object\namount + currency\nstructural equality"]
+    end
+    Root -->|contains list of| Line
+    Root -->|has| Addr
+    Line -->|uses| Money
+    Repo["OrderRepository"] -->|persists and loads| Root`,
+      caption: "The aggregate root is an entity owning value objects; only the root is referenced externally and persisted via its repository.",
     },
     {
       title: "Entity Lifecycle State Machine",
       kind: "state",
-      caption: "Entities transition through well-defined states; value objects have *no lifecycle* -- they are created and remain unchanged.",
       mermaid: `stateDiagram-v2
     [*] --> Placed : Order.place()
     Placed --> Confirmed : confirm()
@@ -599,8 +567,33 @@ private:
     Shipped --> Returned : initiateReturn()
     Delivered --> [*]
     Cancelled --> [*]
-    Returned --> Refunded : processRefund()
-    Refunded --> [*]`,
+    Returned --> [*]`,
+      caption: "Entities have lifecycles with valid state transitions enforced by domain methods; value objects have no lifecycle and are simply replaced.",
+    },
+    {
+      title: "Value Object vs Entity Characteristics",
+      kind: "mindmap",
+      mermaid: `mindmap
+  root((Domain Objects))
+    Entity
+      Has unique identity
+      Identity persists through change
+      Mutable state over lifecycle
+      Equality by ID
+      Examples - Customer Order Product
+    Value Object
+      No identity
+      Defined by attributes
+      Immutable
+      Equality by value
+      Replaced not mutated
+      Examples - Money Address Email Color
+    Aggregate
+      Cluster of entities and VOs
+      Single root entity
+      Consistency boundary
+      External references via root ID only`,
+      caption: "Entities are tracked by identity across mutations; value objects are interchangeable when attributes match; aggregates group both under one consistency boundary.",
     },
   ],
   comparison: {

@@ -359,14 +359,74 @@ if (flags.isEnabled("new-checkout-flow", { userId: user.id, attributes: {} })) {
   },
   diagrams: [
     {
-      title: "Canary Release Traffic Flow",
-      kind: "flow",
-      caption: "Progressive traffic shifting from stable to canary version with automated analysis gates at each stage",
+      title: "Blue-Green Deployment",
+      kind: "architecture",
+      caption: "Two identical production environments where traffic switches from blue to green for zero-downtime deployments. Rollback is instant by switching back.",
+      mermaid: `graph LR
+    LB[Load Balancer] -->|Active traffic| Blue[Blue Environment - v1]
+    LB -.->|Standby| Green[Green Environment - v2]
+    subgraph Deploy["Deployment Process"]
+      D1[Deploy v2 to Green]
+      D2[Run smoke tests on Green]
+      D3[Switch LB to Green]
+      D4[Monitor Green]
+      D5[Decommission Blue or keep for rollback]
+      D1 --> D2 --> D3 --> D4 --> D5
+    end`,
     },
     {
-      title: "Blue-Green Deployment Architecture",
-      kind: "architecture",
-      caption: "Two identical environments behind a load balancer with shared database and instant switchover",
+      title: "Canary Release Traffic Split",
+      kind: "flow",
+      caption: "Canary releases gradually shift traffic from the stable version to the new version, monitoring error rates and latency before full rollout.",
+      mermaid: `flowchart TD
+    A([New version deployed to canary]) --> B[Route 5 percent traffic to canary]
+    B --> C[Monitor metrics - errors and latency]
+    C --> D{Metrics healthy?}
+    D -->|No| E[Rollback canary to 0 percent]
+    E --> F([Investigate issues])
+    D -->|Yes| G[Increase to 25 percent]
+    G --> H[Monitor again]
+    H --> I{Still healthy?}
+    I -->|Yes| J[Increase to 100 percent]
+    I -->|No| E
+    J --> K([Full rollout complete])`,
+    },
+    {
+      title: "Feature Flag Release Strategy",
+      kind: "sequence",
+      caption: "Feature flags decouple deployment from release. Code ships dark, flags enable features for specific users or percentages without redeployment.",
+      mermaid: `sequenceDiagram
+    participant Dev as Developer
+    participant CI as CI Pipeline
+    participant Prod as Production
+    participant Flag as Feature Flag Service
+    participant User as User
+
+    Dev->>CI: Merge code with flag disabled
+    CI->>Prod: Deploy new code dark
+    Dev->>Flag: Enable flag for beta users
+    User->>Prod: Request feature
+    Prod->>Flag: Check flag for user
+    Flag-->>Prod: Enabled
+    Prod-->>User: New feature shown
+    Dev->>Flag: Ramp to 100 percent
+    Dev->>Flag: Remove flag from code`,
+    },
+    {
+      title: "Rolling Deployment",
+      kind: "state",
+      caption: "Rolling deployments update instances one at a time or in batches, keeping the service available throughout the update process.",
+      mermaid: `stateDiagram-v2
+    [*] --> AllV1: All instances running v1
+    AllV1 --> Batch1: Update first batch to v2
+    Batch1 --> Batch2: Health check passes
+    Batch2 --> Batch3: Health check passes
+    Batch3 --> AllV2: All instances on v2
+    Batch1 --> Rollback: Health check fails
+    Batch2 --> Rollback: Health check fails
+    Batch3 --> Rollback: Health check fails
+    Rollback --> AllV1: Revert updated instances
+    AllV2 --> [*]`,
     },
   ],
   animations: [

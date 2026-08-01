@@ -222,15 +222,54 @@ int main() {
 
   diagrams: [
     {
-      title: "Function Abstraction Levels (Stepdown Rule)",
+      title: "Function Abstraction Levels",
       kind: "architecture",
-      caption: "Shows how a high-level function calls mid-level functions, which call low-level functions. Each layer operates at a single level of abstraction. High: processOrder(). Mid: validateOrder(), calculateTotal(), applyPayment(). Low: checkInventory(), computeTax(), chargeCard()."
+      caption: "The stepdown rule: each function operates at a single level of abstraction and delegates to functions one level below.",
+      mermaid: `graph TD
+    HIGH["High Level\nprocessOrder()"]
+    HIGH --> M1["Mid Level\nvalidateOrder()"]
+    HIGH --> M2["Mid Level\ncalculateTotal()"]
+    HIGH --> M3["Mid Level\napplyPayment()"]
+    M1 --> L1["Low Level\ncheckInventory()"]
+    M1 --> L2["Low Level\nvalidateAddress()"]
+    M2 --> L3["Low Level\ncomputeTax()"]
+    M2 --> L4["Low Level\napplyDiscount()"]
+    M3 --> L5["Low Level\nchargeCard()"]`,
     },
     {
-      title: "Functional Core / Imperative Shell Pattern",
+      title: "Functional Core / Imperative Shell",
       kind: "architecture",
-      caption: "The outer shell handles I/O (HTTP requests, database, files, APIs) and passes data to the inner pure functional core. The core computes results with no side effects and returns them to the shell, which handles persisting the results. Arrows show data flowing inward (pure) and effects flowing outward (impure)."
-    }
+      caption: "I/O and side effects live in the outer shell; the inner pure core computes results with no side effects.",
+      mermaid: `graph LR
+    subgraph Shell["Imperative Shell (I/O)"]
+      HTTP["HTTP Request"]
+      DB["Database"]
+      FILES["Files / APIs"]
+    end
+    subgraph Core["Functional Core (Pure)"]
+      TRANSFORM["transform()"]
+      VALIDATE["validate()"]
+      COMPUTE["compute()"]
+    end
+    HTTP -->|"data in"| TRANSFORM
+    DB -->|"data in"| VALIDATE
+    TRANSFORM --> COMPUTE
+    VALIDATE --> COMPUTE
+    COMPUTE -->|"result out"| DB
+    COMPUTE -->|"result out"| FILES`,
+    },
+    {
+      title: "Pure vs Impure Function Properties",
+      kind: "flow",
+      caption: "Decision flow for classifying a function as pure or impure based on its observable behavior.",
+      mermaid: `flowchart TD
+    A["Inspect function"] --> B{Same inputs always produce same output?}
+    B -->|No| IMP["Impure\ne.g. Date.now, Math.random"]
+    B -->|Yes| C{Any observable side effects?}
+    C -->|Yes| IMP2["Impure\ne.g. modifies global, writes to DB"]
+    C -->|No| PURE["Pure function\nSafe to memoize, test, parallelize"]
+    PURE --> BENEFITS["Benefits\nReferential transparency\nEasy testing\nMemoization"]`,
+    },
   ],
 
   animations: [

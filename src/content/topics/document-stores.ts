@@ -234,24 +234,67 @@ const resumed = db.orders.watch(pipeline, {
   ],
   diagrams: [
     {
-      title: "MongoDB replica set architecture",
+      title: "MongoDB Replica Set Architecture",
       kind: "architecture",
-      caption: "Primary accepts writes; secondaries replicate the oplog asynchronously. An arbiter participates in elections but holds no data.",
+      mermaid: `graph TD
+    Client["Application Client"]
+    Primary["Primary Node\nAccepts Reads and Writes"]
+    Sec1["Secondary 1\nReplicates Oplog"]
+    Sec2["Secondary 2\nReplicates Oplog"]
+    Arbiter["Arbiter\nVotes Only - No Data"]
+    Client -->|Write - w:majority| Primary
+    Client -->|Read - primaryPreferred| Primary
+    Client -.->|Read - secondary| Sec1
+    Primary -->|Async oplog replication| Sec1
+    Primary -->|Async oplog replication| Sec2
+    Primary <-->|Election votes| Arbiter
+    Sec1 <-->|Election votes| Arbiter`,
+      caption: "Primary accepts writes and replicates via the oplog; secondaries can serve reads; arbiter participates in elections without holding data.",
     },
     {
-      title: "Sharded cluster topology",
-      kind: "architecture",
-      caption: "mongos routers direct queries to the correct shard based on the shard key. Config servers store metadata and chunk mappings.",
-    },
-    {
-      title: "Document embedding vs. referencing decision flow",
+      title: "Document Embedding vs Referencing Decision",
       kind: "flow",
-      caption: "Decision tree: access patterns, data size, update frequency, and relationship cardinality determine whether to embed or reference.",
+      mermaid: `flowchart TD
+    A["New relationship to model"] --> B{"Always accessed\ntogether?"}
+    B -->|Yes| C{"Document would\nexceed 16 MB?"}
+    B -->|No| D{"Independent\nlifecycle?"}
+    C -->|No| E["EMBED the document"]
+    C -->|Yes| F{"One-to-many\ncardinality?"}
+    D -->|Yes| G["REFERENCE with ID"]
+    D -->|No| F
+    F -->|One-to-few| E
+    F -->|One-to-many| G
+    F -->|Many-to-many| G`,
+      caption: "Embed for co-located, bounded data; reference for independent lifecycle, high cardinality, or documents near the 16 MB limit.",
     },
     {
-      title: "CouchDB multi-master replication",
-      kind: "sequence",
-      caption: "Two CouchDB nodes independently accept writes, then replicate changes bidirectionally using the _changes feed and revision trees.",
+      title: "MongoDB Sharded Cluster Topology",
+      kind: "network",
+      mermaid: `graph LR
+    App["Application"] --> MR1["mongos Router 1"]
+    App --> MR2["mongos Router 2"]
+    MR1 --> CFG[("Config Servers\n3-node Replica Set\nChunk metadata")]
+    MR2 --> CFG
+    MR1 --> S1["Shard 1\nReplica Set\nChunks 0-499"]
+    MR1 --> S2["Shard 2\nReplica Set\nChunks 500-999"]
+    MR1 --> S3["Shard 3\nReplica Set\nChunks 1000-1499"]
+    MR2 --> S1
+    MR2 --> S2
+    MR2 --> S3`,
+      caption: "mongos routers use config server metadata to route queries to the correct shard; chunk ranges are determined by the shard key.",
+    },
+    {
+      title: "Aggregation Pipeline Execution Flow",
+      kind: "flow",
+      mermaid: `flowchart LR
+    Input["Collection\nDocuments"] --> Match["1 - dollar match\nFilter early\nUses indexes"]
+    Match --> Lookup["2 - dollar lookup\nJoin collection\nIndex-backed"]
+    Lookup --> Unwind["3 - dollar unwind\nFlatten arrays"]
+    Unwind --> Group["4 - dollar group\nAccumulate\n100 MB limit"]
+    Group --> Sort["5 - dollar sort\nSort results"]
+    Sort --> Project["6 - dollar project\nReshape output"]
+    Project --> Output["Result Set"]`,
+      caption: "Each pipeline stage transforms the document stream; match and sort early to reduce data volume in later expensive stages.",
     },
   ],
   animations: [

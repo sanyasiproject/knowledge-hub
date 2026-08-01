@@ -128,16 +128,73 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Full adder circuit",
+      title: "Full Adder Circuit Architecture",
       kind: "architecture",
-      caption:
-        "Internal structure of a full adder built from two half adders and an OR gate, showing the dataflow from inputs A, B, Cin through XOR/AND gates to outputs Sum and Cout.",
+      caption: "Internal structure of a full adder: two half adders and an OR gate combine A, B, Cin to produce Sum and Cout.",
+      mermaid: `graph LR
+    A["Input A"] --> XOR1["XOR gate 1"]
+    B["Input B"] --> XOR1
+    XOR1 --> XOR2["XOR gate 2"]
+    Cin["Input Cin"] --> XOR2
+    XOR2 --> Sum["Output Sum"]
+    A --> AND1["AND gate 1"]
+    B --> AND1
+    XOR1 --> AND2["AND gate 2"]
+    Cin --> AND2
+    AND1 --> OR1["OR gate"]
+    AND2 --> OR1
+    OR1 --> Cout["Output Cout"]`,
     },
     {
-      title: "Logic gate hierarchy and universality",
+      title: "Logic Gate Universality Mind Map",
       kind: "mindmap",
-      caption:
-        "Relationships between logic gates showing how AND, OR, NOT derive from NAND alone, demonstrating NAND universality.",
+      caption: "NAND and NOR are each universal — every other gate can be built from copies of just one of them.",
+      mermaid: `mindmap
+  root((Logic Gates))
+    Basic
+      AND
+      OR
+      NOT
+    Universal
+      NAND
+        NOT from NAND
+        AND from NAND
+        OR from NAND
+      NOR
+        NOT from NOR
+        AND from NOR
+        OR from NOR
+    Derived
+      XOR
+      XNOR`,
+    },
+    {
+      title: "Boolean Expression Simplification Flow",
+      kind: "flow",
+      caption: "Process for simplifying a Boolean expression using algebraic laws or a Karnaugh map.",
+      mermaid: `flowchart TD
+    A([Start with expression]) --> B{More than 4 variables?}
+    B -->|Yes| C[Use algebraic laws]
+    B -->|No| D[Build Karnaugh map]
+    C --> E[Apply absorption and De Morgan and distribution]
+    D --> F[Group adjacent 1-cells in powers of 2]
+    E --> G{Reducible further?}
+    F --> H[Read minimal SOP expression]
+    G -->|Yes| C
+    G -->|No| I([Minimized expression])
+    H --> I`,
+    },
+    {
+      title: "De Morgan Law Transformation",
+      kind: "state",
+      caption: "State transitions showing how De Morgan's laws convert between AND/OR forms when negation is pushed inward.",
+      mermaid: `stateDiagram-v2
+    [*] --> NOT_AND : NOT of A AND B
+    NOT_AND --> OR_NOT : De Morgan gives NOT-A OR NOT-B
+    [*] --> NOT_OR : NOT of A OR B
+    NOT_OR --> AND_NOT : De Morgan gives NOT-A AND NOT-B
+    OR_NOT --> NOT_AND : apply again
+    AND_NOT --> NOT_OR : apply again`,
     },
   ],
   animations: [

@@ -352,107 +352,104 @@ async function invalidateUser(userId: string): Promise<void> {
 
   diagrams: [
     {
-      title: "Distributed Cache Architecture",
+      title: "Distributed Cache Cluster Architecture",
       kind: "architecture",
-      caption: "Application layer communicating with a distributed cache cluster (Redis) in front of the database, showing cache-aside flow",
-      mermaid: `graph TB
-    Client["**Client Application**"]
-    LB["**Load Balancer**"]
+      mermaid: `graph TD
+    Client["Client App"]
+    LB["Load Balancer"]
     App1["App Server 1"]
     App2["App Server 2"]
-    App3["App Server 3"]
-    CacheProxy["**Cache Router**<br/>*Consistent Hashing*"]
-    C1["Redis Node 1<br/>*Slots 0-5460*"]
-    C2["Redis Node 2<br/>*Slots 5461-10922*"]
-    C3["Redis Node 3<br/>*Slots 10923-16383*"]
+    CacheProxy["Cache Router\nConsistent Hashing"]
+    C1["Redis Node 1\nSlots 0-5460"]
+    C2["Redis Node 2\nSlots 5461-10922"]
+    C3["Redis Node 3\nSlots 10923-16383"]
     R1["Replica 1"]
     R2["Replica 2"]
     R3["Replica 3"]
-    DB[("**Primary Database**<br/>*PostgreSQL*")]
-
+    DB[("Primary DB\nPostgreSQL")]
     Client --> LB
     LB --> App1
     LB --> App2
-    LB --> App3
     App1 --> CacheProxy
     App2 --> CacheProxy
-    App3 --> CacheProxy
     CacheProxy --> C1
     CacheProxy --> C2
     CacheProxy --> C3
     C1 --> R1
     C2 --> R2
     C3 --> R3
-    App1 -.->|"*Cache Miss*"| DB
-    App2 -.->|"*Cache Miss*"| DB
-    App3 -.->|"*Cache Miss*"| DB`,
+    App1 -.->|Cache Miss| DB
+    App2 -.->|Cache Miss| DB`,
+      caption: "Application servers route requests through a consistent-hash proxy to Redis cluster nodes, with replicas for HA and database fallback on cache miss.",
     },
     {
-      title: "Cache-Aside (Look-Aside) Flow",
+      title: "Cache-Aside Read Flow",
       kind: "flow",
-      caption: "Step-by-step flow of a cache-aside read operation: check cache, on miss load from DB, populate cache, return result",
       mermaid: `flowchart TD
-    A["**Application receives request**"] --> B{"Check **cache**<br/>for key"}
-    B -->|"**Cache HIT**"| C["Return *cached value*<br/>directly to caller"]
-    B -->|"**Cache MISS**"| D["Query the **database**"]
-    D --> E["Write result to **cache**<br/>with *TTL*"]
+    A["Application receives request"] --> B{"Key in cache?"}
+    B -->|Cache HIT| C["Return cached value"]
+    B -->|Cache MISS| D["Query database"]
+    D --> E["Write result to cache with TTL"]
     E --> F["Return value to caller"]
-    C --> G["**Response sent**<br/>*~1ms latency*"]
+    C --> G["Response sent"]
     F --> G`,
+      caption: "Step-by-step cache-aside pattern: check cache first, fall back to DB on miss, populate cache, return result.",
     },
     {
-      title: "Consistent Hashing Ring",
-      kind: "flow",
-      caption: "Visualization of keys mapped to nodes on a consistent hashing ring with virtual nodes",
-      mermaid: `flowchart LR
-    subgraph Ring["**Hash Ring** *(0 to 2^32)*"]
-        direction TB
-        N1["**Node A** — vnode positions:<br/>*hash(A#0), hash(A#1), ...*"]
-        N2["**Node B** — vnode positions:<br/>*hash(B#0), hash(B#1), ...*"]
-        N3["**Node C** — vnode positions:<br/>*hash(C#0), hash(C#1), ...*"]
-    end
-    K1["Key: \`user:42\`"] -->|"hash → **clockwise**<br/>to nearest vnode"| N1
-    K2["Key: \`session:99\`"] -->|"hash → **clockwise**"| N2
-    K3["Key: \`product:7\`"] -->|"hash → **clockwise**"| N3
-    N1 -->|"**~1/N keys move**<br/>when node added"| AddNode["New Node D<br/>*takes subset of C's range*"]`,
-    },
-    {
-      title: "Cache Stampede Prevention Sequence",
+      title: "Cache Stampede Prevention",
       kind: "sequence",
-      caption: "Sequence diagram showing how distributed locking prevents a cache stampede when a popular key expires",
       mermaid: `sequenceDiagram
-    participant R1 as **Request 1**
-    participant R2 as **Request 2**
-    participant R3 as **Request 3**
-    participant Cache as **Redis Cache**
-    participant Lock as **Distributed Lock**
-    participant DB as **Database**
-
-    Note over Cache: Popular key **expires**
+    participant R1 as Request 1
+    participant R2 as Request 2
+    participant Cache as Redis Cache
+    participant Lock as Distributed Lock
+    participant DB as Database
+    Note over Cache: Popular key expires
     R1->>Cache: GET user:42
     R2->>Cache: GET user:42
-    R3->>Cache: GET user:42
-    Cache-->>R1: *MISS*
-    Cache-->>R2: *MISS*
-    Cache-->>R3: *MISS*
-
+    Cache-->>R1: MISS
+    Cache-->>R2: MISS
     R1->>Lock: SET lock:user:42 NX EX 10
-    Lock-->>R1: **OK** (lock acquired)
+    Lock-->>R1: OK - lock acquired
     R2->>Lock: SET lock:user:42 NX EX 10
-    Lock-->>R2: *FAIL* (already locked)
-    R3->>Lock: SET lock:user:42 NX EX 10
-    Lock-->>R3: *FAIL* (already locked)
-
-    Note over R2,R3: Wait and **retry from cache**
-    R1->>DB: SELECT * FROM users WHERE id=42
+    Lock-->>R2: FAIL - already locked
+    Note over R2: Wait and retry
+    R1->>DB: SELECT user WHERE id=42
     DB-->>R1: User data
     R1->>Cache: SETEX user:42 300 data
     R1->>Lock: DEL lock:user:42
-
     R2->>Cache: GET user:42
-    Cache-->>R2: **HIT** (populated by R1)
-    R3->>Cache: GET user:42
-    Cache-->>R3: **HIT**`,
+    Cache-->>R2: HIT - populated by R1`,
+      caption: "Distributed locking prevents stampede: only one request loads from DB while others wait and then read from the populated cache.",
+    },
+    {
+      title: "Cache Eviction Policy Comparison",
+      kind: "mindmap",
+      mermaid: `mindmap
+  root((Cache Eviction))
+    LRU
+      Evict least recently used
+      Good for recency bias
+      LinkedHashMap implementation
+    LFU
+      Evict least frequently used
+      Better for Zipfian workloads
+      Higher overhead
+    TTL Based
+      Keys expire automatically
+      Time-to-live per key
+      SETEX in Redis
+    Write Policies
+      Write-Through
+        Sync write to DB
+        Strong consistency
+      Write-Behind
+        Async flush to DB
+        Lower write latency
+      Write-Around
+        Skip cache on write
+        Avoids cache pollution`,
+      caption: "Taxonomy of cache eviction and write policies, their trade-offs, and typical implementation approaches.",
     },
   ],
 

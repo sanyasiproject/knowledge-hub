@@ -260,67 +260,91 @@ az network private-endpoint dns-zone-group create \\
   ],
   diagrams: [
     {
-      title: "Blob Lifecycle Management Flow",
+      title: "Azure Storage Services Architecture",
+      kind: "architecture",
+      caption: "Overview of Azure storage services under a storage account, their protocols, and primary use cases.",
+      mermaid: `graph TD
+    SA["Storage Account"]
+    Blob["Blob Storage<br/>Objects and unstructured data"]
+    Files["Azure Files<br/>SMB and NFS shares"]
+    Queue["Queue Storage<br/>Async messaging"]
+    Table["Table Storage<br/>NoSQL key-value"]
+    Disk["Managed Disks<br/>Block storage for VMs"]
+
+    SA --> Blob
+    SA --> Files
+    SA --> Queue
+    SA --> Table
+
+    Blob --> BB["Block Blobs<br/>Up to 190 TiB"]
+    Blob --> AB["Append Blobs<br/>Log streams"]
+    Blob --> PB["Page Blobs<br/>Random read/write"]
+    Files --> SMB["SMB 3.0/3.1.1<br/>Port 445"]
+    Files --> NFS["NFS 4.1<br/>Premium only"]
+    Disk --> HDD["Standard HDD"]
+    Disk --> SSD["Premium SSD"]
+    Disk --> Ultra["Ultra Disk<br/>160K IOPS"]`,
+    },
+    {
+      title: "Choosing the Right Azure Storage Type",
       kind: "flow",
-      caption: "Automated blob tier transitions and deletion based on lifecycle management policy rules",
-      mermaid: `flowchart LR
-    A["Blob Created\\n(Hot Tier)"] -->|"30 days after\\nlast modified"| B["Cool Tier"]
-    B -->|"180 days after\\nlast modified"| C["Archive Tier"]
-    C -->|"365 days after\\nlast modified"| D["Deleted"]
-    B -->|"Rehydrate\\n(on access)"| A
-    C -->|"Standard: up to 15h\\nHigh priority: under 1h"| B
-    A -->|"Snapshot created"| E["Snapshot"]
-    E -->|"90 days after\\ncreation"| D`,
+      caption: "Decision flow for selecting the correct Azure storage service based on data type, access pattern, and performance requirements.",
+      mermaid: `flowchart TD
+    A["What type of data?"] --> B{"Structured or<br/>unstructured?"}
+    B -->|"Unstructured objects<br/>images, video, backups"| C["Blob Storage"]
+    B -->|"File shares<br/>shared file system"| D["Azure Files"]
+    B -->|"Semi-structured<br/>key-value rows"| E["Table Storage"]
+    B -->|"Messages between<br/>app components"| F["Queue Storage"]
+    B -->|"VM block storage"| G{"Performance tier?"}
+    C --> H{"Access frequency?"}
+    H -->|"Frequent"| I["Hot Tier"]
+    H -->|"Infrequent"| J["Cool Tier"]
+    H -->|"Rare, archival"| K["Archive Tier"]
+    G -->|"Dev/test"| L["Standard HDD"]
+    G -->|"Production workloads"| M["Premium SSD"]
+    G -->|"High IOPS databases"| N["Ultra Disk"]`,
     },
     {
       title: "Storage Redundancy Architecture",
       kind: "architecture",
-      caption: "Comparison of LRS, ZRS, GRS, and GZRS replication across datacenters and regions",
+      caption: "How LRS, ZRS, GRS, and GZRS replicate data across datacenters and regions, with synchronous and asynchronous replication boundaries.",
       mermaid: `graph TD
-    subgraph "Primary Region"
-        subgraph "Availability Zone 1"
-            LRS1["Replica 1"]
-        end
-        subgraph "Availability Zone 2"
-            ZRS2["Replica 2"]
-        end
-        subgraph "Availability Zone 3"
-            ZRS3["Replica 3"]
-        end
+    subgraph Primary["Primary Region"]
+      subgraph Zone1["Availability Zone 1"]
+        R1["Replica 1"]
+      end
+      subgraph Zone2["Availability Zone 2"]
+        R2["Replica 2"]
+      end
+      subgraph Zone3["Availability Zone 3"]
+        R3["Replica 3"]
+      end
     end
-    subgraph "Secondary Region (Geo)"
-        subgraph "Single Datacenter"
-            GRS1["Replica 4"]
-            GRS2["Replica 5"]
-            GRS3["Replica 6"]
-        end
+    subgraph Secondary["Secondary Region"]
+      subgraph DC["Single Datacenter"]
+        R4["Replica 4"]
+        R5["Replica 5"]
+        R6["Replica 6"]
+      end
     end
-    LRS1 -->|"Synchronous\\n(ZRS/GZRS)"| ZRS2
-    LRS1 -->|"Synchronous\\n(ZRS/GZRS)"| ZRS3
-    LRS1 -->|"Asynchronous\\n(GRS/GZRS)\\nRPO < 15 min"| GRS1
-    GRS1 --- GRS2
-    GRS1 --- GRS3`,
+    R1 -->|"Sync - ZRS/GZRS"| R2
+    R1 -->|"Sync - ZRS/GZRS"| R3
+    R1 -->|"Async GRS/GZRS RPO under 15 min"| R4
+    R4 --- R5
+    R4 --- R6`,
     },
     {
-      title: "Storage Access Control Decision Flow",
+      title: "Blob Storage Access Tier Lifecycle",
       kind: "flow",
-      caption: "Decision flow for determining how a storage request is authenticated and authorized",
-      mermaid: `flowchart TD
-    A["Incoming Storage Request"] --> B{"Anonymous\\naccess enabled?"}
-    B -->|"Yes (public container)"| C["Allow read\\n(no auth needed)"]
-    B -->|"No"| D{"Auth method?"}
-    D -->|"Entra ID Token"| E{"RBAC role\\nassigned?"}
-    E -->|"Yes"| F["Authorize via\\nRBAC policy"]
-    E -->|"No"| G["403 Forbidden"]
-    D -->|"SAS Token"| H{"Token valid?\\n(time, IP, perms)"}
-    H -->|"Yes"| I["Authorize via\\nSAS permissions"]
-    H -->|"No / Expired"| G
-    D -->|"Account Key"| J["Full access\\n(all operations)"]
-    F --> K{"Network rules\\npassed?"}
-    I --> K
-    J --> K
-    K -->|"Yes"| L["Request Processed"]
-    K -->|"No"| M["403 Firewall Block"]`,
+      caption: "Automated blob tier transitions driven by lifecycle management policies, including rehydration paths and snapshot deletion.",
+      mermaid: `flowchart LR
+    A["Blob Created - Hot Tier"] -->|"30 days since modified"| B["Cool Tier"]
+    B -->|"180 days since modified"| C["Archive Tier"]
+    C -->|"365 days since modified"| D["Deleted"]
+    C -->|"Rehydrate standard up to 15h"| B
+    B -->|"Access triggers recall"| A
+    A -->|"Snapshot created"| E["Snapshot"]
+    E -->|"90 days since creation"| D`,
     },
   ],
   comparison: {

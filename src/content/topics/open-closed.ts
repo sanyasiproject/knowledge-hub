@@ -190,13 +190,72 @@ const pipeline = new Pipeline()
     {
       title: "OCP via Strategy Pattern",
       kind: "architecture",
-      caption: "Context depends on an abstract Strategy interface. Concrete strategies implement the interface. New strategies can be added without modifying the Context."
+      caption: "Context depends on an abstract Strategy interface. New strategies extend without modifying Context.",
+      mermaid: `graph TD
+    Context["Context\nuses Strategy"] -->|depends on| Strategy["Strategy Interface\nexecute"]
+    Strategy --> S1["ConcreteStrategy A\nexecute impl"]
+    Strategy --> S2["ConcreteStrategy B\nexecute impl"]
+    Strategy --> S3["NEW ConcreteStrategy C\nexecute impl"]
+    Context -->|no change needed| Note1["Context closed for modification"]
+    S3 -->|add without touching| Note2["Open for extension"]`,
     },
     {
       title: "Plugin Architecture Extension Flow",
       kind: "flow",
-      caption: "Core application defines extension points -> Plugins implement interfaces -> Plugin registry discovers and loads plugins at runtime -> Core delegates to loaded plugins."
-    }
+      caption: "Core defines extension points; plugins implement interfaces; registry loads them at runtime.",
+      mermaid: `flowchart TD
+    A["Core defines plugin interface"] --> B["Plugin implements interface"]
+    B --> C["Plugin registered in registry"]
+    C --> D["Application starts"]
+    D --> E["Registry discovers plugins"]
+    E --> F["Core delegates to loaded plugins"]
+    F --> G{"New plugin needed?"}
+    G -->|Yes| H["Write new plugin class"]
+    H --> B
+    G -->|No| I["Core unchanged"]`,
+    },
+    {
+      title: "OCP Violation vs Compliance",
+      kind: "sequence",
+      caption: "Shows the difference between violating OCP with if/else chains and complying via polymorphism.",
+      mermaid: `sequenceDiagram
+    participant Dev as Developer
+    participant Bad as Violation if-else
+    participant Good as OCP-Compliant
+
+    Note over Dev,Bad: Adding new discount type - VIOLATION
+    Dev->>Bad: add STUDENT discount
+    Bad->>Bad: modify calculateDiscount method
+    Bad->>Bad: add new else-if branch
+    Note over Bad: Existing code modified - risk of regression
+
+    Note over Dev,Good: Adding new discount type - OCP
+    Dev->>Good: create StudentDiscount class
+    Good->>Good: implements DiscountStrategy
+    Dev->>Good: register in DI container
+    Note over Good: No existing code modified`,
+    },
+    {
+      title: "Open-Closed Principle Patterns",
+      kind: "mindmap",
+      caption: "Design patterns that enable extension without modification.",
+      mermaid: `mindmap
+    root["Open-Closed Principle"]
+      Design Patterns
+        Strategy runtime behavior swap
+        Template Method hook methods
+        Decorator wrap without changing
+        Observer add listeners
+      Extension Mechanisms
+        Interfaces and abstract classes
+        Plugin registries
+        Dependency injection
+        Event systems
+      Code Smells Suggesting Violation
+        Long if-else or switch on type
+        instanceof chains
+        Hardcoded enum checks`,
+    },
   ],
   animations: [
     {

@@ -237,14 +237,79 @@ json process_parallel_tool_calls(const json& response) {
   },
   diagrams: [
     {
-      title: "Tool Call Lifecycle",
-      kind: "sequence",
-      caption: "Sequence diagram showing the full lifecycle of a tool call: user request, model decision, tool execution, result incorporation, and final response.",
+      title: "Tool Use Agentic Loop",
+      kind: "flow",
+      caption: "How an LLM iterates through tool calls, receiving results, until it produces a final answer.",
+      mermaid: `flowchart TD
+    A["User Message"] --> B["LLM processes prompt
+and tool definitions"]
+    B --> C{LLM decides}
+    C -->|tool call needed| D["Generate tool call
+name and arguments"]
+    D --> E["Execute tool
+function or API"]
+    E --> F["Append tool result
+to context"]
+    F --> B
+    C -->|final answer ready| G["Generate text response"]
+    G --> H["Return to user"]`,
     },
     {
-      title: "Multi-Agent Tool Orchestration",
+      title: "Tool Definition Structure",
       kind: "architecture",
-      caption: "Architecture diagram showing a tool registry serving multiple agents, with routing, access control, and shared tool execution infrastructure.",
+      caption: "Anatomy of a tool definition passed to the LLM including name, description, and JSON schema parameters.",
+      mermaid: `graph TD
+    TD["Tool Definition"] --> N["name
+string identifier"]
+    TD --> D["description
+tells model when to use"]
+    TD --> P["parameters
+JSON Schema object"]
+    P --> PR["properties
+name + type + description"]
+    P --> RE["required
+array of required fields"]
+    N --> LLM["LLM uses to select
+correct tool"]
+    D --> LLM
+    P --> LLM`,
+    },
+    {
+      title: "Multi-Tool Orchestration",
+      kind: "sequence",
+      caption: "LLM orchestrating multiple tool calls in sequence to answer a complex question.",
+      mermaid: `sequenceDiagram
+    participant U as User
+    participant L as LLM
+    participant S as Search Tool
+    participant C as Calculator Tool
+    U->>L: What is the GDP growth rate difference?
+    L->>S: search(query="US GDP 2023")
+    S-->>L: result: 2.5%
+    L->>S: search(query="EU GDP 2023")
+    S-->>L: result: 0.5%
+    L->>C: subtract(2.5, 0.5)
+    C-->>L: result: 2.0
+    L-->>U: The difference is 2.0 percentage points`,
+    },
+    {
+      title: "Tool Use vs RAG",
+      kind: "mindmap",
+      caption: "Comparing tool use with retrieval-augmented generation for extending LLM capabilities.",
+      mermaid: `mindmap
+  root((LLM Extensions))
+    Tool Use
+      Real-time actions
+      APIs and functions
+      Calculator
+      Code execution
+      Write and modify state
+    RAG
+      Static knowledge
+      Vector search
+      Document retrieval
+      Read-only context
+      Grounding responses`,
     },
   ],
   animations: [

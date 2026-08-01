@@ -252,15 +252,68 @@ LoyaltyTier calculate_loyalty_tier(const Customer& customer) {
 
   diagrams: [
     {
-      title: "Comment Decision Flowchart",
+      title: "Comment Quality Decision Tree",
       kind: "flow",
-      caption: "Decision tree: Can you rename a variable/function to eliminate the comment? -> Yes: rename and delete comment. No -> Does the comment explain WHY (not WHAT)? -> Yes: keep the comment. No -> Does it warn about consequences or clarify non-obvious behavior? -> Yes: keep it. No -> Delete it, it is likely noise or will become misleading."
+      caption: "Decision flow for determining whether a comment is necessary or whether the code should be rewritten instead.",
+      mermaid: `flowchart TD
+    A["About to Write Comment"] --> B{"Is code self-explanatory?"}
+    B -->|Yes| C["Skip the comment"]
+    B -->|No| D{"Can code be renamed or refactored?"}
+    D -->|Yes| E["Refactor first"]
+    E --> B
+    D -->|No| F{"What does it explain?"}
+    F -->|Why not what| G["Write intent comment"]
+    F -->|Complex algorithm| H["Write explanation comment"]
+    F -->|Public API| I["Write doc comment"]
+    F -->|Workaround or hack| J["Write warning comment"]`,
     },
     {
-      title: "Good vs Bad Comments Taxonomy",
+      title: "Comment Types Mindmap",
       kind: "mindmap",
-      caption: "Mindmap showing two branches: Good Comments (legal, explanation of intent, clarification, warning, TODO with ticket, API documentation) and Bad Comments (redundant, misleading, mandated/boilerplate, journal, noise, position markers, commented-out code, attribution)."
-    }
+      caption: "Taxonomy of comment types by purpose, from API documentation to inline warnings.",
+      mermaid: `mindmap
+  root((Code Comments))
+    Documentation
+      Public API docs
+      Function contracts
+      Parameter descriptions
+      Return value and errors
+    Explanatory
+      Complex algorithm notes
+      Business rule context
+      Why not what
+    Warning
+      Known side effects
+      Deprecated usage
+      Performance traps
+      Thread safety notes
+    TODO and FIXME
+      Known issues
+      Future improvements
+    Bad Practices
+      Commented-out code
+      Redundant comments
+      Misleading comments`,
+    },
+    {
+      title: "Documentation Comment Workflow",
+      kind: "sequence",
+      caption: "How documentation comments flow from source code through tooling to generated API docs.",
+      mermaid: `sequenceDiagram
+    participant Dev as Developer
+    participant VCS as Version Control
+    participant CI as CI Pipeline
+    participant DocGen as Doc Generator
+    participant Portal as Docs Portal
+    Dev->>VCS: Commit with JSDoc or docstring
+    VCS->>CI: Trigger pipeline
+    CI->>DocGen: Extract and parse comments
+    DocGen-->>CI: Validate completeness
+    CI-->>Dev: Warn on missing docs
+    CI->>DocGen: Generate HTML or Markdown
+    DocGen->>Portal: Publish updated docs
+    Portal-->>Dev: Docs live at URL`,
+    },
   ],
 
   animations: [

@@ -555,139 +555,81 @@ function rankFeed(candidates, viewer, interactionHistory, limit = 20) {
     {
       title: "News Feed System Architecture",
       kind: "architecture",
-      caption: "High-level architecture showing the fan-out on write path, fan-out on read path, and feed ranking service.",
+      caption: "High-level architecture showing the write path through fan-out workers, the read path merging pre-computed and celebrity posts, and the ranking service.",
       mermaid: `graph TB
-    subgraph Client
-      A[Mobile / Web App]
+    subgraph Write ["Write Path"]
+        PS["Post Service"]
+        MQ["Message Queue"]
+        FW["Fan-Out Workers"]
+        REDIS["Redis Feed Cache"]
     end
-
-    subgraph API_Gateway["API Gateway & Load Balancer"]
-      B[API Gateway]
+    subgraph Read ["Read Path"]
+        FS["Feed Service"]
+        RANKER["ML Ranker"]
     end
-
-    subgraph Write_Path["Fan-Out on Write Path"]
-      C[Post Service]
-      D[Message Queue<br/>Kafka / RabbitMQ]
-      E[Fan-Out Workers]
+    subgraph Storage ["Storage"]
+        DB["Posts DB - MongoDB"]
+        SG["Social Graph DB"]
+        FS_STORE["Feature Store"]
     end
-
-    subgraph Read_Path["Fan-Out on Read Path"]
-      F[Feed Service]
-      G[Celebrity Post<br/>Fetcher]
-      H[Feed Ranker<br/>ML Scoring]
-    end
-
-    subgraph Storage
-      I[(Posts DB<br/>MongoDB)]
-      J[(Social Graph DB<br/>Follow Table)]
-      K[Redis Cluster<br/>Feed Cache]
-      L[Feature Store<br/>Feast / Redis]
-    end
-
-    subgraph Media
-      M[Object Storage<br/>S3]
-      N[CDN<br/>CloudFront]
-    end
-
-    A -->|POST /posts| B
-    A -->|GET /feed| B
-    B --> C
-    B --> F
-    C --> I
-    C --> D
-    D --> E
-    E -->|ZADD feed:userId| K
-    E -->|Read followers| J
-    F -->|ZREVRANGEBYSCORE| K
-    F --> G
-    G -->|Query celebrity posts| I
-    F --> H
-    H -->|Fetch features| L
-    H -->|Return ranked feed| A
-    C -->|Upload media| M
-    M --> N
-    N -->|Serve media| A`,
+    PS --> MQ
+    MQ --> FW
+    FW --> SG
+    FW --> REDIS
+    FS --> REDIS
+    FS --> DB
+    FS --> RANKER
+    RANKER --> FS_STORE`,
     },
     {
-      title: "Fan-Out on Write Flow",
+      title: "Fan-Out on Write Sequence",
       kind: "sequence",
-      caption: "Sequence diagram showing how a post is created and fanned out to followers' feed caches.",
+      caption: "When a user creates a post, fan-out workers asynchronously write the post ID to each follower's Redis sorted-set feed cache.",
       mermaid: `sequenceDiagram
-    participant U as User (Author)
+    participant U as Author
     participant API as API Gateway
     participant PS as Post Service
     participant MQ as Message Queue
     participant FW as Fan-Out Worker
-    participant DB as Posts DB
-    participant SG as Social Graph DB
+    participant SG as Social Graph
     participant RC as Redis Feed Cache
-
-    U->>API: POST /posts {content, media}
+    U->>API: POST /posts
     API->>PS: Create post
-    PS->>DB: INSERT post record
-    DB-->>PS: postId
-    PS->>MQ: Enqueue FanOutTask(postId, authorId)
-    PS-->>API: 201 Created {postId}
-    API-->>U: Post created
-
-    Note over MQ,FW: Async processing
-    MQ->>FW: Dequeue FanOutTask
-    FW->>SG: Get followers(authorId)
-    SG-->>FW: [follower1, follower2, ..., followerN]
-    loop For each follower batch
-        FW->>RC: ZADD feed:{followerId} timestamp postId
-    end
-    FW->>RC: ZREMRANGEBYRANK (trim to max size)`,
+    PS->>MQ: Enqueue FanOutTask
+    PS-->>U: 201 Created
+    MQ->>FW: Dequeue task
+    FW->>SG: Get followers
+    SG-->>FW: follower list
+    FW->>RC: ZADD feed per follower`,
     },
     {
-      title: "Hybrid Feed Read Flow",
+      title: "Fan-Out on Write vs Read",
       kind: "flow",
-      caption: "How the feed service merges precomputed feed with celebrity posts and applies ranking.",
+      caption: "Decision tree for choosing fan-out on write, fan-out on read, or a hybrid approach based on follower count and latency requirements.",
       mermaid: `flowchart TD
-    A[User requests feed<br/>GET /feed/:userId] --> B[Read precomputed feed<br/>from Redis sorted set]
-    B --> C{User follows<br/>any celebrities?}
-    C -->|Yes| D[Fetch celebrity IDs<br/>from social graph cache]
-    C -->|No| F[Candidate set =<br/>precomputed posts only]
-    D --> E[Query recent celebrity posts<br/>from Posts DB / cache]
-    E --> F2[Merge precomputed +<br/>celebrity posts]
-    F --> G[Feed Ranking Service]
-    F2 --> G
-    G --> H[Compute features from<br/>Feature Store]
-    H --> I[Score each candidate<br/>via ML model]
-    I --> J[Apply diversity constraints<br/>max 3 per author]
-    J --> K[Return top N posts<br/>with cursor token]
-    K --> L[Client renders feed]`,
+    A[User creates post] --> B{Has celebrity followers?}
+    B -->|Yes - millions of followers| C[Fan-Out on Read]
+    B -->|No - regular user| D[Fan-Out on Write]
+    D --> E[Write postId to each follower Redis feed]
+    C --> F[Store post in DB only]
+    E --> G[Feed read is fast single Redis query]
+    F --> H[Feed read fetches celebrity posts at query time]
+    G --> I[Hybrid: combine both at read time]
+    H --> I`,
     },
     {
-      title: "Feed Cache Data Model in Redis",
-      kind: "mindmap",
-      caption: "Overview of Redis data structures used for feed caching, post storage, and social graph.",
-      mermaid: `mindmap
-  root((Redis Data Model))
-    Feed Cache
-      Sorted Set per user
-        Key: feed:{userId}
-        Member: postId
-        Score: timestamp or rank
-      Operations
-        ZADD for insert
-        ZREVRANGEBYSCORE for read
-        ZREMRANGEBYRANK for trim
-    Post Cache
-      Hash or String per post
-        Key: post:{postId}
-        Value: serialized JSON
-        TTL: 24 hours
-    Social Graph Cache
-      Set per user
-        Key: following:{userId}
-        Members: followeeIds
-      Counter
-        Key: follower_count:{userId}
-        Value: integer count
-    Session / Rate Limit
-      Token bucket counters
-      API rate limit keys`,
+      title: "Feed Ranking Pipeline",
+      kind: "flow",
+      caption: "After retrieving candidate posts, the ranking service scores them using ML features and applies diversity constraints before returning the final feed.",
+      mermaid: `flowchart TD
+    A[Retrieve candidate posts from Redis] --> B[Fetch celebrity posts from DB]
+    B --> C[Merge candidates into pool]
+    C --> D[Load engagement features from Feature Store]
+    D --> E[Score each post via ML model]
+    E --> F[Apply diversity - max 3 per author]
+    F --> G[Sort by score descending]
+    G --> H[Paginate with cursor token]
+    H --> I[Return feed to client]`,
     },
   ],
   comparison: {

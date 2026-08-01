@@ -299,18 +299,60 @@ DELETE /_pit
     {
       title: "Bool Query Clause Types",
       kind: "architecture",
-      caption: "The bool query has four clause types: must (AND + scored), should (OR + scored, min_should_match), filter (AND + unscored + cached), must_not (NOT + unscored + cached). Scored clauses contribute to _score; unscored clauses use bitset caching for performance."
+      caption: "The four bool query clauses and how they differ in scoring and caching behavior.",
+      mermaid: `graph TD
+    BQ["bool query"]
+    BQ --> MUST["must\nAND semantics\nContributes to score"]
+    BQ --> SHOULD["should\nOR semantics\nContributes to score\nmin_should_match control"]
+    BQ --> FILTER["filter\nAND semantics\nNo score\nBitset cached"]
+    BQ --> MUSTNOT["must_not\nNOT semantics\nNo score\nBitset cached"]`,
     },
     {
       title: "Two-Phase Search Execution",
-      kind: "flow",
-      caption: "Query phase: coordinating node broadcasts to all shards -> each shard returns top-N doc IDs + scores -> coordinating node merges into global top-N. Fetch phase: coordinating node requests full documents from relevant shards -> returns final results."
+      kind: "sequence",
+      caption: "Query phase gathers top doc IDs from all shards; fetch phase retrieves only the selected full documents.",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant Coord as Coordinating Node
+    participant S1 as Shard 1
+    participant S2 as Shard 2
+
+    Client->>Coord: Search request
+    Note over Coord,S2: Query Phase
+    Coord->>S1: Get top-N doc IDs and scores
+    Coord->>S2: Get top-N doc IDs and scores
+    S1-->>Coord: doc IDs + scores
+    S2-->>Coord: doc IDs + scores
+    Coord->>Coord: Merge and rank global top N
+    Note over Coord,S2: Fetch Phase
+    Coord->>S1: Fetch full docs for selected IDs
+    S1-->>Coord: Full source documents
+    Coord-->>Client: Final ranked result set`,
     },
     {
       title: "Aggregation Nesting Structure",
       kind: "architecture",
-      caption: "Bucket aggregations (date_histogram, terms) create groups. Metric aggregations (sum, avg, cardinality) compute values within each bucket. Pipeline aggregations (cumulative_sum, derivative) operate on other aggregation outputs. Buckets can nest other buckets and metrics."
-    }
+      caption: "Bucket, metric, and pipeline aggregations compose into nested analytics hierarchies.",
+      mermaid: `graph TD
+    ROOT["Query Result Set"]
+    ROOT --> BUCK["Bucket Aggregation\ndate_histogram or terms\nGroups documents into buckets"]
+    BUCK --> B1["Bucket: Jan 2024"]
+    BUCK --> B2["Bucket: Feb 2024"]
+    B1 --> MET["Metric Aggregation\nsum / avg / cardinality\nComputes value per bucket"]
+    B2 --> MET
+    MET --> PIPE["Pipeline Aggregation\ncumulative_sum or derivative\nOperates on aggregation outputs"]`,
+    },
+    {
+      title: "Query vs Filter Context Decision",
+      kind: "flow",
+      caption: "When to use query context for relevance scoring versus filter context for cached boolean matching.",
+      mermaid: `flowchart TD
+    A["Need to match documents"] --> B{Relevance score needed?}
+    B -->|Yes| C["Query Context\nmust or should\nCalculates _score"]
+    B -->|No| D["Filter Context\nfilter or must_not\nNo _score, bitset cached"]
+    C --> E["Full-text search\nmatch, multi_match\nquery_string"]
+    D --> F["Exact filters\nterm, range, exists\nFaster for repeated queries"]`,
+    },
   ],
 
   animations: [

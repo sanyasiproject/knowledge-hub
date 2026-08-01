@@ -279,15 +279,106 @@ aws ec2 describe-snapshots \\
 
   diagrams: [
     {
+      title: "AWS Storage Services Overview",
+      kind: "architecture",
+      caption: "AWS storage services grouped by type: block, file, and object storage, with their primary use cases.",
+      mermaid: `graph TB
+    subgraph Block["Block Storage"]
+      EBS["EBS Elastic Block Store\nEC2-attached volumes"]
+      IS["EC2 Instance Store\nEphemeral NVMe"]
+    end
+    subgraph File["File Storage"]
+      EFS["EFS Elastic File System\nNFS shared storage"]
+      FSX["FSx\nWindows, Lustre, NetApp, OpenZFS"]
+    end
+    subgraph Object["Object Storage"]
+      S3["S3 Standard\nGeneral purpose"]
+      S3IA["S3 Infrequent Access\nLower cost less frequent"]
+      GLACIER["S3 Glacier\nArchival storage"]
+    end
+    EC2["EC2 Instance"] --> EBS
+    EC2 --> IS
+    EC2 --> EFS
+    EC2 --> S3
+    EBS -->|Snapshots| S3
+    Lambda["Lambda"] --> S3
+    EFS --> FSX`,
+    },
+    {
       title: "S3 Storage Class Lifecycle Transitions",
-      kind: "flow" as const,
-      caption: "Flow diagram showing allowed lifecycle transitions between S3 storage classes and their minimum duration requirements"
+      kind: "flow",
+      caption: "Allowed lifecycle transitions between S3 storage classes and their minimum duration requirements before transition.",
+      mermaid: `flowchart TD
+    STD["S3 Standard\nNo minimum"]
+    IA["S3 Standard-IA\nMin 30 days"]
+    ZIA["S3 One Zone-IA\nMin 30 days"]
+    IT["S3 Intelligent-Tiering\nNo minimum"]
+    GF["S3 Glacier Flexible\nMin 90 days"]
+    GIR["S3 Glacier Instant\nMin 90 days"]
+    GDA["S3 Glacier Deep Archive\nMin 180 days"]
+    STD -->|After 30+ days| IA
+    STD -->|After 30+ days| ZIA
+    STD --> IT
+    STD -->|After 90+ days| GIR
+    IA -->|After 90+ days| GF
+    IA -->|After 90+ days| GIR
+    GF -->|After 180+ days| GDA
+    IT -->|Auto tiering| GF`,
     },
     {
       title: "EBS Architecture with EC2",
-      kind: "architecture" as const,
-      caption: "Architecture diagram showing EBS volumes attached to EC2 instances across AZs, with snapshot replication to S3"
-    }
+      kind: "architecture",
+      caption: "EBS volumes attached to EC2 instances within an AZ, with cross-region snapshot replication to S3.",
+      mermaid: `graph TB
+    subgraph AZ1["Availability Zone A"]
+      EC2A["EC2 Instance"]
+      GP3["EBS gp3\nOS volume 100 GiB"]
+      IO2["EBS io2\nData volume 1 TiB"]
+      EC2A --> GP3
+      EC2A --> IO2
+    end
+    subgraph AZ2["Availability Zone B"]
+      EC2B["EC2 Instance standby"]
+      GP3B["EBS gp3\nOS volume 100 GiB"]
+    end
+    subgraph S3["S3 - Regional"]
+      SNAP["EBS Snapshots\nIncremental backups"]
+    end
+    GP3 -->|Snapshot| SNAP
+    IO2 -->|Snapshot| SNAP
+    SNAP -->|Restore in AZ B| GP3B
+    SNAP -->|Copy to other region| REMOTE["Remote Region Snapshot"]`,
+    },
+    {
+      title: "S3 Core Features",
+      kind: "mindmap",
+      caption: "Mind map of S3 capabilities covering storage classes, security, performance, and data management features.",
+      mermaid: `mindmap
+  root((Amazon S3))
+    Storage Classes
+      Standard high durability
+      Intelligent-Tiering auto
+      Standard-IA infrequent
+      Glacier instant retrieval
+      Glacier Deep Archive
+    Security
+      Bucket policies
+      ACLs legacy
+      S3 Block Public Access
+      SSE-S3 AWS managed keys
+      SSE-KMS customer keys
+    Performance
+      Multipart upload
+      Transfer Acceleration
+      S3 Select query in place
+      Byte-range fetches
+    Data Management
+      Versioning
+      Lifecycle policies
+      Replication CRR and SRR
+      Object Lock WORM
+      Event notifications`,
+    },
   ],
 
   animations: [

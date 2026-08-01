@@ -245,24 +245,75 @@ private:
   ],
   diagrams: [
     {
-      title: "CAP theorem Venn diagram",
+      title: "CAP Theorem System Placement",
       kind: "mindmap",
-      caption: "Three properties (C, A, P) with databases positioned: CP (HBase, ZooKeeper, etcd), AP (Cassandra at CL=ONE, CouchDB, DynamoDB default), CA (single-node RDBMS — not distributed).",
+      caption: "Real systems placed in CP, AP, or CA positions based on how they behave during a network partition.",
+      mermaid: `mindmap
+  root((CAP Theorem))
+    CP - Consistency and Partition Tolerance
+      HBase
+      ZooKeeper
+      etcd
+      Google Spanner
+    AP - Availability and Partition Tolerance
+      Cassandra at CL ONE
+      CouchDB
+      DynamoDB default
+      Riak
+    CA - Consistency and Availability
+      Single-node PostgreSQL
+      Single-node MySQL
+      Not distributed so P irrelevant`,
     },
     {
-      title: "Network partition scenario",
+      title: "Network Partition Cluster Topology",
       kind: "network",
-      caption: "Two groups of nodes unable to communicate. CP system refuses writes on the minority side. AP system accepts writes on both sides, creating divergent state.",
+      caption: "A five-node cluster split by a network failure. CP: minority side refuses writes. AP: both sides accept writes independently.",
+      mermaid: `graph LR
+    N1["Node 1 - majority side"]
+    N2["Node 2 - majority side"]
+    N3["Node 3 - majority side"]
+    N4["Node 4 - minority side"]
+    N5["Node 5 - minority side"]
+    N1 --- N2
+    N2 --- N3
+    N4 --- N5
+    N3 -. "partition - no comms" .- N4`,
     },
     {
-      title: "Eventual consistency convergence timeline",
+      title: "Eventual Consistency Convergence Sequence",
       kind: "sequence",
-      caption: "Write hits node A, propagates to B after delay, propagates to C after further delay. All replicas converge after replication completes.",
+      caption: "Write hits Node A; propagates to B after a delay, then to C. All replicas converge on the same value once replication completes.",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant NodeA
+    participant NodeB
+    participant NodeC
+    Client->>NodeA: write x=5
+    NodeA-->>Client: OK - x=5
+    Note over NodeB,NodeC: x still=4 briefly - stale reads possible
+    NodeA->>NodeB: replicate x=5
+    NodeB-->>NodeA: ack
+    NodeA->>NodeC: replicate x=5
+    NodeC-->>NodeA: ack
+    Note over NodeA,NodeC: all replicas converged - x=5`,
     },
     {
-      title: "PACELC decision tree",
+      title: "PACELC Decision Flow",
       kind: "flow",
-      caption: "If partition: choose A or C. Else: choose L or C. Maps systems: Cassandra=PA/EL, HBase=PC/EC, MongoDB=PA/EC (depends on config).",
+      caption: "PACELC extends CAP: during a partition choose A or C; else choose Latency or Consistency.",
+      mermaid: `flowchart TD
+    A([Distributed system request]) --> B{Network partition?}
+    B -->|Yes| C{CP or AP?}
+    C -->|CP| D[Refuse minority-side requests]
+    C -->|AP| E[Serve with possible divergence]
+    B -->|No| F{Prioritize latency or consistency?}
+    F -->|Latency| G[Read from local replica - EL]
+    F -->|Consistency| H[Read with quorum - EC]
+    D --> I([Cassandra=PA/EL  HBase=PC/EC])
+    E --> I
+    G --> I
+    H --> I`,
     },
   ],
   animations: [

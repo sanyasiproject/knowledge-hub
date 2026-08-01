@@ -133,16 +133,78 @@ void diagonal(const Program& program) {
   ],
   diagrams: [
     {
-      title: "Turing Machine Architecture",
+      title: "Turing Machine Components",
       kind: "architecture",
-      caption:
-        "Infinite tape with read/write head, finite-state control, and transition function — the core components of a Turing machine.",
+      caption: "Structural components of a Turing machine: infinite tape, read-write head, state register, and transition table.",
+      mermaid: `graph TD
+    TM["Turing Machine"] --> Tape["Infinite Tape
+symbols in cells"]
+    TM --> Head["Read-Write Head
+current cell position"]
+    TM --> State["State Register
+current state q"]
+    TM --> Table["Transition Table
+delta: Q x Gamma -> Q x Gamma x Dir"]
+    Head -->|reads| Tape
+    Head -->|writes| Tape
+    State --> Table
+    Table -->|next state + symbol + move| Head`,
     },
     {
-      title: "Decidability Hierarchy",
+      title: "Turing Machine Execution Cycle",
+      kind: "flow",
+      caption: "Single step execution cycle of a Turing machine reading a symbol and applying the transition function.",
+      mermaid: `flowchart TD
+    A([Current state q and symbol s]) --> B["Look up delta(q, s)"]
+    B --> C{Transition exists?}
+    C -->|No| D["Halt - reject or undefined"]
+    C -->|Yes| E["Write new symbol s-prime"]
+    E --> F["Move head Left or Right"]
+    F --> G["Update state to q-prime"]
+    G --> H{Accept state?}
+    H -->|Yes| Accept(["ACCEPT"])
+    H -->|No| A`,
+    },
+    {
+      title: "Computability Hierarchy",
       kind: "mindmap",
-      caption:
-        "Relationships between decidable, recognisable (r.e.), co-recognisable, and unrecognisable languages, with example problems at each level.",
+      caption: "Chomsky hierarchy of language classes and corresponding machine models from finite automata to Turing machines.",
+      mermaid: `mindmap
+  root((Computability))
+    Regular Languages
+      Finite Automata
+      Regular expressions
+      Pumping lemma
+    Context-Free Languages
+      Pushdown Automata
+      BNF grammars
+      Parsing
+    Decidable Languages
+      Turing Machines
+      Always halt
+      Membership decidable
+    Recognizable Languages
+      TM may not halt
+      Semi-decidable
+    Undecidable
+      Halting problem
+      No TM can decide`,
+    },
+    {
+      title: "Church-Turing Thesis",
+      kind: "sequence",
+      caption: "Conceptual equivalence between lambda calculus, Turing machines, and modern computers.",
+      mermaid: `sequenceDiagram
+    participant LC as Lambda Calculus
+    participant TM as Turing Machine
+    participant RAM as RAM Model
+    participant PC as Modern Computer
+    Note over LC,PC: All compute the same class of functions
+    LC->>TM: can simulate lambda calculus
+    TM->>LC: can simulate Turing machine
+    TM->>RAM: can simulate RAM model
+    RAM->>PC: modern CPUs implement RAM model
+    Note over LC,PC: Church-Turing Thesis: this is the limit of computation`,
     },
   ],
   animations: [

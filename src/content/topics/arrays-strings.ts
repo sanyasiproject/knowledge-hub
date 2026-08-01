@@ -104,14 +104,71 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Dynamic array resizing",
-      kind: "flow",
-      caption: "Shows a dynamic array at capacity, triggering a doubling resize: allocate new array of 2× size, copy elements, free old array. Amortized O(1) append.",
+      title: "Array Memory Layout",
+      kind: "architecture",
+      caption: "Arrays store elements in contiguous memory. Index arithmetic gives O(1) random access. Dynamic arrays double capacity on overflow.",
+      mermaid: `flowchart LR
+    subgraph Memory["Contiguous Memory Block"]
+        I0["[0]\\n10"]
+        I1["[1]\\n20"]
+        I2["[2]\\n30"]
+        I3["[3]\\n40"]
+        I4["[4]\\n50"]
+        I0 --- I1 --- I2 --- I3 --- I4
+    end
+    Ptr["Base Pointer"] --> I0
+    Idx["Index i\\naddr = base + i * size"] --> I2`,
     },
     {
-      title: "Sliding window on a string",
+      title: "Sliding Window State Machine",
       kind: "state",
-      caption: "Visualizes left and right pointers advancing through a string, with the current window highlighted. Shows how the window grows and shrinks to satisfy a constraint.",
+      caption: "The sliding window technique maintains a window over a string or array, expanding and contracting to satisfy a constraint.",
+      mermaid: `stateDiagram-v2
+    [*] --> Init: Set left = 0, right = 0
+    Init --> Expand: Move right pointer
+    Expand --> Valid: Window satisfies\\nconstraint
+    Valid --> RecordResult: Update best result
+    RecordResult --> Expand: Move right
+    Expand --> Invalid: Window violates\\nconstraint
+    Invalid --> Shrink: Move left pointer
+    Shrink --> Valid: Constraint restored
+    Shrink --> Invalid: Still violating
+    Expand --> [*]: right reaches end`,
+    },
+    {
+      title: "Common String Operations Flow",
+      kind: "flow",
+      caption: "Decision tree for choosing the right string algorithm technique based on the problem structure.",
+      mermaid: `flowchart TD
+    Problem["String Problem"] --> Q1{"Subarray or\\nsubstring?"}
+    Q1 -->|Fixed length| Slide["Sliding Window\\nfixed size"]
+    Q1 -->|Variable length| Q2{"Constraint\\ntype?"}
+    Q2 -->|At most k| VarSlide["Sliding Window\\nvariable size"]
+    Q2 -->|Exact match| TP["Two Pointers\\nor KMP"]
+    Problem --> Q3{"Sorted input?"}
+    Q3 -->|Yes| TP2["Two Pointers\\npair sum"]
+    Q3 -->|No| Hash["HashMap\\nfrequency count"]`,
+    },
+    {
+      title: "Array and String Algorithm Techniques",
+      kind: "mindmap",
+      caption: "Core algorithmic techniques used for array and string problems.",
+      mermaid: `mindmap
+  root((Arrays and Strings))
+    Two Pointers
+      Pair sum in sorted array
+      Remove duplicates
+      Palindrome check
+    Sliding Window
+      Longest substring without repeat
+      Max sum subarray of size k
+    Prefix Sum
+      Range sum queries
+      Subarray sum equals k
+    Hashing
+      Anagram detection
+      Two sum
+      Frequency count`,
     },
   ],
   animations: [

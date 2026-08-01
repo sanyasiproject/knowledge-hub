@@ -499,63 +499,79 @@ int main() {
 
   diagrams: [
     {
-      title: "Order Saga Orchestration Flow",
+      title: "Choreography-Based Saga",
       kind: "sequence",
-      caption: "Sequence diagram showing the orchestrator coordinating payment, inventory, and order confirmation steps with compensating transactions on failure",
+      caption: "In choreography sagas, each service publishes events and listens for others. No central coordinator. Services react to events and trigger the next step.",
       mermaid: `sequenceDiagram
-    participant Client
-    participant Orchestrator
-    participant PaymentService
-    participant InventoryService
-    participant OrderService
+    participant Order as Order Service
+    participant Payment as Payment Service
+    participant Inventory as Inventory Service
+    participant Shipping as Shipping Service
 
-    Client->>Orchestrator: POST /api/orders
-    Orchestrator->>Orchestrator: Create saga (status: STARTED)
-
-    Orchestrator->>PaymentService: ChargePayment command
-    PaymentService-->>Orchestrator: PaymentSucceeded
-
-    Orchestrator->>InventoryService: ReserveStock command
-    alt Inventory succeeds
-        InventoryService-->>Orchestrator: StockReserved
-        Orchestrator->>OrderService: ConfirmOrder command
-        OrderService-->>Orchestrator: OrderConfirmed
-        Orchestrator->>Client: 200 Order Confirmed
-    else Inventory fails
-        InventoryService-->>Orchestrator: StockReservationFailed
-        Orchestrator->>Orchestrator: Begin compensation
-        Orchestrator->>PaymentService: RefundPayment (compensate)
-        PaymentService-->>Orchestrator: RefundCompleted
-        Orchestrator->>Client: 409 Order Failed (compensated)
-    end`,
+    Order->>Order: Create order
+    Order-)Payment: OrderCreated event
+    Payment->>Payment: Process payment
+    Payment-)Inventory: PaymentProcessed event
+    Inventory->>Inventory: Reserve stock
+    Inventory-)Shipping: StockReserved event
+    Shipping->>Shipping: Schedule shipment
+    Shipping-)Order: ShipmentScheduled event
+    Order->>Order: Mark order confirmed`,
     },
     {
-      title: "Saga State Machine — Compensation Flow",
-      kind: "state",
-      caption: "State diagram showing all saga states and transitions, including the compensation path triggered on any step failure",
-      mermaid: `stateDiagram-v2
-    [*] --> STARTED
-    STARTED --> PAYMENT_PENDING : begin saga
+      title: "Orchestration-Based Saga",
+      kind: "sequence",
+      caption: "In orchestration sagas, a central saga orchestrator directs each step. It knows the full workflow and coordinates compensation on failure.",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant Orch as Saga Orchestrator
+    participant Payment as Payment Service
+    participant Inventory as Inventory Service
+    participant Shipping as Shipping Service
 
-    PAYMENT_PENDING --> PAYMENT_SUCCEEDED : payment OK
-    PAYMENT_PENDING --> COMPENSATING : payment failed
-
-    PAYMENT_SUCCEEDED --> INVENTORY_PENDING : advance
-    INVENTORY_PENDING --> INVENTORY_RESERVED : stock reserved
-    INVENTORY_PENDING --> COMPENSATING : reservation failed
-
-    INVENTORY_RESERVED --> COMPLETED : confirm order
-
-    COMPENSATING --> FAILED : all compensations done
-
-    COMPLETED --> [*]
-    FAILED --> [*]
-
-    note right of COMPENSATING
-        Runs compensating transactions
-        in reverse completion order.
-        Retries on transient failures.
-    end note`,
+    Client->>Orch: Create order
+    Orch->>Payment: Process payment
+    Payment-->>Orch: Payment confirmed
+    Orch->>Inventory: Reserve stock
+    Inventory-->>Orch: Stock reserved
+    Orch->>Shipping: Create shipment
+    Shipping-->>Orch: Shipment created
+    Orch-->>Client: Order confirmed`,
+    },
+    {
+      title: "Saga Compensation on Failure",
+      kind: "flow",
+      caption: "When a saga step fails, compensating transactions undo the effects of all prior completed steps, restoring the system to a consistent state.",
+      mermaid: `flowchart TD
+    A[Step 1 - Create Order - Success] --> B[Step 2 - Charge Payment - Success]
+    B --> C[Step 3 - Reserve Inventory - Success]
+    C --> D[Step 4 - Book Shipping - FAILED]
+    D --> E[Compensate Step 3 - Release Inventory]
+    E --> F[Compensate Step 2 - Refund Payment]
+    F --> G[Compensate Step 1 - Cancel Order]
+    G --> H([Saga rolled back - system consistent])`,
+    },
+    {
+      title: "Saga vs Two-Phase Commit",
+      kind: "architecture",
+      caption: "Comparing saga pattern with 2PC for distributed transactions. Sagas use eventual consistency with compensation while 2PC uses distributed locking.",
+      mermaid: `graph TD
+    subgraph TwoPC["Two-Phase Commit - 2PC"]
+      C1[Coordinator sends Prepare]
+      C2[All services lock resources]
+      C3[Coordinator sends Commit or Abort]
+      C4[All services release locks]
+      C1 --> C2 --> C3 --> C4
+    end
+    subgraph SagaP["Saga Pattern"]
+      S1[Local transaction per service]
+      S2[Publish domain events]
+      S3[Next service reacts]
+      S4[Compensate on failure]
+      S1 --> S2 --> S3 --> S4
+    end
+    TwoPC -->|Tight coupling - blocking| Tradeoff[Trade-offs]
+    SagaP -->|Loose coupling - eventual| Tradeoff`,
     },
   ],
 

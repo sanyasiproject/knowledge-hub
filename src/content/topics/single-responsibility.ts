@@ -239,15 +239,91 @@ class OrderService {
   ],
   diagrams: [
     {
-      title: "SRP Refactoring: Before and After",
+      title: "Single Responsibility Principle",
       kind: "architecture",
-      caption: "Shows a monolithic Employee class being decomposed into Employee (domain), PayCalculator (logic), HoursReportGenerator (formatting), and EmployeeRepository (persistence)."
+      caption: "Each class has one reason to change. Splitting a God class into focused classes with single responsibilities improves cohesion and maintainability.",
+      mermaid: `graph TD
+    subgraph Before["Before SRP - God Class"]
+      G[UserManager]
+      G --> G1[Validate user data]
+      G --> G2[Save to database]
+      G --> G3[Send welcome email]
+      G --> G4[Generate PDF report]
+      G --> G5[Calculate analytics]
+    end
+    subgraph After["After SRP - Focused Classes"]
+      U[UserValidator] --> V1[Validate user data]
+      R[UserRepository] --> V2[Save to database]
+      E[EmailService] --> V3[Send welcome email]
+      P[ReportGenerator] --> V4[Generate PDF]
+      A[AnalyticsService] --> V5[Calculate analytics]
+    end`,
     },
     {
-      title: "Responsibility Identification Flow",
+      title: "Reasons to Change Analysis",
       kind: "flow",
-      caption: "Decision flow: identify actors/stakeholders, map each to the code they would request changes to, group co-changing code, separate independently-changing code."
-    }
+      caption: "Identifying violations of SRP by asking how many different stakeholders or business reasons could cause a class to change.",
+      mermaid: `flowchart TD
+    A([Analyze a class]) --> B[List all methods and behaviors]
+    B --> C[For each behavior: who would request a change?]
+    C --> D{More than one actor?}
+    D -->|No - one stakeholder| E[SRP satisfied]
+    D -->|Yes - multiple stakeholders| F[Identify separate concerns]
+    F --> G[Extract each concern to its own class]
+    G --> H[Verify each class has one actor]
+    H --> I([SRP achieved])`,
+    },
+    {
+      title: "Cohesion and Coupling Impact",
+      kind: "mindmap",
+      caption: "How applying SRP increases cohesion within classes and reduces coupling between classes, leading to more maintainable and testable code.",
+      mermaid: `mindmap
+  root((SRP Benefits))
+    High Cohesion
+      Methods relate to one purpose
+      Data and behavior aligned
+      Easier to understand
+    Low Coupling
+      Fewer dependencies
+      Changes are isolated
+      Easier to test
+    Maintainability
+      One place to change
+      Clear ownership
+      Smaller classes
+    Testability
+      Focused unit tests
+      Mock fewer dependencies
+      Faster test suites`,
+    },
+    {
+      title: "SRP in Layers",
+      kind: "network",
+      caption: "SRP applied at different levels: method level, class level, module level, and service level in a microservice architecture.",
+      mermaid: `graph LR
+    subgraph Method["Method Level"]
+      M1[parseDate method]
+      M2[formatDate method]
+      M3[validateDate method]
+    end
+    subgraph ClassLevel["Class Level"]
+      C1[DateParser class]
+      C2[DateFormatter class]
+    end
+    subgraph Module["Module Level"]
+      Mod1[date-utils module]
+      Mod2[user-auth module]
+    end
+    subgraph Service["Service Level"]
+      Svc1[Auth Service]
+      Svc2[Notification Service]
+    end
+    M1 --> C1
+    M2 --> C2
+    C1 --> Mod1
+    C2 --> Mod1
+    Mod1 --> Svc1`,
+    },
   ],
   animations: [
     {

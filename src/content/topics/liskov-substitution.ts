@@ -207,13 +207,76 @@ function migrateFlyingAnimals(flyers: Flyable[]): void {
     {
       title: "LSP Contract Rules",
       kind: "architecture",
-      caption: "Shows the three contract rules: preconditions can only be weakened (same or more permissive), postconditions can only be strengthened (same or more restrictive), and invariants must be preserved."
+      caption: "Preconditions can only be weakened, postconditions only strengthened, and invariants must be preserved.",
+      mermaid: `graph TD
+    Base["Base Class Contract"] --> Pre["Preconditions\nmust be same or weaker in subtype"]
+    Base --> Post["Postconditions\nmust be same or stronger in subtype"]
+    Base --> Inv["Invariants\nmust be preserved in subtype"]
+    Pre --> OK1["Subtype accepts more inputs - OK"]
+    Pre --> BAD1["Subtype rejects valid base inputs - VIOLATION"]
+    Post --> OK2["Subtype guarantees stronger output - OK"]
+    Post --> BAD2["Subtype returns weaker guarantee - VIOLATION"]
+    style BAD1 fill:#ffcccc
+    style BAD2 fill:#ffcccc`,
     },
     {
-      title: "Covariance and Contravariance in LSP",
+      title: "LSP Substitutability Check",
       kind: "flow",
-      caption: "Return types are covariant (subtype can return more specific type). Parameter types are contravariant (subtype should accept more general types). This preserves substitutability."
-    }
+      caption: "Decision flow to determine if a subtype correctly substitutes for its base type.",
+      mermaid: `flowchart TD
+    A["Replace base with subtype"] --> B{"All base preconditions still valid?"}
+    B -->|No| FAIL["LSP Violation - subtype too restrictive"]
+    B -->|Yes| C{"All postconditions still met?"}
+    C -->|No| FAIL
+    C -->|Yes| D{"All invariants preserved?"}
+    D -->|No| FAIL
+    D -->|Yes| E{"Client behavior unchanged?"}
+    E -->|No| FAIL
+    E -->|Yes| PASS["LSP Satisfied - safe substitution"]
+    style FAIL fill:#ffcccc
+    style PASS fill:#d4edda`,
+    },
+    {
+      title: "Rectangle Square Violation",
+      kind: "sequence",
+      caption: "Classic LSP failure: Square extends Rectangle but breaks width/height independence invariant.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant R as Rectangle
+    participant S as Square
+
+    Note over C,R: Using Rectangle - works
+    C->>R: setWidth 5
+    C->>R: setHeight 10
+    C->>R: getArea()
+    R-->>C: 50 - correct
+
+    Note over C,S: Using Square instead - FAILS
+    C->>S: setWidth 5
+    S->>S: also sets height to 5
+    C->>S: setHeight 10
+    S->>S: also sets width to 10
+    C->>S: getArea()
+    S-->>C: 100 - expected 50 - LSP violated`,
+    },
+    {
+      title: "Covariance and Contravariance",
+      kind: "mindmap",
+      caption: "How return type covariance and parameter type contravariance enable safe substitution.",
+      mermaid: `mindmap
+    root["LSP Type Variance"]
+      Return Types - Covariant
+        Subtype may return more specific type
+        Animal returns Dog instead of Animal - OK
+        Enables specialization
+      Parameter Types - Contravariant
+        Subtype should accept broader types
+        Animal accepts Object instead of Animal - OK
+        Enables generalization
+      Invariant Types
+        Must be identical
+        Strict substitution required`,
+    },
   ],
   animations: [
     {

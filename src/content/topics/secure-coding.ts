@@ -409,54 +409,76 @@ void processData() {
   ],
   diagrams: [
     {
-      title: "Defense in Depth — Layered Security Architecture",
-      kind: "architecture",
-      caption: "Multiple security layers protect the application so that no single point of failure leads to compromise.",
-      mermaid: `graph TB
-    subgraph Network["Network Layer"]
-        FW[Firewall / WAF]
-        TLS[TLS Termination]
-        DDOS[DDoS Protection]
-    end
-    subgraph Application["Application Layer"]
-        AUTH[Authentication]
-        AUTHZ[Authorization]
-        IV[Input Validation]
-        OE[Output Encoding]
-    end
-    subgraph Data["Data Layer"]
-        PQ[Parameterized Queries]
-        ENC[Encryption at Rest]
-        AC[DB Access Controls]
-    end
-    subgraph Monitoring["Monitoring Layer"]
-        LOG[Audit Logging]
-        IDS[Intrusion Detection]
-        ALERT[Alerting]
-    end
-    FW --> TLS --> DDOS
-    DDOS --> AUTH --> AUTHZ --> IV --> OE
-    OE --> PQ --> ENC --> AC
-    AC --> LOG --> IDS --> ALERT`,
+      title: "OWASP Top 10 Attack Vectors",
+      kind: "mindmap",
+      caption: "Overview of the OWASP Top 10 most critical web application security risks and their attack categories.",
+      mermaid: `mindmap
+  root((OWASP Top 10))
+    Injection
+      SQL Injection
+      Command Injection
+      LDAP Injection
+    Broken Authentication
+      Weak passwords
+      Session fixation
+      Missing MFA
+    Broken Access Control
+      IDOR
+      Privilege escalation
+      Missing authorization
+    Cryptographic Failures
+      Weak algorithms
+      Hardcoded secrets
+      Missing encryption
+    Security Misconfiguration
+      Default credentials
+      Verbose errors
+      Open cloud storage
+    Vulnerable Components
+      Outdated libraries
+      Known CVEs`,
     },
     {
-      title: "Secure Request Processing Flow",
+      title: "SQL Injection Attack and Defense",
       kind: "flow",
-      caption: "How an incoming request passes through security controls before reaching business logic.",
+      caption: "How SQL injection attacks work and the defense strategy using parameterized queries to prevent attacker-controlled SQL execution.",
+      mermaid: `flowchart TD
+    A([User input: username]) --> B{Using string concatenation?}
+    B -->|Yes - vulnerable| C["Query: SELECT * FROM users WHERE name= ' + input + '"]
+    C --> D["Attacker input: ' OR 1=1 --"]
+    D --> E[All rows returned - data breach]
+    B -->|No - parameterized| F["Query: SELECT * FROM users WHERE name = ?"]
+    F --> G[Input bound as data - not code]
+    G --> H[No injection possible]
+    H --> I([Safe query executed])`,
+    },
+    {
+      title: "Defense in Depth Layers",
+      kind: "architecture",
+      caption: "Security defense in depth uses multiple layers so that bypassing one layer does not compromise the system. Each layer independently reduces risk.",
+      mermaid: `graph TD
+    Internet[Internet] --> WAF[Web Application Firewall]
+    WAF --> LB[Load Balancer - TLS termination]
+    LB --> Auth[Authentication Layer - OAuth and JWT]
+    Auth --> AuthZ[Authorization - RBAC]
+    AuthZ --> Validation[Input Validation and Sanitization]
+    Validation --> App[Application Logic]
+    App --> ORM[ORM - Parameterized Queries]
+    ORM --> DB[(Encrypted Database)]
+    DB --> Audit[Audit Logging]`,
+    },
+    {
+      title: "Secure Development Lifecycle",
+      kind: "flow",
+      caption: "Security integrated throughout the software development lifecycle: threat modeling in design, SAST in development, DAST in testing, and monitoring in production.",
       mermaid: `flowchart LR
-    A[Client Request] --> B{Rate Limit OK?}
-    B -- No --> C[429 Too Many Requests]
-    B -- Yes --> D{TLS Valid?}
-    D -- No --> E[Connection Rejected]
-    D -- Yes --> F{Authenticated?}
-    F -- No --> G[401 Unauthorized]
-    F -- Yes --> H{Authorized?}
-    H -- No --> I[403 Forbidden]
-    H -- Yes --> J{Input Valid?}
-    J -- No --> K[400 Bad Request]
-    J -- Yes --> L[Business Logic]
-    L --> M[Output Encoding]
-    M --> N[Secure Response + Headers]`,
+    Plan[Plan] -->|Threat modeling| Design[Design]
+    Design -->|Security architecture review| Develop[Develop]
+    Develop -->|SAST - lint rules - code review| Test[Test]
+    Test -->|DAST - pen testing - dependency scan| Release[Release]
+    Release -->|Signed artifacts - SBOM| Deploy[Deploy]
+    Deploy -->|Runtime monitoring - WAF| Monitor[Monitor]
+    Monitor -->|Incident response| Plan`,
     },
   ],
   comparison: {

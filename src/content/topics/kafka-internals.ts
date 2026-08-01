@@ -230,22 +230,71 @@ producer.close();`,
     {
       title: "Kafka Partition Replication",
       kind: "architecture",
-      caption: "Leader handles reads/writes; followers fetch from leader. ISR tracks caught-up replicas. High-water mark limits consumer visibility.",
+      caption: "Leader handles reads/writes; followers fetch from leader. ISR tracks caught-up replicas.",
+      mermaid: `graph LR
+    Producer["Producer"] -->|write| Leader["Partition Leader\nBroker 1"]
+    Leader -->|replicate| F1["Follower\nBroker 2"]
+    Leader -->|replicate| F2["Follower\nBroker 3"]
+    F1 -->|ack in ISR| Leader
+    F2 -->|ack in ISR| Leader
+    Consumer["Consumer Group"] -->|read up to HWM| Leader
+    subgraph ISR["In-Sync Replicas"]
+      Leader
+      F1
+      F2
+    end`,
     },
     {
-      title: "Log Segment Structure",
-      kind: "architecture",
-      caption: "Partition directory contains .log, .index, and .timeindex files per segment. Active segment receives writes.",
+      title: "Kafka Producer Message Flow",
+      kind: "sequence",
+      caption: "Shows how a producer sends a record through batching, partitioning, and broker acknowledgement.",
+      mermaid: `sequenceDiagram
+    participant App as Application
+    participant P as Producer
+    participant B as Broker Leader
+    participant R as Replica
+
+    App->>P: send record key value
+    P->>P: serialize and partition
+    P->>P: accumulate in RecordBatch
+    P->>B: ProduceRequest batch
+    B->>B: write to log segment
+    B->>R: replicate to followers
+    R-->>B: follower ack
+    B-->>P: ProduceResponse offset
+    P-->>App: RecordMetadata`,
     },
     {
-      title: "KRaft Architecture",
-      kind: "architecture",
-      caption: "Controller quorum uses Raft consensus. Metadata stored in __cluster_metadata topic. No external ZooKeeper dependency.",
+      title: "KRaft Controller Architecture",
+      kind: "network",
+      caption: "Controller quorum uses Raft consensus. No external ZooKeeper dependency.",
+      mermaid: `graph TD
+    subgraph Controllers["Controller Quorum - KRaft"]
+      C1["Controller 1\nRaft Leader"]
+      C2["Controller 2\nFollower"]
+      C3["Controller 3\nFollower"]
+      C1 -->|replicate metadata| C2
+      C1 -->|replicate metadata| C3
+    end
+    C1 -->|push metadata| B1["Broker 1"]
+    C1 -->|push metadata| B2["Broker 2"]
+    C1 -->|push metadata| B3["Broker 3"]
+    Clients["Producers and Consumers"] -->|bootstrap| B1`,
     },
     {
-      title: "Log Compaction Process",
+      title: "Log Compaction Flow",
       kind: "flow",
-      caption: "Cleaner scans dirty segments, builds key-offset map, rewrites keeping only latest value per key. Tombstones expire after TTL.",
+      caption: "Cleaner scans dirty segments, builds key-offset map, rewrites keeping only the latest value per key.",
+      mermaid: `flowchart TD
+    A["Log segments with duplicate keys"] --> B["Cleaner thread scans dirty segments"]
+    B --> C["Build key-to-latest-offset map"]
+    C --> D["Rewrite segments, keep only latest value per key"]
+    D --> E{"Tombstone records found?"}
+    E -->|Yes| F["Retain until tombstone TTL expires"]
+    E -->|No| G["Compacted segment written"]
+    F --> G
+    G --> H["Old dirty segments deleted"]
+    H --> I["Compaction complete - log smaller"]`,
     },
   ],
   animations: [

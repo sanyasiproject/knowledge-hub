@@ -213,32 +213,64 @@ int main(int argc, char* argv[]) {
     {
       title: "ext4 Disk Layout and Block Group Structure",
       kind: "architecture",
-      caption:
-        "Shows the on-disk layout of an ext4 file system: boot block, superblock, block group descriptors, and the repeating block group structure containing bitmaps, inode table, and data blocks.",
+      caption: "On-disk layout of ext4: boot block, superblock, block group descriptors, and repeating block groups with bitmaps, inode tables, and data blocks.",
+      mermaid: `graph LR
+    BOOT["Boot Block"]
+    SB["Superblock\nFS metadata"]
+    BGD["Block Group\nDescriptors"]
+    BOOT --> SB --> BGD
+    BGD --> BG0["Block Group 0\nBlock Bitmap\nInode Bitmap\nInode Table\nData Blocks"]
+    BGD --> BG1["Block Group 1\nBlock Bitmap\nInode Bitmap\nInode Table\nData Blocks"]
+    BGD --> BGN["Block Group N\n..."]`,
     },
     {
-      title: "Inode-Based File Lookup Path Resolution",
+      title: "Inode-Based Path Resolution",
       kind: "flow",
-      caption:
-        "Traces how the VFS resolves a path like /home/user/file.txt: starting from the root inode, reading each directory's data blocks to find the next component's inode number, checking the dentry cache at each step.",
+      caption: "How the VFS resolves /home/user/file.txt by traversing directory inodes from the root.",
+      mermaid: `flowchart TD
+    START["Open /home/user/file.txt"] --> RC{Dentry cache hit?}
+    RC -->|Yes| FAST["Use cached inode"]
+    RC -->|No| ROOT["Load root inode 2"]
+    ROOT --> D1["Read root dir blocks\nFind home entry -> inode X"]
+    D1 --> D2["Load inode X\nRead home dir blocks\nFind user entry -> inode Y"]
+    D2 --> D3["Load inode Y\nRead user dir blocks\nFind file.txt -> inode Z"]
+    D3 --> FILE["Load inode Z\nOpen file descriptor"]
+    FAST --> FILE`,
     },
     {
-      title: "Journaling Write Sequence (Ordered Mode)",
+      title: "Journaling Write Sequence",
       kind: "sequence",
-      caption:
-        "Sequence diagram showing the steps of a journaled write in ext4 ordered mode: data blocks written first, then journal descriptor block, metadata blocks written to journal, journal commit block, and finally checkpoint (metadata written to final locations).",
+      caption: "Steps of a journaled write in ext4 ordered mode: data first, then metadata via journal, then checkpoint.",
+      mermaid: `sequenceDiagram
+    participant App
+    participant VFS
+    participant Journal
+    participant Disk
+
+    App->>VFS: write() syscall
+    VFS->>Disk: Write data blocks to final location
+    Disk-->>VFS: Data written
+    VFS->>Journal: Write journal descriptor block
+    VFS->>Journal: Write metadata blocks
+    VFS->>Journal: Write commit block
+    Journal-->>VFS: Transaction committed
+    VFS->>Disk: Checkpoint - write metadata to final location
+    Disk-->>VFS: Checkpoint complete
+    VFS-->>App: write() returns`,
     },
     {
-      title: "Copy-on-Write Block Update in ZFS",
-      kind: "flow",
-      caption:
-        "Illustrates how ZFS performs a COW update: modified data is written to a new block, parent indirect block pointers are updated (also via COW up the tree), and the uberblock is atomically swapped to point to the new root.",
-    },
-    {
-      title: "VFS Abstraction Layer and File System Dispatch",
+      title: "VFS Abstraction Layer",
       kind: "architecture",
-      caption:
-        "Shows the Linux VFS layer sitting between user-space system calls and concrete file system implementations (ext4, XFS, Btrfs, NFS, FUSE), with the four core VFS objects: superblock, inode, dentry, and file.",
+      caption: "Linux VFS sits between syscalls and concrete file system implementations with four core objects.",
+      mermaid: `graph TD
+    SYSCALL["User Space Syscalls\nopen read write stat"]
+    VFS["VFS Layer\nSuperblock / Inode / Dentry / File"]
+    SYSCALL --> VFS
+    VFS --> EXT4["ext4"]
+    VFS --> XFS["XFS"]
+    VFS --> BTRFS["Btrfs"]
+    VFS --> NFS["NFS"]
+    VFS --> FUSE["FUSE"]`,
     },
   ],
   animations: [

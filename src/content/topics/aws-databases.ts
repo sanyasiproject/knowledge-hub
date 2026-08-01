@@ -275,15 +275,106 @@ aws dynamodb update-time-to-live \\
 
   diagrams: [
     {
-      title: "Aurora Storage Architecture",
-      kind: "architecture" as const,
-      caption: "6-way replication across 3 AZs with protection groups, quorum writes (4/6), and quorum reads (3/6)"
+      title: "AWS Database Services Architecture",
+      kind: "architecture",
+      caption: "Overview of AWS managed database services grouped by type: relational, NoSQL, in-memory, and purpose-built.",
+      mermaid: `graph TB
+    subgraph Relational["Relational"]
+      RDS["RDS\nMySQL, Postgres, Oracle, SQL Server"]
+      AURORA["Aurora\nMySQL and Postgres compatible"]
+    end
+    subgraph NoSQL["NoSQL"]
+      DYNAMO["DynamoDB\nKey-value and document"]
+      DOCDB["DocumentDB\nMongoDB compatible"]
+    end
+    subgraph InMemory["In-Memory"]
+      REDIS["ElastiCache Redis\nCache and sessions"]
+      MEMCACHED["ElastiCache Memcached\nSimple caching"]
+    end
+    subgraph PurposeBuilt["Purpose-Built"]
+      NEPTUNE["Neptune\nGraph database"]
+      TIMESTREAM["Timestream\nTime-series data"]
+      QLDB["QLDB\nImmutable ledger"]
+    end
+    App["Application"] --> Relational
+    App --> NoSQL
+    App --> InMemory
+    App --> PurposeBuilt`,
     },
     {
-      title: "DynamoDB Request Flow",
-      kind: "sequence" as const,
-      caption: "Sequence from application through DynamoDB request router to storage nodes, showing partition key hashing and consistent reads vs eventually consistent reads"
-    }
+      title: "Choosing an AWS Database",
+      kind: "flow",
+      caption: "Decision tree for selecting the right AWS database service based on data model, access pattern, and scale requirements.",
+      mermaid: `flowchart TD
+    Start["What is your data model?"] --> Q1{"Structured\nrelational data?"}
+    Q1 -->|Yes| Q2{"Need high\nautoscaling?"}
+    Q2 -->|Yes| AURORA["Aurora Serverless v2\nAuto-scales capacity"]
+    Q2 -->|No| RDS["RDS\nManaged relational DB"]
+    Q1 -->|No| Q3{"Key-value or\ndocument?"}
+    Q3 -->|Yes| Q4{"Massive scale\nsingle-digit ms?"}
+    Q4 -->|Yes| DYNAMO["DynamoDB\nManaged NoSQL"]
+    Q4 -->|No| DOCDB["DocumentDB\nMongoDB workloads"]
+    Q3 -->|No| Q5{"Graph\nrelationships?"}
+    Q5 -->|Yes| NEPTUNE["Neptune\nGraph queries"]
+    Q5 -->|No| Q6{"Time-series\ndata?"}
+    Q6 -->|Yes| TIMESTREAM["Timestream\nTime-series optimised"]
+    Q6 -->|No| REDIS["ElastiCache Redis\nCaching layer"]`,
+    },
+    {
+      title: "Aurora Storage Architecture",
+      kind: "architecture",
+      caption: "6-way replication across 3 AZs with quorum writes requiring 4 of 6 and quorum reads requiring 3 of 6 storage nodes.",
+      mermaid: `graph TB
+    Writer["Aurora Writer Instance"]
+    Reader1["Aurora Reader 1"]
+    Reader2["Aurora Reader 2"]
+    subgraph AZ1["Availability Zone A"]
+      S1["Storage Node 1"]
+      S2["Storage Node 2"]
+    end
+    subgraph AZ2["Availability Zone B"]
+      S3["Storage Node 3"]
+      S4["Storage Node 4"]
+    end
+    subgraph AZ3["Availability Zone C"]
+      S5["Storage Node 5"]
+      S6["Storage Node 6"]
+    end
+    Writer -->|Write quorum 4 of 6| S1
+    Writer --> S2
+    Writer --> S3
+    Writer --> S4
+    Writer --> S5
+    Writer --> S6
+    Reader1 -->|Read quorum 3 of 6| S1
+    Reader2 -->|Read quorum 3 of 6| S3`,
+    },
+    {
+      title: "DynamoDB Key Concepts",
+      kind: "mindmap",
+      caption: "Mind map of DynamoDB features covering data model, capacity modes, indexes, and advanced capabilities.",
+      mermaid: `mindmap
+  root((DynamoDB))
+    Data Model
+      Table
+      Item rows
+      Partition Key required
+      Sort Key optional
+      Attributes schemaless
+    Capacity Modes
+      On-Demand auto-scales
+      Provisioned RCU and WCU
+      Auto Scaling
+    Indexes
+      GSI Global Secondary Index
+      LSI Local Secondary Index
+    Advanced Features
+      DynamoDB Streams CDC
+      DAX in-memory cache
+      Transactions ACID
+      TTL automatic expiry
+      Point-in-time recovery`,
+    },
   ],
 
   animations: [

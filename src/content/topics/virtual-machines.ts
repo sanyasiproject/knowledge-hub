@@ -205,34 +205,84 @@ int32_t vm_run(VM *vm) {
   ],
   diagrams: [
     {
-      title: "JVM architecture overview",
+      title: "Virtual Machine Architecture",
       kind: "architecture",
-      caption:
-        "Class loader subsystem feeds bytecode to the execution engine (interpreter + C1/C2 JIT), which operates on runtime data areas: method area, heap, thread stacks, and PC registers.",
+      caption: "Layered architecture from physical hardware through hypervisor to guest VMs and operating systems.",
+      mermaid: `graph TD
+    HW["Physical Hardware
+CPU, RAM, Disk, NIC"] --> HV["Hypervisor
+Type 1: bare metal
+Type 2: hosted"]
+    HV --> VM1["Guest VM 1
+Guest OS 1
+Apps"]
+    HV --> VM2["Guest VM 2
+Guest OS 2
+Apps"]
+    HV --> VM3["Guest VM 3
+Guest OS 3
+Apps"]
+    VM1 --> vCPU1["vCPU
+vRAM
+vDisk"]
+    VM2 --> vCPU2["vCPU
+vRAM
+vDisk"]`,
     },
     {
-      title: "Tiered JIT compilation pipeline",
-      kind: "flow",
-      caption:
-        "Source -> bytecode -> interpreter (profile collection) -> tier 1 JIT (C1, quick compile) -> tier 2 JIT (C2/TurboFan, optimized) -> deoptimization back to interpreter if speculation fails.",
+      title: "VM vs Container Comparison",
+      kind: "mindmap",
+      caption: "Key differences between virtual machines and containers in isolation, overhead, and use cases.",
+      mermaid: `mindmap
+  root((Virtualization))
+    Virtual Machines
+      Full OS per VM
+      Hardware emulation
+      Strong isolation
+      Minutes to start
+      GBs of overhead
+      Different OS possible
+    Containers
+      Shared host kernel
+      Process isolation
+      Lightweight
+      Seconds to start
+      MBs of overhead
+      Same OS family`,
     },
     {
-      title: "Stack VM vs Register VM execution",
-      kind: "architecture",
-      caption:
-        "Stack VM: operands pushed/popped from a virtual stack; each instruction is 1 byte + optional operand. Register VM: operands addressed by register index; instruction is wider but fewer dispatches needed.",
-    },
-    {
-      title: "V8 compilation pipeline (Ignition + TurboFan)",
-      kind: "flow",
-      caption:
-        "JavaScript source -> parser -> AST -> Ignition bytecode generator -> bytecode execution with type feedback -> TurboFan optimizing compiler -> native code. Deoptimization arrow back from native code to Ignition on speculation failure.",
-    },
-    {
-      title: "Inline cache state transitions",
+      title: "VM Lifecycle Flow",
       kind: "state",
-      caption:
-        "Uninitialized -> monomorphic (one shape seen) -> polymorphic (2-4 shapes, linear scan) -> megamorphic (5+ shapes, hash lookup). Each transition reduces lookup speed.",
+      caption: "States a virtual machine transitions through from creation to deletion.",
+      mermaid: `stateDiagram-v2
+    [*] --> Defined : create VM config
+    Defined --> Running : start VM
+    Running --> Paused : pause
+    Paused --> Running : resume
+    Running --> Stopped : shutdown
+    Stopped --> Running : start
+    Running --> Suspended : suspend to disk
+    Suspended --> Running : restore
+    Stopped --> [*] : delete VM`,
+    },
+    {
+      title: "Hypervisor Resource Scheduling",
+      kind: "sequence",
+      caption: "How a Type-1 hypervisor schedules vCPU time and handles a guest memory page fault.",
+      mermaid: `sequenceDiagram
+    participant G1 as Guest VM 1
+    participant HV as Hypervisor
+    participant G2 as Guest VM 2
+    participant HW as Physical CPU
+    HV->>HW: schedule G1 vCPU on pCPU0
+    G1->>HV: VM exit - memory page fault
+    HV->>HV: map guest physical to host physical
+    HV->>G1: VM entry - resume execution
+    HV->>HW: schedule G2 vCPU on pCPU0
+    G2->>HV: VM exit - IO request
+    HV->>HW: perform IO on behalf of guest
+    HW-->>HV: IO complete
+    HV->>G2: VM entry - deliver result`,
     },
   ],
   animations: [

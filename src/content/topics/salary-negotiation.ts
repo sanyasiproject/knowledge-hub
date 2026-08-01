@@ -424,62 +424,85 @@ public:
   },
   diagrams: [
     {
-      title: "Salary Negotiation Decision Flow",
+      title: "Salary Negotiation Process",
       kind: "flow",
-      caption:
-        "Decision tree from receiving an offer through research, counter-offer strategy, and final acceptance or walk-away based on BATNA.",
+      caption: "Step-by-step negotiation process from receiving an offer through research, counter-offer, and reaching an agreement.",
       mermaid: `flowchart TD
-    A["**Offer Received**"] --> B["*Express enthusiasm*\\n*Ask for 2-3 days*"]
-    B --> C["**Evaluate Against Research**\\n*levels.fyi, Glassdoor, network*"]
-    C --> D{"**Offer vs. Target Range?**"}
-    D -->|"*Within or above*"| E["**Minor Adjustments**\\n*Negotiate equity, bonus,*\\n*or perks*"]
-    D -->|"*Below target*"| F{"**Have Competing Offers?**"}
-    F -->|"*Yes*"| G["**Leverage Competing Offer**\\n*Share range respectfully*\\n*Express preference*"]
-    F -->|"*No*"| H["**Counter with Data**\\n*Market research,*\\n*unique skills, experience*"]
-    G --> I["**Present Counter-Offer**\\n*Specific, data-backed asks*"]
-    H --> I
-    E --> I
-    I --> J{"**Company Response**"}
-    J -->|"*Improved offer*"| K{"**Meets Minimum?**"}
-    J -->|"*No movement*"| L{"**Compare to BATNA**"}
-    K -->|"*Yes*"| M["**Accept & Get in Writing**"]
-    K -->|"*Close but not quite*"| N["*Negotiate other components*\\n*signing bonus, level, PTO*"]
-    L -->|"*BATNA is stronger*"| O["**Decline Respectfully**"]
-    L -->|"*Offer is better than BATNA*"| M
-    N --> J`,
+    A([Receive job offer]) --> B[Research market rate - levels.fyi and Glassdoor]
+    B --> C[Determine your target and walkaway]
+    C --> D[Express enthusiasm for role]
+    D --> E[Make counter-offer with justification]
+    E --> F{Response received}
+    F -->|Above walkaway| G[Evaluate total comp]
+    G --> H{Acceptable?}
+    H -->|Yes| I([Accept offer])
+    H -->|No| J[Negotiate non-salary items]
+    F -->|Below walkaway| K([Decline politely])
+    J --> I`,
     },
     {
-      title: "Total Compensation Breakdown",
+      title: "Total Compensation Components",
       kind: "mindmap",
-      caption:
-        "Visual map of all compensation components: base salary, equity (RSUs, options, vesting), bonuses (signing, annual, spot), benefits (health, retirement, insurance), perks (PTO, remote, learning budget, relocation), and non-monetary value (title, scope, growth trajectory).",
+      caption: "Comprehensive view of total compensation beyond base salary, including equity, bonuses, and benefits that should all be considered in negotiation.",
       mermaid: `mindmap
-  root(("**Total Compensation**"))
-    ("**Base Salary**")
-      ("*Monthly / annual cash*")
-      ("*Often has rigid bands*")
-    ("**Equity**")
-      ("*RSUs with vesting schedule*")
-      ("*Stock options & strike price*")
-      ("*Refresh grants*")
-    ("**Bonuses**")
-      ("*Signing bonus (one-time)*")
-      ("*Annual target bonus*")
-      ("*Spot / performance bonus*")
-    ("**Benefits**")
-      ("*Health insurance*")
-      ("*Retirement / 401k match*")
-      ("*Life & disability insurance*")
-    ("**Perks**")
-      ("*PTO & sabbaticals*")
-      ("*Remote / hybrid flexibility*")
-      ("*Learning budget*")
-      ("*Relocation assistance*")
-    ("**Non-Monetary Value**")
-      ("*Title & level*")
-      ("*Scope & ownership*")
-      ("*Growth trajectory*")
-      ("*Review timeline*")`,
+  root((Total Compensation))
+    Base Salary
+      Monthly fixed pay
+      Review frequency
+    Equity
+      RSUs - Restricted Stock Units
+      Options - ISOs and NSOs
+      Vesting schedule
+      Cliff period
+    Bonus
+      Signing bonus
+      Annual performance bonus
+      Spot bonuses
+    Benefits
+      Health dental vision
+      401k match
+      PTO and paid leave
+    Other
+      Remote work flexibility
+      Learning and development budget
+      Home office stipend`,
+    },
+    {
+      title: "Negotiation BATNA Framework",
+      kind: "architecture",
+      caption: "Best Alternative to a Negotiated Agreement framework showing how a strong BATNA improves negotiating position and outcomes.",
+      mermaid: `graph TD
+    You[Your Position] --> BATNA[BATNA - Best Alternative]
+    BATNA --> Alt1[Competing offer]
+    BATNA --> Alt2[Current job stay]
+    BATNA --> Alt3[Freelance option]
+    You --> Target[Target number]
+    You --> WAP[Walkaway Point]
+    WAP --> BATNA
+    Employer[Employer Position] --> ETarget[Budget ceiling]
+    Employer --> EFloor[Initial offer]
+    Target --> ZOPATop[Zone of Possible Agreement]
+    ETarget --> ZOPATop
+    EFloor --> ZOPABottom[Negotiation Range]
+    WAP --> ZOPABottom`,
+    },
+    {
+      title: "Negotiation Conversation Flow",
+      kind: "sequence",
+      caption: "A scripted negotiation conversation showing how to respond to an offer, make a counter, and handle pushback professionally.",
+      mermaid: `sequenceDiagram
+    participant C as Candidate
+    participant R as Recruiter
+
+    R->>C: Offer: 130k base plus 20k bonus
+    Note over C: Research shows 145-160k for this level
+    C->>R: Thank you - very excited about the role
+    C->>R: Based on my research - can we get to 150k base?
+    R->>C: Best we can do is 138k
+    C->>R: I appreciate that - could we add 10k signing bonus?
+    R->>C: Yes - we can do 138k plus 10k signing
+    Note over C: Total now 148k first year - close to target
+    C->>R: That works for me - I accept`,
     },
   ],
   animations: [

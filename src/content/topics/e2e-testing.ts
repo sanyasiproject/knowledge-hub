@@ -267,16 +267,101 @@ TEST_F(SearchTest, EmptySearchShowsNoResults) {
   ],
   diagrams: [
     {
-      title: "E2E Test Architecture",
+      title: "E2E Test Infrastructure Architecture",
       kind: "architecture",
-      caption:
-        "Shows how the E2E test runner controls a browser that interacts with the deployed application stack (frontend, API, database), with optional API mocking for controlled scenarios.",
+      mermaid: `graph TB
+    subgraph TestRunner["Test Runner - Playwright or Cypress"]
+      Tests["Test Files"]
+      POM["Page Object Models"]
+      Fixtures["Test Fixtures\nand Seed Data"]
+    end
+    subgraph Browser["Controlled Browser"]
+      Page["Browser Page\nChromium Firefox WebKit"]
+    end
+    subgraph AppStack["Application Stack"]
+      FE["Frontend\nReact or Vue"]
+      API["Backend API\nREST or GraphQL"]
+      DB[("Database\nTest Instance")]
+    end
+    subgraph Mocks["Optional Mocks"]
+      APIStub["API Stub\nfor external services"]
+    end
+    Tests --> POM
+    POM --> Page
+    Page --> FE
+    FE --> API
+    API --> DB
+    API -.->|intercepted| APIStub`,
+      caption: "Test runner controls the browser via CDP; page objects abstract selectors; the app stack uses a dedicated test database seeded per test.",
+    },
+    {
+      title: "E2E Test Execution Lifecycle",
+      kind: "flow",
+      mermaid: `flowchart TD
+    A["CI pipeline starts"] --> B["Spin up app stack\nor connect to staging"]
+    B --> C["Launch browser\nheadless in CI"]
+    C --> D["Seed test data\nvia API or DB fixture"]
+    D --> E["Navigate to page\nunder test"]
+    E --> F["Perform user actions\nclick fill submit"]
+    F --> G["Auto-wait for elements\nto be actionable"]
+    G --> H["Assert expected outcome\nURL content visibility"]
+    H --> I{"Test passed?"}
+    I -->|Yes| J["Clean up test data"]
+    I -->|No| K["Capture screenshot\nand video trace"]
+    K --> L["Report failure\nwith artifacts"]
+    J --> M["Run next test"]`,
+      caption: "Each test seeds its own data, drives a real browser with auto-waiting, asserts outcomes, and cleans up; failures capture screenshots and video.",
     },
     {
       title: "Page Object Model Structure",
       kind: "architecture",
-      caption:
-        "Illustrates how test files use page objects that encapsulate selectors and actions, decoupling test logic from UI structure so changes to the UI only require updating page objects.",
+      mermaid: `graph LR
+    subgraph Tests["Test Files"]
+      T1["checkout.spec.ts"]
+      T2["login.spec.ts"]
+    end
+    subgraph Pages["Page Objects"]
+      LP["LoginPage\nfillEmail()\nfillPassword()\nsubmit()"]
+      CP["CheckoutPage\naddItem()\nfillAddress()\nplaceOrder()"]
+      NAV["NavBar\ngoToCart()\ngetCartCount()"]
+    end
+    subgraph Selectors["Locators"]
+      S1["data-testid=email"]
+      S2["data-testid=checkout-btn"]
+    end
+    T1 --> LP
+    T1 --> NAV
+    T2 --> LP
+    CP --> S2
+    LP --> S1`,
+      caption: "Page objects encapsulate locators and actions; test files call high-level methods; only page objects know about data-testid selectors.",
+    },
+    {
+      title: "Test Reliability Failure Modes",
+      kind: "mindmap",
+      mermaid: `mindmap
+  root((E2E Flakiness Causes))
+    Timing Issues
+      Missing auto-wait
+      Hardcoded sleep calls
+      Animation not settled
+      Race between requests
+    Data Problems
+      Shared test database
+      Tests depend on order
+      Missing cleanup
+      Stale fixtures
+    Environment Issues
+      Different viewport sizes
+      Timezone differences
+      Feature flags varying
+      Third-party API calls
+    Selector Fragility
+      CSS class selectors
+      XPath positional
+      Text content brittle
+      No data-testid attributes`,
+      caption: "E2E flakiness root causes: timing races, shared data, environment variance, and fragile selectors each require different mitigation strategies.",
     },
   ],
   animations: [

@@ -264,16 +264,75 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Threading Models Compared",
-      kind: "architecture",
-      caption:
-        "OS threads map 1:1 to kernel threads. Green threads/virtual threads use M:N mapping — many lightweight threads multiplexed onto few OS threads. The event loop uses a single thread with an I/O multiplexer (epoll/kqueue) dispatching callbacks.",
+      title: "Threads vs Async Concurrency Models",
+      kind: "mindmap",
+      caption: "Comparing multi-threading and async event-loop concurrency across key dimensions.",
+      mermaid: `mindmap
+  root((Concurrency Models))
+    Threads
+      OS-managed
+      Preemptive scheduling
+      Shared memory
+      Mutex and locks needed
+      High memory per thread
+      CPU-bound tasks
+    Async Event Loop
+      Single thread
+      Cooperative yielding
+      No shared state risk
+      await and async
+      Low overhead
+      IO-bound tasks`,
     },
     {
-      title: "Event Loop Lifecycle",
+      title: "Thread Lifecycle",
+      kind: "state",
+      caption: "States a thread passes through from creation to termination.",
+      mermaid: `stateDiagram-v2
+    [*] --> New : create thread
+    New --> Runnable : start()
+    Runnable --> Running : CPU scheduled
+    Running --> Runnable : preempted
+    Running --> Blocked : waiting for lock or IO
+    Blocked --> Runnable : lock acquired or IO done
+    Running --> Terminated : task complete
+    Terminated --> [*]`,
+    },
+    {
+      title: "Async Event Loop Flow",
       kind: "flow",
-      caption:
-        "The event loop cycle: check timers -> poll for I/O (epoll/kqueue) -> run ready callbacks -> check immediate queue -> repeat. Node.js adds microtask and nextTick queues between phases. A blocking callback stalls the entire cycle.",
+      caption: "How the async event loop processes tasks, callbacks, and IO completions without blocking.",
+      mermaid: `flowchart TD
+    A["Event Loop Start"] --> B["Check task queue"]
+    B --> C{Tasks pending?}
+    C -->|Yes| D["Execute synchronous task"]
+    D --> E{IO operation?}
+    E -->|Yes| F["Register IO callback
+yield to loop"]
+    E -->|No| B
+    F --> G["OS handles IO"]
+    G --> H["IO complete - push callback"]
+    H --> B
+    C -->|No| I["Sleep until event"]
+    I --> B`,
+    },
+    {
+      title: "Request Handling Comparison",
+      kind: "sequence",
+      caption: "How a threaded server and an async server each handle two concurrent requests.",
+      mermaid: `sequenceDiagram
+    participant R1 as Request 1
+    participant R2 as Request 2
+    participant TS as Threaded Server
+    participant AS as Async Server
+    R1->>TS: HTTP request
+    Note over TS: Thread 1 blocked on DB
+    R2->>TS: HTTP request
+    Note over TS: Thread 2 handles R2
+    R1->>AS: HTTP request
+    Note over AS: await DB query - yield
+    R2->>AS: HTTP request
+    Note over AS: handles R2 while R1 waits`,
     },
   ],
   animations: [

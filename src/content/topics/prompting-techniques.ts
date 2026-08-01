@@ -390,41 +390,75 @@ console.log(result);
     {
       title: "Prompting Techniques Decision Tree",
       kind: "flow",
-      caption: "How to choose the right prompting technique based on task characteristics",
+      caption: "How to choose the right prompting technique based on task characteristics and accuracy requirements.",
       mermaid: `flowchart TD
     A[New Task] --> B{Requires external data?}
-    B -- Yes --> C[Use ReAct / Tool-Augmented]
-    B -- No --> D{Multi-step reasoning?}
-    D -- Yes --> E{High stakes / accuracy critical?}
-    D -- No --> F{Ambiguous instructions?}
-    E -- Yes --> G[Self-Consistency + CoT]
-    E -- No --> H[Chain-of-Thought]
-    F -- Yes --> I{Have good examples?}
-    F -- No --> J[Zero-Shot with Clear Instructions]
-    I -- Yes --> K[Few-Shot Prompting]
-    I -- No --> J
+    B -->|Yes| C[ReAct or Tool-Augmented]
+    B -->|No| D{Multi-step reasoning?}
+    D -->|Yes| E{High stakes or accuracy critical?}
+    D -->|No| F{Ambiguous instructions?}
+    E -->|Yes| G[Self-Consistency + CoT]
+    E -->|No| H[Chain-of-Thought]
+    F -->|Yes| I{Have good examples?}
+    F -->|No| J[Zero-Shot with Clear Instructions]
+    I -->|Yes| K[Few-Shot Prompting]
+    I -->|No| J
     C --> L{Accuracy critical?}
-    L -- Yes --> M[ReAct + Self-Consistency]
-    L -- No --> C`,
+    L -->|Yes| M[ReAct + Self-Consistency]
+    L -->|No| C`,
     },
     {
-      title: "ReAct Loop Sequence",
+      title: "ReAct Thought-Action-Observation Loop",
       kind: "sequence",
-      caption: "The Thought-Action-Observation cycle in a ReAct agent answering a factual question",
+      caption: "The Thought-Action-Observation cycle in a ReAct agent answering a factual question with tool use.",
       mermaid: `sequenceDiagram
     participant U as User
     participant M as Model
-    participant T as Tool (Search API)
-
-    U->>M: "What is the population of Tokyo in 2024?"
+    participant T as Tool - Search API
+    U->>M: What is the population of Tokyo in 2024?
     M->>M: Thought: I need current population data
-    M->>T: Action: search("Tokyo population 2024")
-    T-->>M: Observation: ~14 million (city proper)
-    M->>M: Thought: The user may want metro area too
-    M->>T: Action: search("Tokyo metropolitan area population 2024")
-    T-->>M: Observation: ~37.4 million (metro area)
-    M->>M: Thought: I have both figures, can answer
-    M->>U: "Tokyo city proper: ~14M, metro area: ~37.4M (2024)"`,
+    M->>T: Action: search Tokyo population 2024
+    T-->>M: Observation: 14 million city proper
+    M->>M: Thought: User may want metro area too
+    M->>T: Action: search Tokyo metropolitan area population 2024
+    T-->>M: Observation: 37.4 million metro area
+    M->>M: Thought: I have both figures, can answer now
+    M->>U: Tokyo city proper ~14M, metro area ~37.4M`,
+    },
+    {
+      title: "Prompting Techniques Comparison",
+      kind: "mindmap",
+      caption: "Overview of major prompting techniques, their mechanisms, and the problem types they are best suited for.",
+      mermaid: `mindmap
+  root((Prompting Techniques))
+    Zero-Shot
+      No examples needed
+      Simple well-defined tasks
+      Relies on model knowledge
+    Few-Shot
+      2 to 8 examples in prompt
+      Custom formats
+      Classification tasks
+      Domain-specific output
+    Chain-of-Thought
+      Step by step reasoning
+      Math and logic problems
+      Append think step by step
+      Reduces reasoning errors
+    Self-Consistency
+      Sample N reasoning paths
+      Majority vote on answer
+      High-stakes decisions
+      Expensive N forward passes
+    ReAct
+      Interleaves thought and action
+      Calls external tools
+      Grounded in real data
+      Multi-step research tasks
+    Tree of Thought
+      Explores branching paths
+      Complex planning problems
+      Most expensive technique`,
     },
   ],
   comparison: {

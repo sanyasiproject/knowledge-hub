@@ -274,24 +274,71 @@ public:
   ],
   diagrams: [
     {
-      title: "Hash table internal structure",
+      title: "Hash Table Internals",
       kind: "architecture",
-      caption: "Array of buckets with hash function mapping keys to indices. Chained buckets show linked nodes for collision resolution.",
+      caption: "Internal structure of a hash table with buckets and collision chaining.",
+      mermaid: `graph TD
+    Key[Input Key] --> HF[Hash Function]
+    HF --> IDX[Array Index 0 to N-1]
+    IDX --> B0[Bucket 0 empty]
+    IDX --> B1[Bucket 1]
+    IDX --> B2[Bucket 2]
+    B1 --> E1[Entry: key1 value1]
+    E1 --> E2[Entry: key2 value2 chained]
+    B2 --> E3[Entry: key3 value3]`,
     },
     {
-      title: "Open addressing probe sequences",
+      title: "Collision Resolution Strategies",
       kind: "flow",
-      caption: "Comparison of linear probing, quadratic probing, and double hashing paths through the array on collision.",
+      caption: "Decision flow for handling key collisions in a hash table.",
+      mermaid: `flowchart TD
+    A[Insert key-value pair] --> B[Compute hash index]
+    B --> C{Slot empty?}
+    C -- Yes --> D[Insert directly]
+    C -- No --> E{Collision strategy?}
+    E -- Chaining --> F[Append to linked list at slot]
+    E -- Open Addressing --> G{Probing type?}
+    G -- Linear --> H[Check index plus 1 plus 2 etc]
+    G -- Quadratic --> I[Check index plus 1 plus 4 plus 9 etc]
+    G -- Double Hash --> J[Apply second hash function]`,
     },
     {
-      title: "Consistent hashing ring",
-      kind: "network",
-      caption: "Keys and server nodes mapped onto a circular hash space. Adding or removing a node only remaps the keys in its arc.",
-    },
-    {
-      title: "Resize / rehash operation",
+      title: "Hash Table Resize Process",
       kind: "sequence",
-      caption: "Step-by-step: load factor exceeds threshold, new array allocated at 2x capacity, every entry rehashed and reinserted.",
+      caption: "How a hash table rehashes entries when load factor exceeds threshold.",
+      mermaid: `sequenceDiagram
+    participant App
+    participant HT as Hash Table
+    App->>HT: Insert new key-value
+    HT->>HT: Check load factor
+    alt Load factor exceeds threshold
+        HT->>HT: Allocate new array 2x size
+        HT->>HT: Rehash all existing entries
+        HT->>HT: Insert into new positions
+        HT->>HT: Replace old array
+    end
+    HT-->>App: Insert complete`,
+    },
+    {
+      title: "Hash Function Properties",
+      kind: "mindmap",
+      caption: "Properties of a good hash function for use in hash tables.",
+      mermaid: `mindmap
+  root((Hash Function))
+    Deterministic
+      Same key same hash always
+    Uniform Distribution
+      Minimize collisions
+      Spread keys evenly
+    Fast Computation
+      O of 1 time
+    Avalanche Effect
+      Small input change
+      Large hash change
+    Common Algorithms
+      FNV-1a
+      MurmurHash
+      xxHash`,
     },
   ],
   animations: [

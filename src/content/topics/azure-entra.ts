@@ -202,23 +202,108 @@ export const azureEntra: TopicContent = {
   ],
   diagrams: [
     {
-      title: "OAuth 2.0 Authorization Code Flow with Entra ID",
-      kind: "sequence",
-      caption: "Sequence diagram showing the complete OAuth 2.0 authorization code flow between a client application, Entra ID, and a resource API, including token exchange and API access.",
-      mermaid: "sequenceDiagram\n    participant User as User / Browser\n    participant App as Client Application\n    participant Entra as Entra ID<br/>(Authorization Server)\n    participant API as Resource API<br/>(e.g., Microsoft Graph)\n\n    User->>App: 1. Access protected resource\n    App->>Entra: 2. Redirect to /authorize endpoint<br/>(client_id, redirect_uri, scope, state)\n    Entra->>User: 3. Present sign-in page\n    User->>Entra: 4. Authenticate (credentials + MFA)\n    Note over Entra: Evaluate Conditional Access policies\n    Entra->>App: 5. Redirect with authorization code\n    App->>Entra: 6. POST /token endpoint<br/>(code, client_secret, redirect_uri)\n    Entra->>App: 7. Return access_token, id_token, refresh_token\n    App->>API: 8. API request with Bearer access_token\n    API->>App: 9. Return protected resource data\n    Note over App,Entra: When access_token expires:\n    App->>Entra: 10. POST /token with refresh_token\n    Entra->>App: 11. New access_token + refresh_token"
-    },
-    {
-      title: "Conditional Access Policy Evaluation Flow",
-      kind: "flow",
-      caption: "Flowchart illustrating how Conditional Access policies are evaluated during a sign-in attempt, from signal collection through policy matching to access decision.",
-      mermaid: "flowchart TD\n    A[Sign-in Request] --> B{Collect Signals}\n    B --> C[User / Group Identity]\n    B --> D[Application Target]\n    B --> E[Device State & Platform]\n    B --> F[Location / IP]\n    B --> G[Sign-in Risk Level]\n    B --> H[User Risk Level]\n    C & D & E & F & G & H --> I{Match Against<br/>All CA Policies}\n    I -->|No policies match| J[Grant Access<br/>Default Policy]\n    I -->|Policies match| K{Aggregate Grant Controls<br/>Most Restrictive Wins}\n    K --> L{Any Policy<br/>Blocks Access?}\n    L -->|Yes| M[Block Access]\n    L -->|No| N{Evaluate Required Controls}\n    N --> O{MFA Required?}\n    O -->|Yes| P[Prompt for MFA]\n    O -->|No| Q{Device Compliance<br/>Required?}\n    P -->|Pass| Q\n    P -->|Fail| M\n    Q -->|Yes| R{Device Compliant?}\n    Q -->|No| S{Other Controls?}\n    R -->|Yes| S\n    R -->|No| M\n    S --> T[Apply Session Controls]\n    T --> U[Grant Access with Controls]"
-    },
-    {
-      title: "Azure RBAC Scope Hierarchy",
+      title: "Entra ID Component Architecture",
       kind: "architecture",
-      caption: "Hierarchical diagram showing how RBAC role assignments inherit downward from management groups through subscriptions, resource groups, and individual resources.",
-      mermaid: "graph TD\n    MG[Management Group<br/>Scope: /providers/Microsoft.Management/managementGroups/mg-id] --> SUB1[Subscription A<br/>Scope: /subscriptions/sub-a-id]\n    MG --> SUB2[Subscription B<br/>Scope: /subscriptions/sub-b-id]\n    SUB1 --> RG1[Resource Group: prod-rg<br/>Scope: .../resourceGroups/prod-rg]\n    SUB1 --> RG2[Resource Group: dev-rg<br/>Scope: .../resourceGroups/dev-rg]\n    SUB2 --> RG3[Resource Group: staging-rg<br/>Scope: .../resourceGroups/staging-rg]\n    RG1 --> R1[Storage Account]\n    RG1 --> R2[Virtual Machine]\n    RG1 --> R3[Key Vault]\n    RG2 --> R4[App Service]\n    RG2 --> R5[SQL Database]\n    RG3 --> R6[Container Registry]\n\n    style MG fill:#4a90d9,stroke:#2c5f8a,color:#fff\n    style SUB1 fill:#5ba55b,stroke:#3a7a3a,color:#fff\n    style SUB2 fill:#5ba55b,stroke:#3a7a3a,color:#fff\n    style RG1 fill:#d4a843,stroke:#a07e2e,color:#fff\n    style RG2 fill:#d4a843,stroke:#a07e2e,color:#fff\n    style RG3 fill:#d4a843,stroke:#a07e2e,color:#fff"
-    }
+      caption: "Overview of the core Azure Entra ID components and how tenants, app registrations, managed identities, and RBAC relate to one another.",
+      mermaid: `graph TD
+    Tenant["Tenant<br/>(Isolated Directory)"]
+    Users["Users and Groups"]
+    AppReg["App Registrations"]
+    SP["Service Principals"]
+    MI["Managed Identities"]
+    CA["Conditional Access<br/>Policies"]
+    PIM["Privileged Identity<br/>Management"]
+    RBAC["Azure RBAC<br/>Role Assignments"]
+    MG["Management Group"]
+    SUB["Subscription"]
+    RG["Resource Group"]
+    RES["Azure Resources"]
+
+    Tenant --> Users
+    Tenant --> AppReg
+    Tenant --> CA
+    Tenant --> PIM
+    AppReg --> SP
+    MI --> SP
+    SP --> RBAC
+    Users --> RBAC
+    MG --> SUB --> RG --> RES
+    RBAC --> RES`,
+    },
+    {
+      title: "OAuth 2.0 Authorization Code Flow",
+      kind: "sequence",
+      caption: "The complete OAuth 2.0 authorization code flow from user sign-in through token exchange to API access, including the Conditional Access evaluation step.",
+      mermaid: `sequenceDiagram
+    participant User as User
+    participant App as Client App
+    participant Entra as Entra ID
+    participant API as Resource API
+
+    User->>App: Access protected page
+    App->>Entra: Redirect to /authorize
+    Entra->>User: Present sign-in page
+    User->>Entra: Submit credentials and MFA
+    Note over Entra: Evaluate Conditional Access
+    Entra->>App: Return authorization code
+    App->>Entra: POST /token with code and secret
+    Entra->>App: Return access_token and refresh_token
+    App->>API: Request with Bearer access_token
+    API->>App: Return protected data
+    Note over App,Entra: Token expiry - silent refresh
+    App->>Entra: POST /token with refresh_token
+    Entra->>App: New access_token`,
+    },
+    {
+      title: "Conditional Access Authentication Flow",
+      kind: "flow",
+      caption: "Decision flow for a sign-in request evaluated against Conditional Access policies, from signal collection to final access grant or block.",
+      mermaid: `flowchart TD
+    A["Sign-in Request"] --> B["Collect Signals"]
+    B --> C["User Identity and Group"]
+    B --> D["Device Platform and Compliance"]
+    B --> E["Location and IP"]
+    B --> F["Sign-in Risk Level"]
+    C & D & E & F --> G{"Match CA Policies?"}
+    G -->|"No match"| H["Grant Access"]
+    G -->|"Match found"| I{"Block Policy?"}
+    I -->|"Yes"| J["Block Access"]
+    I -->|"No"| K{"MFA Required?"}
+    K -->|"Yes"| L["Prompt for MFA"]
+    K -->|"No"| M{"Device Compliance?"}
+    L -->|"Pass"| M
+    L -->|"Fail"| J
+    M -->|"Compliant"| N["Apply Session Controls"]
+    M -->|"Not compliant"| J
+    N --> O["Access Granted"]`,
+    },
+    {
+      title: "Identity Concepts Mindmap",
+      kind: "mindmap",
+      caption: "Key concepts in Azure Entra ID identity and access management, organized by category.",
+      mermaid: `mindmap
+  root["Entra ID"]
+    Authentication
+      OAuth 2.0
+      OpenID Connect
+      SAML 2.0
+      MFA
+    Authorization
+      Azure RBAC
+      Entra ID Roles
+      Conditional Access
+      PIM
+    Identities
+      Users
+      Groups
+      Service Principals
+      Managed Identities
+    Hybrid
+      Entra Connect
+      Password Hash Sync
+      Pass-through Auth
+      Federation`,
+    },
   ],
   comparison: {
     columns: ["Feature", "Password Hash Sync (PHS)", "Pass-through Authentication (PTA)", "Federation (ADFS)"],

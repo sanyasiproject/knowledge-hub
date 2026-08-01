@@ -159,86 +159,96 @@ get(Pid) ->
   ],
   diagrams: [
     {
-      title: "Concurrency Models Overview",
+      title: "Backend Concurrency Models Mindmap",
       kind: "mindmap",
-      caption: "A mindmap of the major **backend concurrency models** with their *key characteristics*, representative runtimes, and trade-offs.",
+      caption: "Overview of the major backend concurrency models, their scheduling strategies, representative runtimes, and key trade-offs.",
       mermaid: `mindmap
-  root(("**Backend Concurrency**"))
+  root["Backend Concurrency Models"]
     Thread-per-Request
-      ~1MB stack per thread
-      Simple sequential code
-      Java Servlets, PHP-FPM
-      Poor at 10K+ connections
+      One OS thread per request
+      Blocks on I/O
+      Java Servlets
+      PHP-FPM
     Thread Pool
-      Fixed thread count
-      Reuse threads across requests
-      Java ExecutorService, Tomcat NIO
-      Pool exhaustion risk
+      Fixed worker pool
+      Queue overflow risk
+      Tomcat NIO
+      Java ExecutorService
     Event Loop
-      Single-threaded
-      Non-blocking I/O callbacks
-      Node.js, Nginx, Redis
-      Blocks on CPU work
-    Reactor Pattern
-      Event demultiplexer + handlers
-      Multi-reactor for multi-core
-      Netty, Twisted, Vert.x
+      Single-threaded reactor
+      Non-blocking callbacks
+      Node.js
+      Nginx
     Actor Model
-      Isolated processes
+      Isolated mailboxes
       Message passing only
-      Erlang BEAM, Akka
-      Let it crash philosophy
-    Coroutines / Green Threads
-      User-space scheduling
-      Tiny stacks 2-8KB
-      Go goroutines, Java Loom
-      M:N threading`
+      Erlang BEAM
+      Akka
+    Goroutines
+      M-to-N scheduling
+      Work stealing
+      Go runtime
+      Tiny 2KB stacks`,
     },
     {
       title: "Go GMP Scheduler Architecture",
       kind: "architecture",
-      caption: "Diagram of Go's **M:N scheduler** showing the relationship between *Goroutines (G)*, *OS Threads (M)*, and *Processors (P)* with work-stealing behavior.",
+      caption: "Go runtime M-to-N scheduler: Goroutines run on Processors which are bound to OS Threads, with work stealing across idle processors.",
       mermaid: `graph TD
-    subgraph P1 ["**Processor P1**"]
-        LRQ1["Local Run Queue<br/>*G1, G2, G3*"]
+    GRQ["Global Run Queue"]
+    NetPoll["Network Poller"]
+    subgraph P1["Processor P1"]
+        LRQ1["Local Queue G1 G2 G3"]
     end
-    subgraph P2 ["**Processor P2**"]
-        LRQ2["Local Run Queue<br/>*G4, G5*"]
+    subgraph P2["Processor P2"]
+        LRQ2["Local Queue G4 G5"]
     end
-    subgraph P3 ["**Processor P3**"]
-        LRQ3["Local Run Queue<br/>*(empty)*"]
+    subgraph P3["Processor P3 - idle"]
+        LRQ3["Local Queue - empty"]
     end
-
-    GRQ["**Global Run Queue**<br/>*overflow goroutines*"]
-    M1["**OS Thread M1**<br/>*executing G1*"]
-    M2["**OS Thread M2**<br/>*executing G4*"]
-    M3["**OS Thread M3**<br/>*idle — looking for work*"]
-    NetPoll["**Network Poller**<br/>*parked goroutines<br/>waiting on I/O*"]
-
-    P1 --> M1
-    P2 --> M2
-    P3 --> M3
-    M3 -.->|"**work stealing**<br/>steal half of P1's queue"| LRQ1
-    GRQ -.->|"schedule to<br/>idle processor"| P3
-    NetPoll -.->|"I/O ready:<br/>reschedule goroutine"| GRQ`
+    M1["OS Thread M1"] --> P1
+    M2["OS Thread M2"] --> P2
+    M3["OS Thread M3 - idle"] --> P3
+    P3 -.->|"steal half"| LRQ1
+    GRQ -.->|"schedule"| P3
+    NetPoll -.->|"I/O ready"| GRQ`,
     },
     {
-      title: "Event Loop Phases (Node.js / libuv)",
+      title: "Actor Model Message Flow",
+      kind: "sequence",
+      caption: "Actors communicate exclusively via asynchronous messages; each actor processes one message at a time from its mailbox, maintaining isolated mutable state.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant S as Supervisor
+    participant A as Actor A
+    participant B as Actor B
+
+    C->>S: spawn child actors
+    S->>A: start
+    S->>B: start
+    C->>A: Send message M1
+    A->>A: Process M1, update state
+    A->>B: Forward result
+    B->>B: Process forwarded msg
+    B-->>C: Reply with result
+    A->>A: Crash on bad input
+    S->>A: Restart actor`,
+    },
+    {
+      title: "Event Loop vs Thread Pool Request Handling",
       kind: "flow",
-      caption: "The phases of the **Node.js event loop** showing how *timers*, *I/O callbacks*, *idle/prepare*, *poll*, *check*, and *close* phases execute in order each tick.",
-      mermaid: `graph TD
-    Start["**Event Loop Start**"] --> Timers["**Timers Phase**<br/>*setTimeout, setInterval callbacks*"]
-    Timers --> Pending["**Pending Callbacks**<br/>*deferred I/O callbacks*"]
-    Pending --> Idle["**Idle / Prepare**<br/>*internal use only*"]
-    Idle --> Poll["**Poll Phase**<br/>*retrieve new I/O events*<br/>*execute I/O callbacks*"]
-    Poll --> Check["**Check Phase**<br/>*setImmediate callbacks*"]
-    Check --> Close["**Close Callbacks**<br/>*socket.on('close')*"]
-    Close --> MicroCheck{"**Microtask Queue?**<br/>*Promise.then,<br/>process.nextTick*"}
-    MicroCheck -->|"Yes"| Micro["**Run Microtasks**"]
-    Micro --> Timers
-    MicroCheck -->|"No — empty"| ExitCheck{"**More work?**"}
-    ExitCheck -->|"Yes"| Timers
-    ExitCheck -->|"No"| Exit["**Exit Process**"]`
+      caption: "Event loop handles I/O-bound requests non-blockingly in a single thread; CPU-bound work is offloaded to a thread pool to avoid blocking the loop.",
+      mermaid: `flowchart TD
+    Req["Incoming Request"] --> EL["Event Loop - single thread"]
+    EL --> IOCheck{"I/O bound?"}
+    IOCheck -->|"Yes"| NB["Non-blocking async I/O"]
+    NB --> CB["Callback queued on completion"]
+    CB --> EL
+    IOCheck -->|"No - CPU heavy"| TP["Thread Pool - worker threads"]
+    TP --> Work["CPU work executes"]
+    Work --> Post["Post result to event loop"]
+    Post --> EL
+    EL --> Resp["Send response to client"]`,
     },
   ],
   exercises: [

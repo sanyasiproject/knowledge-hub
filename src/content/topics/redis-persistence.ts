@@ -188,24 +188,79 @@ DEBUG RELOAD     # Save + quit + reload (testing only)`,
   ],
   diagrams: [
     {
-      title: "RDB snapshot fork and copy-on-write flow",
+      title: "RDB Snapshot via fork and Copy-on-Write",
       kind: "sequence",
-      caption: "Parent calls fork(). Child writes RDB from shared memory pages. Parent modifies pages, triggering COW copies only for changed pages. Child exits when done.",
+      caption: "Redis forks a child process for BGSAVE. The child writes the RDB snapshot while the parent continues serving requests. Modified pages trigger OS copy-on-write.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant P as Redis Parent
+    participant Ch as Child Process
+    participant D as Disk
+
+    P->>Ch: fork()
+    Note over Ch: Shares memory via COW
+    C->>P: SET key value
+    P->>P: Modify page - COW copy
+    Ch->>D: Write RDB snapshot
+    Ch->>Ch: Serialize all keys
+    Ch->>D: fsync and close file
+    Ch-->>P: Exit SIGCHLD
+    P->>D: Rename temp to dump.rdb`,
     },
     {
-      title: "AOF rewrite with multi-part files (Redis 7.0+)",
+      title: "AOF Rewrite Multi-Part File Flow",
       kind: "flow",
-      caption: "Manifest references base file + incremental files. BGREWRITEAOF creates new base from current dataset. New incremental file starts. Old files are garbage-collected.",
+      caption: "BGREWRITEAOF forks a child to write a new base file. The parent buffers new commands. On completion the manifest is updated and old files are garbage-collected.",
+      mermaid: `flowchart TD
+    A([BGREWRITEAOF triggered]) --> B[Fork child process]
+    B --> C[Child writes new base RDB]
+    B --> D[Parent buffers new writes]
+    C --> E[Child exits]
+    D --> F[Rewrite buffer accumulated]
+    E --> G[Append buffer to new incremental AOF]
+    G --> H[Update manifest file]
+    H --> I[Garbage-collect old files]
+    I --> J([Rewrite complete])`,
     },
     {
-      title: "Hybrid AOF load sequence on restart",
-      kind: "sequence",
-      caption: "Redis reads manifest, loads RDB preamble into memory (fast bulk load), then replays incremental AOF commands for recent changes.",
+      title: "Persistence Mode Comparison",
+      kind: "architecture",
+      caption: "Comparison of RDB-only, AOF-only, and Hybrid persistence modes showing their trade-offs in data safety, recovery speed, and file size.",
+      mermaid: `graph LR
+    subgraph RDB["RDB Only"]
+      R1[Compact binary snapshot]
+      R2[Fast restart]
+      R3[Data loss on crash]
+    end
+    subgraph AOF["AOF Only"]
+      A1[Every write logged]
+      A2[Slow restart - replay all]
+      A3[1-2 sec data loss max]
+    end
+    subgraph Hybrid["Hybrid Mode"]
+      H1[RDB preamble in AOF]
+      H2[Fast load and low data loss]
+      H3[Default since Redis 4.0]
+    end
+    RDB --> Hybrid
+    AOF --> Hybrid`,
     },
     {
-      title: "Persistence decision tree",
+      title: "AOF fsync Policy Decision",
       kind: "flow",
-      caption: "Helps choose between RDB-only, AOF-only, hybrid, or no persistence based on data safety requirements, performance constraints, and recovery time objectives.",
+      caption: "Choosing the right appendfsync policy based on durability requirements and performance constraints.",
+      mermaid: `flowchart TD
+    A([Choose fsync policy]) --> B{Zero data loss required?}
+    B -->|Yes| C[appendfsync always]
+    C --> C1[fsync after every write]
+    C1 --> C2[Safest - highest latency]
+    B -->|No| D{1 second loss acceptable?}
+    D -->|Yes| E[appendfsync everysec]
+    E --> E1[Background fsync per second]
+    E1 --> E2[Recommended default]
+    D -->|No strict need| F[appendfsync no]
+    F --> F1[OS decides when to flush]
+    F1 --> F2[Fastest - least durable]`,
     },
   ],
   animations: [

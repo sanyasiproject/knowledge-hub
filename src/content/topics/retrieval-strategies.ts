@@ -514,14 +514,82 @@ std::vector<RerankedDocument> full_rag_retrieval_pipeline(
   ],
   diagrams: [
     {
-      title: "Hybrid Retrieval Pipeline Flow",
+      title: "RAG Retrieval Pipeline",
       kind: "flow",
-      caption: "End-to-end flow from user query through parallel dense and sparse retrieval, RRF fusion, re-ranking, and final context assembly for LLM generation.",
+      caption: "Retrieval-Augmented Generation pipeline: query is embedded, similar documents retrieved from vector store, context injected into LLM prompt.",
+      mermaid: `flowchart TD
+    A([User query]) --> B[Embed query to vector]
+    B --> C[Search vector database]
+    C --> D[Top-k similar chunks retrieved]
+    D --> E[Re-rank results by relevance]
+    E --> F[Build prompt with context]
+    F --> G[LLM generates answer]
+    G --> H([Return answer with sources])`,
     },
     {
-      title: "RAG Retrieval System Architecture",
+      title: "Retrieval Strategy Comparison",
+      kind: "mindmap",
+      caption: "Overview of retrieval strategies including sparse, dense, and hybrid retrieval, each suited to different data types and query patterns.",
+      mermaid: `mindmap
+  root((Retrieval Strategies))
+    Sparse Retrieval
+      BM25 keyword matching
+      TF-IDF scoring
+      Good for exact terms
+      Fast - inverted index
+    Dense Retrieval
+      Semantic embeddings
+      Vector similarity search
+      Handles synonyms
+      Requires GPU for scale
+    Hybrid Retrieval
+      Combine sparse and dense
+      Reciprocal rank fusion
+      Best of both worlds
+    Graph Retrieval
+      Knowledge graph traversal
+      Multi-hop reasoning
+      Entity relationships`,
+    },
+    {
+      title: "Vector Index Types",
       kind: "architecture",
-      caption: "Architecture showing the ingestion pipeline (chunking, embedding, indexing) and the query pipeline (retrieval, fusion, re-ranking, generation) with their data stores.",
+      caption: "Different vector index types used in retrieval systems: flat exact search, HNSW for approximate nearest neighbor, and IVF for partitioned search.",
+      mermaid: `graph TD
+    subgraph Exact["Exact Search"]
+      Flat["Flat Index - brute force"]
+      Flat --> FlatPros["100 percent recall - slow at scale"]
+    end
+    subgraph Approx["Approximate Search"]
+      HNSW["HNSW - hierarchical graph"]
+      IVF["IVF - inverted file"]
+      HNSW --> HNSWPros["Fast - high recall tradeoff"]
+      IVF --> IVFPros["Scalable - cluster-based"]
+    end
+    subgraph Hybrid2["Hybrid Index"]
+      IVFPQ["IVF + Product Quantization"]
+      IVFPQ --> HybridPros["Compressed - billion scale"]
+    end`,
+    },
+    {
+      title: "Query Expansion and Re-ranking Flow",
+      kind: "sequence",
+      caption: "Advanced retrieval using query expansion to broaden recall, followed by a cross-encoder re-ranker to improve precision before returning results.",
+      mermaid: `sequenceDiagram
+    participant User
+    participant QueryProc as Query Processor
+    participant VectorDB as Vector Store
+    participant Reranker as Cross-Encoder Re-ranker
+    participant LLM
+
+    User->>QueryProc: Original query
+    QueryProc->>QueryProc: Expand query with synonyms and HyDE
+    QueryProc->>VectorDB: Multi-query retrieval
+    VectorDB-->>QueryProc: Top-50 candidate chunks
+    QueryProc->>Reranker: Score all 50 candidates
+    Reranker-->>QueryProc: Top-5 by relevance
+    QueryProc->>LLM: Prompt with top-5 context
+    LLM-->>User: Final answer`,
     },
   ],
   animations: [

@@ -232,26 +232,72 @@ int main() {
     {
       title: "Resource Allocation Graph with Deadlock Cycle",
       kind: "network",
-      caption:
-        "Two processes P1 and P2 each hold one resource and request the other, forming a cycle that constitutes a deadlock.",
+      caption: "Two processes P1 and P2 each hold one resource and request the other, forming a circular wait that constitutes a deadlock.",
+      mermaid: `graph LR
+    P1["Process P1"]
+    P2["Process P2"]
+    R1["Resource R1"]
+    R2["Resource R2"]
+    R1 -->|held by| P1
+    R2 -->|held by| P2
+    P1 -->|requests| R2
+    P2 -->|requests| R1`,
     },
     {
-      title: "Coffman Conditions Mind Map",
+      title: "Coffman Conditions for Deadlock",
       kind: "mindmap",
-      caption:
-        "The four necessary conditions for deadlock -- mutual exclusion, hold and wait, no preemption, and circular wait -- with brief descriptions and prevention strategies for each.",
+      caption: "All four Coffman conditions must hold simultaneously for a deadlock to occur. Eliminating any one condition prevents deadlock.",
+      mermaid: `mindmap
+  root[Deadlock Conditions]
+    Mutual Exclusion
+      Resource held exclusively
+      Prevention: use sharable resources
+    Hold and Wait
+      Process holds while requesting more
+      Prevention: request all resources at once
+    No Preemption
+      Resources cannot be forcibly taken
+      Prevention: allow preemption and rollback
+    Circular Wait
+      Cycle in resource allocation graph
+      Prevention: impose global lock ordering`,
     },
     {
-      title: "Deadlock Handling Strategies Flow",
+      title: "Deadlock Handling Strategy Decision",
       kind: "flow",
-      caption:
-        "Decision flow for choosing a deadlock handling strategy: prevention (design-time constraints), avoidance (runtime safety checks), detection and recovery (periodic monitoring), or ignoring (ostrich algorithm).",
+      caption: "Decision flow for choosing a deadlock handling strategy based on system requirements and acceptable overhead.",
+      mermaid: `flowchart TD
+    A[Deadlock Risk Identified] --> B{System type?}
+    B -->|Safety-critical| C[Prevention]
+    B -->|General purpose OS| D{Can predict max resource needs?}
+    D -->|Yes| E[Avoidance - Bankers Algorithm]
+    D -->|No| F{Deadlock frequency?}
+    F -->|Rare| G[Ostrich Algorithm - Ignore]
+    F -->|Occasional| H[Detection and Recovery]
+    C --> C1[Lock ordering or request all upfront]
+    E --> E1[Safety check on each allocation]
+    H --> H1[Periodic cycle detection]
+    H1 --> H2[Terminate or rollback victim process]`,
     },
     {
-      title: "Banker's Algorithm State Transition",
+      title: "Banker's Algorithm Safe vs Unsafe State",
       kind: "state",
-      caption:
-        "State diagram showing transitions between safe state, unsafe state (potential deadlock), and deadlocked state, illustrating how the Banker's algorithm keeps the system in safe states.",
+      caption: "State transitions showing how the Banker's algorithm prevents entering unsafe states by denying requests that could lead to deadlock.",
+      mermaid: `stateDiagram-v2
+    [*] --> Safe
+    Safe --> Safe : Grant request passes safety check
+    Safe --> Unsafe : Grant request fails safety check
+    Unsafe --> Safe : Process releases resources
+    Unsafe --> Deadlocked : All processes blocked
+    Deadlocked --> Safe : Terminate victim and reclaim resources
+    note right of Safe
+      All processes can complete
+      in some ordering
+    end note
+    note right of Unsafe
+      No guarantee all processes
+      can complete
+    end note`,
     },
   ],
   animations: [

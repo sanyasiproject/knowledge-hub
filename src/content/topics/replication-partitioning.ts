@@ -68,8 +68,80 @@ FROM pg_stat_replication;`
     },
   ],
   diagrams: [
-    { title: "Leader-follower replication", kind: "architecture", caption: "Writes go to the leader; replication log streams changes to followers; reads can go to any node." },
-    { title: "Consistent hashing ring", kind: "network", caption: "Keys and nodes mapped to a ring; each key is owned by the next node clockwise; adding a node only remaps keys between the new node and its predecessor." },
+    {
+      title: "Primary-Replica Replication",
+      kind: "architecture",
+      caption: "Primary node handles all writes and replicates changes to replica nodes. Replicas serve read traffic, improving scalability and providing failover capability.",
+      mermaid: `graph TD
+    Client[Client] -->|Writes| Primary[Primary Node]
+    Primary -->|Replicate| R1[Replica 1]
+    Primary -->|Replicate| R2[Replica 2]
+    Primary -->|Replicate| R3[Replica 3]
+    Client -->|Reads| R1
+    Client -->|Reads| R2
+    Client -->|Reads| R3
+    subgraph Failover["Failover"]
+      R1 -->|Promote on primary failure| NewPrimary[New Primary]
+    end`,
+    },
+    {
+      title: "Horizontal Partitioning - Sharding Strategies",
+      kind: "mindmap",
+      caption: "Different strategies for partitioning data horizontally across multiple nodes, each with different trade-offs for distribution and query routing.",
+      mermaid: `mindmap
+  root((Partitioning Strategies))
+    Range Partitioning
+      Split by key range
+      Easy range queries
+      Risk of hot spots
+    Hash Partitioning
+      Hash key to shard
+      Even distribution
+      Range queries expensive
+    Directory Partitioning
+      Lookup table maps keys to shards
+      Flexible reassignment
+      Lookup overhead
+    Consistent Hashing
+      Nodes on a ring
+      Minimal rekey on change
+      Used in Cassandra and DynamoDB`,
+    },
+    {
+      title: "Replication Lag and Read-Your-Writes",
+      kind: "sequence",
+      caption: "Asynchronous replication introduces lag between primary and replica. Read-your-writes consistency ensures a user sees their own updates despite replication lag.",
+      mermaid: `sequenceDiagram
+    participant User
+    participant Primary
+    participant Replica
+
+    User->>Primary: Write: update profile
+    Primary-->>User: Write confirmed
+    Note over Primary,Replica: Async replication lag 100ms
+    User->>Replica: Read: get profile
+    Replica-->>User: Returns stale data
+    Note over User: Read-your-writes fix: route read to Primary
+    User->>Primary: Read: get profile
+    Primary-->>User: Returns updated data`,
+    },
+    {
+      title: "Multi-Leader Replication Conflict",
+      kind: "flow",
+      caption: "When multiple leaders accept concurrent writes to the same record, conflicts arise on replication. Conflict resolution strategies include last-write-wins and application-level merge.",
+      mermaid: `flowchart TD
+    A[Leader 1 accepts write X=1] --> C[Replicate to Leader 2]
+    B[Leader 2 accepts write X=2] --> D[Replicate to Leader 1]
+    C --> E{Conflict detected - X=1 vs X=2}
+    D --> E
+    E --> F{Resolution strategy}
+    F -->|Last Write Wins| G[Use higher timestamp]
+    F -->|Application merge| H[Custom merge logic]
+    F -->|Conflict CRDT| I[Merge using CRDT rules]
+    G --> J[Converged value]
+    H --> J
+    I --> J`,
+    },
   ],
   animations: [
     {

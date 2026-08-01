@@ -126,14 +126,85 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Eigenvector transformation",
+      title: "Eigenvector Transformation Visualization",
       kind: "flow",
-      caption: "Shows how applying matrix A to an eigenvector v only scales it by λ, while a non-eigenvector changes both direction and magnitude.",
+      mermaid: `flowchart LR
+    subgraph NonEigen["Non-Eigenvector Input"]
+      V["Vector v\nnot eigenvector"]
+      AV["Av\nchanges direction\nand magnitude"]
+      V -->|"Apply matrix A"| AV
+    end
+    subgraph Eigen["Eigenvector Input"]
+      E["Eigenvector e\nspecial direction"]
+      AE["Ae = lambda * e\nscales only\ndirection preserved"]
+      E -->|"Apply matrix A"| AE
+    end
+    subgraph Eigenvalue["Eigenvalue Meaning"]
+      L1["lambda greater than 1\nstretches vector"]
+      L2["lambda between 0 and 1\ncompresses vector"]
+      L3["lambda negative\nflips direction"]
+      L4["lambda equals 0\ncollapse to zero"]
+    end`,
+      caption: "Applying a matrix to an eigenvector only scales it by lambda; all other vectors change direction, making eigenvectors special fixed-direction axes.",
     },
     {
-      title: "PCA via eigendecomposition pipeline",
+      title: "PCA via Eigendecomposition Pipeline",
       kind: "architecture",
-      caption: "Data → center → covariance matrix → eigendecomposition → select top-k eigenvectors → project data onto lower-dimensional subspace.",
+      mermaid: `graph TD
+    Raw["Raw Data Matrix X\nm samples x n features"]
+    Center["Center Data\nsubtract column means"]
+    Cov["Covariance Matrix C\nC = X_T X div n-1\nsymmetric n x n"]
+    Eig["Eigendecomposition\nC = P D P_inv\northogonal eigenvectors"]
+    Sort["Sort by eigenvalue\ndescending"]
+    Select["Select top k\neigenvectors"]
+    Project["Project Data\nZ = X dot P_k\nm x k output"]
+    Raw --> Center --> Cov --> Eig --> Sort --> Select --> Project`,
+      caption: "PCA extracts the directions of maximum variance from the covariance matrix, then projects data onto the top k principal components.",
+    },
+    {
+      title: "Power Iteration Convergence",
+      kind: "sequence",
+      mermaid: `sequenceDiagram
+    participant Algo as Power Iteration
+    participant Vec as Current Vector
+    participant Dom as Dominant Eigenvector
+    Note over Vec: Initialize random unit vector v0
+    loop until convergence
+      Algo->>Vec: w = A times v_k
+      Note over Vec: Dominant component scaled by lambda_1
+      Algo->>Vec: v_k+1 = w divided by norm of w
+      Note over Vec: Normalize to unit length
+    end
+    Vec-->>Dom: v_k converges to dominant eigenvector
+    Note over Dom: lambda_1 approx v_k_T A v_k Rayleigh quotient`,
+      caption: "Each iteration amplifies the dominant eigenvector component; after k iterations the vector aligns with the eigenvector of the largest eigenvalue.",
+    },
+    {
+      title: "Eigenvalue Applications Mindmap",
+      kind: "mindmap",
+      mermaid: `mindmap
+  root((Eigenvalue Applications))
+    Dimensionality Reduction
+      PCA principal components
+      LDA discriminant analysis
+      t-SNE initialization
+    Graph Analysis
+      PageRank stationary distribution
+      Spectral clustering
+      Graph Laplacian
+    Dynamical Systems
+      Stability analysis
+      Control theory
+      Markov chain steady state
+    Signal Processing
+      Fourier transform eigenbasis
+      Vibration modes
+      Image compression via SVD
+    Machine Learning
+      Covariance structure
+      Kernel PCA
+      Neural network Hessian`,
+      caption: "Eigenvalues and eigenvectors appear across ML, signal processing, graph theory, and dynamical systems as the natural language of linear transformations.",
     },
   ],
   animations: [

@@ -168,20 +168,82 @@ function hashToken(token: string): string {
     {
       title: "Session-Based Authentication Flow",
       kind: "sequence",
-      caption:
-        "Client sends credentials, server creates session in Redis, returns session ID in httpOnly cookie. Subsequent requests include the cookie automatically; server looks up session in Redis to authenticate.",
+      caption: "Server-side sessions store auth state in memory or a database. The session ID in a cookie references server-side state on every request.",
+      mermaid: `sequenceDiagram
+    participant Browser
+    participant Server
+    participant SessionStore as Session Store - Redis
+
+    Browser->>Server: POST /login - credentials
+    Server->>Server: Validate credentials
+    Server->>SessionStore: Store session data - userId and roles
+    SessionStore-->>Server: session_id: abc123
+    Server-->>Browser: Set-Cookie: session_id=abc123
+    Browser->>Server: GET /profile - Cookie: session_id=abc123
+    Server->>SessionStore: Lookup session abc123
+    SessionStore-->>Server: userId: 42 - roles: admin
+    Server-->>Browser: Profile data`,
     },
     {
-      title: "Token-Based Authentication Flow",
+      title: "JWT Token-Based Authentication Flow",
       kind: "sequence",
-      caption:
-        "Client sends credentials, server returns access token (JWT) + refresh token. Client stores tokens and sends access token in Authorization header. When access token expires, client uses refresh token to get a new pair.",
+      caption: "JWT tokens are self-contained. The server validates the signature without a database lookup, enabling stateless and scalable authentication.",
+      mermaid: `sequenceDiagram
+    participant Browser
+    participant AuthServer as Auth Server
+    participant API as API Server
+
+    Browser->>AuthServer: POST /login - credentials
+    AuthServer->>AuthServer: Validate credentials
+    AuthServer->>AuthServer: Sign JWT with secret - userId and roles and exp
+    AuthServer-->>Browser: access_token: eyJhbG...
+    Browser->>API: GET /profile - Authorization: Bearer eyJhbG...
+    API->>API: Verify JWT signature
+    API->>API: Check expiry claim
+    API-->>Browser: Profile data - no DB lookup needed`,
     },
     {
-      title: "Refresh Token Rotation with Reuse Detection",
-      kind: "flow",
-      caption:
-        "Each refresh creates a new token and marks the old one as used. If a used token is presented again (stolen token), the entire token family is revoked, forcing re-authentication.",
+      title: "JWT Structure",
+      kind: "architecture",
+      caption: "A JWT consists of three base64url-encoded parts: header specifying algorithm, payload containing claims, and signature for integrity verification.",
+      mermaid: `graph LR
+    JWT[JWT Token] --> Header["Header - Base64url"]
+    JWT --> Payload["Payload - Base64url"]
+    JWT --> Signature["Signature - Base64url"]
+    Header --> H1["alg: HS256"]
+    Header --> H2["typ: JWT"]
+    Payload --> P1["sub: user_id"]
+    Payload --> P2["iat: issued_at"]
+    Payload --> P3["exp: expiry"]
+    Payload --> P4["roles: admin"]
+    Signature --> S1["HMAC-SHA256 of header.payload with secret"]`,
+    },
+    {
+      title: "Session vs Token Trade-offs",
+      kind: "mindmap",
+      caption: "Comparing session-based and token-based authentication on key dimensions: scalability, security, revocation, and implementation complexity.",
+      mermaid: `mindmap
+  root((Sessions vs Tokens))
+    Sessions
+      Server-side state
+      Instant revocation
+      Requires sticky sessions or shared store
+      Vulnerable to CSRF
+      Simple to implement
+    JWT Tokens
+      Stateless - no server store
+      Scales horizontally
+      Hard to revoke before expiry
+      Larger payload in requests
+      Vulnerable to XSS if in localStorage
+    When to use Sessions
+      Single server or small fleet
+      Need instant logout
+      Traditional web apps
+    When to use JWT
+      Microservices
+      Mobile clients
+      Third-party API access`,
     },
   ],
   animations: [

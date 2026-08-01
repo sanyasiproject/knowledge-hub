@@ -87,8 +87,78 @@ FETCH NEXT 20 ROWS ONLY;`
     },
   ],
   diagrams: [
-    { title: "SQL logical processing order", kind: "flow", caption: "FROM -> WHERE -> GROUP BY -> HAVING -> SELECT -> DISTINCT -> ORDER BY -> LIMIT/OFFSET." },
-    { title: "WHERE clause decision tree", kind: "flow", caption: "How the database evaluates compound predicates with AND, OR, NOT, and NULL three-valued logic." },
+    {
+      title: "SQL Query Execution Order",
+      kind: "flow",
+      caption: "SQL clauses are executed in a logical order that differs from how they are written. Understanding this order is essential for correct queries.",
+      mermaid: `flowchart TD
+    A[FROM and JOIN - identify source tables] --> B[WHERE - filter rows]
+    B --> C[GROUP BY - group remaining rows]
+    C --> D[HAVING - filter groups]
+    D --> E[SELECT - compute output columns]
+    E --> F[DISTINCT - remove duplicates]
+    F --> G[ORDER BY - sort results]
+    G --> H[LIMIT and OFFSET - paginate]`,
+    },
+    {
+      title: "JOIN Types",
+      kind: "architecture",
+      caption: "SQL JOIN types and what rows they include from left and right tables, from INNER JOIN returning only matches to FULL OUTER JOIN returning all rows.",
+      mermaid: `graph TD
+    subgraph INNER["INNER JOIN"]
+      I[Only matching rows from both tables]
+    end
+    subgraph LEFT["LEFT JOIN"]
+      L[All rows from left table]
+      L --> L1[Plus matching rows from right]
+      L --> L2[NULL for non-matching right rows]
+    end
+    subgraph RIGHT["RIGHT JOIN"]
+      R[All rows from right table]
+      R --> R1[Plus matching rows from left]
+      R --> R2[NULL for non-matching left rows]
+    end
+    subgraph FULL["FULL OUTER JOIN"]
+      F[All rows from both tables]
+      F --> F1[NULLs where no match on either side]
+    end`,
+    },
+    {
+      title: "Aggregate Functions and GROUP BY",
+      kind: "sequence",
+      caption: "How GROUP BY partitions rows into groups and aggregate functions compute one value per group for COUNT, SUM, AVG, MIN, and MAX.",
+      mermaid: `sequenceDiagram
+    participant Q as Query
+    participant E as SQL Engine
+    participant Result as Result Set
+
+    Q->>E: SELECT dept, COUNT(*) FROM employees GROUP BY dept
+    E->>E: Scan employees table
+    E->>E: Group rows by dept value
+    E->>E: For each group: compute COUNT
+    E-->>Result: Engineering - 15
+    E-->>Result: Marketing - 8
+    E-->>Result: Finance - 5
+    Q->>E: Add HAVING COUNT(*) > 10
+    E->>E: Filter groups where count exceeds 10
+    E-->>Result: Engineering - 15`,
+    },
+    {
+      title: "SQL Indexes and Query Planning",
+      kind: "flow",
+      caption: "How the query planner decides whether to use an index or perform a full table scan based on selectivity and available indexes.",
+      mermaid: `flowchart TD
+    A([SQL query received]) --> B[Parse and validate query]
+    B --> C[Query planner generates plans]
+    C --> D{Index available for WHERE clause?}
+    D -->|Yes| E{High selectivity - few rows?}
+    E -->|Yes| F[Index scan - read index then fetch rows]
+    E -->|No - low selectivity| G[Full table scan may be faster]
+    D -->|No| G
+    F --> H[Execute chosen plan]
+    G --> H
+    H --> I([Return result set])`,
+    },
   ],
   animations: [
     {

@@ -63,8 +63,72 @@ COMMIT;`
     },
   ],
   diagrams: [
-    { title: "Isolation levels and prevented anomalies", kind: "architecture", caption: "Each level prevents progressively more anomalies: dirty reads, non-repeatable reads, phantom reads, write skew." },
-    { title: "MVCC row versioning", kind: "sequence", caption: "Multiple versions of a row coexist, each tagged with creating and deleting transaction IDs." },
+    {
+      title: "Isolation Levels and Prevented Anomalies",
+      kind: "architecture",
+      caption: "Each isolation level progressively prevents more anomalies. PostgreSQL's Repeatable Read uses snapshot isolation which also prevents phantoms, and Serializable adds SSI to catch write skew.",
+      mermaid: `graph LR
+    subgraph Levels["Isolation Levels - Strictest at Bottom"]
+      RU["Read Uncommitted\ndirty reads allowed\nrarely used"]
+      RC["Read Committed\nprevents dirty reads\ndefault in PostgreSQL and Oracle"]
+      RR["Repeatable Read\nprevents non-repeatable reads\nsnapshot isolation in PostgreSQL"]
+      SER["Serializable\nprevents write skew\nSSI detects dependency cycles"]
+    end
+    RU -->|adds protection| RC
+    RC -->|adds protection| RR
+    RR -->|adds protection| SER
+    DIRTY["Dirty Read"] -.->|prevented at| RC
+    NRR["Non-Repeatable Read"] -.->|prevented at| RR
+    PHANTOM["Phantom Read"] -.->|prevented at| RR
+    WS["Write Skew"] -.->|prevented at| SER`,
+    },
+    {
+      title: "MVCC Row Version Visibility",
+      kind: "sequence",
+      caption: "MVCC tags each row version with xmin and xmax transaction IDs. A snapshot sees only versions where xmin committed before the snapshot and xmax did not.",
+      mermaid: `sequenceDiagram
+    participant T100 as Transaction 100
+    participant T200 as Transaction 200
+    participant T250 as Reader at snapshot 250
+    participant DB as Row Storage
+    T100->>DB: INSERT row\nxmin=100 xmax=null
+    T200->>DB: UPDATE row\nold version: xmax=200\nnew version: xmin=200 xmax=null
+    Note over DB: Two versions coexist
+    T250->>DB: SELECT row
+    DB-->>T250: Returns new version\nxmin=200 committed before 250\nxmax=null means current
+    Note over T100,DB: Reader at snapshot 150\nwould see old version\nxmax=200 not committed before 150`,
+    },
+    {
+      title: "Write Skew Scenario",
+      kind: "flow",
+      caption: "Write skew occurs under Repeatable Read when two transactions each read shared data, make independent decisions, and write without conflict — yet together violate an invariant.",
+      mermaid: `flowchart TD
+    A["Invariant: at least 2 doctors on call"] --> B["T1 reads: 2 doctors on call"]
+    A --> C["T2 reads: 2 doctors on call"]
+    B --> D["T1 decides: safe to go off call"]
+    C --> E["T2 decides: safe to go off call"]
+    D --> F["T1 updates: doctor A off call"]
+    E --> G["T2 updates: doctor B off call"]
+    F --> H["0 doctors on call - invariant violated"]
+    G --> H
+    H --> FIX["Fix: use Serializable isolation\nor SELECT FOR UPDATE to lock rows"]`,
+    },
+    {
+      title: "Transaction Isolation State Transitions",
+      kind: "state",
+      caption: "A transaction progresses through states from Begin to Commit or Rollback. Under Serializable, a serialization failure triggers a required retry.",
+      mermaid: `stateDiagram-v2
+    [*] --> Active: BEGIN
+    Active --> ReadPhase: execute statements
+    ReadPhase --> WritePhase: modifications
+    ReadPhase --> Committed: read-only COMMIT
+    WritePhase --> Committed: COMMIT
+    WritePhase --> Aborted: ROLLBACK
+    WritePhase --> Aborted: serialization failure\nSQLSTATE 40001
+    Aborted --> Active: retry transaction
+    Committed --> [*]
+    Aborted --> [*]: give up`,
+    },
   ],
   animations: [
     {

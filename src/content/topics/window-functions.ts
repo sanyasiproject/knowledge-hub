@@ -102,8 +102,85 @@ FROM employees;`
     },
   ],
   diagrams: [
-    { title: "Window function vs GROUP BY", kind: "architecture", caption: "GROUP BY collapses rows into groups; window functions keep all rows and compute across the window." },
-    { title: "Window frame types", kind: "flow", caption: "ROWS = physical positions, RANGE = logical value range, GROUPS = peer group count." },
+    {
+      title: "SQL Window Function Anatomy",
+      kind: "architecture",
+      caption: "Structure of a window function clause showing OVER, PARTITION BY, ORDER BY, and frame specification.",
+      mermaid: `graph TD
+    WF["Window Function
+SUM, RANK, LAG"] --> OV["OVER clause
+defines the window"]
+    OV --> PB["PARTITION BY
+divide rows into groups"]
+    OV --> OB["ORDER BY
+sort within partition"]
+    OV --> FR["Frame
+ROWS or RANGE bounds"]
+    FR --> RS["ROWS BETWEEN
+UNBOUNDED PRECEDING
+AND CURRENT ROW"]
+    PB --> P1["Partition 1
+dept = Sales"]
+    PB --> P2["Partition 2
+dept = Eng"]`,
+    },
+    {
+      title: "Window Function Types",
+      kind: "mindmap",
+      caption: "Categories of SQL window functions: ranking, analytic, and aggregate with examples.",
+      mermaid: `mindmap
+  root((Window Functions))
+    Ranking
+      ROW_NUMBER unique rank
+      RANK gaps on tie
+      DENSE_RANK no gaps
+      NTILE buckets
+    Analytic
+      LAG previous row value
+      LEAD next row value
+      FIRST_VALUE partition first
+      LAST_VALUE partition last
+    Aggregate
+      SUM running total
+      AVG moving average
+      COUNT cumulative count
+      MAX running maximum`,
+    },
+    {
+      title: "Window Function Execution Flow",
+      kind: "flow",
+      caption: "How the database engine processes a query with window functions after the WHERE and GROUP BY phases.",
+      mermaid: `flowchart TD
+    A["Full table or join result"] --> B["Apply WHERE filter"]
+    B --> C["Apply GROUP BY
+if present"]
+    C --> D["Apply HAVING
+if present"]
+    D --> E["Evaluate Window Functions
+over partitioned rows"]
+    E --> F["Apply SELECT columns
+with window results"]
+    F --> G["Apply ORDER BY
+final sort"]
+    G --> H["Apply LIMIT
+return rows"]`,
+    },
+    {
+      title: "Running Total Sequence",
+      kind: "sequence",
+      caption: "How SUM with ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW computes a running total.",
+      mermaid: `sequenceDiagram
+    participant Q as Query Engine
+    participant W as Window Frame
+    participant R as Result Set
+    Q->>W: partition by dept, order by date
+    W->>W: row 1: amount=100, frame=[100]
+    W->>R: running_total=100
+    W->>W: row 2: amount=200, frame=[100,200]
+    W->>R: running_total=300
+    W->>W: row 3: amount=150, frame=[100,200,150]
+    W->>R: running_total=450`,
+    },
   ],
   animations: [
     {

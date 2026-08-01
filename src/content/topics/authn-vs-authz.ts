@@ -165,21 +165,61 @@ async function loginWithMFA(email: string, password: string, totpCode?: string) 
   diagrams: [
     {
       title: "Authentication vs Authorization Flow",
-      kind: "sequence",
-      caption:
-        "Client sends credentials to the auth service (authentication). The auth service returns a token with identity claims. On subsequent requests, the API verifies the token (authentication) then checks permissions (authorization).",
-    },
-    {
-      title: "Multi-Factor Authentication Flow",
       kind: "flow",
-      caption:
-        "User provides password (knowledge factor), then receives a challenge for a second factor — TOTP code from an authenticator app (possession) or biometric scan (inherence). Both must pass for authentication to succeed.",
+      caption: "Authentication verifies WHO the user is. Authorization decides WHAT they are allowed to do. Both gates must pass for access to be granted.",
+      mermaid: `flowchart TD
+    Req["Incoming Request\\nwith Bearer Token"] --> AuthN["Authentication\\nVerify token signature\\nand expiry"]
+    AuthN -->|Invalid| Reject401["401 Unauthorized\\ntoken rejected"]
+    AuthN -->|Valid| Identity["Extract Identity\\nuser + roles + claims"]
+    Identity --> AuthZ["Authorization\\nCheck permissions\\nfor requested resource"]
+    AuthZ -->|Denied| Reject403["403 Forbidden\\naccess denied"]
+    AuthZ -->|Allowed| Handler["Request Handler\\nBusiness Logic"]`,
     },
     {
-      title: "SSO with OIDC",
+      title: "OAuth 2.0 Authorization Code Flow",
       kind: "sequence",
-      caption:
-        "User visits App A, is redirected to the IdP, authenticates once, receives tokens, and is redirected back. When visiting App B, the IdP recognizes the existing session and issues tokens without re-authentication.",
+      caption: "Full OAuth 2.0 authorization code flow showing how a client obtains an access token via an authorization server.",
+      mermaid: `sequenceDiagram
+    participant U as User
+    participant C as Client App
+    participant AS as Auth Server
+    participant RS as Resource Server
+    U->>C: Login Request
+    C->>AS: Authorization Request
+    AS->>U: Login Prompt
+    U->>AS: Credentials
+    AS->>C: Authorization Code
+    C->>AS: Exchange Code for Token
+    AS->>C: Access Token
+    C->>RS: Request with Token
+    RS->>C: Protected Resource`,
+    },
+    {
+      title: "AuthN and AuthZ Architecture",
+      kind: "architecture",
+      caption: "System components involved in authentication and authorization showing the separation between identity verification and permission checking.",
+      mermaid: `flowchart TB
+    Client["Client"] --> API["API Gateway"]
+    API --> AuthNSvc["Auth Service\\nAuthentication\\nIssues tokens"]
+    API --> AppSvc["Application Service\\nBusiness Logic"]
+    AuthNSvc --> IdStore["Identity Store\\nUsers and Credentials"]
+    AppSvc --> AuthZSvc["Authorization Engine\\nRBAC or ABAC"]
+    AuthZSvc --> PolicyStore["Policy Store\\nRoles and Permissions"]
+    AuthNSvc --> TokenStore["Token Store\\nRevocation list"]`,
+    },
+    {
+      title: "Token Lifecycle States",
+      kind: "state",
+      caption: "State machine for an access token from issuance through use to expiry or revocation.",
+      mermaid: `stateDiagram-v2
+    [*] --> Issued: Successful authentication
+    Issued --> Active: First use
+    Active --> Active: Valid requests
+    Active --> Expired: TTL elapsed
+    Active --> Revoked: Logout or admin action
+    Issued --> Revoked: Admin revocation
+    Expired --> [*]
+    Revoked --> [*]`,
     },
   ],
   animations: [

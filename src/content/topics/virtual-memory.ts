@@ -203,19 +203,93 @@ static inline int pte_is_writable(PageTableEntry pte) {
   ],
   diagrams: [
     {
-      title: "Multi-level page table structure (x86-64)",
-      kind: "architecture",
-      caption: "CR3 -> PML4 -> PDPT -> PD -> PT -> Physical Frame. Each level uses 9 bits of the virtual address. The final 12 bits are the page offset.",
-    },
-    {
-      title: "Page fault handling flow",
+      title: "Virtual Memory Address Translation",
       kind: "flow",
-      caption: "CPU accesses VA -> TLB miss -> page table walk -> present bit = 0 -> page fault exception -> OS handler checks validity -> find free frame (or evict) -> load from disk -> update PTE -> restart instruction.",
+      caption: "How a virtual address is translated to a physical address via the page table and TLB.",
+      mermaid: `flowchart TD
+    A["Process requests
+virtual address VA"] --> B["Check TLB
+Translation Lookaside Buffer"]
+    B --> C{TLB hit?}
+    C -->|Yes| D["Get physical address PA
+fast path"]
+    C -->|No| E["Walk page table
+in memory"]
+    E --> F{Page present?}
+    F -->|Yes| G["Load TLB entry
+return PA"]
+    G --> D
+    F -->|No| H["Page fault
+OS loads from disk"]
+    H --> G
+    D --> I["Access physical memory
+at PA"]`,
     },
     {
-      title: "Demand paging with copy-on-write",
+      title: "Virtual Memory Layout",
+      kind: "architecture",
+      caption: "Typical process virtual address space layout from kernel space to stack and heap.",
+      mermaid: `graph TD
+    VS["Virtual Address Space"] --> KS["Kernel Space
+high addresses
+not user accessible"]
+    VS --> Stack["Stack
+grows downward
+local variables"]
+    VS --> Mmap["Memory-mapped files
+and shared libraries"]
+    VS --> Heap["Heap
+grows upward
+malloc and new"]
+    VS --> BSS["BSS segment
+uninitilized globals"]
+    VS --> Data["Data segment
+initialized globals"]
+    VS --> Text["Text segment
+code
+read-only"]`,
+    },
+    {
+      title: "Page Replacement Policies",
+      kind: "mindmap",
+      caption: "Common page replacement algorithms used when physical memory is full and a page must be evicted.",
+      mermaid: `mindmap
+  root((Page Replacement))
+    FIFO
+      Evict oldest page
+      Simple to implement
+      Belady anomaly
+    LRU
+      Evict least recently used
+      Good hit rate
+      Expensive tracking
+    Clock Algorithm
+      Approximates LRU
+      Reference bit
+      Circular buffer
+    Optimal
+      Evict furthest future use
+      Theoretical best
+      Not implementable`,
+    },
+    {
+      title: "Demand Paging Sequence",
       kind: "sequence",
-      caption: "fork() marks all pages read-only and shared. On write, page fault triggers copy of the faulted page only. Unmodified pages remain shared.",
+      caption: "How the OS handles a page fault by loading the missing page from disk into physical memory.",
+      mermaid: `sequenceDiagram
+    participant P as Process
+    participant MMU as MMU Hardware
+    participant OS as OS Kernel
+    participant Disk as Disk
+    P->>MMU: access virtual address 0x4000
+    MMU->>OS: page fault - page not present
+    OS->>OS: find free frame or evict victim
+    OS->>Disk: load page from swap or file
+    Disk-->>OS: page data
+    OS->>MMU: update page table entry
+    OS->>P: resume execution
+    P->>MMU: retry access 0x4000
+    MMU-->>P: physical memory access`,
     },
   ],
   animations: [

@@ -225,22 +225,66 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Binary heap array-to-tree mapping",
+      title: "Max-Heap Tree Structure",
       kind: "architecture",
-      caption:
-        "Shows how array indices [0..n-1] map to a complete binary tree: index 0 is the root, left child of i is 2i+1, right child is 2i+2, parent is floor((i-1)/2).",
+      caption: "Max-heap structure showing parent-child ordering property.",
+      mermaid: `graph TD
+    A[100 root] --> B[70 left]
+    A --> C[90 right]
+    B --> D[50]
+    B --> E[60]
+    C --> F[80]
+    C --> G[40]`,
     },
     {
-      title: "Sift-down / extract-min operation flow",
+      title: "Heap Insert and Bubble Up",
       kind: "flow",
-      caption:
-        "Step-by-step flow of removing the root from a min-heap: replace root with last element, then repeatedly swap with the smaller child until the heap property is restored.",
+      caption: "Steps to insert a new element and restore the heap property.",
+      mermaid: `flowchart TD
+    A[Insert new element] --> B[Append to end of array]
+    B --> C[Compare with parent node]
+    C --> D{Heap property satisfied?}
+    D -- Yes --> E[Done heap is valid]
+    D -- No --> F[Swap with parent]
+    F --> G[Move up to parent position]
+    G --> C`,
     },
     {
-      title: "Heap variant comparison mind map",
+      title: "Heap Extract and Sift Down",
+      kind: "flow",
+      caption: "Steps to extract the root and restore heap property via sift-down.",
+      mermaid: `flowchart TD
+    A[Extract root element] --> B[Move last element to root]
+    B --> C[Remove last array position]
+    C --> D[Compare root with children]
+    D --> E{Heap property satisfied?}
+    E -- Yes --> F[Done heap is valid]
+    E -- No --> G[Swap with best child]
+    G --> H[Move down to child position]
+    H --> D`,
+    },
+    {
+      title: "Heap Applications",
       kind: "mindmap",
-      caption:
-        "Branching diagram of heap variants: binary heap, d-ary heap, binomial heap, Fibonacci heap, pairing heap, and their key trade-offs in insert, extract, decrease-key, and merge.",
+      caption: "Common applications and algorithms that use heap data structures.",
+      mermaid: `mindmap
+  root((Heap Applications))
+    Priority Queue
+      Task scheduling
+      Dijkstra algorithm
+      Event simulation
+    HeapSort
+      O n log n sort
+      In-place sorting
+    Top K Elements
+      K largest items
+      K smallest items
+    Merge K Lists
+      K sorted arrays
+      Streaming merge
+    Median Tracking
+      Two heaps pattern
+      Rolling median`,
     },
   ],
   animations: [

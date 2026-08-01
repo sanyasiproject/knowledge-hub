@@ -329,14 +329,48 @@ int main() {
     {
       title: "Property-Based Testing Lifecycle",
       kind: "flow",
-      caption:
-        "The PBT loop: define property, generate inputs, evaluate, shrink on failure, report minimal counterexample",
+      caption: "The PBT loop: define property, generate random inputs, evaluate the property, shrink on failure, and report the minimal counterexample.",
+      mermaid: `flowchart TD
+    Define[Define Property\nForall inputs: invariant holds] --> Gen[Generator produces\nrandom input]
+    Gen --> Eval{Property holds?}
+    Eval -->|Yes| Counter{Run count\nreached?}
+    Counter -->|No| Gen
+    Counter -->|Yes| Pass([All tests passed])
+    Eval -->|No| Found[Counterexample found\nRecord failing input]
+    Found --> Shrink[Shrinker tries simpler\nversions of input]
+    Shrink --> StillFails{Simpler input\nstill fails?}
+    StillFails -->|Yes| Shrink
+    StillFails -->|No| Minimal[Minimal counterexample found]
+    Minimal --> Report[Report with minimal\nfailing input and trace]`,
     },
     {
       title: "Shrinking Search Tree",
       kind: "state",
-      caption:
-        "How the shrinker explores progressively simpler inputs, pruning branches that no longer fail, converging on the minimal counterexample",
+      caption: "How the shrinker explores progressively simpler inputs, pruning branches that no longer fail, converging on the minimal counterexample.",
+      mermaid: `stateDiagram-v2
+    [*] --> FailingInput: Random generator found failure
+    FailingInput --> ShrinkElements: Try removing elements
+    ShrinkElements --> StillFails: Simpler version still fails
+    ShrinkElements --> Pruned: Simpler version passes - prune branch
+    StillFails --> ShrinkValues: Try reducing element values toward zero
+    Pruned --> ShrinkElements: Try another simplification
+    ShrinkValues --> StillFails: Still fails with simpler values
+    ShrinkValues --> Pruned: Passes - keep previous as minimal
+    StillFails --> Minimal: No further simplification fails
+    Minimal --> [*]: Report minimal counterexample`,
+    },
+    {
+      title: "PBT vs Example-Based Testing",
+      kind: "architecture",
+      caption: "How property-based and example-based tests complement each other across the input space.",
+      mermaid: `graph TD
+    InputSpace[Full Input Space\nAll possible inputs] --> Manual[Example-Based Tests\nHandpicked inputs\nKnown edge cases]
+    InputSpace --> PBT[Property-Based Tests\nRandom sampling\nUnexpected edge cases]
+    Manual --> Known[Tests you thought of\nHappy path and known bugs]
+    PBT --> Unknown[Tests you did not think of\nShrunk to minimal case]
+    Known --> Suite[Combined Test Suite]
+    Unknown --> Suite
+    Suite --> Confidence[High confidence\nin correctness]`,
     },
   ],
   animations: [

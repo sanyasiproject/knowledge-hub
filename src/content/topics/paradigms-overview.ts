@@ -247,16 +247,73 @@ LIMIT 5;`,
       title: "Paradigm Family Tree",
       kind: "mindmap",
       caption: "Hierarchical relationship between major paradigms, showing how declarative branches into functional and logic, while imperative branches into procedural, OOP, and event-driven.",
+      mermaid: `mindmap
+  root((Programming Paradigms))
+    Imperative
+      Procedural
+        C
+        Pascal
+      Object-Oriented
+        Java
+        C++
+        Python
+      Event-Driven
+        JavaScript
+        Node.js
+    Declarative
+      Functional
+        Haskell
+        Clojure
+        Scala
+      Logic
+        Prolog
+        Datalog
+    Concurrent
+      Actor Model
+        Erlang
+        Akka
+      CSP
+        Go`,
     },
     {
-      title: "Multi-Paradigm Language Venn Diagram",
+      title: "Multi-Paradigm Language Network",
       kind: "network",
-      caption: "Languages positioned by paradigm support: Haskell (pure FP), Prolog (logic), C (procedural), Java (OOP + imperative), Scala (OOP + FP), JavaScript (imperative + FP + event-driven + OOP), Rust (imperative + FP + procedural).",
+      caption: "Languages connected to the paradigms they support, illustrating how modern languages blend multiple paradigms.",
+      mermaid: `graph LR
+    Haskell --- FP[Functional]
+    OCaml --- FP
+    Scala --- FP
+    Scala --- OOP[Object-Oriented]
+    Python --- OOP
+    Python --- FP
+    Python --- Proc[Procedural]
+    Java --- OOP
+    Java --- FP
+    JavaScript --- FP
+    JavaScript --- OOP
+    JavaScript --- ED[Event-Driven]
+    Rust --- Proc
+    Rust --- FP
+    Go --- Proc
+    Go --- Conc[Concurrent]
+    Erlang --- FP
+    Erlang --- Conc
+    Prolog --- Logic[Logic]`,
     },
     {
       title: "Event-Driven Execution Flow",
       kind: "flow",
-      caption: "Event loop cycle: poll for events, dispatch to registered handler, handler runs to completion, return to polling. Illustrates non-blocking I/O and callback invocation.",
+      caption: "Event loop cycle: poll for events, dispatch to registered handler, handler runs to completion, return to polling.",
+      mermaid: `flowchart TD
+    Start([Event Loop Starts]) --> Poll[Poll for Events\nI/O, timers, signals]
+    Poll --> Q{Events pending?}
+    Q -->|No| Poll
+    Q -->|Yes| Dequeue[Dequeue next event]
+    Dequeue --> Dispatch[Dispatch to registered handler]
+    Dispatch --> Run[Handler runs to completion\nno preemption]
+    Run --> Q2{More handlers for this event?}
+    Q2 -->|Yes| Dispatch
+    Q2 -->|No| Poll`,
     },
   ],
   animations: [

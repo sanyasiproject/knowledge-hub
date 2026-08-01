@@ -226,28 +226,76 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Segment Tree Structure",
-      kind: "architecture",
-      caption:
-        "A segment tree for array [1, 3, 5, 7] shown as a binary tree. Each internal node stores the sum of its subtree. Leaves correspond to individual array elements; internal nodes aggregate their children's ranges.",
+      title: "Advanced Data Structures Overview",
+      kind: "mindmap",
+      caption: "Taxonomy of advanced data structures grouped by their primary use-case: range queries, probabilistic, tree-based, and graph-oriented.",
+      mermaid: `mindmap
+  root["Advanced Structures"]
+    Range Query
+      Segment Tree
+      Fenwick Tree
+      Sparse Table
+    Union-Find
+      Path Compression
+      Union by Rank
+    Probabilistic
+      Bloom Filter
+      Skip List
+      HyperLogLog
+    Trees
+      B-Tree
+      Trie
+      Suffix Array`,
     },
     {
-      title: "Fenwick Tree Index Responsibilities",
-      kind: "architecture",
-      caption:
-        "Visualization of how each Fenwick tree index covers a range determined by its lowest set bit. Index 8 (binary 1000) covers indices 1-8, index 6 (binary 0110) covers indices 5-6, and index 5 (binary 0101) covers only index 5.",
+      title: "B-Tree Node States",
+      kind: "state",
+      caption: "States a B-tree node passes through during insertion, including splits that propagate up to maintain balance.",
+      mermaid: `stateDiagram-v2
+    [*] --> Underflow : new empty node
+    Underflow --> Valid : keys inserted
+    Valid --> Full : key count = max
+    Full --> Split : insert into full node
+    Split --> Valid : parent absorbs median
+    Split --> NewRoot : root was split
+    NewRoot --> Valid : tree height increases`,
     },
     {
-      title: "Union-Find Path Compression",
+      title: "Skip List Search Path",
       kind: "flow",
-      caption:
-        "Before and after path compression on find(5): the chain 5->4->3->2->1->0 becomes a flat star where 5, 4, 3, 2, 1 all point directly to root 0.",
+      caption: "A skip list search starts at the top express lane and drops down levels until the target key is found or confirmed absent.",
+      mermaid: `flowchart TD
+    HEAD["Head Node"]
+    L3["Level 3 — express lane"]
+    L2["Level 2"]
+    L1["Level 1 — base list"]
+    CMP{"key found?"}
+    DOWN["Drop one level"]
+    FWD["Advance forward"]
+    FOUND["Return node"]
+    MISS["Return not found"]
+    HEAD --> L3 --> CMP
+    CMP -- "yes" --> FOUND
+    CMP -- "overshot" --> DOWN --> FWD --> CMP
+    L1 -- "end of list" --> MISS`,
     },
     {
       title: "Lazy Propagation Push-Down",
       kind: "sequence",
-      caption:
-        "Sequence diagram showing how a range update stores a lazy tag at a covering node, and a subsequent query triggers push-down of the tag to children before accessing them.",
+      caption: "A range update tags a covering node lazily; a later query pushes the tag down to children before reading them.",
+      mermaid: `sequenceDiagram
+    participant C as Caller
+    participant N as Covering Node
+    participant L as Left Child
+    participant R as Right Child
+    C->>N: rangeUpdate(l, r, val)
+    N->>N: store lazy tag
+    C->>N: rangeQuery(l, r)
+    N->>L: pushDown tag
+    N->>R: pushDown tag
+    L-->>N: partial result
+    R-->>N: partial result
+    N-->>C: merged result`,
     },
   ],
   animations: [

@@ -349,16 +349,62 @@ val testDb = new Database {
       title: "Functional Core / Imperative Shell Architecture",
       kind: "architecture",
       caption: "Pure business logic in the core (testable, composable). Impure I/O in the outer shell (thin, orchestrating). Data flows inward as arguments, outward as return values.",
+      mermaid: `graph TD
+    subgraph Shell["Imperative Shell - thin, impure"]
+        FetchDB[Fetch data from DB]
+        SendEmail[Send email via SMTP]
+        WriteFile[Write result to file]
+    end
+    subgraph Core["Functional Core - pure, testable"]
+        CalcTotal[calculateTotal - items to total]
+        ApplyDisc[applyDiscount - total and rate to discounted]
+        Validate[validateOrder - order to result]
+    end
+    FetchDB -->|Data as arguments| CalcTotal
+    CalcTotal -->|Return value| ApplyDisc
+    ApplyDisc -->|Return value| Validate
+    Validate -->|Return value| SendEmail
+    Validate -->|Return value| WriteFile`,
     },
     {
       title: "Side Effect Categories",
       kind: "mindmap",
-      caption: "Classification of side effects: State mutation (variables, collections), I/O (files, network, console), Non-determinism (random, time, threading), Exceptions (thrown errors, panics).",
+      caption: "Classification of side effects that make a function impure, grouped by type.",
+      mermaid: `mindmap
+  root((Side Effects))
+    State Mutation
+      Mutating global variables
+      Mutating function arguments
+      Updating shared collections
+      In-place array modification
+    IO Operations
+      Reading or writing files
+      Network requests
+      Console output
+      Database queries
+    Non-Determinism
+      Math.random calls
+      Date.now or new Date
+      Thread scheduling
+      External service calls
+    Exception Throwing
+      throw new Error
+      Panic in Rust
+      Unchecked exceptions
+      Out-of-bounds access`,
     },
     {
-      title: "IO Monad Execution Flow",
+      title: "Memoization Flow for Pure Functions",
       kind: "flow",
-      caption: "Pure functions build IO action descriptions. The runtime executes the description tree. At no point does a pure function perform a side effect — it only constructs a blueprint.",
+      caption: "How memoization is safe and effective for pure functions because the same input always yields the same output.",
+      mermaid: `flowchart TD
+    Call[Call fib of n] --> Check{Cache hit\nfor key n?}
+    Check -->|Yes| Return[Return cached result\nO of 1 lookup]
+    Check -->|No| Compute[Compute recursively\nfib of n-1 + fib of n-2]
+    Compute --> Store[Store result in cache\ncache n = result]
+    Store --> Return
+    Return --> Safe{Why is this safe?}
+    Safe --> Pure[Function is pure\nSame input always gives same output\nCached value never goes stale]`,
     },
   ],
   animations: [

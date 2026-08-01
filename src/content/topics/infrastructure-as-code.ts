@@ -250,8 +250,88 @@ export const url = alb.loadBalancer.dnsName;`
   },
 
   diagrams: [
-    { title: "Terraform Plan/Apply Workflow", kind: "flow", caption: "Developer writes HCL, runs plan to preview, gets approval, runs apply to provision." },
-    { title: "IaC CI/CD Pipeline Architecture", kind: "architecture", caption: "PR triggers plan, merge triggers apply, with policy checks and approval gates." },
+    {
+      title: "IaC Workflow",
+      kind: "flow",
+      caption: "Infrastructure-as-code workflow from code commit to provisioned resources.",
+      mermaid: `flowchart TD
+    A[Write IaC config files] --> B[Version control commit]
+    B --> C[CI pipeline trigger]
+    C --> D[Lint and validate]
+    D --> E{Validation pass?}
+    E -- No --> A
+    E -- Yes --> F[Plan or preview changes]
+    F --> G[Review diff output]
+    G --> H{Approve changes?}
+    H -- No --> A
+    H -- Yes --> I[Apply changes]
+    I --> J[Provision or update resources]
+    J --> K[State file updated]`,
+    },
+    {
+      title: "Terraform State Management",
+      kind: "architecture",
+      caption: "How Terraform state tracks real infrastructure and enables planning.",
+      mermaid: `graph TD
+    Code[Terraform .tf files] --> TF[Terraform Core]
+    State[State file .tfstate] --> TF
+    TF --> Plan[terraform plan shows diff]
+    Plan --> Apply[terraform apply]
+    Apply --> Provider[Cloud Provider API]
+    Provider --> Resources[Real Infrastructure]
+    Apply --> State
+    subgraph Remote Backend
+        RS[S3 or GCS bucket] --> Lock[DynamoDB or GCS lock]
+    end
+    State --> RS`,
+    },
+    {
+      title: "IaC Tool Comparison",
+      kind: "mindmap",
+      caption: "Comparing popular infrastructure-as-code tools and their approaches.",
+      mermaid: `mindmap
+  root((IaC Tools))
+    Terraform
+      HCL declarative
+      Multi-cloud
+      State file required
+      Large module ecosystem
+    Pulumi
+      Real code TypeScript Python Go
+      Multi-cloud
+      No DSL needed
+    CloudFormation
+      AWS native
+      JSON or YAML
+      No state file
+    Ansible
+      Procedural not declarative
+      Agentless SSH
+      Configuration management
+    CDK
+      AWS native
+      TypeScript Python Java
+      Compiles to CloudFormation`,
+    },
+    {
+      title: "Drift Detection and Remediation",
+      kind: "sequence",
+      caption: "How IaC tools detect and remediate infrastructure configuration drift.",
+      mermaid: `sequenceDiagram
+    participant Engineer
+    participant IaC as IaC Tool
+    participant State as State Backend
+    participant Cloud as Cloud Provider
+    Engineer->>IaC: terraform plan
+    IaC->>State: Read desired state
+    IaC->>Cloud: Read actual state via API
+    IaC->>IaC: Diff desired vs actual
+    IaC-->>Engineer: Show drift detected
+    Engineer->>IaC: terraform apply
+    IaC->>Cloud: Apply changes to fix drift
+    Cloud-->>IaC: Resources updated
+    IaC->>State: Update state file`,
+    },
   ],
 
   animations: [

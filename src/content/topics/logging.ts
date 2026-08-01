@@ -482,40 +482,29 @@ int main() {
     {
       title: "ELK Log Pipeline Architecture",
       kind: "architecture",
-      caption:
-        "End-to-end flow of log data from application containers through the ELK pipeline to dashboards and alerts",
-      mermaid: `flowchart LR
+      caption: "End-to-end flow of log data from application containers through the ELK pipeline to dashboards and alerts.",
+      mermaid: `graph LR
     subgraph Sources["Application Sources"]
-        A1["Service A<br/>stdout/JSON"]
-        A2["Service B<br/>stdout/JSON"]
-        A3["Service C<br/>stdout/JSON"]
+        A1["Service A - stdout JSON"]
+        A2["Service B - stdout JSON"]
+        A3["Service C - stdout JSON"]
     end
-
     subgraph Shippers["Log Shippers"]
-        F1["Fluent Bit<br/>DaemonSet"]
-        F2["Filebeat<br/>Sidecar"]
+        F1["Fluent Bit DaemonSet"]
+        F2["Filebeat Sidecar"]
     end
-
-    subgraph Buffer["Message Buffer"]
-        K["Kafka<br/>logs topic<br/>3 partitions"]
-    end
-
+    K["Kafka - logs topic"]
     subgraph Processing["Log Processing"]
-        L1["Logstash<br/>Node 1"]
-        L2["Logstash<br/>Node 2"]
+        L1["Logstash Node 1"]
+        L2["Logstash Node 2"]
     end
-
     subgraph Storage["Elasticsearch Cluster"]
-        ES1["Hot Nodes<br/>7-day retention<br/>SSD"]
-        ES2["Warm Nodes<br/>30-day retention<br/>HDD"]
-        ES3["Cold / S3<br/>Archive<br/>1-year"]
+        ES1["Hot Nodes - 7-day SSD"]
+        ES2["Warm Nodes - 30-day HDD"]
+        ES3["Cold Archive S3"]
     end
-
-    subgraph Visualization["Dashboards & Alerts"]
-        KB["Kibana<br/>Dashboards"]
-        AL["ElastAlert<br/>Alerting"]
-    end
-
+    KB["Kibana Dashboards"]
+    AL["ElastAlert Alerting"]
     A1 --> F1
     A2 --> F1
     A3 --> F2
@@ -531,53 +520,72 @@ int main() {
     ES1 --> AL`,
     },
     {
-      title: "Log Level Decision Flow",
+      title: "Log Level Selection Flow",
       kind: "flow",
-      caption:
-        "Decision tree for choosing the appropriate log level for an event in production systems",
+      caption: "Decision tree for choosing the appropriate log level for any event in production systems.",
       mermaid: `flowchart TD
-    Start["Event Occurs"] --> Q1{"Can the process<br/>continue?"}
-    Q1 -->|No| FATAL["FATAL<br/>Process must exit<br/>e.g. missing config,<br/>OOM"]
-    Q1 -->|Yes| Q2{"Did an error<br/>occur?"}
-    Q2 -->|Yes| Q3{"Was it<br/>recovered?"}
-    Q3 -->|No| ERROR["ERROR<br/>Requires attention<br/>e.g. unhandled exception,<br/>downstream timeout"]
-    Q3 -->|Yes| WARN["WARN<br/>Recovered but notable<br/>e.g. retry succeeded,<br/>fallback used"]
-    Q2 -->|No| Q4{"Is it a normal<br/>operational event?"}
-    Q4 -->|Yes| INFO["INFO<br/>Business events<br/>e.g. order created,<br/>user login"]
-    Q4 -->|No| Q5{"Is it useful for<br/>debugging?"}
-    Q5 -->|Yes| DEBUG["DEBUG<br/>Diagnostic detail<br/>e.g. variable values,<br/>cache hit/miss"]
-    Q5 -->|No| SKIP["Do not log<br/>Avoid noise"]
-
-    style FATAL fill:#d32f2f,color:#fff
-    style ERROR fill:#f57c00,color:#fff
-    style WARN fill:#fbc02d,color:#000
-    style INFO fill:#388e3c,color:#fff
-    style DEBUG fill:#1976d2,color:#fff
-    style SKIP fill:#757575,color:#fff`,
+    Start["Event Occurs"] --> Q1{"Can the process\ncontinue?"}
+    Q1 -->|No| FATAL["FATAL - Process must exit"]
+    Q1 -->|Yes| Q2{"Did an error occur?"}
+    Q2 -->|Yes| Q3{"Was it recovered?"}
+    Q3 -->|No| ERROR["ERROR - Requires attention"]
+    Q3 -->|Yes| WARN["WARN - Recovered but notable"]
+    Q2 -->|No| Q4{"Normal operational event?"}
+    Q4 -->|Yes| INFO["INFO - Business events"]
+    Q4 -->|No| Q5{"Useful for debugging?"}
+    Q5 -->|Yes| DEBUG["DEBUG - Diagnostic detail"]
+    Q5 -->|No| SKIP["Do not log - avoid noise"]`,
     },
     {
-      title: "Log Lifecycle State Machine",
+      title: "Log Event Lifecycle States",
       kind: "state",
-      caption:
-        "States of a log event from emission through pipeline processing to storage tier transitions",
+      caption: "States a log event passes through from emission to archival, including error and drop paths.",
       mermaid: `stateDiagram-v2
     [*] --> Emitted: Application logs event
     Emitted --> Buffered: Async appender queues
     Buffered --> Shipped: Shipper reads from buffer
-    Shipped --> Queued: Arrives in Kafka/Redis
-    Queued --> Parsed: Logstash/Vector processes
-    Parsed --> Enriched: Add metadata, redact PII
-    Enriched --> HotStorage: Index in Elasticsearch
-    HotStorage --> WarmStorage: ILM policy (7 days)
-    WarmStorage --> ColdStorage: ILM policy (30 days)
-    ColdStorage --> Archived: Move to S3/GCS
-    Archived --> Deleted: Retention expired
-    Deleted --> [*]
-
     Buffered --> Dropped: Buffer overflow
+    Shipped --> Queued: Arrives in Kafka
     Shipped --> Failed: Network error
     Failed --> Shipped: Retry with backoff
+    Queued --> Parsed: Logstash processes
+    Parsed --> Enriched: Add metadata and redact PII
+    Enriched --> HotStorage: Index in Elasticsearch
+    HotStorage --> WarmStorage: ILM policy 7 days
+    WarmStorage --> ColdStorage: ILM policy 30 days
+    ColdStorage --> Archived: Move to S3
+    Archived --> Deleted: Retention expired
+    Deleted --> [*]
     Dropped --> [*]`,
+    },
+    {
+      title: "Structured Logging Fields Mindmap",
+      kind: "mindmap",
+      caption: "Essential and optional fields for structured JSON log events in a distributed system.",
+      mermaid: `mindmap
+  root((Structured Log Event))
+    Required Fields
+      timestamp ISO 8601
+      level ERROR WARN INFO DEBUG
+      message human readable
+      service name
+    Correlation
+      requestId per request UUID
+      traceId distributed trace
+      spanId current span
+      userId or sessionId
+    Context
+      host or pod name
+      region or zone
+      version or commit SHA
+    Error Fields
+      error.type exception class
+      error.message
+      stack trace
+    Performance
+      durationMs
+      statusCode
+      httpMethod and path`,
     },
   ],
   comparison: {

@@ -266,16 +266,80 @@ function escapeRegex(str: string): string {
   ],
   diagrams: [
     {
-      title: "Red-Green-Refactor Cycle",
+      title: "TDD Red-Green-Refactor Cycle",
       kind: "flow",
-      caption:
-        "The TDD cycle: write a failing test (Red), make it pass with minimal code (Green), improve code structure (Refactor), then repeat. The cycle typically takes 1-5 minutes per iteration.",
+      caption: "The core TDD loop: write a failing test, make it pass with minimal code, then refactor.",
+      mermaid: `flowchart TD
+    A([Start]) --> B["Write a failing test
+RED"]
+    B --> C{Test passes?}
+    C -->|No - expected| D["Write minimal code
+to pass the test"]
+    D --> E{Test passes?}
+    E -->|No| D
+    E -->|Yes - GREEN| F["Refactor code
+keep tests green"]
+    F --> G{Tests still pass?}
+    G -->|No| H["Fix regression"]
+    H --> F
+    G -->|Yes| I{More features?}
+    I -->|Yes| B
+    I -->|No| J([Done])`,
     },
     {
-      title: "Outside-In vs Inside-Out TDD",
+      title: "TDD vs Traditional Development",
       kind: "architecture",
-      caption:
-        "Outside-In (London) starts from the controller/API layer and works inward using mocks. Inside-Out (Detroit) starts from the domain model and works outward with real objects.",
+      caption: "Comparing test-after development with test-driven development in terms of feedback loops.",
+      mermaid: `graph LR
+    subgraph Traditional
+    TC["Write Code"] --> TT["Write Tests"]
+    TT --> TD["Debug Issues"]
+    TD --> TC
+    end
+    subgraph TDD
+    WT["Write Test"] --> WC["Write Code"]
+    WC --> RF["Refactor"]
+    RF --> WT
+    end`,
+    },
+    {
+      title: "TDD Benefits and Properties",
+      kind: "mindmap",
+      caption: "Key benefits and design effects of practicing test-driven development consistently.",
+      mermaid: `mindmap
+  root((TDD))
+    Design Benefits
+      Forces loose coupling
+      Drives small interfaces
+      Reveals complex APIs early
+    Quality Benefits
+      High test coverage
+      Regression safety net
+      Executable documentation
+    Process Benefits
+      Fast feedback loop
+      Confident refactoring
+      Incremental delivery`,
+    },
+    {
+      title: "TDD with Outside-In Approach",
+      kind: "sequence",
+      caption: "Outside-in TDD starting from acceptance test down through integration and unit tests.",
+      mermaid: `sequenceDiagram
+    participant Dev as Developer
+    participant AT as Acceptance Test
+    participant IT as Integration Test
+    participant UT as Unit Test
+    Dev->>AT: Write failing acceptance test
+    AT-->>Dev: RED
+    Dev->>IT: Write integration test for component
+    IT-->>Dev: RED
+    Dev->>UT: Write unit tests for small functions
+    UT-->>Dev: RED then GREEN
+    Dev->>IT: Component satisfies integration test
+    IT-->>Dev: GREEN
+    Dev->>AT: Feature satisfies acceptance test
+    AT-->>Dev: GREEN`,
     },
   ],
   animations: [

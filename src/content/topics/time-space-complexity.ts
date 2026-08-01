@@ -125,14 +125,87 @@ int fib(int n) {
   ],
   diagrams: [
     {
-      title: "Recursion tree for merge sort T(n) = 2T(n/2) + O(n)",
-      kind: "flow",
-      caption: "Each level does O(n) total work across all nodes. There are log₂(n) levels, giving O(n log n) total.",
+      title: "Big-O Complexity Hierarchy",
+      kind: "architecture",
+      caption: "Growth rate ordering from constant O(1) to factorial O(n!) showing relative performance.",
+      mermaid: `graph LR
+    O1["O(1)
+Constant
+Hash lookup"] --> Olog["O(log n)
+Logarithmic
+Binary search"]
+    Olog --> On["O(n)
+Linear
+Array scan"]
+    On --> Onlog["O(n log n)
+Linearithmic
+Merge sort"]
+    Onlog --> On2["O(n squared)
+Quadratic
+Bubble sort"]
+    On2 --> O2n["O(2 to n)
+Exponential
+Subset search"]
+    O2n --> Onfac["O(n!)
+Factorial
+Permutations"]`,
     },
     {
-      title: "Master theorem decision flowchart",
+      title: "Algorithm Complexity Analysis Flow",
       kind: "flow",
-      caption: "Given T(n) = aT(n/b) + O(n^d): compare log_b(a) with d to determine which case applies and the resulting complexity.",
+      caption: "Step-by-step approach to analyzing the time complexity of an algorithm.",
+      mermaid: `flowchart TD
+    A([Analyze algorithm]) --> B["Identify input size n"]
+    B --> C["Count dominant operations"]
+    C --> D{Loops present?}
+    D -->|Single loop| E["O(n) per loop body"]
+    D -->|Nested loops| F["Multiply complexities
+O(n squared) for 2x nested"]
+    D -->|No loops| G["O(1) or recursion check"]
+    E --> H["Apply Big-O rules
+drop constants and lower terms"]
+    F --> H
+    G --> H
+    H --> I["State final Big-O"]`,
+    },
+    {
+      title: "Space vs Time Trade-off",
+      kind: "mindmap",
+      caption: "Common algorithmic strategies that trade more memory for faster runtime or vice versa.",
+      mermaid: `mindmap
+  root((Complexity Trade-offs))
+    More Space for Speed
+      Hash tables
+        O(1) lookup vs O(n) scan
+      Memoization
+        Cache recursive results
+      Precomputed tables
+        Lookup vs compute
+    Less Space Slower
+      In-place sorting
+        O(1) space O(n log n) time
+      Streaming algorithms
+        O(1) space linear scan`,
+    },
+    {
+      title: "Sorting Algorithm Complexities",
+      kind: "architecture",
+      caption: "Time and space complexity comparison for common sorting algorithms.",
+      mermaid: `graph TD
+    Sort["Sorting Algorithms"] --> Comp["Comparison-Based"]
+    Sort --> NonComp["Non-Comparison"]
+    Comp --> BS["Bubble Sort
+O(n^2) time O(1) space"]
+    Comp --> MS["Merge Sort
+O(n log n) time O(n) space"]
+    Comp --> QS["Quick Sort
+O(n log n) avg O(log n) space"]
+    Comp --> HS["Heap Sort
+O(n log n) time O(1) space"]
+    NonComp --> CS["Counting Sort
+O(n+k) time O(k) space"]
+    NonComp --> RS["Radix Sort
+O(nk) time O(n+k) space"]`,
     },
   ],
   animations: [

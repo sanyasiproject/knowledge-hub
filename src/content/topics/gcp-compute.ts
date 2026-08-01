@@ -283,105 +283,85 @@ resource "google_compute_instance_template" "spot" {
   ],
   diagrams: [
     {
-      title: "GCP Compute Decision Tree",
+      title: "GCP Compute Service Selection",
       kind: "flow",
-      caption: "Choosing the right GCP compute service based on workload requirements",
+      caption: "Decision tree for selecting the right GCP compute service.",
       mermaid: `flowchart TD
-    A["Need to run\\ncompute workload?"] --> B{"Need full\\nVM control?"}
-    B -- Yes --> C{"Need dedicated\\nhardware?"}
-    C -- Yes --> D["Sole-Tenant Nodes"]
-    C -- No --> E{"Cost-sensitive &\\nfault-tolerant?"}
-    E -- Yes --> F["Spot / Preemptible VMs"]
-    E -- No --> G["Compute Engine\\nStandard VMs"]
-    B -- No --> H{"Container-based?"}
-    H -- Yes --> I{"Need Kubernetes\\norchestration?"}
-    I -- Yes --> J{"Want managed\\nnodes?"}
-    J -- Yes --> K["GKE Autopilot"]
-    J -- No --> L["GKE Standard"]
-    I -- No --> M{"Stateless\\nHTTP/events?"}
-    M -- Yes --> N["Cloud Run"]
-    M -- No --> O["Cloud Run Jobs"]
-    H -- No --> P{"Simple event-driven\\nfunction?"}
-    P -- Yes --> Q["Cloud Functions\\n2nd Gen"]
-    P -- No --> R["Cloud Run with\\ncustom container"]
-
-    style D fill:#4285F4,color:#fff
-    style F fill:#EA4335,color:#fff
-    style G fill:#4285F4,color:#fff
-    style K fill:#34A853,color:#fff
-    style L fill:#34A853,color:#fff
-    style N fill:#FBBC04,color:#000
-    style O fill:#FBBC04,color:#000
-    style Q fill:#EA4335,color:#fff
-    style R fill:#FBBC04,color:#000`,
+    A[Need to run workload] --> B{Full VM control needed?}
+    B -- Yes --> C{Dedicated hardware?}
+    C -- Yes --> D[Sole-Tenant Nodes]
+    C -- No --> E{Fault-tolerant batch?}
+    E -- Yes --> F[Spot VMs]
+    E -- No --> G[Compute Engine VMs]
+    B -- No --> H{Container-based?}
+    H -- Yes --> I{Need Kubernetes?}
+    I -- Yes --> J{Managed nodes?}
+    J -- Yes --> K[GKE Autopilot]
+    J -- No --> L[GKE Standard]
+    I -- No --> M[Cloud Run]
+    H -- No --> N[Cloud Functions 2nd Gen]`,
     },
     {
       title: "Cloud Run Request Lifecycle",
       kind: "sequence",
-      caption: "How Cloud Run handles an incoming request from load balancer to response",
+      caption: "How Cloud Run handles an incoming HTTP request end-to-end.",
       mermaid: `sequenceDiagram
     participant Client
-    participant GCLB as Google Cloud<br/>Load Balancer
-    participant Autoscaler
-    participant Instance as Cloud Run<br/>Instance
-    participant Container as User Container
-
-    Client->>GCLB: HTTPS Request
-    GCLB->>Autoscaler: Route request
-
-    alt No warm instances available
-        Autoscaler->>Instance: Provision new instance (cold start)
-        Instance->>Container: Pull image & start container
-        Container-->>Instance: Listening on PORT
-        Note over Instance,Container: Startup CPU boost active<br/>if --cpu-boost enabled
+    participant LB as Load Balancer
+    participant Scaler as Autoscaler
+    participant Instance as Cloud Run Instance
+    participant App as Container App
+    Client->>LB: HTTPS Request
+    LB->>Scaler: Route request
+    alt No warm instance
+        Scaler->>Instance: Provision instance
+        Instance->>App: Cold start container
     end
-
-    Autoscaler->>Instance: Forward request
-    Instance->>Container: HTTP request on $PORT
-
-    Note over Container: Process request<br/>(concurrency up to 1000)
-
-    Container-->>Instance: HTTP response
-    Instance-->>GCLB: Response
-    GCLB-->>Client: HTTPS Response
-
-    alt CPU throttled mode
-        Note over Instance,Container: CPU throttled between requests<br/>Billing stops
-    else CPU always allocated
-        Note over Instance,Container: CPU remains available<br/>Background work continues
+    LB->>Instance: Forward request
+    Instance->>App: Handle request
+    App-->>Instance: Response
+    Instance-->>LB: Response
+    LB-->>Client: HTTPS Response`,
+    },
+    {
+      title: "GKE Autopilot vs Standard",
+      kind: "architecture",
+      caption: "Comparing responsibilities between GKE Autopilot and Standard modes.",
+      mermaid: `graph LR
+    subgraph Autopilot
+        A1[Pod Spec] --> A2[GKE Manages Nodes]
+        A2 --> A3[Auto Scaling]
+        A2 --> A4[Security Policy]
+        A2 --> A5[Billing Per Pod]
     end
-
-    alt No requests for idle timeout
-        Autoscaler->>Instance: Scale down to min-instances
+    subgraph Standard
+        S1[Pod Spec] --> S2[You Manage Node Pools]
+        S2 --> S3[Manual Scaling Config]
+        S2 --> S4[Custom Security]
+        S2 --> S5[Billing Per Node]
     end`,
     },
     {
-      title: "GKE Autopilot Pod Scheduling Flow",
-      kind: "flow",
-      caption: "How GKE Autopilot provisions nodes and schedules pods with bin-packing",
-      mermaid: `flowchart TD
-    A["Pod submitted via\\nkubectl apply"] --> B["Admission Webhook\\nintercepts"]
-    B --> C{"Resource requests\\n& limits set?"}
-    C -- No --> D["Mutating webhook\\ninjects defaults"]
-    C -- Yes --> E["Validate against\\nAutopilot constraints"]
-    D --> E
-    E --> F{"Passes security\\npolicies?"}
-    F -- No --> G["Pod rejected\\nwith error"]
-    F -- Yes --> H["Resource adjustment\\nannotation added"]
-    H --> I["Scheduler evaluates\\nresource requests"]
-    I --> J{"Existing node\\nwith capacity?"}
-    J -- Yes --> K["Bin-pack onto\\nexisting node"]
-    J -- No --> L["Provision new node\\nof optimal type"]
-    L --> M["Node joins cluster\\n& becomes Ready"]
-    M --> K
-    K --> N["Pod scheduled\\n& running"]
-    N --> O["Billing: per-pod\\nresource SKU tier"]
-
-    style G fill:#EA4335,color:#fff
-    style N fill:#34A853,color:#fff
-    style O fill:#FBBC04,color:#000
-    style D fill:#4285F4,color:#fff
-    style H fill:#4285F4,color:#fff`,
+      title: "GCP Compute Cost Tiers",
+      kind: "mindmap",
+      caption: "Overview of GCP compute pricing and discount strategies.",
+      mermaid: `mindmap
+  root((GCP Compute Cost))
+    On-Demand
+      Standard VMs
+      Per-second billing
+    Sustained Use
+      Auto applied
+      Up to 30 percent off
+    Committed Use
+      1 year 37 percent off
+      3 year 55 percent off
+    Spot VMs
+      60 to 91 percent off
+      Preemptible
+    Cloud Run
+      Per request billing
+      100ms granularity`,
     },
   ],
   comparison: {

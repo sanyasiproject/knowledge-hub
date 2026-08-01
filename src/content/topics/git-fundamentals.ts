@@ -273,38 +273,66 @@ git cherry-pick def5678`,
 
   diagrams: [
     {
-      title: "Git Branching and Merge Workflow",
-      kind: "flow",
-      caption: "A typical feature-branch workflow showing branch creation, parallel development, and merge back to main.",
-      mermaid: `gitGraph
-  commit id: "Initial commit"
-  commit id: "Add README"
-  branch feature/login
-  checkout feature/login
-  commit id: "Add auth module"
-  commit id: "Add login form"
-  checkout main
-  commit id: "Update docs"
-  merge feature/login id: "Merge login feature"
-  commit id: "Release v1.0"`,
+      title: "Git Object Model",
+      kind: "architecture",
+      caption: "How Git stores content as a graph of blob, tree, and commit objects.",
+      mermaid: `graph TD
+    C2[Commit HEAD] --> T2[Tree root]
+    C2 --> C1[Commit parent]
+    C1 --> T1[Tree root prev]
+    T2 --> B1[Blob file1.txt]
+    T2 --> B2[Blob file2.txt]
+    T2 --> ST[Subtree src]
+    ST --> B3[Blob main.js]
+    T1 --> B1`,
     },
     {
-      title: "Git Three-Tree Architecture",
+      title: "Git Branch Workflow",
       kind: "flow",
-      caption: "How files flow between the working tree, staging area (index), and the repository (HEAD) through Git commands.",
-      mermaid: `flowchart LR
-  WT["**Working Tree**\\n(files on disk)"]
-  IDX["**Staging Area**\\n(index)"]
-  REPO["**Repository**\\n(HEAD / commits)"]
-  REMOTE["**Remote**\\n(origin)"]
-
-  WT -->|"git add"| IDX
-  IDX -->|"git commit"| REPO
-  REPO -->|"git push"| REMOTE
-  REMOTE -->|"git fetch"| REPO
-  REPO -->|"git checkout / restore"| WT
-  IDX -->|"git restore --staged"| WT
-  REMOTE -->|"git pull (fetch+merge)"| WT`,
+      caption: "Typical feature branch workflow from creation to merge.",
+      mermaid: `flowchart TD
+    A[Start on main] --> B[git checkout -b feature]
+    B --> C[Make changes]
+    C --> D[git add and commit]
+    D --> E{More changes?}
+    E -- Yes --> C
+    E -- No --> F[git push origin feature]
+    F --> G[Open Pull Request]
+    G --> H{Review passed?}
+    H -- No --> C
+    H -- Yes --> I[Merge to main]
+    I --> J[Delete feature branch]`,
+    },
+    {
+      title: "Git File State Transitions",
+      kind: "state",
+      caption: "How files transition between working directory, staging area, and repository.",
+      mermaid: `stateDiagram-v2
+    [*] --> Untracked: new file created
+    Untracked --> Staged: git add
+    Staged --> Committed: git commit
+    Committed --> Modified: edit file
+    Modified --> Staged: git add
+    Staged --> Modified: git restore --staged
+    Committed --> Untracked: git rm`,
+    },
+    {
+      title: "Merge vs Rebase Strategy",
+      kind: "sequence",
+      caption: "Comparing merge and rebase for integrating branch changes.",
+      mermaid: `sequenceDiagram
+    participant Main
+    participant Feature
+    Note over Main,Feature: Branches diverged
+    Main->>Main: Commit M1
+    Feature->>Feature: Commit F1
+    Feature->>Feature: Commit F2
+    Note over Main: Merge creates merge commit
+    Feature->>Main: Merge F1 and F2
+    Main->>Main: Merge commit
+    Note over Feature: Rebase replays commits linearly
+    Feature->>Feature: Rebase F1 onto M1
+    Feature->>Feature: Rebase F2 onto rebased F1`,
     },
   ],
 

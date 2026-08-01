@@ -379,85 +379,67 @@ fullReliabilitySetup().catch(console.error);`,
     {
       title: "Publisher Confirm Flow",
       kind: "sequence",
-      caption: "The lifecycle of a message from publish to broker confirmation, showing ack and nack paths.",
+      caption: "Publisher confirms ensure the broker has persisted the message. The broker acks after fsync. A nack triggers a retry loop.",
       mermaid: `sequenceDiagram
-  participant P as Publisher
-  participant Ch as Channel (confirm mode)
-  participant Ex as Exchange
-  participant Q as Durable Queue
-  participant Disk as Disk (fsync)
-
-  P->>Ch: confirm.select
-  Ch-->>P: confirm.select-ok
-
-  P->>Ch: basic.publish (persistent, tag=1)
-  Ch->>Ex: Route message
-  Ex->>Q: Deliver to matched queue
-  Q->>Disk: Write to disk
-  Disk-->>Q: fsync complete
-  Q-->>Ch: Message handled
-  Ch-->>P: basic.ack (tag=1)
-
-  P->>Ch: basic.publish (persistent, tag=2)
-  Ch->>Ex: Route message
-  Note over Ex: Internal error
-  Ch-->>P: basic.nack (tag=2)`,
+    participant P as Publisher
+    participant CH as Channel
+    participant EX as Exchange
+    participant Q as Durable Queue
+    participant Disk as Disk
+    P->>CH: confirm.select
+    CH-->>P: confirm.select-ok
+    P->>CH: basic.publish (persistent, tag=1)
+    CH->>EX: route message
+    EX->>Q: enqueue
+    Q->>Disk: fsync
+    Disk-->>Q: ok
+    Q-->>CH: basic.ack (tag=1)
+    CH-->>P: basic.ack
+    Note over P: Safe to forget message`,
     },
     {
-      title: "Dead Letter Exchange Retry Architecture",
+      title: "Dead Letter Exchange Routing",
       kind: "architecture",
-      caption: "DLX-based retry pattern with exponential backoff using TTL queues and a parking lot for exhausted retries.",
+      caption: "Messages that are rejected, expire, or exceed max-length are routed to a Dead Letter Exchange, allowing inspection and reprocessing.",
       mermaid: `graph LR
-  P[Producer] -->|publish| ME[Main Exchange]
-  ME -->|binding| MQ[Main Queue]
-  MQ -->|consume| C[Consumer]
-
-  C -->|ack| MQ
-  C -->|nack requeue=false| DLX[Dead Letter Exchange]
-
-  DLX -->|retry count < max| RQ1[Retry Queue 1s TTL]
-  DLX -->|retry count < max| RQ2[Retry Queue 5s TTL]
-  DLX -->|retry count < max| RQ3[Retry Queue 30s TTL]
-
-  RQ1 -->|TTL expired| ME
-  RQ2 -->|TTL expired| ME
-  RQ3 -->|TTL expired| ME
-
-  DLX -->|retry count >= max| PLQ[Parking Lot Queue]
-  PLQ -->|manual inspection| Admin[Admin Dashboard]`,
+    P[Producer] --> EX[Main Exchange]
+    EX --> Q[(Work Queue
+x-dead-letter-exchange=dlx)]
+    Q -->|nack / ttl / overflow| DLX[Dead Letter Exchange]
+    DLX --> DLQ[(Dead Letter Queue)]
+    DLQ --> INSPECT[Ops / Retry Service]
+    INSPECT -->|requeue| EX`,
     },
     {
-      title: "Message Delivery Guarantees State Machine",
+      title: "Consumer Acknowledgement State Machine",
       kind: "state",
-      caption: "State transitions for a message under different delivery guarantee modes.",
+      caption: "A delivered message stays unacked until the consumer sends ack or nack. Unacked messages are redelivered on channel close or timeout.",
       mermaid: `stateDiagram-v2
-  [*] --> Published: Producer publishes
-
-  state "At-Most-Once" as AMO {
-    Published --> Delivered: auto-ack
-    Delivered --> Lost: Consumer crashes
-    Delivered --> Processed: Success
-  }
-
-  state "At-Least-Once" as ALO {
-    Published --> Confirmed: Publisher confirm
-    Confirmed --> Queued: Persisted to disk
-    Queued --> Processing: Consumer receives
-    Processing --> Acked: basic.ack
-    Processing --> Redelivered: Consumer crash / nack+requeue
-    Redelivered --> Processing: Redelivery
-    Acked --> [*]
-  }
-
-  state "Exactly-Once (approx)" as EO {
-    Published --> Confirmed2: Publisher confirm
-    Confirmed2 --> Queued2: Persisted
-    Queued2 --> DedupCheck: Consumer receives
-    DedupCheck --> Skipped: Already processed
-    DedupCheck --> ProcessAndRecord: New messageId
-    ProcessAndRecord --> Acked2: Atomic ack + DB write
-    Acked2 --> [*]
-  }`,
+    [*] --> Ready : Message enqueued
+    Ready --> Unacked : basic.deliver to consumer
+    Unacked --> Removed : basic.ack
+    Unacked --> Requeued : basic.nack requeue=true
+    Unacked --> DeadLettered : basic.nack requeue=false
+    Unacked --> Requeued : Channel closed / connection drop
+    Requeued --> Ready
+    Removed --> [*]
+    DeadLettered --> [*]`,
+    },
+    {
+      title: "High Availability Queue Mirroring",
+      kind: "architecture",
+      caption: "Classic mirrored queues replicate a master queue to mirror nodes. Quorum queues use Raft consensus for stronger durability guarantees.",
+      mermaid: `graph TD
+    subgraph Cluster
+      N1[Node 1 - Master]
+      N2[Node 2 - Mirror]
+      N3[Node 3 - Mirror]
+      N1 -->|sync| N2
+      N1 -->|sync| N3
+    end
+    P[Producer] --> N1
+    C1[Consumer] --> N1
+    N1 -->|promote on failure| N2`,
     },
   ],
   comparison: {

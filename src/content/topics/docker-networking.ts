@@ -357,99 +357,93 @@ YAML`,
     {
       title: "Docker Bridge Network Architecture",
       kind: "architecture",
-      caption: "Shows how containers connect to the docker0 bridge via veth pairs, with NAT for external traffic and iptables DNAT for port publishing.",
-      mermaid: `flowchart TB
-  subgraph Host["Docker Host"]
-    direction TB
-    subgraph NS1["Container A (net namespace)"]
-      eth0a["eth0\\n10.0.1.2"]
+      mermaid: `graph TB
+    subgraph Host["Docker Host"]
+      subgraph NS1["Container A namespace"]
+        eth0a["eth0\n10.0.1.2"]
+      end
+      subgraph NS2["Container B namespace"]
+        eth0b["eth0\n10.0.1.3"]
+      end
+      subgraph Bridge["User-defined Bridge br-xxxx"]
+        vethA["veth-a"]
+        vethB["veth-b"]
+        DNS["Embedded DNS\n127.0.0.11"]
+      end
+      IPT["iptables DNAT and MASQUERADE"]
+      HostNIC["Host NIC eth0\n192.168.1.100"]
     end
-    subgraph NS2["Container B (net namespace)"]
-      eth0b["eth0\\n10.0.1.3"]
-    end
-    subgraph Bridge["User-defined Bridge (br-xxxx)"]
-      vethA["veth-a"]
-      vethB["veth-b"]
-      DNS["Embedded DNS\\n127.0.0.11"]
-    end
-    IPT["iptables\\nDNAT / MASQUERADE"]
-    HostNIC["Host NIC (eth0)\\n192.168.1.100"]
-  end
-  Internet["External Network"]
-  Client["Client :8080"]
-
-  eth0a --- vethA
-  eth0b --- vethB
-  vethA --- DNS
-  vethB --- DNS
-  Bridge --- IPT
-  IPT --- HostNIC
-  HostNIC --- Internet
-  Client -->|"-p 8080:80"| IPT`,
+    Internet["External Network"]
+    eth0a --- vethA
+    eth0b --- vethB
+    vethA --- DNS
+    vethB --- DNS
+    Bridge --- IPT
+    IPT --- HostNIC
+    HostNIC --- Internet`,
+      caption: "Each container has its own network namespace connected to the bridge via veth pairs; iptables handles NAT for outbound and port publishing for inbound traffic.",
     },
     {
-      title: "Overlay Network Multi-Host Communication",
+      title: "Overlay Network VXLAN Encapsulation",
       kind: "flow",
-      caption: "Illustrates VXLAN encapsulation for container-to-container traffic across Docker Swarm nodes.",
       mermaid: `flowchart LR
-  subgraph Host1["Swarm Node 1"]
-    C1["Container A\\n10.0.0.2"]
-    VTEP1["VTEP\\n(VXLAN Tunnel Endpoint)"]
-    NIC1["eth0\\n192.168.1.10"]
-  end
-  subgraph Host2["Swarm Node 2"]
-    NIC2["eth0\\n192.168.1.11"]
-    VTEP2["VTEP\\n(VXLAN Tunnel Endpoint)"]
-    C2["Container B\\n10.0.0.3"]
-  end
-  C1 -->|"L2 Frame"| VTEP1
-  VTEP1 -->|"VXLAN Encap\\nUDP:4789"| NIC1
-  NIC1 -->|"Underlay Network"| NIC2
-  NIC2 -->|"VXLAN Decap"| VTEP2
-  VTEP2 -->|"L2 Frame"| C2`,
+    subgraph Node1["Swarm Node 1"]
+      CA["Container A\n10.0.0.2"]
+      VTEP1["VTEP\nVXLAN Endpoint"]
+      NIC1["eth0\n192.168.1.10"]
+    end
+    subgraph Node2["Swarm Node 2"]
+      NIC2["eth0\n192.168.1.11"]
+      VTEP2["VTEP\nVXLAN Endpoint"]
+      CB["Container B\n10.0.0.3"]
+    end
+    CA -->|L2 Frame| VTEP1
+    VTEP1 -->|VXLAN Encap UDP 4789| NIC1
+    NIC1 -->|Underlay Network| NIC2
+    NIC2 -->|VXLAN Decap| VTEP2
+    VTEP2 -->|L2 Frame| CB`,
+      caption: "VXLAN encapsulates container L2 frames inside UDP packets, enabling containers on different hosts to share an L2 segment.",
     },
     {
-      title: "Docker DNS Resolution Flow",
+      title: "Docker DNS Resolution Sequence",
       kind: "sequence",
-      caption: "Sequence of DNS resolution in a user-defined bridge network when one container resolves another by name.",
       mermaid: `sequenceDiagram
-  participant App as Container: app
-  participant DNS as Docker DNS<br/>127.0.0.11
-  participant DB as Container: postgres
-
-  App->>DNS: DNS query: "postgres" (A record)
-  DNS->>DNS: Look up container name<br/>in network registry
-  DNS-->>App: Response: 10.0.1.5
-  App->>DB: TCP SYN to 10.0.1.5:5432
-  DB-->>App: TCP SYN-ACK
-  App->>DB: SQL query over established connection`,
+    participant App as Container: app
+    participant DNS as Docker DNS 127.0.0.11
+    participant DB as Container: postgres
+    App->>DNS: Query A record for postgres
+    DNS->>DNS: Lookup container name in network registry
+    DNS-->>App: Response 10.0.1.5
+    App->>DB: TCP SYN to 10.0.1.5:5432
+    DB-->>App: TCP SYN-ACK
+    App->>DB: SQL query over established connection`,
+      caption: "Docker's embedded DNS resolves service names to container IPs, enabling containers to discover each other by name.",
     },
     {
-      title: "Docker Storage Types",
+      title: "Docker Network Driver Comparison",
       kind: "mindmap",
-      caption: "Overview of Docker storage options: volumes, bind mounts, and tmpfs mounts with their characteristics.",
       mermaid: `mindmap
-  root((Docker Storage))
-    Volumes
-      Managed by Docker daemon
-      /var/lib/docker/volumes/
-      Named or anonymous
-      Pre-populate from image
-      Volume drivers for remote storage
-      Survives container removal
-    Bind Mounts
-      Arbitrary host path
-      Direct host filesystem access
-      Development hot-reloading
-      Read-only option with :ro
-      Overrides container mount point
-      Host path dependency
-    tmpfs Mounts
-      In-memory only
-      Never written to disk
-      Lost on container stop
-      Sensitive data / secrets
-      Size-limited`,
+  root((Docker Network Drivers))
+    bridge
+      Default for single host
+      NAT via iptables
+      User-defined for DNS
+    host
+      No network namespace
+      Uses host IP directly
+      Highest performance
+    overlay
+      Multi-host via VXLAN
+      Requires Swarm or manual key store
+      Encrypted option
+    macvlan
+      Container gets MAC address
+      Direct L2 access
+      No NAT overhead
+    none
+      No network stack
+      Fully isolated container`,
+      caption: "Docker network driver options from isolated bridge to high-performance host and multi-host overlay, each with distinct trade-offs.",
     },
   ],
   exercises: [

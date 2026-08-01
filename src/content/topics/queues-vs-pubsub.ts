@@ -322,28 +322,62 @@ async function consumeQueue(queueUrl: string) {
 
   diagrams: [
     {
-      title: "Queue: Competing Consumers Pattern",
+      title: "Queue Competing Consumers Pattern",
       kind: "architecture",
-      caption:
-        "Multiple consumers compete for messages from a single queue. Each message is processed by exactly one consumer, enabling horizontal scaling of processing throughput.",
+      caption: "Multiple consumers compete for messages in a single queue. Each message is delivered to exactly one consumer, enabling horizontal scaling.",
+      mermaid: `graph LR
+    P[Producer] --> Q[(Queue)]
+    Q --> C1[Consumer 1]
+    Q --> C2[Consumer 2]
+    Q --> C3[Consumer 3]
+    C1 --> ACK1[ACK]
+    C2 --> ACK2[ACK]
+    C3 --> ACK3[ACK]`,
     },
     {
-      title: "Pub/Sub: Fan-Out Pattern",
+      title: "Pub/Sub Fan-Out Pattern",
       kind: "architecture",
-      caption:
-        "A publisher emits to a topic/exchange. The broker delivers independent copies to each subscriber's queue or endpoint. Adding subscribers requires no publisher changes.",
+      caption: "A publisher emits to a topic. The broker delivers independent copies to each subscriber. Adding subscribers requires no publisher changes.",
+      mermaid: `graph LR
+    PUB[Publisher] --> TOPIC[(Topic / Exchange)]
+    TOPIC --> Q1[(Queue A)]
+    TOPIC --> Q2[(Queue B)]
+    TOPIC --> Q3[(Queue C)]
+    Q1 --> S1[Subscriber 1]
+    Q2 --> S2[Subscriber 2]
+    Q3 --> S3[Subscriber 3]`,
     },
     {
-      title: "SNS + SQS Fan-Out Architecture",
-      kind: "architecture",
-      caption:
-        "SNS topic fans out to per-service SQS queues. Each service has its own queue with independent retry, DLQ, and scaling policies. SNS filter policies reduce unnecessary deliveries.",
-    },
-    {
-      title: "Kafka Consumer Groups: Queue + Pub/Sub Hybrid",
+      title: "Queue vs Pub/Sub Decision Flow",
       kind: "flow",
-      caption:
-        "Within a consumer group, partitions are distributed across members (queue semantics). Multiple consumer groups on the same topic each get all messages (pub/sub semantics).",
+      caption: "Choose between a queue and pub/sub based on delivery semantics, consumer count, and ordering requirements.",
+      mermaid: `flowchart TD
+    A([New async requirement]) --> B{Multiple consumers need same message?}
+    B -->|No| C{Need ordering guarantee?}
+    B -->|Yes| D[Pub/Sub - Fan-out]
+    C -->|Yes| E[FIFO Queue]
+    C -->|No| F[Standard Queue]
+    D --> G{Need per-subscriber filtering?}
+    G -->|Yes| H[Topic with filter policies]
+    G -->|No| I[Simple broadcast topic]`,
+    },
+    {
+      title: "SNS plus SQS Fan-Out Sequence",
+      kind: "sequence",
+      caption: "SNS publishes to multiple SQS queues simultaneously. Each downstream service consumes independently at its own pace.",
+      mermaid: `sequenceDiagram
+    participant Svc as Service
+    participant SNS as SNS Topic
+    participant SQS1 as SQS Email Queue
+    participant SQS2 as SQS Analytics Queue
+    participant SQS3 as SQS Audit Queue
+    Svc->>SNS: publish(OrderPlaced)
+    SNS->>SQS1: deliver copy
+    SNS->>SQS2: deliver copy
+    SNS->>SQS3: deliver copy
+    SQS1-->>Svc: consumed by Email Service
+    SQS2-->>Svc: consumed by Analytics
+    SQS3-->>Svc: consumed by Audit`,
     },
   ],
 

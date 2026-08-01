@@ -294,20 +294,82 @@ PUT /articles
 
   diagrams: [
     {
-      title: "Inverted Index Structure",
+      title: "Inverted Index Architecture",
       kind: "architecture",
-      caption: "Term dictionary maps each unique term to a posting list containing document IDs, term frequencies, and positions. The dictionary is stored as a Finite State Transducer (FST) for compact in-memory representation."
+      caption: "Term dictionary stored as an FST maps each term to a posting list. Each posting list entry stores document ID, term frequency, and optionally positions for phrase queries.",
+      mermaid: `graph TD
+    subgraph Index["Inverted Index"]
+      TD["Term Dictionary\nFST - Finite State Transducer\n5-10 bytes per term"]
+      TD -->|"brown -> "| PL1["Posting List\ndoc1:pos2, doc3:pos1"]
+      TD -->|"fox -> "| PL2["Posting List\ndoc1:pos3, doc2:pos4"]
+      TD -->|"quick -> "| PL3["Posting List\ndoc1:pos1, doc3:pos2"]
+    end
+    subgraph Stored["Per Document"]
+      SF["Stored Fields\noriginal source LZ4 compressed"]
+      DV["Doc Values\ncolumn store for aggregations"]
+      NM["Norms\nlength normalization for BM25"]
+    end
+    TD --> Stored`,
     },
     {
       title: "Elasticsearch Analysis Pipeline",
       kind: "flow",
-      caption: "Raw text flows through character filters (html_strip, mapping), then a tokenizer (standard, whitespace, pattern), then token filters (lowercase, stemmer, stop, synonym) to produce the final terms stored in the inverted index."
+      caption: "Raw text passes through character filters, a tokenizer, and token filters before terms are stored in the index. The same pipeline runs at query time for matching.",
+      mermaid: `flowchart LR
+    RAW["Raw Text\nThe Quick Brown Fox"] --> CF
+    subgraph CF["Character Filters"]
+      html["html_strip\nremove HTML tags"]
+      map["mapping\nreplace characters"]
+    end
+    CF --> TOK
+    subgraph TOK["Tokenizer"]
+      std["standard\nUnicode word boundaries"]
+    end
+    TOK --> TF
+    subgraph TF["Token Filters"]
+      lc["lowercase"]
+      stop["stop words\nremove the an is"]
+      stem["stemmer\nrunning -> run"]
+      syn["synonym\nexpand or replace"]
+    end
+    TF --> TERMS["Index Terms\nquick brown fox"]`,
     },
     {
       title: "Lucene Segment Lifecycle",
-      kind: "flow",
-      caption: "Documents are buffered in memory, refreshed into immutable segments (making them searchable), flushed to disk, and periodically merged into larger segments. Deletes are marked in a bitset until the segment is merged."
-    }
+      kind: "state",
+      caption: "Documents flow from in-memory buffer through refresh into searchable segments, then are flushed to disk and periodically merged. Deletes are deferred until merge.",
+      mermaid: `stateDiagram-v2
+    [*] --> InMemoryBuffer
+    InMemoryBuffer: In-Memory Buffer\ndocuments not yet searchable
+    InMemoryBuffer --> Segment: refresh every 1s
+    Segment: Lucene Segment\nimmutable, searchable\nin filesystem cache
+    Segment --> OnDisk: flush - fsync to disk\nclears translog
+    OnDisk --> Merged: merge policy\ntiered merge
+    Merged: Merged Segment\nlarger, fewer segments\ndeleted docs physically removed
+    OnDisk --> OnDisk: new segments accumulate
+    Merged --> [*]`,
+    },
+    {
+      title: "BM25 Scoring Flow",
+      kind: "sequence",
+      caption: "A search query is tokenized, posting lists are fetched, IDF and TF normalization are computed per term, and scores are summed to rank documents.",
+      mermaid: `sequenceDiagram
+    participant Q as Query
+    participant A as Analyzer
+    participant I as Inverted Index
+    participant S as Scorer
+    Q->>A: tokenize "quick fox"
+    A-->>Q: terms [quick, fox]
+    Q->>I: lookup quick
+    I-->>Q: posting list doc1 doc3
+    Q->>I: lookup fox
+    I-->>Q: posting list doc1 doc2
+    Q->>S: score doc1 for quick and fox
+    S->>S: idf = log(1 + N-df/df+0.5)
+    S->>S: tf_norm = tf*(k1+1) / (tf + k1*(1-b+b*dl/avgdl))
+    S-->>Q: doc1 score = sum of idf*tf_norm per term
+    Q-->>Q: rank by score descending`,
+    },
   ],
 
   animations: [

@@ -199,20 +199,77 @@ async function callInternalAPI(endpoint: string) {
     {
       title: "Authorization Code Flow with PKCE",
       kind: "sequence",
-      caption:
-        "Client generates PKCE verifier/challenge, redirects user to auth server, user authenticates and consents, auth server redirects back with code, client exchanges code + verifier for tokens.",
+      caption: "PKCE flow: client generates verifier/challenge, redirects to auth server, exchanges code for tokens.",
+      mermaid: `sequenceDiagram
+    participant App as Client App
+    participant Browser
+    participant AS as Auth Server
+    participant RS as Resource Server
+
+    App->>App: generate code_verifier, derive code_challenge
+    App->>Browser: redirect to /authorize?code_challenge=...
+    Browser->>AS: GET /authorize
+    AS->>Browser: show login and consent page
+    Browser->>AS: user submits credentials
+    AS->>Browser: redirect to app with ?code=...
+    Browser->>App: callback with auth code
+    App->>AS: POST /token with code + code_verifier
+    AS->>AS: verify PKCE
+    AS-->>App: access_token + id_token
+    App->>RS: API call with Bearer token`,
     },
     {
-      title: "OAuth 2.0 vs OIDC Token Comparison",
+      title: "OAuth 2.0 vs OIDC Tokens",
       kind: "architecture",
-      caption:
-        "OAuth issues only access tokens (what can you do?). OIDC adds an ID token (who are you?) on top of OAuth. The ID token is a JWT with identity claims; the access token may be opaque or a JWT.",
+      caption: "OAuth issues access tokens for authorization; OIDC adds ID tokens for identity.",
+      mermaid: `graph TD
+    OAuth["OAuth 2.0"] -->|issues| AT["Access Token\nwhat can you do?"]
+    AT --> Scope["Scopes: read write admin"]
+    OIDC["OpenID Connect\nbuilt on OAuth"] -->|extends| OAuth
+    OIDC -->|adds| IDT["ID Token JWT\nwho are you?"]
+    IDT --> Claims["Claims: sub iss email name iat exp"]
+    AT -->|may be| Opaque["Opaque string"]
+    AT -->|may be| ATJWT["JWT with claims"]`,
     },
     {
-      title: "OIDC Discovery and JWKS Flow",
+      title: "OIDC Discovery and Token Verification",
       kind: "flow",
-      caption:
-        "Client fetches /.well-known/openid-configuration to discover endpoints. Uses the jwks_uri to fetch public keys. Verifies ID tokens locally using the fetched keys without contacting the auth server.",
+      caption: "Client discovers endpoints via well-known URL, fetches JWKS, and verifies ID tokens locally.",
+      mermaid: `flowchart TD
+    A["App starts up"] --> B["Fetch /.well-known/openid-configuration"]
+    B --> C["Parse: authorization_endpoint, token_endpoint, jwks_uri"]
+    C --> D["Fetch JWKS public keys from jwks_uri"]
+    D --> E["Cache public keys"]
+    E --> F["Receive ID token from token endpoint"]
+    F --> G["Decode JWT header - get kid"]
+    G --> H["Find matching key in JWKS by kid"]
+    H --> I{"Signature valid?"}
+    I -->|No| J["Reject token"]
+    I -->|Yes| K["Verify iss aud exp claims"]
+    K --> L["Token accepted - user authenticated"]`,
+    },
+    {
+      title: "OAuth Grant Type Selection",
+      kind: "mindmap",
+      caption: "Choosing the right OAuth 2.0 grant type for different client scenarios.",
+      mermaid: `mindmap
+    root["OAuth 2.0 Grant Types"]
+      Auth Code + PKCE
+        Web apps
+        Mobile apps
+        Most secure
+      Client Credentials
+        Server to server
+        No user involved
+        Background services
+      Device Code
+        Smart TVs
+        CLI tools
+        Browserless devices
+      Refresh Token
+        Extend sessions
+        Silent renewal
+        Keep users logged in`,
     },
   ],
   animations: [

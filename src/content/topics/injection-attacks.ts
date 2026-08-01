@@ -393,62 +393,74 @@ int safePing(const std::string& host) {
   ],
   diagrams: [
     {
-      title: "Injection Attack Classification and Defenses",
+      title: "SQL Injection Attack Flow",
+      kind: "sequence",
+      caption: "How a SQL injection attack exploits unsanitized user input.",
+      mermaid: `sequenceDiagram
+    participant Attacker
+    participant App
+    participant DB
+    Attacker->>App: Input: ' OR '1'='1
+    App->>App: Concatenate into SQL string
+    App->>DB: SELECT * FROM users WHERE id='' OR '1'='1'
+    DB->>DB: Condition always true
+    DB-->>App: Return all user records
+    App-->>Attacker: All user data exposed
+    Note over App: Parameterized queries prevent this`,
+    },
+    {
+      title: "Injection Defense Layers",
+      kind: "flow",
+      caption: "Layered defenses to prevent injection attacks at each layer.",
+      mermaid: `flowchart TD
+    A[User Input Received] --> B[Input Validation]
+    B --> C{Valid format and type?}
+    C -- No --> D[Reject with 400 error]
+    C -- Yes --> E[Use Parameterized Query or ORM]
+    E --> F[Apply Least Privilege DB user]
+    F --> G[WAF Web Application Firewall]
+    G --> H[Execute query safely]
+    H --> I[Audit logging]`,
+    },
+    {
+      title: "Injection Attack Types",
       kind: "mindmap",
-      caption: "Overview of injection attack types, their targets, and primary defenses",
+      caption: "Common injection attack vectors targeting different interpreter types.",
       mermaid: `mindmap
   root((Injection Attacks))
     SQL Injection
-      In-band
-        Union-based
-        Error-based
-      Blind
-        Boolean-based
-        Time-based
-      Out-of-band
-      Defense: Parameterized Queries
-    XSS
-      Stored
+      Classic string concat
+      Blind boolean-based
+      Error-based
+    Command Injection
+      OS shell commands
+      Backtick execution
+    LDAP Injection
+      Directory queries
+      Auth bypass
+    XSS Cross-Site Scripting
+      Stored persistent
       Reflected
       DOM-based
-      Defense: Output Encoding + CSP
-    CSRF
-      Cookie-based
-      Defense: CSRF Tokens
-      Defense: SameSite Cookies
-    Other
-      NoSQL Injection
-      Command Injection
-      SSTI
-      LDAP Injection`,
+    XXE XML External Entities
+      Local file disclosure
+      SSRF via XML
+    Template Injection
+      SSTI Jinja2 Twig
+      Code execution`,
     },
     {
-      title: "CSRF Attack and Prevention Flow",
-      kind: "sequence",
-      caption: "Sequence showing how a CSRF attack works and how tokens prevent it",
-      mermaid: `sequenceDiagram
-    participant Attacker as Attacker Site
-    participant Victim as Victim Browser
-    participant Server as Bank Server
-
-    Note over Victim,Server: Normal: User logs in
-    Victim->>Server: POST /login (credentials)
-    Server-->>Victim: Set-Cookie: session=abc123
-
-    Note over Attacker,Victim: Attack: User visits attacker page
-    Attacker->>Victim: Malicious page with hidden form
-    Victim->>Server: POST /transfer (cookie auto-included)
-    Note right of Server: No CSRF token - request succeeds!
-    Server-->>Victim: Transfer completed
-
-    Note over Victim,Server: With CSRF Protection
-    Victim->>Server: GET /transfer-form
-    Server-->>Victim: Form + CSRF token (hidden field)
-    Victim->>Server: POST /transfer + CSRF token
-    Note right of Server: Token valid - request allowed
-    Attacker->>Victim: Malicious page (no CSRF token)
-    Victim->>Server: POST /transfer (no valid token)
-    Note right of Server: Token missing - request BLOCKED`,
+      title: "Defense in Depth Architecture",
+      kind: "architecture",
+      caption: "Layered security architecture protecting against injection attacks.",
+      mermaid: `graph TD
+    Request --> WAF[WAF Rate Limiting]
+    WAF --> Valid[Input Validation Layer]
+    Valid --> Param[Parameterized Queries]
+    Param --> ORM[ORM Prepared Statements]
+    ORM --> PoLP[Least Privilege DB Account]
+    PoLP --> Audit[Audit Logging]
+    Audit --> DB[(Database)]`,
     },
   ],
   comparison: {

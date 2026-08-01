@@ -340,37 +340,78 @@ async function verifyUser(password, storedPepperedHash) {
   ],
   diagrams: [
     {
-      title: "Password Hashing and Verification Flow",
+      title: "Password Hashing Registration Flow",
       kind: "flow",
-      caption: "Shows the registration and login flow with salting, hashing, and optional peppering.",
+      caption: "Secure password storage flow using salted hashing algorithms.",
       mermaid: `flowchart TD
-    A["User submits password"] --> B["Generate random salt via CSPRNG"]
-    B --> C["Concatenate password + salt + pepper"]
-    C --> D["Apply hash algorithm\\n(bcrypt / Argon2id)"]
-    D --> E["Store hash + salt + algorithm params\\nin database"]
-
-    F["User attempts login"] --> G["Retrieve stored hash + salt\\nfrom database"]
-    G --> H["Hash submitted password\\nwith stored salt + pepper"]
-    H --> I{"Hashes match?"}
-    I -- Yes --> J["Grant access"]
-    I -- No --> K["Reject login"]
-    J --> L{"Work factor outdated?"}
-    L -- Yes --> M["Rehash with updated params\\nand store new hash"]
-    L -- No --> N["Done"]`,
+    A[User registers with password] --> B[Generate random salt]
+    B --> C[Combine password and salt]
+    C --> D[Apply hashing algorithm]
+    D --> E{Algorithm choice}
+    E -- bcrypt --> F[Cost factor applied]
+    E -- Argon2 --> G[Memory and time params]
+    E -- scrypt --> H[CPU and memory hard]
+    F --> I[Store hash and salt in DB]
+    G --> I
+    H --> I`,
     },
     {
-      title: "Password Hashing Algorithm Selection Decision Tree",
-      kind: "flow",
-      caption: "Decision tree for choosing the right password hashing algorithm based on requirements.",
-      mermaid: `flowchart TD
-    A["Need to hash passwords"] --> B{"Regulatory compliance\\nrequired? (FIPS/NIST)"}
-    B -- Yes --> C["Use PBKDF2\\nHMAC-SHA256\\n600,000+ iterations"]
-    B -- No --> D{"Memory-hard\\nresistance needed?"}
-    D -- Yes --> E{"Side-channel\\nconcerns?"}
-    E -- Yes --> F["Use Argon2id\\nm=64MB, t=3, p=1"]
-    E -- No --> G["Use Argon2d\\nfor max GPU resistance"]
-    D -- No --> H["Use bcrypt\\ncost factor >= 12"]
-    F --> I["Recommended for\\nmost applications"]`,
+      title: "Password Verification Sequence",
+      kind: "sequence",
+      caption: "How stored password hash is verified during user login.",
+      mermaid: `sequenceDiagram
+    participant User
+    participant App
+    participant DB
+    User->>App: Login with password
+    App->>DB: Fetch stored hash and salt
+    DB-->>App: Hash and salt retrieved
+    App->>App: Hash input password with same salt
+    App->>App: Compare computed hash to stored hash
+    alt Hashes match
+        App-->>User: Login successful
+    else Hashes differ
+        App-->>User: Invalid credentials
+    end`,
+    },
+    {
+      title: "Password Attack Vectors",
+      kind: "mindmap",
+      caption: "Common attacks against password storage and their mitigations.",
+      mermaid: `mindmap
+  root((Password Attacks))
+    Plaintext Storage
+      Immediate exposure on breach
+      Use hashing always
+    Weak Hashes MD5 SHA1
+      Rainbow table attacks
+      Use bcrypt or Argon2
+    Unsalted Hashes
+      Dictionary attacks
+      Unique salt per user
+    Brute Force
+      Guess all combinations
+      Slow hash algorithms
+    Credential Stuffing
+      Reuse leaked passwords
+      MFA and breach detection`,
+    },
+    {
+      title: "bcrypt vs Argon2 Properties",
+      kind: "architecture",
+      caption: "Comparing bcrypt and Argon2 password hashing algorithm properties.",
+      mermaid: `graph LR
+    subgraph bcrypt
+        B1[Cost factor] --> B2[Adjustable work]
+        B2 --> B3[CPU bound only]
+        B3 --> B4[Built-in 128-bit salt]
+    end
+    subgraph Argon2
+        A1[Memory parameter] --> A2[Time parameter]
+        A2 --> A3[Parallelism parameter]
+        A3 --> A4[Memory and CPU hard]
+        A4 --> A5[Argon2id recommended variant]
+    end`,
     },
   ],
   comparison: {

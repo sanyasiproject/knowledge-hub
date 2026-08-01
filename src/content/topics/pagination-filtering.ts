@@ -162,14 +162,69 @@ function buildWhereClause(filters: FilterParam[]): { sql: string; params: any[] 
     {
       title: "Offset vs Cursor vs Keyset Pagination",
       kind: "flow",
-      caption:
-        "Offset scans from the start each time, cursor uses an opaque pointer to resume from the last seen item, keyset uses indexed WHERE clauses for direct seeking.",
+      caption: "Decision tree for choosing the right pagination strategy based on requirements for page-jumping, write stability, and performance at depth.",
+      mermaid: `flowchart TD
+    Start[Choose Pagination Strategy] --> Q1{Need to jump to arbitrary page?}
+    Q1 -->|Yes| Offset[Offset-Based\nLIMIT and OFFSET]
+    Q1 -->|No| Q2{Large dataset or deep pages?}
+    Q2 -->|No| Offset
+    Q2 -->|Yes| Q3{Stable under concurrent writes?}
+    Q3 -->|Not required| Offset
+    Q3 -->|Required| Q4{Simple sort order?}
+    Q4 -->|Yes| Keyset[Keyset Pagination\nWHERE col less than last_val]
+    Q4 -->|Complex multi-column| Cursor[Cursor-Based\nEncoded position token]
+    Offset --> NoteOffset[Simple, but O of offset scans]
+    Keyset --> NoteKeyset[Constant time, index seek]
+    Cursor --> NoteCursor[Constant time, flexible sort]`,
     },
     {
-      title: "Filtering and Pagination Pipeline",
-      kind: "flow",
-      caption:
-        "Request arrives with filter params, sort, and cursor. Filters are validated and applied as WHERE clauses, sort order determines the index used, cursor is decoded into a seek condition, and the query is executed with LIMIT + 1 to detect hasNextPage.",
+      title: "Cursor-Based Pagination Request Flow",
+      kind: "sequence",
+      caption: "How the client and server exchange cursor tokens across multiple page requests, with cursor encoding and decoding.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant DB as Database
+    C->>S: GET /items?first=3
+    S->>DB: SELECT ... ORDER BY created_at DESC, id DESC LIMIT 4
+    DB-->>S: 4 rows returned
+    S-->>C: items[0..2] + endCursor + hasNextPage=true
+    C->>S: GET /items?first=3&after=endCursor
+    S->>S: Decode cursor to createdAt and id values
+    S->>DB: SELECT ... WHERE created_at,id less than decoded values LIMIT 4
+    DB-->>S: Next 4 rows
+    S-->>C: items[0..2] + endCursor + hasNextPage=true`,
+    },
+    {
+      title: "Filtering and Sorting Pipeline",
+      kind: "architecture",
+      caption: "How a request with filter, sort, and cursor parameters flows through validation, query building, and execution.",
+      mermaid: `graph TD
+    Req[Incoming Request] --> Val[Validate Filter Fields\nagainst Allowlist]
+    Val --> Ops[Validate Operators\nagainst Known Set]
+    Ops --> Params[Build Parameterized\nWHERE Clauses]
+    Params --> Sort[Determine Sort Index\nfrom ORDER BY fields]
+    Sort --> Cur[Decode Cursor to\nSeek Condition]
+    Cur --> Exec[Execute Query\nLIMIT N+1]
+    Exec --> Check{rows.length > N?}
+    Check -->|Yes| More[hasNextPage = true\nReturn N rows + cursor]
+    Check -->|No| Done[hasNextPage = false\nReturn all rows]`,
+    },
+    {
+      title: "Keyset vs Offset Performance",
+      kind: "state",
+      caption: "State transitions showing why offset degrades while keyset stays constant as page depth increases.",
+      mermaid: `stateDiagram-v2
+    [*] --> ShallowPage: Request page 1
+    ShallowPage --> DeepPage: Request page 1000
+    state ShallowPage {
+        OffsetShallow: OFFSET 0\nScan 0 rows\nFast
+        KeysetShallow: WHERE id less than max\nIndex seek\nFast
+    }
+    state DeepPage {
+        OffsetDeep: OFFSET 10000\nScan and discard 10000 rows\nSlow
+        KeysetDeep: WHERE id less than cursor_id\nIndex seek\nStill Fast
+    }`,
     },
   ],
   animations: [

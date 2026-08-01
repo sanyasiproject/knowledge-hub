@@ -159,16 +159,88 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Hypothesis testing decision flowchart",
+      title: "Hypothesis Testing Decision Flow",
       kind: "flow",
-      caption:
-        "From stating hypotheses through computing the test statistic, determining the p-value, and making a decision to reject or fail to reject H0.",
+      caption: "Step-by-step process from stating hypotheses to making a reject or fail-to-reject decision based on p-value.",
+      mermaid: `flowchart TD
+    A([Start]) --> B["State H0 and H1"]
+    B --> C["Choose significance level alpha"]
+    C --> D["Collect sample data"]
+    D --> E["Compute test statistic
+t or z or chi-squared"]
+    E --> F["Calculate p-value"]
+    F --> G{p-value < alpha?}
+    G -->|Yes| H["Reject H0
+Evidence for H1"]
+    G -->|No| I["Fail to reject H0
+Insufficient evidence"]
+    H --> J([End])
+    I --> J`,
     },
     {
-      title: "Types of error in hypothesis testing",
+      title: "Type I and Type II Errors",
       kind: "architecture",
-      caption:
-        "A 2x2 matrix showing the four outcomes: correct decision (true positive/negative) vs Type I error (false positive) vs Type II error (false negative).",
+      caption: "Four outcomes in hypothesis testing based on the true state of H0 and the decision made.",
+      mermaid: `graph LR
+    subgraph Decision
+    R["Reject H0"]
+    F["Fail to Reject H0"]
+    end
+    subgraph Reality
+    T["H0 is TRUE"]
+    FA["H0 is FALSE"]
+    end
+    T --> R --> E1["Type I Error
+False Positive
+prob = alpha"]
+    T --> F --> E2["Correct Decision
+True Negative
+prob = 1 - alpha"]
+    FA --> R --> E3["Correct Decision
+True Positive
+Power = 1 - beta"]
+    FA --> F --> E4["Type II Error
+False Negative
+prob = beta"]`,
+    },
+    {
+      title: "Central Tendency and Spread",
+      kind: "mindmap",
+      caption: "Overview of descriptive statistics measures grouped by central tendency and spread.",
+      mermaid: `mindmap
+  root((Descriptive Stats))
+    Central Tendency
+      Mean
+        Sensitive to outliers
+      Median
+        Robust to skew
+      Mode
+        Categorical data
+    Spread
+      Variance
+        Avg squared deviation
+      Standard Deviation
+        Same units as data
+      IQR
+        Q3 minus Q1
+        Outlier robust`,
+    },
+    {
+      title: "Linear Regression Components",
+      kind: "sequence",
+      caption: "Steps from data collection through OLS fitting to prediction and R-squared evaluation.",
+      mermaid: `sequenceDiagram
+    participant D as Data
+    participant M as Model
+    participant E as Evaluation
+    D->>M: Provide X and Y pairs
+    M->>M: Compute means x_bar and y_bar
+    M->>M: Calculate beta1 = Cov(X,Y)/Var(X)
+    M->>M: Calculate beta0 = y_bar - beta1*x_bar
+    M->>E: Fitted line y = beta0 + beta1*x
+    E->>E: Compute SS_residual and SS_total
+    E->>E: R_squared = 1 - SS_res/SS_total
+    E-->>D: Report R_squared and predictions`,
     },
   ],
   animations: [

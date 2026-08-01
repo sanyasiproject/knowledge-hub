@@ -334,110 +334,114 @@ cat /sys/fs/cgroup$CGROUP/cpu.pressure`
   diagrams: [
     {
       title: "Container vs Virtual Machine Architecture",
-      kind: "architecture" as const,
-      caption: "Structural comparison showing how containers share the host kernel while VMs each run their own",
+      kind: "architecture",
+      caption: "Containers share the host kernel via a container runtime, while VMs each run a full guest OS kernel on top of a hypervisor, trading isolation for startup speed.",
       mermaid: `graph TB
     subgraph Containers["Container Architecture"]
-        direction TB
         CA["App A"]
         CB["App B"]
-        CC["App C"]
-        BinsA["Bins/Libs"]
-        BinsB["Bins/Libs"]
-        BinsC["Bins/Libs"]
-        CRT["Container Runtime<br/>(containerd / CRI-O)"]
-        HK["Host OS Kernel<br/>(shared)"]
+        CRT["Container Runtime - containerd"]
+        HK["Host OS Kernel - shared"]
         HW1["Hardware"]
-
-        CA --- BinsA
-        CB --- BinsB
-        CC --- BinsC
-        BinsA --- CRT
-        BinsB --- CRT
-        BinsC --- CRT
-        CRT --- HK
-        HK --- HW1
+        CA --> CRT
+        CB --> CRT
+        CRT --> HK
+        HK --> HW1
     end
-
     subgraph VMs["Virtual Machine Architecture"]
-        direction TB
         VA["App X"]
         VB["App Y"]
-        GA["Guest OS<br/>(full kernel)"]
-        GB["Guest OS<br/>(full kernel)"]
-        HYP["Hypervisor<br/>(KVM / Xen)"]
+        GA["Guest OS kernel A"]
+        GB["Guest OS kernel B"]
+        HYP["Hypervisor - KVM or Xen"]
         HK2["Host OS Kernel"]
         HW2["Hardware"]
-
-        VA --- GA
-        VB --- GB
-        GA --- HYP
-        GB --- HYP
-        HYP --- HK2
-        HK2 --- HW2
-    end`
+        VA --> GA
+        VB --> GB
+        GA --> HYP
+        GB --> HYP
+        HYP --> HK2
+        HK2 --> HW2
+    end`,
     },
     {
-      title: "Linux Namespace Isolation Layers",
-      kind: "mindmap" as const,
-      caption: "The seven Linux namespace types and what each isolates for container processes",
+      title: "Linux Namespace and cgroup Isolation",
+      kind: "mindmap",
+      caption: "Linux namespaces provide isolation of kernel resources per container; cgroups enforce resource limits on CPU, memory, and I/O.",
       mermaid: `mindmap
-  root((Container<br/>Namespaces))
-    PID
-      Own process tree
-      PID 1 = container init
-      Cannot see host processes
-    Network
-      Own interfaces
-      Own IP addresses
-      Own routing table
-      Own iptables rules
-    Mount
-      Own filesystem view
-      OverlayFS root
-      Volume mounts
-    UTS
-      Own hostname
-      Own domain name
-    IPC
-      Own shared memory
-      Own message queues
-      Own semaphores
-    User
-      UID/GID mapping
-      Rootless containers
-      root inside = unprivileged outside
-    Cgroup
-      Own cgroup root view
-      Resource limit isolation`
+  root["Container Isolation Primitives"]
+    Namespaces
+      PID
+        Own process tree
+        PID 1 is container init
+      Network
+        Own interfaces and IP
+        Own routing table
+      Mount
+        Own filesystem view
+        OverlayFS root
+      UTS
+        Own hostname
+      IPC
+        Own shared memory
+      User
+        UID mapping rootless
+    cgroups v2
+      CPU quota
+        cpu.max
+      Memory limit
+        memory.max OOM kill
+      Block I/O weight
+        io.weight
+      PID limit
+        pids.max`,
     },
     {
-      title: "OverlayFS Copy-on-Write Layer Stack",
-      kind: "flow" as const,
-      caption: "How OverlayFS merges read-only image layers with a writable container layer using copy-on-write",
-      mermaid: `flowchart TB
-    subgraph Image["Image Layers (read-only)"]
-        L1["Layer 1: Base OS<br/>/bin, /lib, /etc"]
-        L2["Layer 2: Runtime<br/>/usr/local/bin/python"]
-        L3["Layer 3: App deps<br/>/app/requirements.txt"]
-        L4["Layer 4: App code<br/>/app/main.py"]
-        L1 --> L2 --> L3 --> L4
-    end
+      title: "Container Image Build and Push Flow",
+      kind: "flow",
+      caption: "Dockerfile instructions are executed sequentially, each producing a cached layer; the final image is tagged and pushed to a registry for distribution.",
+      mermaid: `flowchart TD
+    DF["Dockerfile"] --> Build["docker build"]
+    Build --> L1["Layer 1 - FROM base image"]
+    L1 --> L2["Layer 2 - RUN apt-get install"]
+    L2 --> L3["Layer 3 - COPY app files"]
+    L3 --> L4["Layer 4 - RUN pip install"]
+    L4 --> CacheCheck{"Layer cached?"}
+    CacheCheck -->|"Yes"| Reuse["Reuse cached layer"]
+    CacheCheck -->|"No"| Execute["Execute and cache new layer"]
+    Reuse --> Tag["docker tag image"]
+    Execute --> Tag
+    Tag --> Push["docker push to registry"]
+    Push --> Registry["Container Registry"]`,
+    },
+    {
+      title: "Container Lifecycle Sequence",
+      kind: "sequence",
+      caption: "From image pull through container creation, start, execution, and stop, showing interaction between the Docker CLI, containerd, and runc.",
+      mermaid: `sequenceDiagram
+    participant CLI as Docker CLI
+    participant D as Docker Daemon
+    participant CT as containerd
+    participant R as runc
+    participant K as Host Kernel
 
-    subgraph Container["Container Layer (read-write)"]
-        UL["Upper Layer<br/>/app/main.py (modified)<br/>/tmp/cache.db (new)<br/>.wh.oldfile (whiteout)"]
-    end
-
-    L4 --> |"OverlayFS<br/>union mount"| MV["Merged View<br/>(what the container sees)"]
-    UL --> MV
-
-    MV --> R{"Read /app/main.py"}
-    R --> |"Found in upper"| UL
-    MV --> R2{"Read /bin/sh"}
-    R2 --> |"Not in upper,<br/>fall through"| L1
-    MV --> W{"Write /etc/config"}
-    W --> |"Copy-on-Write:<br/>copy from L1 to upper,<br/>then modify"| UL`
-    }
+    CLI->>D: docker run image cmd
+    D->>CT: pull image if missing
+    CT-->>D: image layers ready
+    D->>CT: create container spec
+    CT->>R: create container
+    R->>K: unshare namespaces
+    R->>K: apply cgroup limits
+    R-->>CT: container created
+    CT-->>D: container ID
+    D->>CT: start container
+    CT->>R: exec process in container
+    R-->>CT: process running
+    CLI->>D: docker stop
+    D->>CT: send SIGTERM
+    CT->>R: kill process
+    R->>K: release namespaces and cgroups`,
+    },
   ],
   comparison: {
     columns: ["Feature", "Containers", "Virtual Machines", "Kata Containers", "gVisor"],

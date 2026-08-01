@@ -105,14 +105,67 @@ cqlsh> SELECT * FROM users WHERE id = 1;
   ],
   diagrams: [
     {
-      title: "CAP theorem Venn diagram",
+      title: "CAP Properties Architecture",
       kind: "architecture",
-      caption: "Three overlapping circles (C, A, P) with real systems placed in CP (HBase, etcd), AP (Cassandra, DynamoDB), and CA (single-node RDBMS — not distributed, so P isn't applicable).",
+      caption: "The three CAP properties and how real distributed systems choose between CP and AP when a partition forces the trade-off.",
+      mermaid: `graph TD
+    C["Consistency - every read sees the latest write"]
+    A["Availability - every request gets a response"]
+    P["Partition Tolerance - system survives network splits"]
+    CP["CP Systems: HBase, etcd, ZooKeeper"]
+    AP["AP Systems: Cassandra, DynamoDB, CouchDB"]
+    CA["CA: single-node RDBMS - not truly distributed"]
+    C --> CP
+    P --> CP
+    A --> AP
+    P --> AP
+    C --> CA
+    A --> CA`,
     },
     {
-      title: "Network partition scenario",
+      title: "Network Partition Cluster Topology",
       kind: "network",
-      caption: "A cluster of 5 nodes split into groups of 3 and 2 by a network failure. CP: only the majority group serves requests. AP: both groups serve requests independently.",
+      caption: "Five-node cluster split 3-2 by a network failure. CP refuses minority writes; AP serves both sides independently.",
+      mermaid: `graph LR
+    N1["Node 1"]
+    N2["Node 2"]
+    N3["Node 3 - leader"]
+    N4["Node 4 - isolated"]
+    N5["Node 5 - isolated"]
+    N1 --- N2
+    N2 --- N3
+    N4 --- N5
+    N3 -. "partition" .- N4`,
+    },
+    {
+      title: "CP vs AP Partition Response Sequence",
+      kind: "sequence",
+      caption: "How CP and AP systems respond differently to a write request when a network partition is active.",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant MajorityNode
+    participant MinorityNode
+    Note over MajorityNode,MinorityNode: Network partition active
+    Client->>MinorityNode: write x=99 - CP system
+    MinorityNode-->>Client: ERROR - cannot guarantee consistency
+    Client->>MajorityNode: write x=99 - CP system
+    MajorityNode-->>Client: OK - quorum achieved
+    Client->>MinorityNode: write x=99 - AP system
+    MinorityNode-->>Client: OK - availability preserved
+    Note over MinorityNode: data diverges from majority side`,
+    },
+    {
+      title: "Partition Recovery State Machine",
+      kind: "state",
+      caption: "States a distributed system moves through from normal operation through a partition to full recovery.",
+      mermaid: `stateDiagram-v2
+    [*] --> NormalOperation : cluster healthy
+    NormalOperation --> Partitioned : network failure
+    Partitioned --> CP_Degraded : CP system - minority stops serving
+    Partitioned --> AP_Diverged : AP system - both sides accept writes
+    CP_Degraded --> Reconciling : partition heals
+    AP_Diverged --> Reconciling : partition heals - must merge divergent writes
+    Reconciling --> NormalOperation : replicas converge`,
     },
   ],
   animations: [

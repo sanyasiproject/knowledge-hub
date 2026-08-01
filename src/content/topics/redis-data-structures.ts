@@ -205,19 +205,79 @@ GEOSEARCH locations FROMMEMBER "San Francisco" BYRADIUS 200 km ASC`,
   ],
   diagrams: [
     {
-      title: "Redis encoding selection decision tree",
+      title: "Redis Encoding Selection Decision Tree",
       kind: "flow",
-      caption: "Shows how Redis selects internal encoding (listpack, hashtable, skiplist, intset, embstr, raw) based on element count and size thresholds.",
+      caption: "Redis selects a compact internal encoding (listpack, intset, ziplist) for small structures and upgrades to hashtable, skiplist, or raw when thresholds are exceeded.",
+      mermaid: `flowchart TD
+    A([Set value]) --> B{Data type?}
+    B -->|String| C{Length <= 44 bytes?}
+    C -->|Yes| D[embstr encoding]
+    C -->|No| E[raw SDS]
+    B -->|Hash| F{Entries <= 128 and values small?}
+    F -->|Yes| G[listpack]
+    F -->|No| H[hashtable]
+    B -->|Set| I{All integers, count <= 512?}
+    I -->|Yes| J[intset]
+    I -->|No| K[hashtable]
+    B -->|ZSet| L{Entries <= 128 and values small?}
+    L -->|Yes| M[listpack]
+    L -->|No| N[skiplist + hashtable]`,
     },
     {
-      title: "Sorted Set dual data structure",
+      title: "Sorted Set Internal Structure",
       kind: "architecture",
-      caption: "Skiplist provides ordered range queries; hashtable provides O(1) member-to-score lookups. Both reference the same SDS member strings.",
+      caption: "A Sorted Set uses both a skip list for ordered range queries and a hash table for O(1) score lookups by member name.",
+      mermaid: `graph TD
+    ZSET[Sorted Set] --> SL[Skip List
+ordered by score]
+    ZSET --> HT[Hash Table
+member to score]
+    SL --> E1[member:alice score:1.0]
+    SL --> E2[member:bob score:2.5]
+    SL --> E3[member:carol score:4.0]
+    HT --> E1
+    HT --> E2
+    HT --> E3`,
     },
     {
-      title: "Stream radix tree and consumer group architecture",
+      title: "Stream Consumer Group Architecture",
       kind: "architecture",
-      caption: "Radix tree of listpack macro-nodes stores entries. Consumer groups track last-delivered-ID and per-consumer PEL (Pending Entries List).",
+      caption: "A Stream has a radix tree of entries. Consumer groups track the last delivered ID and maintain a Pending Entries List (PEL) per consumer.",
+      mermaid: `graph LR
+    STR[(Stream
+radix tree)] --> CG1[Consumer Group A]
+    STR --> CG2[Consumer Group B]
+    CG1 --> C1A[Consumer 1
+PEL: msg-1, msg-3]
+    CG1 --> C1B[Consumer 2
+PEL: msg-2]
+    CG2 --> C2A[Consumer 1
+PEL: msg-1]`,
+    },
+    {
+      title: "Redis Data Structures Overview",
+      kind: "mindmap",
+      caption: "All Redis data structures with their key commands and typical use cases.",
+      mermaid: `mindmap
+  root((Redis Data Structures))
+    String
+      SET GET INCR
+      Counters, sessions
+    List
+      LPUSH RPOP LRANGE
+      Queues, activity feeds
+    Hash
+      HSET HGET HGETALL
+      User profiles, objects
+    Set
+      SADD SMEMBERS SINTER
+      Tags, unique visitors
+    Sorted Set
+      ZADD ZRANGE ZRANGEBYSCORE
+      Leaderboards, rate limits
+    Stream
+      XADD XREAD XACK
+      Event logs, messaging`,
     },
   ],
   animations: [

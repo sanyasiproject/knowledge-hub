@@ -30,83 +30,103 @@ export const serviceModels: TopicContent = {
 
   diagrams: [
     {
-      title: "Cloud Service Models Stack",
+      title: "IaaS vs PaaS vs SaaS Stack",
       kind: "architecture",
-      caption: "Visual representation of the **cloud service model stack** showing which layers are managed by the *provider* vs the *customer* for each model: IaaS, PaaS, FaaS, and SaaS.",
+      caption: "The cloud service model stack showing which layers are managed by the provider versus the customer for IaaS, PaaS, and SaaS.",
       mermaid: `graph TD
-    subgraph IaaS ["**IaaS** (EC2, Azure VMs)"]
-        I1["Data — **Customer**"]
-        I2["Application — **Customer**"]
-        I3["Runtime — **Customer**"]
-        I4["OS — **Customer**"]
-        I5["Virtualization — *Provider*"]
-        I6["Servers — *Provider*"]
-        I7["Networking — *Provider*"]
+    subgraph SaaS["SaaS - Provider manages all"]
+      S1[Application]
+      S2[Runtime]
+      S3[Middleware]
+      S4[OS]
+      S5[Virtualization]
+      S6[Hardware]
     end
-
-    subgraph PaaS ["**PaaS** (Heroku, App Engine)"]
-        P1["Data — **Customer**"]
-        P2["Application — **Customer**"]
-        P3["Runtime — *Provider*"]
-        P4["OS — *Provider*"]
-        P5["Virtualization — *Provider*"]
-        P6["Servers — *Provider*"]
-        P7["Networking — *Provider*"]
+    subgraph PaaS["PaaS - Customer manages app"]
+      P1[Application - Customer]
+      P2[Runtime - Provider]
+      P3[Middleware - Provider]
+      P4[OS - Provider]
+      P5[Virtualization - Provider]
+      P6[Hardware - Provider]
     end
-
-    subgraph SaaS ["**SaaS** (Gmail, Salesforce)"]
-        S1["Data — **Customer**"]
-        S2["Application — *Provider*"]
-        S3["Runtime — *Provider*"]
-        S4["OS — *Provider*"]
-        S5["Virtualization — *Provider*"]
-        S6["Servers — *Provider*"]
-        S7["Networking — *Provider*"]
-    end`
+    subgraph IaaS["IaaS - Customer manages OS up"]
+      I1[Application - Customer]
+      I2[Runtime - Customer]
+      I3[OS - Customer]
+      I4[Virtualization - Provider]
+      I5[Hardware - Provider]
+    end`,
     },
     {
       title: "Service Model Decision Flow",
       kind: "flow",
-      caption: "Decision tree for choosing between **IaaS**, **PaaS**, **FaaS**, and **SaaS** based on *control requirements*, team capabilities, and workload characteristics.",
-      mermaid: `graph TD
-    Start["**New Project**"] --> Q1{"Need a **custom OS**,<br/>kernel modules, or<br/>GPU passthrough?"}
-    Q1 -->|"Yes"| IaaS["**IaaS**<br/>EC2 / Azure VMs"]
-    Q1 -->|"No"| Q2{"Is this a **standard<br/>business function**?<br/>(email, CRM, chat)"}
-    Q2 -->|"Yes"| SaaS["**SaaS**<br/>Buy, don't build"]
-    Q2 -->|"No"| Q3{"Is the workload<br/>**event-driven** with<br/>short execution?"}
-    Q3 -->|"Yes"| Q4{"Need to stay<br/>below **15 min**<br/>execution time?"}
-    Q4 -->|"Yes"| FaaS["**FaaS / Serverless**<br/>Lambda / Cloud Functions"]
-    Q4 -->|"No"| PaaS2["**PaaS or CaaS**<br/>for long-running tasks"]
-    Q3 -->|"No"| Q5{"Do you have<br/>dedicated **DevOps**<br/>engineers?"}
-    Q5 -->|"Yes"| CaaS["**CaaS / IaaS**<br/>Containers on ECS/GKE"]
-    Q5 -->|"No"| PaaS["**PaaS**<br/>Heroku / Render / Railway"]`
+      caption: "Decision tree for choosing between IaaS, PaaS, and SaaS based on control requirements, team expertise, and operational overhead tolerance.",
+      mermaid: `flowchart TD
+    A([Choose cloud service model]) --> B{Need full OS and runtime control?}
+    B -->|Yes| C[IaaS - VMs and networking]
+    B -->|No| D{Need to deploy custom code?}
+    D -->|Yes| E[PaaS - Heroku and App Engine]
+    D -->|No| F{Need ready-made software?}
+    F -->|Yes| G[SaaS - Salesforce and Slack]
+    F -->|No| H[FaaS - serverless functions]
+    C --> I[High control - high ops burden]
+    E --> J[Medium control - moderate ops]
+    G --> K[Low control - minimal ops]`,
     },
     {
-      title: "Shared Responsibility Model",
-      kind: "architecture",
-      caption: "The **shared responsibility model** showing which *security and operational layers* are owned by the provider vs the customer across IaaS, PaaS, and SaaS.",
+      title: "Shared Responsibility by Model",
+      kind: "network",
+      caption: "How security and operational responsibilities are distributed between cloud provider and customer across IaaS, PaaS, and SaaS models.",
       mermaid: `graph LR
-    subgraph Customer ["**Customer Responsibility**"]
-        D["Data Classification<br/>& Governance"]
-        IAM["Identity &<br/>Access Management"]
-        AppSec["Application<br/>Security"]
-        NetCtrl["Network Controls<br/>& Firewall Rules"]
-        OSPatch["OS Patching &<br/>Hardening"]
+    subgraph Provider["Cloud Provider Responsibility"]
+      P1[Physical security]
+      P2[Network infrastructure]
+      P3[Hypervisor]
+      P4[Managed services]
     end
-
-    subgraph Provider ["**Provider Responsibility**"]
-        PhysSec["Physical Security<br/>& Data Center"]
-        HW["Hardware &<br/>Hypervisor"]
-        NetFabric["Network Fabric<br/>& DDoS Protection"]
+    subgraph IaaSCust["IaaS Customer"]
+      IC1[OS patching]
+      IC2[Runtime]
+      IC3[Application]
+      IC4[Data]
     end
-
-    D -->|"Always customer"| IaaS_C["IaaS ✓"]
-    D -->|"Always customer"| PaaS_C["PaaS ✓"]
-    D -->|"Always customer"| SaaS_C["SaaS ✓"]
-    OSPatch -->|"Customer in IaaS"| IaaS_C
-    OSPatch -->|"Provider in PaaS"| PaaS_P["PaaS ✓"]
-    AppSec -->|"Customer"| IaaS_C
-    AppSec -->|"Provider in SaaS"| SaaS_P["SaaS ✓"]`
+    subgraph PaaSCust["PaaS Customer"]
+      PC1[Application code]
+      PC2[Data]
+      PC3[Access control]
+    end
+    subgraph SaaSCust["SaaS Customer"]
+      SC1[Data and access]
+      SC2[User management]
+    end`,
+    },
+    {
+      title: "Cloud Service Model Examples",
+      kind: "mindmap",
+      caption: "Real-world examples of IaaS, PaaS, FaaS, and SaaS products from major cloud providers.",
+      mermaid: `mindmap
+  root((Cloud Service Models))
+    IaaS
+      AWS EC2
+      Azure Virtual Machines
+      Google Compute Engine
+      DigitalOcean Droplets
+    PaaS
+      Heroku
+      Google App Engine
+      AWS Elastic Beanstalk
+      Render
+    FaaS
+      AWS Lambda
+      Azure Functions
+      Google Cloud Functions
+      Cloudflare Workers
+    SaaS
+      Salesforce
+      Google Workspace
+      Slack
+      GitHub`,
     },
   ],
   exercises: [

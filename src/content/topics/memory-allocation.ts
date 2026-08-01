@@ -246,19 +246,74 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Process memory layout",
+      title: "Process Memory Layout",
       kind: "architecture",
-      caption: "High addresses: Stack (grows down) | ... | Heap (grows up) | BSS | Data | Text (code). Shows stack pointer and program break.",
+      caption: "Virtual address space layout from low to high addresses showing code, data, heap, and stack segments.",
+      mermaid: `graph TD
+    HIGH["High Addresses - Kernel Space"]
+    STK["Stack - grows downward\nlocal variables and call frames"]
+    GAP["Gap - unmapped virtual space"]
+    MMAP["Memory-Mapped Region\nmmap allocations and shared libs"]
+    HEAP["Heap - grows upward\nmalloc and new allocations"]
+    BSS["BSS Segment\nzero-initialised globals"]
+    DATA["Data Segment\ninitialised globals and statics"]
+    TEXT["Text Segment\nexecutable code - read-only"]
+    LOW["Low Addresses - NULL page unmapped"]
+    HIGH --> STK --> GAP --> MMAP --> HEAP --> BSS --> DATA --> TEXT --> LOW`,
     },
     {
-      title: "Buddy system splitting and coalescing",
+      title: "Buddy System Split and Coalesce Flow",
       kind: "flow",
-      caption: "Request for 32 bytes: split 256->128->64->32. Free buddy pair: coalesce 32+32->64, then 64+64->128 if both free.",
+      caption: "How the buddy system splits blocks on allocation and merges buddies on free to return memory to larger free lists.",
+      mermaid: `flowchart TD
+    A["Request 32 bytes"] --> B{"Free list\nfor 32 bytes?"}
+    B -->|Yes| C["Return 32-byte block"]
+    B -->|No| D{"Free list\nfor 64 bytes?"}
+    D -->|No| E["Split 128-byte block into two 64-byte buddies"]
+    E --> D
+    D -->|Yes| F["Split 64-byte block into two 32-byte buddies"]
+    F --> G["Return one 32-byte block\nKeep buddy on free list"]
+    H["free 32-byte block"] --> I{"Buddy also free?"}
+    I -->|No| J["Add to 32-byte free list"]
+    I -->|Yes| K["Coalesce into 64-byte block"]
+    K --> L{"64-byte buddy\nalso free?"}
+    L -->|Yes| M["Coalesce into 128-byte block - repeat"]
+    L -->|No| N["Add to 64-byte free list"]`,
     },
     {
-      title: "Allocator hierarchy (jemalloc/tcmalloc style)",
+      title: "Modern Allocator Hierarchy",
       kind: "architecture",
-      caption: "Thread-local cache -> Arena/Central cache -> Page heap -> OS (mmap/brk). Each layer handles different size classes.",
+      caption: "Layered allocator architecture from thread-local cache down to OS system calls, handling different size classes at each level.",
+      mermaid: `graph TD
+    APP["Application - malloc or new"]
+    TLC["Thread-Local Cache\nO1 allocation for small sizes\nno locking"]
+    ARENA["Arena or Central Cache\nper-CPU or shared\nsize-class bins"]
+    PH["Page Heap\nlarge span management\nOS page granularity"]
+    OS["OS - mmap or brk\nrequest pages from kernel"]
+    APP --> TLC
+    TLC -->|cache miss| ARENA
+    ARENA -->|span needed| PH
+    PH -->|more memory needed| OS
+    OS -->|pages returned| PH
+    TLC -->|large allocation direct| PH
+    PH -->|large direct| OS`,
+    },
+    {
+      title: "malloc Flow for a Typical Request",
+      kind: "flow",
+      caption: "Decision flow inside malloc showing size-class lookup, thread cache check, arena fallback, and OS allocation.",
+      mermaid: `flowchart TD
+    A["malloc request for N bytes"] --> B{"Size greater than\n128 KB threshold?"}
+    B -->|Yes| C["Use mmap directly\nreturnable to OS via munmap"]
+    B -->|No| D["Round up to nearest size class"]
+    D --> E{"Thread-local\ncache has free block?"}
+    E -->|Yes| F["Return cached block - O1 no lock"]
+    E -->|No| G["Request batch from arena"]
+    G --> H{"Arena has\nfree span?"}
+    H -->|Yes| I["Carve blocks from span\nfill thread cache"]
+    H -->|No| J["Request pages from OS via brk or mmap"]
+    J --> I
+    I --> F`,
     },
   ],
   animations: [

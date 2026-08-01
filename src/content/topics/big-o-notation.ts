@@ -64,9 +64,75 @@ bool has_duplicate(const std::vector<T>& items) {
   },
   diagrams: [
     {
-      title: "Growth-rate curves",
+      title: "Complexity Class Hierarchy",
+      kind: "architecture",
+      caption: "How the common complexity classes nest inside each other — each class is strictly slower than the one above it as n grows.",
+      mermaid: `graph TD
+    O1["O(1) — Constant"]
+    OLOGN["O(log n) — Logarithmic"]
+    ON["O(n) — Linear"]
+    ONLOGN["O(n log n) — Linearithmic"]
+    ON2["O(n²) — Quadratic"]
+    O2N["O(2ⁿ) — Exponential"]
+    ONF["O(n!) — Factorial"]
+    O1 --> OLOGN --> ON --> ONLOGN --> ON2 --> O2N --> ONF`,
+    },
+    {
+      title: "Algorithm Analysis Decision Flow",
       kind: "flow",
-      caption: "How each complexity class diverges as n increases — the visual intuition behind 'drop the lower-order terms'.",
+      caption: "Step-by-step process for determining the Big-O complexity of a given algorithm.",
+      mermaid: `flowchart TD
+    A([Start]) --> B{Nested loops?}
+    B -->|Yes| C{Both over n?}
+    C -->|Yes| D["O(n²) or higher"]
+    C -->|No| E["O(n log n) likely"]
+    B -->|No| F{Single loop?}
+    F -->|Yes| G["O(n)"]
+    F -->|No| H{Halving each step?}
+    H -->|Yes| I["O(log n)"]
+    H -->|No| J["O(1)"]`,
+    },
+    {
+      title: "Amortized Cost — Dynamic Array Append",
+      kind: "sequence",
+      caption: "Most appends are O(1). Occasional resize doubles capacity and copies all elements, but amortizes to O(1) per append.",
+      mermaid: `sequenceDiagram
+    participant App
+    participant Array
+    participant Memory
+    App->>Array: append(x) — capacity available
+    Array-->>App: O(1) insert
+    App->>Array: append(y) — array full
+    Array->>Memory: allocate 2× capacity
+    Array->>Memory: copy all elements O(n)
+    Array-->>App: insert complete
+    Note over Array: amortized cost per append = O(1)`,
+    },
+    {
+      title: "Complexity Classes Mind Map",
+      kind: "mindmap",
+      caption: "Common algorithms grouped by their Big-O complexity class for quick reference.",
+      mermaid: `mindmap
+  root((Big-O))
+    O_1[O of 1]
+      Hash lookup
+      Array index
+      Stack push/pop
+    O_logn[O of log n]
+      Binary search
+      BST lookup
+    O_n[O of n]
+      Linear scan
+      Single loop
+    O_nlogn[O of n log n]
+      Merge sort
+      Heap sort
+      Quick sort avg
+    O_n2[O of n squared]
+      Bubble sort
+      Nested loops
+    O_2n[O of 2 to n]
+      Subset enumeration`,
     },
   ],
   interviewQA: [

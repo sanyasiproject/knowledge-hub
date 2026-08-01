@@ -177,20 +177,67 @@ function rateLimitMiddleware(
     {
       title: "Token Bucket Algorithm",
       kind: "flow",
-      caption:
-        "Tokens are added to the bucket at a fixed refill rate up to capacity. Each request consumes a token. When the bucket is empty, requests are rejected until tokens refill.",
+      caption: "Tokens refill at a fixed rate up to bucket capacity. Each request consumes one token. Empty bucket means reject.",
+      mermaid: `flowchart TD
+    A([Incoming Request]) --> B{Token available?}
+    B -->|Yes| C[Consume 1 token]
+    B -->|No| D[Reject with 429]
+    C --> E[Process request]
+    F[Refill timer] -->|Add tokens up to capacity| B`,
     },
     {
-      title: "Fixed Window vs Sliding Window",
+      title: "Sliding Window Rate Limit",
       kind: "sequence",
-      caption:
-        "Fixed window allows bursts at window boundaries (2x rate). Sliding window weighs current and previous window counts to smooth the boundary.",
+      caption: "Requests are timestamped in Redis. On each request, old entries outside the window are removed, and the count is checked against the limit.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant MW as Rate Limit Middleware
+    participant R as Redis
+    C->>MW: POST /api/action
+    MW->>R: ZREMRANGEBYSCORE key 0 now-window
+    MW->>R: ZCARD key
+    R-->>MW: count = 42
+    MW->>MW: 42 < 100 limit?
+    MW->>R: ZADD key now requestId
+    MW->>R: EXPIRE key window
+    MW-->>C: 200 OK
+    Note over MW: If count >= limit, return 429`,
     },
     {
       title: "Distributed Rate Limiting Architecture",
       kind: "architecture",
-      caption:
-        "Multiple API server instances share a Redis cluster for rate limit state. Each request atomically checks and updates the counter via Lua scripts.",
+      caption: "API gateway checks rate limits against a shared Redis cluster. All gateway instances share state to enforce global limits accurately.",
+      mermaid: `graph LR
+    C1[Client 1] --> GW[API Gateway Cluster]
+    C2[Client 2] --> GW
+    C3[Client 3] --> GW
+    GW --> RC[(Redis Cluster
+Shared State)]
+    GW --> SVC[Backend Service]
+    RC -->|count per key| GW`,
+    },
+    {
+      title: "Rate Limiting Algorithm Comparison",
+      kind: "mindmap",
+      caption: "Overview of the four main rate limiting algorithms with their trade-offs.",
+      mermaid: `mindmap
+  root((Rate Limiting Algorithms))
+    Token Bucket
+      Allows bursts up to capacity
+      Smooth average rate
+      Simple implementation
+    Leaky Bucket
+      Fixed output rate
+      Queues excess requests
+      No burst allowed
+    Fixed Window
+      Simple counter reset
+      Boundary burst problem
+      Low memory usage
+    Sliding Window
+      Smooth enforcement
+      No boundary burst
+      Higher memory cost`,
     },
   ],
   animations: [

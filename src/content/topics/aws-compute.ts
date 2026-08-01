@@ -294,15 +294,103 @@ aws ecs create-service \\
 
   diagrams: [
     {
+      title: "AWS Compute Services Architecture",
+      kind: "architecture",
+      caption: "Overview of AWS compute services spanning IaaS, containers, and serverless, with their management layers.",
+      mermaid: `graph TB
+    subgraph IaaS["IaaS - Full Control"]
+      EC2["EC2\nVirtual Machines"]
+      SPOT["Spot Instances\nLow-cost interruption"]
+      ASG["Auto Scaling Groups"]
+    end
+    subgraph Containers["Containers"]
+      ECS["ECS\nManaged container orchestration"]
+      EKS["EKS\nManaged Kubernetes"]
+      FARGATE["Fargate\nServerless container runtime"]
+    end
+    subgraph Serverless["Serverless"]
+      LAMBDA["Lambda\nEvent-driven functions"]
+      BATCH["AWS Batch\nBatch compute jobs"]
+    end
+    EC2 --> ASG
+    SPOT --> ASG
+    ECS --> FARGATE
+    EKS --> FARGATE
+    LAMBDA --> BATCH`,
+    },
+    {
       title: "AWS Compute Decision Tree",
-      kind: "flow" as const,
-      caption: "Decision flow for choosing between EC2, Lambda, ECS, EKS, and Fargate based on workload characteristics"
+      kind: "flow",
+      caption: "Decision flow for choosing between EC2, Lambda, ECS, EKS, and Fargate based on workload characteristics.",
+      mermaid: `flowchart TD
+    Start["What is your workload?"] --> Q1{"Need OS-level\ncontrol?"}
+    Q1 -->|Yes| EC2["Use EC2\nFull instance control"]
+    Q1 -->|No| Q2{"Containerised\nworkload?"}
+    Q2 -->|No| Q3{"Short-lived\nevent-driven?"}
+    Q3 -->|Yes| LAMBDA["Use Lambda\nServerless functions"]
+    Q3 -->|No| BATCH["Use AWS Batch\nBatch jobs"]
+    Q2 -->|Yes| Q4{"Need Kubernetes?"}
+    Q4 -->|Yes| EKS["Use EKS\nManaged Kubernetes"]
+    Q4 -->|No| Q5{"Manage EC2\nnodes yourself?"}
+    Q5 -->|Yes| ECS_EC2["ECS on EC2\nManage your nodes"]
+    Q5 -->|No| FARGATE["ECS on Fargate\nServerless containers"]`,
     },
     {
       title: "Lambda Execution Lifecycle",
-      kind: "sequence" as const,
-      caption: "Sequence diagram showing cold start vs warm invocation: API Gateway to Lambda Worker Manager to Firecracker micro-VM"
-    }
+      kind: "sequence",
+      caption: "Sequence diagram showing cold start vs warm invocation through API Gateway, Lambda service, and Firecracker micro-VM.",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant APIGW as API Gateway
+    participant LM as Lambda Manager
+    participant MVM as Firecracker MicroVM
+    participant Code as Function Code
+
+    Note over Client,Code: Cold Start Path
+    Client->>APIGW: HTTP Request
+    APIGW->>LM: Invoke function
+    LM->>MVM: Allocate new MicroVM
+    MVM->>Code: Init runtime + load code
+    Code-->>MVM: Runtime ready
+    MVM->>Code: Execute handler
+    Code-->>APIGW: Response
+    APIGW-->>Client: HTTP Response
+
+    Note over Client,Code: Warm Invocation Path
+    Client->>APIGW: HTTP Request
+    APIGW->>LM: Invoke function
+    LM->>MVM: Reuse warm MicroVM
+    MVM->>Code: Execute handler
+    Code-->>APIGW: Response
+    APIGW-->>Client: HTTP Response`,
+    },
+    {
+      title: "EC2 Instance Features",
+      kind: "mindmap",
+      caption: "Mind map of key EC2 concepts including instance types, pricing models, storage options, and networking.",
+      mermaid: `mindmap
+  root((EC2))
+    Instance Types
+      General Purpose M and T series
+      Compute Optimized C series
+      Memory Optimized R and X series
+      Storage Optimized I and D series
+      GPU Instances P and G series
+    Pricing Models
+      On-Demand
+      Reserved 1 or 3 year
+      Spot up to 90 percent off
+      Savings Plans
+    Storage
+      EBS persistent block storage
+      Instance Store ephemeral
+      EFS shared file system
+    Networking
+      ENI virtual network card
+      Enhanced networking SR-IOV
+      Placement Groups
+      Security Groups`,
+    },
   ],
 
   animations: [

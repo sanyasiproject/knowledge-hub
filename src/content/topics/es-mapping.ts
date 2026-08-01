@@ -289,20 +289,67 @@ POST /orders/_search
 
   diagrams: [
     {
-      title: "Elasticsearch Field Type Decision Tree",
+      title: "Field Type Decision Tree",
       kind: "flow",
-      caption: "Decision flow for choosing field types: string -> full-text search? -> text (+ keyword multi-field). Exact match only? -> keyword. Number -> range queries? -> integer/long/float. Date -> date with formats. Location -> geo_point or geo_shape. Array of objects with independent queries -> nested."
+      caption: "Decision flow for selecting the correct Elasticsearch field type based on query requirements.",
+      mermaid: `flowchart TD
+    A["Source Field Value"] --> B{Is it a string?}
+    B -->|Yes| C{Need full-text search?}
+    C -->|Yes| D["text + keyword sub-field"]
+    C -->|No| E["keyword only"]
+    B -->|No| F{Is it a number?}
+    F -->|Yes| G{Range queries needed?}
+    G -->|Yes| H["integer / long / float / double"]
+    G -->|No| I["keyword for exact match"]
+    F -->|No| J{Is it a date?}
+    J -->|Yes| K["date field with format"]
+    J -->|No| L{Is it a location?}
+    L -->|Yes| M["geo_point or geo_shape"]
+    L -->|No| N{Array of objects?}
+    N -->|Independent queries| O["nested type"]
+    N -->|No| P["object type"]`,
     },
     {
-      title: "Multi-Field Indexing",
+      title: "Multi-Field Indexing Architecture",
       kind: "architecture",
-      caption: "A single source value 'New York City' is indexed three ways: as text field (tokens: [new, york, city] for full-text search), as keyword sub-field (exact value for sorting/aggregation), and optionally as autocomplete sub-field (edge ngrams: [ne, new, new_, ...])."
+      caption: "A single source value is stored in multiple sub-fields to serve different query types.",
+      mermaid: `graph TD
+    SRC["Source Value: New York City"]
+    SRC --> TF["text field\ntokens: new, york, city\nfull-text search"]
+    SRC --> KF["keyword sub-field\nexact: New York City\nsort and aggregate"]
+    SRC --> AF["autocomplete sub-field\nedge ngrams: ne, new, new_york\nprefix search"]`,
     },
     {
       title: "Object vs Nested Document Storage",
       kind: "architecture",
-      caption: "Object type flattens arrays: [{a:1,b:2},{a:3,b:4}] becomes a:[1,3], b:[2,4] losing cross-field correlation. Nested type stores each element as a hidden Lucene document, preserving {a:1,b:2} and {a:3,b:4} as discrete units for accurate querying."
-    }
+      caption: "Object type flattens arrays losing cross-field correlation; nested preserves it via hidden Lucene docs.",
+      mermaid: `graph LR
+    RAW["Source Array\nitem1: a=1 b=2\nitem2: a=3 b=4"]
+    RAW --> OBJ["Object Type\na: 1,3\nb: 2,4\nCorrelation LOST"]
+    RAW --> NEST["Nested Type\nHidden doc: a=1 b=2\nHidden doc: a=3 b=4\nCorrelation PRESERVED"]`,
+    },
+    {
+      title: "Mapping Update Sequence",
+      kind: "sequence",
+      caption: "Sequence comparing dynamic mapping auto-detection versus explicit mapping pre-definition.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant ES as Elasticsearch
+    participant I as Index
+
+    Note over C,I: Dynamic Mapping
+    C->>ES: Index document (no prior mapping)
+    ES->>ES: Inspect JSON field types
+    ES->>I: Auto-create mapping
+    I-->>C: Indexed with inferred types
+
+    Note over C,I: Explicit Mapping
+    C->>ES: PUT /index/_mapping
+    ES->>I: Store defined field types
+    C->>ES: Index document
+    ES->>ES: Validate against mapping
+    I-->>C: Indexed with enforced types`,
+    },
   ],
 
   animations: [

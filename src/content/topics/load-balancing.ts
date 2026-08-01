@@ -435,81 +435,76 @@ int main() {
     {
       title: "L7 Load Balancer Architecture",
       kind: "architecture",
-      caption: "Request flow through an L7 load balancer with SSL termination, health checks, and content-based routing to multiple backend pools.",
+      caption: "Request flow through an L7 load balancer with SSL termination, health checks, and content-based routing to backend pools.",
       mermaid: `graph TD
-    Client["**Client** (Browser/App)"]
-    DNS["**DNS** (GSLB)"]
-    LB["**L7 Load Balancer**<br/>SSL Termination<br/>Rate Limiting"]
-    HC["**Health Checker**<br/>Active + Passive"]
-
+    Client["Client Browser or App"]
+    DNS["DNS GSLB"]
+    LB["L7 Load Balancer - SSL Termination and Rate Limiting"]
+    HC["Health Checker - Active and Passive"]
     subgraph API_Pool["API Backend Pool"]
         API1["api-server-1:8080"]
         API2["api-server-2:8080"]
         API3["api-server-3:8080"]
     end
-
     subgraph Static_Pool["Static Backend Pool"]
         S1["cdn-origin-1:8080"]
         S2["cdn-origin-2:8080"]
     end
-
-    Client -->|"HTTPS request"| DNS
-    DNS -->|"Nearest region IP"| LB
-    LB -->|"/api/* routes"| API_Pool
-    LB -->|"/static/* routes"| Static_Pool
-    HC -.->|"GET /health every 5s"| API1
-    HC -.->|"GET /health every 5s"| API2
-    HC -.->|"GET /health every 5s"| API3
-    HC -.->|"probe"| S1
-    HC -.->|"probe"| S2
+    Client -->|HTTPS request| DNS
+    DNS -->|Nearest region IP| LB
+    LB -->|/api routes| API_Pool
+    LB -->|/static routes| Static_Pool
+    HC -.->|GET /health every 5s| API1
+    HC -.->|GET /health every 5s| API2
+    HC -.->|GET /health every 5s| API3
     LB --- HC`,
     },
     {
-      title: "Consistent Hashing Ring",
+      title: "Load Balancing Algorithm Selection",
       kind: "flow",
-      caption: "Visualization of how keys are mapped to servers on a consistent hash ring with virtual nodes. When a server is removed, only its keys redistribute to the next clockwise node.",
-      mermaid: `graph LR
-    subgraph HashRing["**Consistent Hash Ring**"]
-        direction LR
-        VN_A1["A#1"]
-        VN_B1["B#1"]
-        VN_C1["C#1"]
-        VN_A2["A#2"]
-        VN_B2["B#2"]
-        VN_C2["C#2"]
-    end
-
-    K1["Key: user:1001"]
-    K2["Key: session:xyz"]
-    K3["Key: order:500"]
-
-    K1 -->|"hash → clockwise"| VN_A1
-    K2 -->|"hash → clockwise"| VN_C1
-    K3 -->|"hash → clockwise"| VN_B2
-
-    VN_A1 --> ServerA["**Server A**"]
-    VN_A2 --> ServerA
-    VN_B1 --> ServerB["**Server B**"]
-    VN_B2 --> ServerB
-    VN_C1 --> ServerC["**Server C**"]
-    VN_C2 --> ServerC`,
+      caption: "Decision flow for choosing the right load balancing algorithm based on workload characteristics.",
+      mermaid: `flowchart TD
+    A["Choose Load Balancing Algorithm"] --> B{"Are backends\nhomogeneous?"}
+    B -->|No| C["Use Weighted Round-Robin\nor Weighted Least Connections"]
+    B -->|Yes| D{"Do requests have\nvariable duration?"}
+    D -->|Yes| E["Use Least Connections\nor Least Response Time"]
+    D -->|No| F{"Is session\nstickiness needed?"}
+    F -->|Yes| G["Use IP Hash\nor Cookie-Based Affinity"]
+    F -->|No| H{"Is it a\ncache layer?"}
+    H -->|Yes| I["Use Consistent Hashing\nto minimise cache misses"]
+    H -->|No| J["Use Round-Robin\nSimplest and fair"]`,
     },
     {
-      title: "Health Check State Machine",
+      title: "Backend Health Check State Machine",
       kind: "state",
-      caption: "Backend server health states and transitions based on active/passive health check results.",
+      caption: "States and transitions for a backend server based on active probe results and graceful shutdown signals.",
       mermaid: `stateDiagram-v2
     [*] --> Healthy
-    Healthy --> Suspect : 1 failed probe
-    Suspect --> Healthy : successful probe
-    Suspect --> Unhealthy : threshold failures reached
-    Unhealthy --> Recovery : 1 successful probe
-    Recovery --> Healthy : threshold successes reached
-    Recovery --> Unhealthy : probe fails again
-    Unhealthy --> Draining : graceful shutdown signal
-    Healthy --> Draining : graceful shutdown signal
-    Draining --> Removed : all connections closed
+    Healthy --> Suspect: 1 failed probe
+    Suspect --> Healthy: successful probe
+    Suspect --> Unhealthy: threshold failures reached
+    Unhealthy --> Recovery: 1 successful probe
+    Recovery --> Healthy: threshold successes reached
+    Recovery --> Unhealthy: probe fails again
+    Unhealthy --> Draining: graceful shutdown signal
+    Healthy --> Draining: graceful shutdown signal
+    Draining --> Removed: all connections closed
     Removed --> [*]`,
+    },
+    {
+      title: "Consistent Hashing Node Distribution",
+      kind: "network",
+      caption: "How keys are mapped to virtual nodes on a hash ring and resolved to physical servers, with virtual nodes ensuring even distribution.",
+      mermaid: `graph LR
+    K1["Key user:1001"] -->|hash to ring| VN_A1["Virtual Node A1"]
+    K2["Key session:xyz"] -->|hash to ring| VN_C1["Virtual Node C1"]
+    K3["Key order:500"] -->|hash to ring| VN_B2["Virtual Node B2"]
+    VN_A1 --> SA["Server A"]
+    VN_A2["Virtual Node A2"] --> SA
+    VN_B1["Virtual Node B1"] --> SB["Server B"]
+    VN_B2 --> SB
+    VN_C1 --> SC["Server C"]
+    VN_C2["Virtual Node C2"] --> SC`,
     },
   ],
 

@@ -254,29 +254,74 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Redis Cluster hash slot distribution",
+      title: "Redis Cluster Hash Slot Distribution",
       kind: "architecture",
-      caption: "16384 hash slots divided among master nodes. Each master has replica(s). CRC16(key) mod 16384 determines the slot.",
+      caption: "16384 hash slots are divided among master nodes. CRC16(key) mod 16384 maps each key to a slot and thus to a node.",
+      mermaid: `graph TD
+    subgraph Cluster
+      M1[Master 1
+Slots 0-5460]
+      M2[Master 2
+Slots 5461-10922]
+      M3[Master 3
+Slots 10923-16383]
+      R1[Replica 1] --> M1
+      R2[Replica 2] --> M2
+      R3[Replica 3] --> M3
+    end
+    K[Key] -->|CRC16 mod 16384| SLOT[Slot Number]
+    SLOT --> M1
+    SLOT --> M2
+    SLOT --> M3`,
     },
     {
-      title: "Cluster failover sequence",
-      kind: "sequence",
-      caption: "Master stops responding. Replicas detect PFAIL after cluster-node-timeout. Majority of masters confirm FAIL. Replica with best offset requests votes, wins election, promotes to master.",
-    },
-    {
-      title: "MOVED vs ASK redirection flow",
+      title: "MOVED vs ASK Redirection",
       kind: "flow",
-      caption: "Client sends command. If slot is on another node, MOVED redirect (update cache). If slot is migrating and key is on target, ASK redirect (one-time, no cache update).",
+      caption: "MOVED means the slot permanently lives on another node; update the slot cache. ASK means a migration is in progress; forward this one request without caching.",
+      mermaid: `flowchart TD
+    A([Client sends command]) --> B[Target node]
+    B --> C{Slot owned here?}
+    C -->|Yes| D[Execute and return]
+    C -->|No, permanent| E[Return MOVED error]
+    C -->|No, migrating| F[Return ASK error]
+    E --> G[Client updates slot cache]
+    G --> H[Retry on correct node]
+    F --> I[Client sends ASKING to new node]
+    I --> J[Execute this request only]`,
     },
     {
-      title: "Redis Sentinel architecture",
-      kind: "architecture",
-      caption: "3+ Sentinel processes monitor master and replicas. On master failure, Sentinels elect a leader who promotes a replica. Clients query Sentinel for current master address.",
-    },
-    {
-      title: "Resharding slot migration",
+      title: "Cluster Failover Sequence",
       kind: "sequence",
-      caption: "Source marks slot MIGRATING, target marks IMPORTING. Keys are moved with MIGRATE. Source returns ASK for migrated keys. Finalized with SETSLOT NODE on all nodes.",
+      caption: "When a master stops responding, replicas detect PFAIL, cluster confirms FAIL, and a replica wins a vote to become the new master.",
+      mermaid: `sequenceDiagram
+    participant M as Master Node
+    participant R1 as Replica 1
+    participant R2 as Replica 2
+    participant CN as Cluster Nodes
+    M->>M: Node crashes
+    R1->>CN: PFAIL detected
+    CN->>CN: Gossip PFAIL state
+    CN->>CN: Majority confirm FAIL
+    R1->>CN: Request failover vote
+    CN-->>R1: Majority vote granted
+    R1->>R1: Promote to master
+    R1->>CN: Announce new master
+    R2->>R1: Replicate from new master`,
+    },
+    {
+      title: "Cluster Topology",
+      kind: "network",
+      caption: "A minimal Redis Cluster requires 3 masters. Each master has at least one replica for failover. All nodes gossip cluster state.",
+      mermaid: `graph LR
+    C[Client] --> M1[Master 1]
+    C --> M2[Master 2]
+    C --> M3[Master 3]
+    M1 <-->|gossip| M2
+    M2 <-->|gossip| M3
+    M1 <-->|gossip| M3
+    M1 --> Rep1[Replica 1]
+    M2 --> Rep2[Replica 2]
+    M3 --> Rep3[Replica 3]`,
     },
   ],
   animations: [

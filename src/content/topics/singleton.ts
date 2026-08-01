@@ -220,16 +220,83 @@ bus.on("user:login", (user) => console.log("Logged in:", user));`,
   ],
   diagrams: [
     {
-      title: "Singleton class structure",
+      title: "Singleton Pattern Structure",
       kind: "architecture",
-      caption:
-        "The Singleton class holds a private static instance and exposes a public static getInstance() method. All clients share the same instance reference.",
+      caption: "The singleton pattern ensures only one instance exists by making the constructor private and providing a static method to access the sole instance.",
+      mermaid: `graph TD
+    subgraph Singleton["Singleton Class"]
+      Private["private static instance"]
+      Constructor["private constructor()"]
+      GetInstance["public static getInstance()"]
+    end
+    Client1[Client 1] -->|getInstance()| GetInstance
+    Client2[Client 2] -->|getInstance()| GetInstance
+    Client3[Client 3] -->|getInstance()| GetInstance
+    GetInstance -->|returns same| Instance[Single Instance]
+    Instance --> State[Shared State]`,
     },
     {
-      title: "Lazy initialization sequence",
+      title: "Thread-Safe Singleton Initialization",
+      kind: "flow",
+      caption: "Double-checked locking ensures thread-safe singleton creation in multi-threaded environments without synchronizing every access.",
+      mermaid: `flowchart TD
+    A([Thread calls getInstance]) --> B{Instance is null?}
+    B -->|No| C[Return existing instance]
+    B -->|Yes| D[Acquire lock - synchronized]
+    D --> E{Still null after lock?}
+    E -->|No| F[Return instance created by other thread]
+    E -->|Yes| G[Create new instance]
+    G --> H[Assign to static field]
+    H --> I[Release lock]
+    I --> J[Return new instance]`,
+    },
+    {
+      title: "Singleton Use Cases and Anti-Patterns",
+      kind: "mindmap",
+      caption: "Appropriate use cases for the singleton pattern versus common anti-patterns and why they cause testing and coupling problems.",
+      mermaid: `mindmap
+  root((Singleton Pattern))
+    Legitimate Uses
+      Logger instance
+      Configuration manager
+      Thread pool
+      Connection pool
+    Anti-patterns
+      God object with too much state
+      Singleton as global variable
+      Hiding dependencies
+      Hard to unit test
+    Better Alternatives
+      Dependency injection
+      Module-level singletons
+      Service locator pattern
+    Testing Problems
+      Cannot mock easily
+      Shared state between tests
+      Order-dependent tests`,
+    },
+    {
+      title: "Singleton vs Dependency Injection",
       kind: "sequence",
-      caption:
-        "Shows two threads calling getInstance() concurrently, illustrating how double-checked locking prevents duplicate instantiation while minimizing synchronization overhead.",
+      caption: "Comparing singleton accessed globally versus the same object injected via dependency injection, which makes dependencies explicit and testable.",
+      mermaid: `sequenceDiagram
+    participant Test as Unit Test
+    participant Class as Service Class
+    participant Singleton as Global Singleton
+    participant Injected as Injected Dependency
+
+    Note over Test,Singleton: Singleton approach - hard to test
+    Test->>Class: new ServiceClass()
+    Class->>Singleton: Logger.getInstance()
+    Singleton-->>Class: Global logger
+    Note over Class: Cannot substitute logger in test
+
+    Note over Test,Injected: Dependency Injection - testable
+    Test->>Class: new ServiceClass(mockLogger)
+    Class->>Injected: this.logger = injected logger
+    Test->>Class: callMethod()
+    Class->>Injected: mockLogger.log()
+    Injected-->>Test: Verifiable mock call`,
     },
   ],
   animations: [

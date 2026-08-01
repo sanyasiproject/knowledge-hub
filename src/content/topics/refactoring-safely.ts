@@ -244,16 +244,76 @@ void emit_metric(const std::string& name,
   ],
   diagrams: [
     {
-      title: "Strangler Fig Migration Flow",
-      kind: "architecture",
-      caption:
-        "Traffic flows through a routing layer (API gateway or proxy) that directs requests to either the legacy monolith or the new service based on feature flags and migration percentage. As confidence grows, the percentage shifts from 0% to 100% new, and the legacy component is eventually decommissioned.",
+      title: "Safe Refactoring Workflow",
+      kind: "flow",
+      caption: "The recommended process for refactoring safely: ensure tests pass first, make small incremental changes, and verify at each step.",
+      mermaid: `flowchart TD
+    A([Start refactoring]) --> B{Tests passing?}
+    B -->|No| C[Fix failing tests first]
+    C --> B
+    B -->|Yes| D[Identify smallest change]
+    D --> E[Make the change]
+    E --> F[Run tests]
+    F --> G{Tests pass?}
+    G -->|No| H[Revert change]
+    H --> D
+    G -->|Yes| I{More to refactor?}
+    I -->|Yes| D
+    I -->|No| J([Refactoring complete])`,
     },
     {
-      title: "Parallel Change (Expand and Contract) Lifecycle",
-      kind: "flow",
-      caption:
-        "Phase 1 (Expand): add new interface alongside old, both work. Phase 2 (Migrate): move all callers to new interface, deprecate old. Phase 3 (Contract): remove old interface. Each phase is a separate deployment with full test coverage.",
+      title: "Refactoring Safety Net Layers",
+      kind: "architecture",
+      caption: "Multiple layers of safety that enable confident refactoring: automated tests, version control, feature flags, and continuous integration.",
+      mermaid: `graph TD
+    A[Refactoring Change] --> B[Unit Tests]
+    A --> C[Integration Tests]
+    A --> D[Version Control - Git]
+    B --> E[CI Pipeline]
+    C --> E
+    D --> F[Easy Revert]
+    E --> G{All Checks Pass?}
+    G -->|Yes| H[Merge Safely]
+    G -->|No| I[Investigate and Fix]
+    I --> A`,
+    },
+    {
+      title: "Strangler Fig Pattern for Large Refactors",
+      kind: "sequence",
+      caption: "Gradually replace legacy code by routing traffic to new implementation. Old and new code coexist until migration is complete.",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant Router
+    participant Legacy as Legacy System
+    participant New as New Implementation
+
+    Client->>Router: Request
+    Note over Router: Phase 1 - All to Legacy
+    Router->>Legacy: Forward all
+    Legacy-->>Client: Response
+
+    Note over Router: Phase 2 - Partial migration
+    Router->>New: Forward new features
+    New-->>Client: Response
+
+    Note over Router: Phase 3 - Full migration
+    Router->>New: Forward all
+    New-->>Client: Response`,
+    },
+    {
+      title: "Refactoring Risk Assessment",
+      kind: "state",
+      caption: "State machine showing how a refactoring task moves through risk levels and validation stages before being considered safe to ship.",
+      mermaid: `stateDiagram-v2
+    [*] --> Identified
+    Identified --> Assessed: Scope analyzed
+    Assessed --> TestsCovered: Tests written
+    TestsCovered --> InProgress: Refactoring started
+    InProgress --> UnderReview: Change complete
+    UnderReview --> Validated: Tests and review pass
+    UnderReview --> Reverted: Issues found
+    Reverted --> Identified: Re-scope
+    Validated --> [*]`,
     },
   ],
   animations: [

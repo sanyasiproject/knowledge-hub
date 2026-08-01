@@ -104,8 +104,77 @@ int main() {
     },
   ],
   diagrams: [
-    { title: "Key-value store architecture", kind: "architecture", caption: "Client hashes key to determine node; node stores key-value pair in memory or on disk." },
-    { title: "Consistent hashing ring", kind: "network", caption: "Keys and nodes mapped to a hash ring; each key is owned by the next clockwise node." },
+    {
+      title: "Key-Value Store Architecture",
+      kind: "architecture",
+      caption: "Client hashes key to determine which shard node holds the data.",
+      mermaid: `graph LR
+    Client["Client App"] -->|hash key| Router["Request Router"]
+    Router -->|shard 0-33| Node1["Node 1\nin-memory hash map"]
+    Router -->|shard 34-66| Node2["Node 2\nin-memory hash map"]
+    Router -->|shard 67-99| Node3["Node 3\nin-memory hash map"]
+    Node1 -->|persistence| Disk1["AOF / RDB"]
+    Node2 -->|persistence| Disk2["AOF / RDB"]
+    Node3 -->|persistence| Disk3["AOF / RDB"]`,
+    },
+    {
+      title: "Consistent Hashing Ring",
+      kind: "network",
+      caption: "Keys and nodes placed on a hash ring; each key routes to the next clockwise node.",
+      mermaid: `graph LR
+    K1["Key: user:123\nhash=15"] -->|clockwise| NA["Node A\nhash=20"]
+    K2["Key: order:99\nhash=55"] -->|clockwise| NB["Node B\nhash=60"]
+    K3["Key: cart:7\nhash=80"] -->|clockwise| NC["Node C\nhash=90"]
+    NA -->|ring| NB
+    NB -->|ring| NC
+    NC -->|wraps around| NA
+    VN["Virtual Node A'\nhash=40"] -->|owned by| NA`,
+    },
+    {
+      title: "GET Operation Flow",
+      kind: "sequence",
+      caption: "Client GET request routed to the owning shard, with cache-hit and cache-miss paths.",
+      mermaid: `sequenceDiagram
+    participant App as Application
+    participant KV as KV Store Cluster
+    participant Node as Owning Node
+    participant DB as Database
+
+    App->>KV: GET user:1001
+    KV->>KV: hash key to find node
+    KV->>Node: forward GET
+    Node->>Node: lookup in memory
+    alt cache hit
+      Node-->>App: return value
+    else cache miss
+      Node-->>App: null / MISS
+      App->>DB: query database
+      DB-->>App: value
+      App->>KV: SET user:1001 value TTL
+    end`,
+    },
+    {
+      title: "Key-Value Store Use Cases",
+      kind: "mindmap",
+      caption: "Common use cases that key-value stores are optimized for.",
+      mermaid: `mindmap
+    root["Key-Value Stores"]
+      Caching
+        Session data
+        Page fragment cache
+        API response cache
+      Coordination
+        Distributed locks
+        Leader election
+        Service discovery
+      Real-Time
+        Rate limiting counters
+        Leaderboards sorted sets
+        Pub/Sub messaging
+      Config
+        Feature flags
+        App configuration`,
+    },
   ],
   animations: [
     {

@@ -189,16 +189,78 @@ class OrderCheckoutE2ETest {
   ],
   diagrams: [
     {
-      title: "Test Pyramid vs Testing Trophy vs Ice Cream Cone",
+      title: "Test Pyramid Layers",
       kind: "architecture",
-      caption:
-        "Side-by-side comparison of the three test distribution shapes: Cohn's Pyramid (wide unit base), Dodds' Trophy (wide integration middle), and the Ice Cream Cone anti-pattern (wide E2E/manual top).",
+      caption: "The three-tier testing pyramid showing unit tests at the base and end-to-end tests at the top.",
+      mermaid: `graph TD
+    E2E["E2E Tests
+Few - Slow - Costly
+browsers and full stack"]
+    INT["Integration Tests
+Some - Medium speed
+services and databases"]
+    UNIT["Unit Tests
+Many - Fast - Cheap
+isolated functions"]
+    E2E --- INT
+    INT --- UNIT`,
     },
     {
-      title: "Cost-Speed-Confidence Tradeoff by Test Layer",
+      title: "Test Scope by Layer",
+      kind: "mindmap",
+      caption: "What each layer of the test pyramid validates and the tools commonly used at each level.",
+      mermaid: `mindmap
+  root((Test Pyramid))
+    Unit Tests
+      Single function or class
+      Mocks for dependencies
+      Milliseconds to run
+      Jest, JUnit, pytest
+    Integration Tests
+      Multiple components
+      Real databases or APIs
+      Seconds to run
+      Testcontainers
+    E2E Tests
+      Full user workflow
+      Real browser
+      Minutes to run
+      Cypress, Playwright`,
+    },
+    {
+      title: "Test Execution Flow",
       kind: "flow",
-      caption:
-        "Shows how moving up the pyramid increases confidence and cost while decreasing speed and determinism, with specific metrics for each layer.",
+      caption: "CI pipeline execution order from fast unit tests through integration to slow end-to-end tests.",
+      mermaid: `flowchart LR
+    PR["Pull Request"] --> U["Run Unit Tests
+fast feedback"]
+    U --> Pass1{Pass?}
+    Pass1 -->|No| Fail["Block merge
+fix tests"]
+    Pass1 -->|Yes| I["Run Integration Tests
+service boundaries"]
+    I --> Pass2{Pass?}
+    Pass2 -->|No| Fail
+    Pass2 -->|Yes| E["Run E2E Tests
+full workflow"]
+    E --> Pass3{Pass?}
+    Pass3 -->|No| Fail
+    Pass3 -->|Yes| Merge["Merge to main"]`,
+    },
+    {
+      title: "Ice Cream Cone Anti-Pattern",
+      kind: "architecture",
+      caption: "The test ice cream cone anti-pattern inverts the pyramid with too many slow E2E tests and too few unit tests.",
+      mermaid: `graph TD
+    UNIT2["Unit Tests
+Few - undertested logic"]
+    INT2["Integration Tests
+Some"]
+    E2E2["E2E Tests
+Many - Slow - Fragile
+heavy maintenance cost"]
+    UNIT2 --- INT2
+    INT2 --- E2E2`,
     },
   ],
   animations: [

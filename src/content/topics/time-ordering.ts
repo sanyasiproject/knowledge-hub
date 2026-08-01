@@ -361,79 +361,79 @@ public:
   ],
   diagrams: [
     {
-      title: "Lamport Clock Message Exchange",
-      kind: "sequence",
-      caption: "Three processes exchanging messages with Lamport clock updates",
-      mermaid: `sequenceDiagram
-    participant P1 as Process 1
-    participant P2 as Process 2
-    participant P3 as Process 3
-    Note over P1: C=0
-    Note over P2: C=0
-    Note over P3: C=0
-    P1->>P1: local event (C=1)
-    P1->>P2: send msg (C=2)
-    Note over P2: recv: max(0,2)+1 = C=3
-    P2->>P3: send msg (C=4)
-    Note over P3: recv: max(0,4)+1 = C=5
-    P3->>P1: send msg (C=6)
-    Note over P1: recv: max(2,6)+1 = C=7
-    P1->>P1: local event (C=8)`,
+      title: "Logical Clocks and Ordering",
+      kind: "mindmap",
+      caption: "Overview of time ordering mechanisms in distributed systems from physical to vector clocks.",
+      mermaid: `mindmap
+  root((Time Ordering))
+    Physical Clocks
+      NTP synchronization
+      Clock drift
+      Not monotonic
+    Lamport Timestamps
+      Logical clock
+      Happens-before
+      Causal ordering
+    Vector Clocks
+      Per-node counters
+      Concurrent detection
+      Full causality
+    Hybrid Logical Clocks
+      Physical plus logical
+      NTP plus causality`,
     },
     {
-      title: "Vector Clock Concurrency Detection",
+      title: "Lamport Clock Message Flow",
       kind: "sequence",
-      caption: "Two nodes making concurrent writes detected by vector clocks",
+      caption: "How Lamport timestamps are incremented on send and updated on receive to preserve causal order.",
       mermaid: `sequenceDiagram
     participant A as Node A
     participant B as Node B
-    Note over A: V=[0,0]
-    Note over B: V=[0,0]
-    A->>A: write x=1 (V=[1,0])
-    B->>B: write x=2 (V=[0,1])
-    Note over A,B: Neither [1,0] <= [0,1]<br/>nor [0,1] <= [1,0]<br/>=> CONCURRENT! Conflict detected
-    A->>B: sync (send V=[1,0])
-    Note over B: merge: max([0,1],[1,0])+tick = V=[1,2]
-    B->>A: sync (send V=[1,2])
-    Note over A: merge: max([1,0],[1,2])+tick = V=[2,2]
-    Note over A,B: Now both nodes agree on causal order`,
+    participant C as Node C
+    Note over A: t=1
+    A->>B: msg t=1
+    Note over B: t=max(0,1)+1=2
+    Note over B: t=2
+    B->>C: msg t=2
+    Note over C: t=max(0,2)+1=3
+    Note over A: t=2 local event
+    A->>C: msg t=2
+    Note over C: t=max(3,2)+1=4`,
     },
     {
-      title: "Clock Type Comparison Mind Map",
-      kind: "mindmap",
-      caption: "Overview of distributed clock types, their properties, and trade-offs",
-      mermaid: `mindmap
-  root(("**Distributed Clocks**"))
-    Physical
-      Wall Clock
-        NTP synchronized
-        Clock skew problem
-        Leap seconds
-      TrueTime
-        Uncertainty intervals
-        Atomic clocks + GPS
-        Google Spanner
-      Monotonic
-        Never goes backward
-        Local use only
-    Logical
-      Lamport Clock
-        Single counter
-        Captures happens-before
-        Cannot detect concurrency
-      Vector Clock
-        N counters
-        Detects concurrency
-        O(N) space overhead
-    Hybrid
-      HLC
-        Physical + logical pair
-        O(1) space
-        CockroachDB / MongoDB
-      Snowflake ID
-        Timestamp + machine + seq
-        Roughly ordered
-        No causal guarantee`,
+      title: "Vector Clock Causality Detection",
+      kind: "architecture",
+      caption: "Three nodes maintaining vector clocks to detect causal relationships and concurrent events.",
+      mermaid: `graph TD
+    A1["A: [1,0,0]
+local event"] --> A2["A: [2,0,0]
+send to B"]
+    A2 -->|send [2,0,0]| B1["B: [2,1,0]
+receive from A"]
+    B1 --> B2["B: [2,2,0]
+send to C"]
+    B2 -->|send [2,2,0]| C1["C: [2,2,1]
+receive from B"]
+    A1 --> A3["A: [3,0,0]
+concurrent with B events"]`,
+    },
+    {
+      title: "Total vs Causal Ordering",
+      kind: "flow",
+      caption: "Decision flow for choosing an ordering guarantee based on system requirements.",
+      mermaid: `flowchart TD
+    A([Choose ordering]) --> B{Global total order needed?}
+    B -->|Yes| C["Use consensus
+Raft or Paxos"]
+    C --> D["Total Order Broadcast
+high cost"]
+    B -->|No| E{Causal order enough?}
+    E -->|Yes| F["Use Vector Clocks
+or Causal Broadcast"]
+    E -->|No| G{Per-key order enough?}
+    G -->|Yes| H["Partition by key
+single leader per key"]
+    G -->|No| F`,
     },
   ],
   comparison: {

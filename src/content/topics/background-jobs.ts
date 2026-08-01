@@ -302,21 +302,21 @@ await reportQueue.removeRepeatableByKey(repeatableJobs[0].key);`,
   ],
   diagrams: [
     {
-      title: "Background Job Processing Architecture",
+      title: "Background Job System Architecture",
       kind: "architecture",
-      caption: "End-to-end architecture of a **background job system** showing the *producer*, *broker*, *worker pool*, *DLQ*, and *monitoring* components.",
+      caption: "End-to-end architecture showing producers, the broker queue, worker pool, dead letter queue, and monitoring components.",
       mermaid: `graph TD
-    API["**API Server**<br/>*producer*"]
-    Queue["**Redis / RabbitMQ**<br/>*broker & queue*"]
-    W1["**Worker 1**<br/>*concurrency: 10*"]
-    W2["**Worker 2**<br/>*concurrency: 10*"]
-    W3["**Worker 3**<br/>*concurrency: 10*"]
-    DLQ["**Dead Letter Queue**<br/>*failed after retries*"]
-    Monitor["**Dashboard**<br/>*bull-board / Flower*"]
-    ExtAPI["**External APIs**<br/>*email, SMS, payment*"]
-    DB["**Database**<br/>*fetch fresh data*"]
+    API["API Server - Producer"]
+    Queue["Redis or RabbitMQ - Broker"]
+    W1["Worker 1 - concurrency 10"]
+    W2["Worker 2 - concurrency 10"]
+    W3["Worker 3 - concurrency 10"]
+    DLQ["Dead Letter Queue"]
+    Monitor["Dashboard - bull-board or Flower"]
+    ExtAPI["External APIs - email SMS payment"]
+    DB["Database - fetch fresh data"]
 
-    API -->|"enqueue job<br/>{userId, template}"| Queue
+    API -->|"enqueue job"| Queue
     Queue --> W1
     Queue --> W2
     Queue --> W3
@@ -326,47 +326,57 @@ await reportQueue.removeRepeatableByKey(repeatableJobs[0].key);`,
     W1 -->|"exhausted retries"| DLQ
     W2 -->|"exhausted retries"| DLQ
     Queue --> Monitor
-    DLQ --> Monitor`
+    DLQ --> Monitor`,
     },
     {
-      title: "Job Retry with Exponential Backoff",
+      title: "Job Lifecycle Flow",
       kind: "flow",
-      caption: "Flow diagram showing a job's lifecycle through **retry attempts** with *exponential backoff and jitter*, ending at either success or the **DLQ**.",
-      mermaid: `graph TD
-    Start["**Job Enqueued**"] --> Process["**Worker Picks Up Job**"]
-    Process --> Success{"**Success?**"}
-    Success -->|"Yes"| Complete["**Job Completed**<br/>*removed after TTL*"]
-    Success -->|"No — error"| RetryCheck{"**Retries < Max?**"}
-    RetryCheck -->|"Yes"| Backoff["**Exponential Backoff**<br/>*delay = base * 2^attempt*<br/>*+ random jitter*"]
-    Backoff --> Wait["**Wait in Delayed Set**<br/>*Redis sorted set by timestamp*"]
-    Wait --> Process
-    RetryCheck -->|"No — exhausted"| DLQ["**Dead Letter Queue**<br/>*manual inspection required*"]
-    DLQ --> Alert["**Alert Triggered**<br/>*PagerDuty / Slack*"]`
+      caption: "A job's path from enqueue through processing, retries with exponential backoff, and eventual completion or dead letter queue.",
+      mermaid: `flowchart TD
+    A["Job Enqueued"] --> B["Worker Picks Up Job"]
+    B --> C{"Success?"}
+    C -->|"Yes"| D["Job Completed - removed after TTL"]
+    C -->|"Error"| E{"Retries remaining?"}
+    E -->|"Yes"| F["Exponential Backoff - base times 2 to the attempt plus jitter"]
+    F --> G["Wait in Delayed Set"]
+    G --> B
+    E -->|"No - exhausted"| H["Dead Letter Queue"]
+    H --> I["Alert Triggered"]`,
     },
     {
-      title: "Celery Workflow Patterns",
-      kind: "flow",
-      caption: "Visual representation of Celery's **chain**, **group**, and **chord** workflow patterns for composing *complex task pipelines*.",
-      mermaid: `graph LR
-    subgraph Chain ["**Chain** *(sequential)*"]
-        C1["Task A"] --> C2["Task B"] --> C3["Task C"]
-    end
+      title: "Job State Machine",
+      kind: "state",
+      caption: "All states a background job can occupy, including transitions for retry and the terminal dead state after max retries are exceeded.",
+      mermaid: `stateDiagram-v2
+    [*] --> Queued
+    Queued --> Running : Worker picks up
+    Running --> Completed : Success
+    Running --> Failed : Error thrown
+    Failed --> Queued : Retry with backoff
+    Failed --> Dead : Max retries exceeded
+    Completed --> [*]
+    Dead --> [*]`,
+    },
+    {
+      title: "Worker Processing Sequence",
+      kind: "sequence",
+      caption: "Sequence of interactions between the API server, Redis broker, worker, database, and external service during normal job processing.",
+      mermaid: `sequenceDiagram
+    participant API as API Server
+    participant Redis as Redis Broker
+    participant Worker as Worker Process
+    participant DB as Database
+    participant Ext as External Service
 
-    subgraph Group ["**Group** *(parallel)*"]
-        G1["Task X"]
-        G2["Task Y"]
-        G3["Task Z"]
-    end
-
-    subgraph Chord ["**Chord** *(parallel + callback)*"]
-        CH1["Task 1"]
-        CH2["Task 2"]
-        CH3["Task 3"]
-        CB["**Callback**<br/>*receives all results*"]
-        CH1 --> CB
-        CH2 --> CB
-        CH3 --> CB
-    end`
+    API->>Redis: LPUSH job payload with userId
+    Redis-->>Worker: LMOVE wait to active
+    Worker->>DB: Fetch user by userId
+    DB-->>Worker: Return user record
+    Worker->>Ext: Send email or call API
+    Ext-->>Worker: 200 OK
+    Worker->>Redis: DEL job from active list
+    Note over Worker,Redis: Job acknowledged and removed
+    Worker->>Redis: INCR completed counter`,
     },
   ],
   exercises: [

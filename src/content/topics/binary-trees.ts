@@ -156,16 +156,68 @@ int max_depth(TreeNode* root) {
   ],
   diagrams: [
     {
-      title: "BST Insert and Delete Operations",
-      kind: "flow",
-      caption:
-        "Insert: traverse left/right based on comparison until a null child is found, then attach. Delete: three cases — leaf removal, single-child promotion, two-child replacement with inorder successor.",
+      title: "BST Structure and Properties",
+      kind: "architecture",
+      caption: "A sample BST showing how every left child is smaller and every right child is larger than its parent node.",
+      mermaid: `graph TD
+    R["8 (root)"]
+    R --> L["3"]
+    R --> Ri["10"]
+    L --> LL["1"]
+    L --> LR["6"]
+    LR --> LRL["4"]
+    LR --> LRR["7"]
+    Ri --> RiL["(null)"]
+    Ri --> RiR["14"]
+    RiR --> RiRL["13"]`,
     },
     {
-      title: "AVL Tree Rotation Cases",
+      title: "BST Insert and Delete Flow",
+      kind: "flow",
+      caption: "Decision logic for BST insertion and the three deletion cases.",
+      mermaid: `flowchart TD
+    A([Insert value v]) --> B{v < current?}
+    B -->|Yes| C{Left child null?}
+    B -->|No| D{Right child null?}
+    C -->|Yes| E[Insert left]
+    C -->|No| F[Go left]
+    D -->|Yes| G[Insert right]
+    D -->|No| H[Go right]
+    I([Delete node n]) --> J{Children?}
+    J -->|0 children| K[Remove leaf]
+    J -->|1 child| L[Promote child]
+    J -->|2 children| M[Replace with inorder successor]`,
+    },
+    {
+      title: "AVL Rotation State Machine",
       kind: "state",
-      caption:
-        "Four imbalance cases and their rotations: LL (right rotate), RR (left rotate), LR (left rotate child, then right rotate), RL (right rotate child, then left rotate). Each rotation is O(1).",
+      caption: "The four imbalance cases an AVL tree detects after insert or delete, and which rotation restores balance.",
+      mermaid: `stateDiagram-v2
+    [*] --> Balanced
+    Balanced --> LL_Imbalance : insert causes left-left heavy
+    Balanced --> RR_Imbalance : insert causes right-right heavy
+    Balanced --> LR_Imbalance : insert causes left-right heavy
+    Balanced --> RL_Imbalance : insert causes right-left heavy
+    LL_Imbalance --> Balanced : right rotate
+    RR_Imbalance --> Balanced : left rotate
+    LR_Imbalance --> Balanced : left rotate child then right rotate
+    RL_Imbalance --> Balanced : right rotate child then left rotate`,
+    },
+    {
+      title: "Tree Traversal Order Sequence",
+      kind: "sequence",
+      caption: "Inorder, preorder, and postorder traversal visit patterns on the same tree, showing the output order difference.",
+      mermaid: `sequenceDiagram
+    participant Caller
+    participant Inorder
+    participant Preorder
+    participant Postorder
+    Caller->>Inorder: traverse(root)
+    Inorder-->>Caller: left → root → right (sorted for BST)
+    Caller->>Preorder: traverse(root)
+    Preorder-->>Caller: root → left → right (copy/serialize)
+    Caller->>Postorder: traverse(root)
+    Postorder-->>Caller: left → right → root (delete/eval)`,
     },
   ],
   animations: [

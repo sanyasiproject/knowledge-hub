@@ -297,13 +297,93 @@ private:
     {
       title: "Circuit Breaker State Machine",
       kind: "state",
-      caption: "Three states: CLOSED (normal, requests pass through, failure counter increments on errors) -> OPEN (triggered when failures exceed threshold, requests fail immediately, timer starts) -> HALF_OPEN (after recovery timeout, one test request allowed) -> back to CLOSED on success or OPEN on failure."
+      mermaid: `stateDiagram-v2
+    [*] --> Closed : service starts
+    Closed --> Closed : request succeeds - reset counter
+    Closed --> Closed : request fails - increment counter
+    Closed --> Open : failure count exceeds threshold
+    Open --> Open : request arrives - fail immediately
+    Open --> HalfOpen : recovery timeout elapses
+    HalfOpen --> Closed : test request succeeds
+    HalfOpen --> Open : test request fails
+    note right of Open
+      No calls to downstream
+      Timer counts down
+      Gives service time to recover
+    end note`,
+      caption: "Three states control call flow: Closed allows calls, Open blocks them immediately, HalfOpen probes recovery with one test request.",
     },
     {
       title: "Error Handling Strategy Decision Tree",
       kind: "flow",
-      caption: "Is the error a programmer bug? -> Yes: crash/log/fix. No -> Is the error transient? -> Yes: retry with backoff. No -> Is the error from an external service? -> Yes: circuit breaker + fallback. No -> Is it a business rule violation? -> Yes: return domain exception / Result.err. No -> Wrap in generic InternalError and log."
-    }
+      mermaid: `flowchart TD
+    A["An error occurs"] --> B{"Programmer bug?\nnull assertion failed\narray out of bounds"}
+    B -->|Yes| C["Crash fast\nlog and alert\nfix the code"]
+    B -->|No| D{"Transient failure?\ntimeout network blip"}
+    D -->|Yes| E["Retry with\nexponential backoff"]
+    D -->|No| F{"External service\ncall failed?"}
+    F -->|Yes| G["Circuit breaker\nplus fallback value"]
+    F -->|No| H{"Business rule\nviolation?"}
+    H -->|Yes| I["Return domain error\nor Result.err type"]
+    H -->|No| J["Wrap in InternalError\nlog with context"]`,
+      caption: "Match the error type to the strategy: bugs crash fast, transient errors retry, external failures use circuit breakers, business violations return typed errors.",
+    },
+    {
+      title: "Result Type Error Flow",
+      kind: "sequence",
+      mermaid: `sequenceDiagram
+    participant Caller
+    participant Service as UserService
+    participant DB as Database
+    participant Result as Result Type
+    Caller->>Service: createUser email password
+    Service->>Service: validate email format
+    Note over Service: Returns Err if invalid
+    Service->>DB: check email uniqueness
+    DB-->>Service: already exists
+    Service-->>Result: Err EmailAlreadyExists
+    Result-->>Caller: match on Err variant
+    Caller->>Caller: show validation message
+    Note over Caller: Compiler forced the Err case
+    Caller->>Service: createUser valid unique
+    Service->>DB: insert user
+    DB-->>Service: inserted id
+    Service-->>Result: Ok new UserId
+    Result-->>Caller: match on Ok variant`,
+      caption: "Result types make both success and error paths explicit in the type system; the compiler forces callers to handle both cases.",
+    },
+    {
+      title: "Error Handling Patterns Overview",
+      kind: "mindmap",
+      mermaid: `mindmap
+  root((Error Handling Patterns))
+    Exceptions
+      Unchecked - runtime only
+      Checked - Java compile-time
+      Clean separation of paths
+      Invisible in type signatures
+    Result Types
+      Rust Ok and Err
+      TypeScript union types
+      Compiler-enforced handling
+      Verbose at call sites
+    Retry Strategies
+      Immediate retry
+      Exponential backoff
+      Jitter to avoid stampede
+      Max attempt limit
+    Circuit Breaker
+      Closed Half-Open Open states
+      Failure threshold
+      Recovery timeout
+      Prevents cascade failures
+    Fallbacks
+      Default value
+      Cached response
+      Degraded mode
+      Null Object pattern`,
+      caption: "Error handling strategies from exceptions and Result types to retry, circuit breakers, and graceful degradation with fallback values.",
+    },
   ],
 
   animations: [

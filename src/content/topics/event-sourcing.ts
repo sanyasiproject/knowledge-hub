@@ -537,99 +537,75 @@ app.listen(3000, () => {
     {
       title: "Event Sourcing Architecture Overview",
       kind: "architecture",
-      caption:
-        "Shows the flow from commands through the event store to projections and read models",
+      caption: "Flow from commands through the event store to projections and read models.",
       mermaid: `graph TB
-    subgraph Write Side
-        CMD[Command] --> CH[Command Handler]
-        CH -->|Validate & Emit| ES[(Event Store<br/>Append-Only Log)]
-        CH -->|Load Aggregate| ES
-    end
-
-    subgraph Event Processing
-        ES -->|Subscribe| EP1[Projection Builder 1]
-        ES -->|Subscribe| EP2[Projection Builder 2]
-        ES -->|Subscribe| EP3[Notification Service]
-    end
-
-    subgraph Read Side
-        EP1 -->|Materialize| RM1[(Read Model:<br/>Dashboard View)]
-        EP2 -->|Materialize| RM2[(Read Model:<br/>Search Index)]
-        Q[Query] --> RM1
-        Q --> RM2
-    end
-
-    style ES fill:#f9a825,stroke:#f57f17,color:#000
-    style CMD fill:#42a5f5,stroke:#1565c0,color:#000
-    style Q fill:#66bb6a,stroke:#2e7d32,color:#000`,
+    CMD["Command"] --> CH["Command Handler"]
+    CH -->|"Load aggregate"| ES[("Event Store\nAppend-Only Log")]
+    CH -->|"Append new event"| ES
+    ES -->|"Subscribe"| EP1["Projection Builder 1"]
+    ES -->|"Subscribe"| EP2["Projection Builder 2"]
+    ES -->|"Subscribe"| EP3["Notification Service"]
+    EP1 -->|"Materialize"| RM1[("Read Model:\nDashboard View")]
+    EP2 -->|"Materialize"| RM2[("Read Model:\nSearch Index")]
+    Q["Query"] --> RM1
+    Q --> RM2`,
     },
     {
       title: "Event Replay and Snapshot Flow",
       kind: "flow",
-      caption:
-        "Demonstrates how snapshots optimize aggregate loading by reducing the number of events to replay",
-      mermaid: `flowchart LR
-    A[Load Aggregate Request] --> B{Snapshot Exists?}
-    B -->|Yes| C[Load Snapshot<br/>version N]
-    B -->|No| D[Start from<br/>Empty State]
-    C --> E[Load Events<br/>after version N]
-    D --> F[Load ALL Events<br/>from version 1]
-    E --> G[Replay Events<br/>via Fold Function]
+      caption: "Snapshots optimize aggregate loading by reducing the number of events to replay.",
+      mermaid: `flowchart TD
+    A["Load Aggregate Request"] --> B{Snapshot Exists?}
+    B -->|Yes| C["Load Snapshot at version N"]
+    B -->|No| D["Start from Empty State"]
+    C --> E["Load Events after version N"]
+    D --> F["Load ALL Events from version 1"]
+    E --> G["Replay Events via Fold Function"]
     F --> G
-    G --> H[Current Aggregate<br/>State]
-    H --> I{Events Since<br/>Last Snapshot > N?}
-    I -->|Yes| J[Save New Snapshot]
-    I -->|No| K[Done]
+    G --> H["Current Aggregate State"]
+    H --> I{Events since last snapshot greater than threshold?}
+    I -->|Yes| J["Save New Snapshot"]
+    I -->|No| K["Done"]
     J --> K`,
     },
     {
-      title: "Event Lifecycle Sequence",
+      title: "Command Processing Sequence",
       kind: "sequence",
-      caption:
-        "Sequence of interactions when a command is processed in an event-sourced system with CQRS",
+      caption: "Interactions when a command is processed in an event-sourced system with CQRS.",
       mermaid: `sequenceDiagram
     participant Client
     participant API
-    participant CommandHandler
-    participant EventStore
-    participant ProjectionBuilder
-    participant ReadModel
+    participant CH as Command Handler
+    participant ES as Event Store
+    participant PB as Projection Builder
+    participant RM as Read Model
 
     Client->>API: POST /orders/place
-    API->>CommandHandler: PlaceOrder command
-    CommandHandler->>EventStore: Load stream "order-123"
-    EventStore-->>CommandHandler: Events [v1..v5]
-    Note over CommandHandler: Replay events to<br/>rebuild aggregate state
-    CommandHandler->>CommandHandler: Validate command<br/>against current state
-    CommandHandler->>EventStore: Append OrderPlaced (expected v5)
-    EventStore-->>CommandHandler: Confirmed (v6)
-    CommandHandler-->>API: Success
+    API->>CH: PlaceOrder command
+    CH->>ES: Load stream order-123
+    ES-->>CH: Events v1 to v5
+    CH->>CH: Replay events to rebuild state
+    CH->>CH: Validate command against state
+    CH->>ES: Append OrderPlaced at expected v5
+    ES-->>CH: Confirmed v6
+    CH-->>API: Success
     API-->>Client: 201 Created
-
-    Note over EventStore,ProjectionBuilder: Async subscription
-    EventStore->>ProjectionBuilder: New event: OrderPlaced
-    ProjectionBuilder->>ReadModel: Update materialized view
-    Client->>API: GET /orders/123
-    API->>ReadModel: Query
-    ReadModel-->>API: Order details
-    API-->>Client: 200 OK`,
+    ES->>PB: Async - New event OrderPlaced
+    PB->>RM: Update materialized view`,
     },
     {
-      title: "Event Sourcing Concept Mind Map",
+      title: "Event Sourcing Key Concepts",
       kind: "mindmap",
-      caption:
-        "Key concepts and their relationships in event sourcing",
+      caption: "Core concepts and their relationships in event sourcing systems.",
       mermaid: `mindmap
   root((Event Sourcing))
     Event Store
       Append-Only Log
       Streams per Aggregate
-      Global Ordering
       Optimistic Concurrency
     Projections
       Read Models
-      Synchronous vs Async
-      Disposable & Rebuildable
+      Disposable and Rebuildable
       Multiple per Stream
     Snapshots
       Performance Optimization
@@ -639,15 +615,10 @@ app.listen(3000, () => {
       State Reconstruction
       Temporal Queries
       Projection Rebuilds
-      Debugging
     Challenges
       Schema Evolution
-        Upcasting
-        Versioning
       GDPR Compliance
-        Crypto-Shredding
-      Eventual Consistency
-      Storage Growth`,
+      Eventual Consistency`,
     },
   ],
   comparison: {

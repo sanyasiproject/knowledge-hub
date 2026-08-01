@@ -79,8 +79,59 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY monthly_revenue;`
     },
   ],
   diagrams: [
-    { title: "Query processing pipeline", kind: "flow", caption: "Parse -> Validate -> Optimize (generate plans, estimate costs, choose best) -> Execute -> Return results." },
-    { title: "Join algorithm decision tree", kind: "flow", caption: "Small inner table -> Nested Loop; equality join on unsorted data -> Hash Join; sorted or indexable -> Merge Join." },
+    {
+      title: "Query Execution Pipeline",
+      kind: "flow",
+      caption: "How SQL moves from raw text through parsing, optimization, and execution to return a result set.",
+      mermaid: `flowchart TD
+    A([SQL Text]) --> B[Parse into AST]
+    B --> C[Validate Schema]
+    C --> D[Generate Candidate Plans]
+    D --> E[Estimate Costs via Statistics]
+    E --> F{Cheapest Plan?}
+    F -->|Yes| G[Execute Plan]
+    F -->|No| D
+    G --> H([Result Set])`,
+    },
+    {
+      title: "Join Algorithm Decision Tree",
+      kind: "flow",
+      caption: "How the optimizer chooses between Nested Loop, Hash Join, and Merge Join based on table size, sort order, and join predicate type.",
+      mermaid: `flowchart TD
+    A([Join Request]) --> B{Equality join?}
+    B -->|No| C[Nested Loop Join]
+    B -->|Yes| D{Both sides sorted?}
+    D -->|Yes| E[Merge Join]
+    D -->|No| F{Enough memory?}
+    F -->|Yes| G[Hash Join]
+    F -->|No| H[Sort then Merge Join]`,
+    },
+    {
+      title: "Index vs Sequential Scan",
+      kind: "architecture",
+      caption: "Index scan follows a B-tree to row pointers then fetches heap pages. Sequential scan reads every heap page in order. Selectivity determines which is cheaper.",
+      mermaid: `graph TD
+    Q[Query with WHERE clause] --> OPT[Cost-based Optimizer]
+    OPT --> STATS[Table Statistics]
+    STATS --> SEL{High selectivity?}
+    SEL -->|Yes, few rows| IDX[Index Scan]
+    SEL -->|No, many rows| SEQ[Sequential Scan]
+    IDX --> BTREE[B-tree / Hash Index]
+    BTREE --> HEAP[Heap Page Fetch]
+    SEQ --> HEAPALL[All Heap Pages]`,
+    },
+    {
+      title: "Materialized View Refresh Lifecycle",
+      kind: "state",
+      caption: "A materialized view starts stale after underlying data changes and must be refreshed. CONCURRENTLY avoids locks but requires a unique index.",
+      mermaid: `stateDiagram-v2
+    [*] --> Fresh : CREATE MATERIALIZED VIEW
+    Fresh --> Stale : Underlying table updated
+    Stale --> Refreshing : REFRESH MATERIALIZED VIEW
+    Refreshing --> Fresh : Refresh complete
+    Refreshing --> Stale : Refresh failed
+    Fresh --> [*] : DROP MATERIALIZED VIEW`,
+    },
   ],
   animations: [
     {

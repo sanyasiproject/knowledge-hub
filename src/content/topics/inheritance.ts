@@ -594,30 +594,76 @@ int main() {
 
   diagrams: [
     {
-      title: "Types of Inheritance",
-      kind: "mindmap",
-      caption: "Mind map showing single, multiple, multilevel, hierarchical, and hybrid inheritance with examples from Java, C++, and Python"
-    },
-    {
-      title: "The Diamond Problem",
+      title: "Class Inheritance Hierarchy",
       kind: "architecture",
-      caption: "Diamond inheritance diagram showing class D inheriting from B and C, both inheriting from A, with and without virtual inheritance in C++"
+      caption: "Class hierarchy showing parent-child inheritance relationships.",
+      mermaid: `graph TD
+    Animal[Animal base class] --> Mammal
+    Animal --> Bird
+    Mammal --> Dog
+    Mammal --> Cat
+    Bird --> Parrot
+    Bird --> Eagle
+    Dog --> Labrador
+    Dog --> Poodle`,
     },
     {
-      title: "C3 Linearization Algorithm",
+      title: "Method Resolution Order",
       kind: "flow",
-      caption: "Step-by-step flow of C3 linearization computing MRO for a diamond hierarchy, showing merge operations"
+      caption: "How method calls are resolved up the class hierarchy.",
+      mermaid: `flowchart TD
+    A[Call method on object] --> B[Check own class]
+    B --> C{Method defined here?}
+    C -- Yes --> D[Execute method]
+    C -- No --> E[Check parent class]
+    E --> F{Method defined?}
+    F -- Yes --> D
+    F -- No --> G[Check grandparent class]
+    G --> H{Method defined?}
+    H -- Yes --> D
+    H -- No --> I[Check Object base]
+    I --> J{Found?}
+    J -- Yes --> D
+    J -- No --> K[Throw NoMethodError]`,
     },
     {
-      title: "JavaScript Prototype Chain",
-      kind: "network",
-      caption: "Network diagram showing object instances, constructor.prototype, Object.prototype, and null -- the full prototype chain with property lookup path"
+      title: "Inheritance vs Composition",
+      kind: "architecture",
+      caption: "Comparing is-a inheritance to has-a composition for code reuse.",
+      mermaid: `graph TD
+    subgraph Inheritance is-a relationship
+        IDog[Dog] -->|extends| IAnimal[Animal]
+        IDog -->|inherits| ISpeak[speak method]
+        IDog -->|inherits| IEat[eat method]
+    end
+    subgraph Composition has-a relationship
+        CDog[Dog] -->|has a| CSpeaker[Speaker behavior]
+        CDog -->|has a| CEater[Eater behavior]
+        CSpeaker --> CSpeak[speak method]
+        CEater --> CEat[eat method]
+    end`,
     },
     {
-      title: "Composition vs Inheritance",
-      kind: "sequence",
-      caption: "Sequence diagram comparing method dispatch in inheritance (vtable/MRO) vs composition (delegation to held object), showing flexibility differences"
-    }
+      title: "SOLID Principles in OOP",
+      kind: "mindmap",
+      caption: "How SOLID principles guide the use of inheritance and abstraction.",
+      mermaid: `mindmap
+  root((SOLID Principles))
+    Single Responsibility
+      One reason to change per class
+    Open Closed
+      Open for extension
+      Closed for modification
+    Liskov Substitution
+      Subclass replaces parent safely
+      No behavior surprises
+    Interface Segregation
+      Small focused interfaces
+      Avoid fat base classes
+    Dependency Inversion
+      Depend on abstractions
+      Not concrete implementations`,
+    },
   ],
 
   animations: [

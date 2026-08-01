@@ -326,74 +326,72 @@ function isNonBreakingChange(change: string): boolean {
   ],
   diagrams: [
     {
-      title: "API Version Routing Architecture",
+      title: "API Versioning Strategies Architecture",
       kind: "architecture",
-      caption: "How an **API gateway** routes requests to *versioned backend services* based on the version identifier in the URL path or request header.",
-      mermaid: `graph TD
-    Client["**Client**<br/>*sends request*"]
-    GW["**API Gateway**<br/>*version detection*"]
-    V1["**v1 Service**<br/>*legacy handlers*"]
-    V2["**v2 Service**<br/>*current handlers*"]
-    V3["**v3 Service**<br/>*latest handlers*"]
-    Transform["**Transformer Layer**<br/>*request/response mapping*"]
-    BizLogic["**Shared Business Logic**<br/>*single source of truth*"]
-
-    Client -->|"/api/v1/users<br/>or Api-Version: 1"| GW
-    Client -->|"/api/v2/users<br/>or Api-Version: 2"| GW
-    Client -->|"/api/v3/users<br/>or Api-Version: 3"| GW
-    GW --> V1
-    GW --> V2
-    GW --> V3
-    V1 --> Transform
-    V2 --> Transform
-    V3 --> BizLogic
-    Transform --> BizLogic`
+      caption: "Four common strategies for embedding version information in API requests, each with different tradeoffs for cacheability and REST purity.",
+      mermaid: `flowchart TD
+    Client["Client Request"] --> Gateway["API Gateway\\nVersion Detection"]
+    Gateway --> URL["URL Path\\n/api/v1/users"]
+    Gateway --> Header["Custom Header\\nApi-Version: 2"]
+    Gateway --> Accept["Accept Header\\napplication/vnd.api+v3+json"]
+    Gateway --> Query["Query Param\\n?version=1"]
+    URL --> Handler["Versioned Handler"]
+    Header --> Handler
+    Accept --> Handler
+    Query --> Handler
+    Handler --> Transform["Response Transformer"]
+    Transform --> BizLogic["Shared Business Logic"]`,
     },
     {
-      title: "API Deprecation Lifecycle",
-      kind: "state",
-      caption: "State transitions of an API version from **active** through **deprecated** to **sunset**, with the *HTTP headers* emitted at each stage.",
-      mermaid: `stateDiagram-v2
-    [*] --> Active
-    Active --> Deprecated: Announce deprecation<br/>Add Deprecation header
-    Deprecated --> SunsetWarning: Set Sunset header<br/>Publish migration guide
-    SunsetWarning --> Sunset: Sunset date reached<br/>Return 410 Gone
-    Sunset --> [*]
-
-    state Active {
-        [*] --> Serving
-        Serving --> Serving: Normal responses<br/>No special headers
-    }
-
-    state Deprecated {
-        [*] --> DepServing
-        DepServing --> DepServing: Deprecation: true<br/>Link to migration docs
-    }
-
-    state SunsetWarning {
-        [*] --> WarnServing
-        WarnServing --> WarnServing: Sunset date header<br/>Warning: 299 header
-    }`
-    },
-    {
-      title: "Version Negotiation Flow",
+      title: "Version Negotiation Sequence",
       kind: "sequence",
-      caption: "Sequence diagram showing how a client request flows through **version detection**, *transformer middleware*, and handler selection using the header-based versioning pattern.",
+      caption: "Client sends a versioned request, middleware detects the version, transforms the response shape, and attaches deprecation headers.",
       mermaid: `sequenceDiagram
     participant C as Client
     participant MW as Version Middleware
-    participant T as Transformer
-    participant H as Current Handler (v3)
+    participant H as Current Handler
     participant DB as Database
-
-    C->>MW: POST /api/users<br/>Api-Version: 1
-    MW->>MW: Detect version = 1<br/>Add deprecation headers
-    MW->>H: Forward request<br/>(version context attached)
-    H->>DB: Query users
-    DB-->>H: User records
-    H->>T: v3 response object
-    T->>T: Transform v3 → v1 format<br/>nested name → fullName
-    T-->>C: v1 response shape<br/>+ Sunset & Deprecation headers`
+    C->>MW: POST /api/users\\nApi-Version: 1
+    MW->>MW: Detect version 1\\nAdd deprecation headers
+    MW->>H: Forward with version context
+    H->>DB: Query
+    DB-->>H: Records
+    H->>MW: v3 response shape
+    MW->>MW: Transform v3 to v1 shape
+    MW-->>C: v1 response\\nDeprecation and Sunset headers`,
+    },
+    {
+      title: "API Version Lifecycle States",
+      kind: "state",
+      caption: "State machine for an API version from release through deprecation to sunset.",
+      mermaid: `stateDiagram-v2
+    [*] --> Active: Release version
+    Active --> Deprecated: Announce successor\\nadd Deprecation header
+    Deprecated --> SunsetWarning: Set Sunset date\\npublish migration guide
+    SunsetWarning --> Sunset: Sunset date reached\\nreturn 410 Gone
+    Sunset --> [*]`,
+    },
+    {
+      title: "API Versioning Approaches",
+      kind: "mindmap",
+      caption: "Key decisions and tradeoffs when choosing an API versioning strategy.",
+      mermaid: `mindmap
+  root((API Versioning))
+    URL Path Versioning
+      Explicit and visible
+      Easy to cache
+      Changes resource identity
+    Header Versioning
+      Clean URLs
+      Requires Vary header
+      Less discoverable
+    Content Negotiation
+      True REST approach
+      Complex to implement
+    Date-Based Versioning
+      Stripe style
+      Pins client to a date
+      Fine-grained rollout`,
     },
   ],
   exercises: [

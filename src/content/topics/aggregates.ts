@@ -665,91 +665,80 @@ private:
     {
       title: "Aggregate Structure and Boundaries",
       kind: "architecture",
-      caption: "Shows how the aggregate root controls access to internal entities and value objects, with external references by ID only.",
+      caption: "The aggregate root controls all access to internal entities and value objects. External objects hold ID references only.",
       mermaid: `flowchart TB
     subgraph OrderAggregate["Order Aggregate"]
-        Root["<b>Order</b><br/>(Aggregate Root)<br/>Global Identity: OrderId"]
-        LI1["OrderLineItem<br/>(Internal Entity)<br/>Local Identity"]
-        LI2["OrderLineItem<br/>(Internal Entity)<br/>Local Identity"]
-        Addr["Address<br/>(Value Object)<br/>No Identity"]
-        Status["OrderStatus<br/>(Value Object)"]
+        Root["Order Root\\nAggregate Root\\nOrderId"]
+        LI1["OrderLineItem\\nInternal Entity"]
+        LI2["OrderLineItem\\nInternal Entity"]
+        Addr["Address\\nValue Object"]
+        Status["OrderStatus\\nValue Object"]
         Root --> LI1
         Root --> LI2
         Root --> Addr
         Root --> Status
     end
-
-    ExtService["Application Service"]
-    CustId["customerId: CustomerId<br/>(ID Reference)"]
-    Root -.- CustId
-
-    ExtService -->|"order.addItem()"| Root
-    ExtService -.->|"BLOCKED: lineItem.setQty()"| LI1
-
-    style Root fill:#4a9eff,color:#fff,stroke:#2a7ae0
-    style LI1 fill:#6cc644,color:#fff,stroke:#4a9f35
-    style LI2 fill:#6cc644,color:#fff,stroke:#4a9f35
-    style Addr fill:#f5a623,color:#fff,stroke:#d4891a
-    style Status fill:#f5a623,color:#fff,stroke:#d4891a
-    style ExtService fill:#9b59b6,color:#fff,stroke:#7d3c98`,
+    AppService["Application Service"]
+    CustRef["customerId\\nID Reference Only"]
+    Root -.- CustRef
+    AppService -->|"order.addItem()"| Root`,
+    },
+    {
+      title: "Command Processing Through Aggregate Root",
+      kind: "flow",
+      caption: "Every command enters via the aggregate root, which validates invariants before mutating state and recording domain events.",
+      mermaid: `flowchart TD
+    Cmd["Incoming Command\\ne.g. PlaceOrder"] --> AR["Aggregate Root\\nOrder"]
+    AR --> Inv{"Invariants\\nValid?"}
+    Inv -->|No| Err["Throw Domain\\nException"]
+    Inv -->|Yes| Mut["Mutate Internal\\nState"]
+    Mut --> Evt["Record Domain\\nEvent"]
+    Evt --> Persist["Persist Aggregate\\nand Events"]
+    Persist --> Pub["Publish Events\\nvia Outbox"]`,
     },
     {
       title: "Cross-Aggregate Coordination via Domain Events",
       kind: "sequence",
-      caption: "Illustrates eventual consistency between aggregates using domain events and the Outbox pattern.",
+      caption: "Aggregates coordinate via domain events and the Outbox pattern, achieving eventual consistency across bounded contexts.",
       mermaid: `sequenceDiagram
-    participant AppService as Application Service
+    participant App as Application Service
     participant Order as Order Aggregate
     participant DB as Database
     participant Outbox as Outbox Table
-    participant Poller as Outbox Poller
     participant Broker as Message Broker
     participant Inventory as Inventory Aggregate
-    participant Notification as Notification Service
-
-    AppService->>Order: place()
+    App->>Order: place()
     Order->>Order: Validate invariants
-    Order->>Order: Record OrderPlaced event
-
-    AppService->>DB: BEGIN TRANSACTION
-    AppService->>DB: Save Order (status=PLACED)
-    AppService->>Outbox: Insert OrderPlaced event
-    AppService->>DB: COMMIT
-
-    Note over Poller: Polls outbox periodically
-    Poller->>Outbox: Read unpublished events
-    Poller->>Broker: Publish OrderPlaced
-    Poller->>Outbox: Mark as published
-
+    App->>DB: BEGIN TRANSACTION
+    App->>DB: Save Order state
+    App->>Outbox: Insert OrderPlaced event
+    App->>DB: COMMIT
+    Broker->>Outbox: Poll unpublished events
     Broker->>Inventory: OrderPlaced
-    Inventory->>Inventory: reserveStock()
-    Note over Inventory: Separate transaction
-
-    Broker->>Notification: OrderPlaced
-    Notification->>Notification: sendConfirmationEmail()`,
+    Inventory->>Inventory: reserveStock()`,
     },
     {
-      title: "Aggregate Lifecycle State Transitions",
-      kind: "state",
-      caption: "State machine for a typical Order aggregate showing valid transitions and the events that trigger them.",
-      mermaid: `stateDiagram-v2
-    [*] --> Draft: create()
-    Draft --> Draft: addItem() / removeItem()
-    Draft --> Placed: place()
-    Placed --> Confirmed: confirmPayment()
-    Placed --> Cancelled: cancel()
-    Confirmed --> Shipped: ship()
-    Confirmed --> Cancelled: cancel()
-    Shipped --> Delivered: confirmDelivery()
-    Shipped --> Returned: initiateReturn()
-    Delivered --> [*]
-    Cancelled --> [*]
-    Returned --> Refunded: processRefund()
-    Refunded --> [*]
-
-    note right of Draft: Invariants checked\\non every mutation
-    note right of Placed: Publishes OrderPlaced\\ndomain event
-    note left of Cancelled: Publishes OrderCancelled\\ntriggers compensation`,
+      title: "DDD Concepts Map",
+      kind: "mindmap",
+      caption: "Key DDD building blocks and how they relate to the Aggregate pattern.",
+      mermaid: `mindmap
+  root((DDD Aggregates))
+    Aggregate Root
+      Global Identity
+      Enforces Invariants
+      Controls Access
+    Entities
+      Local Identity
+      Mutable State
+    Value Objects
+      No Identity
+      Immutable
+    Domain Events
+      Outbox Pattern
+      Eventual Consistency
+    Bounded Context
+      Ubiquitous Language
+      Context Map`,
     },
   ],
   comparison: {

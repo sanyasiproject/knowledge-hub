@@ -594,48 +594,55 @@ private:
     {
       title: "Message Delivery Sequence",
       kind: "sequence",
-      caption: "End-to-end message flow from sender to receiver, including sequencing, persistence, and offline handling.",
+      caption: "End-to-end message flow from sender to receiver, including sequencing, persistence, and offline push notification fallback.",
       mermaid: `sequenceDiagram
-    participant A as User A (Sender)
+    participant A as User A
     participant CS1 as Chat Server 1
-    participant SEQ as Sequence Service
     participant DB as MongoDB
-    participant MQ as Kafka / Redis PubSub
     participant REG as Connection Registry
     participant CS2 as Chat Server 2
-    participant B as User B (Receiver)
+    participant B as User B
     participant PUSH as Push Service
-
     A->>CS1: Send message via WebSocket
-    CS1->>SEQ: INCR chat:seq:{chatId}
-    SEQ-->>CS1: seqNumber = 42
-
-    CS1->>DB: Persist message (chatId, seq=42)
-    DB-->>CS1: Ack write
-
-    CS1-->>A: Delivery ack (seq=42, single tick)
-
-    CS1->>REG: Lookup user B's server
-    REG-->>CS1: serverId = CS2
-
-    alt User B is Online
-        CS1->>MQ: Publish to user:B channel
-        MQ->>CS2: Deliver message
-        CS2->>B: Push via WebSocket
-        B-->>CS2: Received ack
-        CS2->>DB: Mark delivered = true
-        CS2-->>CS1: Delivery confirmed
-        CS1-->>A: Double tick (delivered)
-    else User B is Offline
-        CS1->>DB: Store with delivered = false
-        CS1->>PUSH: Send push notification
-        PUSH->>B: FCM / APNs notification
-        Note over B: User opens app later
-        B->>CS2: Reconnect + sync (lastSeq=40)
-        CS2->>DB: Fetch messages where seq > 40
-        DB-->>CS2: Messages [41, 42]
-        CS2->>B: Deliver missed messages
-    end`,
+    CS1->>CS1: Assign sequence number
+    CS1->>DB: Persist message
+    CS1-->>A: ACK single tick
+    CS1->>REG: Lookup User B server
+    REG-->>CS1: User B on CS2
+    CS1->>CS2: Route message via broker
+    CS2->>B: Deliver via WebSocket
+    B-->>CS2: Received ACK
+    CS2->>DB: Mark delivered`,
+    },
+    {
+      title: "Presence System State Machine",
+      kind: "state",
+      caption: "User presence states and transitions driven by WebSocket connect, disconnect, heartbeat timeout, and explicit status changes.",
+      mermaid: `stateDiagram-v2
+    [*] --> Offline
+    Offline --> Online : WebSocket connect
+    Online --> Away : No activity for 5 min
+    Away --> Online : Activity detected
+    Online --> Offline : WebSocket disconnect
+    Away --> Offline : WebSocket disconnect
+    Online --> DoNotDisturb : User sets DND
+    DoNotDisturb --> Online : User clears DND`,
+    },
+    {
+      title: "Chat Storage Key Entities",
+      kind: "network",
+      caption: "Key entities and relationships in the chat system storage model: users, conversations, participants, messages, and attachments.",
+      mermaid: `graph LR
+    U["Users"]
+    C["Conversations"]
+    P["Participants"]
+    M["Messages"]
+    A["Attachments"]
+    U --> P
+    C --> P
+    C --> M
+    M --> A
+    U --> M`,
     },
   ],
   comparison: {

@@ -235,65 +235,67 @@ git reset --hard HEAD@{3}`,
   ],
   diagrams: [
     {
-      title: "Rebase vs Merge Workflow",
+      title: "Rebase vs Merge Commit History",
       kind: "flow",
-      caption: "Visual comparison of how rebase and merge integrate changes differently",
-      mermaid: `flowchart TD
-    A["**main**: A - B - C"] --> M["**Merge**: creates merge commit M"]
-    A --> R["**Rebase**: replays D, E onto C"]
-    subgraph Merge Result
-        M --> MR["A - B - C - M\\n         \\\\     /\\n          D - E"]
+      caption: "Merge preserves branch topology with a merge commit. Rebase replays commits onto the target, producing a linear history.",
+      mermaid: `flowchart LR
+    subgraph Merge
+      A1[A] --> B1[B] --> C1[C]
+      D1[D] --> E1[E]
+      C1 --> M[Merge Commit M]
+      E1 --> M
     end
-    subgraph Rebase Result
-        R --> RR["A - B - C - D' - E'\\n*linear history*"]
-    end
-    style M fill:#f9d77e,stroke:#d4a017
-    style R fill:#81c784,stroke:#388e3c`,
+    subgraph Rebase
+      A2[A] --> B2[B] --> C2[C] --> D2[D prime] --> E2[E prime]
+    end`,
     },
     {
-      title: "Interactive Rebase Actions",
+      title: "Interactive Rebase Operations",
       kind: "flow",
-      caption: "Decision flow for choosing the right interactive rebase action",
+      caption: "git rebase -i lets you pick, squash, reword, edit, or drop commits before replaying them onto the target branch.",
       mermaid: `flowchart TD
-    Start["Start: \`git rebase -i\`"] --> Q1{"What do you want\\nto do with this commit?"}
-    Q1 -->|Keep as-is| Pick["**pick** — use commit unchanged"]
-    Q1 -->|Change message| Reword["**reword** — edit commit message"]
-    Q1 -->|Combine with previous| Q2{"Keep this commit's message?"}
-    Q2 -->|Yes, merge messages| Squash["**squash** — combine + edit message"]
-    Q2 -->|No, discard message| Fixup["**fixup** — combine + keep prev message"]
-    Q1 -->|Modify content| Edit["**edit** — pause for amending"]
-    Q1 -->|Remove entirely| Drop["**drop** — delete commit"]
-    style Start fill:#bbdefb,stroke:#1565c0
-    style Pick fill:#c8e6c9,stroke:#2e7d32
-    style Reword fill:#fff9c4,stroke:#f9a825
-    style Squash fill:#ffe0b2,stroke:#ef6c00
-    style Fixup fill:#ffccbc,stroke:#d84315
-    style Edit fill:#e1bee7,stroke:#7b1fa2
-    style Drop fill:#ffcdd2,stroke:#c62828`,
+    A([git rebase -i HEAD~N]) --> B[Editor opens with N commits]
+    B --> C{Action per commit?}
+    C -->|pick| D[Keep as-is]
+    C -->|squash| E[Merge into previous]
+    C -->|reword| F[Keep, edit message]
+    C -->|edit| G[Pause and amend]
+    C -->|drop| H[Remove commit]
+    D --> I[Replay commits]
+    E --> I
+    F --> I
+    G --> I
+    H --> I
+    I --> J([Clean linear history])`,
     },
     {
-      title: "Rebase Conflict Resolution Flow",
+      title: "Rebase Conflict Resolution Sequence",
       kind: "sequence",
-      caption: "Step-by-step sequence for resolving conflicts during a rebase",
+      caption: "When replaying a commit causes a conflict, git pauses. The developer resolves the conflict, stages, and continues the rebase.",
       mermaid: `sequenceDiagram
     participant Dev as Developer
-    participant Git as Git Engine
-    participant Editor as Editor/IDE
+    participant Git as Git
     Dev->>Git: git rebase main
-    Git->>Git: Detach HEAD at main tip
-    loop For each commit to replay
-        Git->>Git: Apply patch
-        alt No conflict
-            Git->>Git: Create new commit
-        else Conflict detected
-            Git->>Dev: Show conflict markers
-            Dev->>Editor: Open conflicted files
-            Editor->>Dev: Resolve conflicts
-            Dev->>Git: git add resolved_files
-            Dev->>Git: git rebase --continue
-        end
-    end
-    Git->>Dev: Rebase complete!`,
+    Git->>Dev: Applying commit D'
+    Git->>Dev: CONFLICT in file.ts
+    Dev->>Dev: Resolve conflict in editor
+    Dev->>Git: git add file.ts
+    Dev->>Git: git rebase --continue
+    Git->>Dev: Applying commit E'
+    Git-->>Dev: Successfully rebased`,
+    },
+    {
+      title: "Git Workflow Rebase vs Merge Decision",
+      kind: "flow",
+      caption: "When to rebase versus merge based on branch type and collaboration status.",
+      mermaid: `flowchart TD
+    A([Integrate changes]) --> B{Is branch public / shared?}
+    B -->|Yes| C[Use Merge - preserve history]
+    B -->|No, local feature branch| D{Want linear history?}
+    D -->|Yes| E[Rebase onto main]
+    D -->|No| F[Merge main into branch]
+    E --> G[Force-push feature branch]
+    F --> H[Merge commit retained]`,
     },
   ],
   comparison: {

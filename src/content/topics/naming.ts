@@ -157,13 +157,70 @@ double calculateInvoiceTotal(const std::vector<InvoiceLineItem>& lineItems) {
     {
       title: "Naming Decision Flowchart",
       kind: "flow",
-      caption: "A decision tree for choosing good names: start with intent, check for disinformation, verify searchability and pronounceability, and apply language-specific conventions."
+      caption: "Decision tree for choosing good names: start with intent, check for disinformation, verify searchability.",
+      mermaid: `flowchart TD
+    A["Choose a name"] --> B{"Reveals intent?"}
+    B -->|No| C["Describe what it holds or does"]
+    B -->|Yes| D{"Contains disinformation?"}
+    D -->|Yes| E["Remove misleading type hints or false context"]
+    D -->|No| F{"Pronounceable and searchable?"}
+    F -->|No| G["Avoid abbreviations and acronyms"]
+    F -->|Yes| H{"Correct naming convention for language?"}
+    H -->|No| I["Apply language conventions"]
+    H -->|Yes| J["Name is good"]
+    C --> B
+    E --> D
+    G --> F
+    I --> H`,
     },
     {
       title: "Naming Conventions by Language",
       kind: "mindmap",
-      caption: "A mindmap showing naming conventions across Java (camelCase methods, PascalCase classes, UPPER_SNAKE constants), Python (snake_case functions/variables, PascalCase classes, _private convention), TypeScript (camelCase functions/variables, PascalCase types/interfaces/enums), and Go (PascalCase for exported, camelCase for unexported)."
-    }
+      caption: "Naming conventions across Java, Python, TypeScript, and Go.",
+      mermaid: `mindmap
+    root["Naming Conventions"]
+      Java
+        camelCase methods and variables
+        PascalCase classes
+        UPPER_SNAKE constants
+      Python
+        snake_case functions and variables
+        PascalCase classes
+        _private convention
+      TypeScript
+        camelCase functions and variables
+        PascalCase types interfaces enums
+        UPPER_SNAKE constants
+      Go
+        PascalCase exported identifiers
+        camelCase unexported
+        Short names for narrow scope`,
+    },
+    {
+      title: "Name Quality Spectrum",
+      kind: "architecture",
+      caption: "Progression from cryptic names to intention-revealing names with examples.",
+      mermaid: `graph LR
+    Bad1["d\ncryptic single letter"] -->|improve| OK1["days\nbetter but vague"]
+    OK1 -->|improve| Good1["elapsedDays\nclear intent"]
+    Bad2["getInfo\nvague verb noun"] -->|improve| OK2["fetchUser\nbetter action"]
+    OK2 -->|improve| Good2["fetchUserById\ncomplete intent"]
+    Bad3["flag\nno meaning"] -->|improve| OK3["isActive\nboolean revealed"]
+    OK3 -->|improve| Good3["isAccountActive\ndomain context"]`,
+    },
+    {
+      title: "Variable Name Length Guidelines",
+      kind: "flow",
+      caption: "Name length should scale with scope size and usage distance.",
+      mermaid: `flowchart TD
+    A["Variable scope"] --> B{"Loop counter or\nvery narrow scope?"}
+    B -->|Yes| C["Short name: i j k x OK"]
+    B -->|No| D{"Used only in one method?"}
+    D -->|Yes| E["Medium name: userId total count"]
+    D -->|No| F{"Used across modules or classes?"}
+    F -->|Yes| G["Full descriptive name:\ncurrentUserAccountId"]
+    F -->|No| E`,
+    },
   ],
 
   animations: [

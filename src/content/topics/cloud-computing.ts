@@ -149,15 +149,87 @@ export const publicIp = server.publicIp;`
 
   diagrams: [
     {
-      title: "Cloud Service Models Stack",
+      title: "Cloud Service Model Layers",
       kind: "architecture",
-      caption: "Shows the layered responsibility model across IaaS, PaaS, and SaaS, illustrating which layers the provider manages versus the consumer."
+      caption: "IaaS, PaaS, and SaaS layers showing which components are managed by the provider versus the customer.",
+      mermaid: `graph TD
+    subgraph SaaS["SaaS - Provider Manages All"]
+        APP["Application"]
+        DATA["Data"]
+    end
+    subgraph PaaS["PaaS - Provider Manages Runtime"]
+        RT["Runtime and Middleware"]
+        OS2["Operating System"]
+    end
+    subgraph IaaS["IaaS - Provider Manages Hardware"]
+        VM["Virtual Machines"]
+        NET["Networking"]
+        STOR["Storage"]
+        HW["Physical Hardware"]
+    end
+    APP --> RT --> VM --> HW
+    DATA --> STOR`,
     },
     {
       title: "Cloud Deployment Models",
       kind: "network",
-      caption: "Depicts public, private, hybrid, and multi-cloud deployment topologies with data flow between environments."
-    }
+      caption: "Public, private, and hybrid cloud deployment topologies and their connectivity patterns.",
+      mermaid: `graph LR
+    subgraph Public["Public Cloud"]
+        PC1["Region A"]
+        PC2["Region B"]
+    end
+    subgraph Private["Private Cloud"]
+        ON["On-Premises DC"]
+        PRIV["Private Network"]
+    end
+    subgraph Hybrid["Hybrid Connectivity"]
+        VPN["VPN Gateway"]
+        DX["Direct Connect"]
+    end
+    PC1 <--> PC2
+    ON --> PRIV
+    PRIV --> VPN --> PC1
+    PRIV --> DX --> PC2`,
+    },
+    {
+      title: "Cloud Resource Provisioning",
+      kind: "flow",
+      caption: "Flow for provisioning cloud resources using infrastructure-as-code with approval and validation gates.",
+      mermaid: `flowchart TD
+    A["Write IaC Template"] --> B["Validate and Lint"]
+    B --> C{"Plan Changes"}
+    C --> D["Review Diff"]
+    D --> E{"Approved?"}
+    E -->|No| A
+    E -->|Yes| F["Apply to Staging"]
+    F --> G{"Tests Pass?"}
+    G -->|No| H["Rollback"]
+    G -->|Yes| I["Apply to Production"]
+    I --> J["Monitor and Alert"]
+    H --> A`,
+    },
+    {
+      title: "Cloud Shared Responsibility",
+      kind: "mindmap",
+      caption: "Breakdown of security and operational responsibilities split between cloud provider and customer.",
+      mermaid: `mindmap
+  root((Shared Responsibility))
+    Provider Responsibility
+      Physical security
+      Network infrastructure
+      Hypervisor
+      Global backbone
+    Customer Responsibility
+      Identity and access
+      Data encryption
+      Application security
+      OS patching on IaaS
+    Shared Areas
+      Compliance controls
+      Logging and monitoring
+      Network configuration`,
+    },
   ],
 
   animations: [

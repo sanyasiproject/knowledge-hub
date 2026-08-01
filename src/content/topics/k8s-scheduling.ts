@@ -277,68 +277,78 @@ kubectl label nodes worker-2 disktype=ssd`,
     {
       title: "Kubernetes Scheduler Pipeline",
       kind: "flow",
-      caption: "The *two-phase* scheduler pipeline: filtering eliminates ineligible nodes, scoring ranks the survivors, and the pod is bound to the **highest-scoring** node.",
+      caption: "The two-phase filter-then-score pipeline. Filtering eliminates nodes that cannot run the pod. Scoring ranks eligible nodes. The highest-scoring node is selected.",
       mermaid: `flowchart LR
-    A["Pod Created\\n(Pending)"] --> B["Filter Phase"]
-    B --> C{"Nodes\\nRemaining?"}
-    C -- No --> D["Pod stays\\nPending"]
-    C -- Yes --> E["Score Phase"]
-    E --> F["Rank Nodes\\nby Weight"]
-    F --> G["Bind Pod to\\nTop Node"]
-    G --> H["Pod Running"]
-
-    style A fill:#f9f,stroke:#333
-    style D fill:#f66,stroke:#333
-    style H fill:#6f6,stroke:#333`,
+    A["Pod Pending\nin scheduling queue"] --> B["Filter Phase\nresource requests\ntaints tolerations\naffinity topology"]
+    B --> C{"Nodes\nremaining?"}
+    C -->|No| D["Pod stays Pending\nInsufficientResources\nor no node matches"]
+    C -->|Yes| E["Score Phase\nLeastRequested\nBalancedResource\nImageLocality"]
+    E --> F["Select highest\nscoring node"]
+    F --> G["Bind Pod to Node\nkubelet starts containers"]`,
     },
     {
       title: "Autoscaling Architecture",
       kind: "architecture",
-      caption: "How **HPA**, **VPA**, **Cluster Autoscaler**, and **KEDA** interact to provide multi-dimensional scaling across pods, containers, and nodes.",
-      mermaid: `flowchart TB
+      caption: "HPA scales replicas based on CPU or custom metrics. VPA adjusts resource requests. Cluster Autoscaler adds nodes when pods are pending. KEDA enables event-driven scaling.",
+      mermaid: `graph TB
     subgraph Metrics["Metrics Sources"]
-        M1["Metrics Server\\n(CPU/Memory)"]
-        M2["Prometheus\\n(Custom Metrics)"]
-        M3["External Events\\n(Kafka, SQS)"]
+      M1["Metrics Server\nCPU Memory"]
+      M2["Prometheus Adapter\nCustom Metrics"]
+      M3["External Events\nKafka queue depth"]
     end
-
-    subgraph Autoscalers["Autoscaling Controllers"]
-        HPA["HPA\\nReplica Count"]
-        VPA["VPA\\nResource Requests"]
-        KEDA["KEDA\\nEvent-Driven"]
-        CA["Cluster Autoscaler\\nNode Count"]
+    subgraph Scalers["Autoscaling Controllers"]
+      HPA["HPA\nscale replica count\ndesiredReplicas = ceil(current * metric/target)"]
+      VPA["VPA\nadjust resource requests\nright-size containers"]
+      CA["Cluster Autoscaler\nadd or remove nodes\nbased on pending pods"]
+      KEDA["KEDA\nevent-driven scaling\nscale to zero"]
     end
-
     M1 --> HPA
     M1 --> VPA
     M2 --> HPA
     M3 --> KEDA
-
-    HPA --> D["Deployment\\n(scale replicas)"]
-    KEDA --> D
-    VPA --> P["Pod\\n(adjust requests)"]
-    CA --> N["Node Pool\\n(add/remove nodes)"]
-
-    D -.->|"Pending pods\\ntrigger scale-up"| CA`,
+    HPA -->|scale| DEP["Deployment replicas"]
+    VPA -->|evict and recreate| POD["Pod resource requests"]
+    DEP -->|pending pods trigger| CA`,
     },
     {
-      title: "Taints, Tolerations, and Affinity Decision Tree",
+      title: "Taint Toleration and Affinity Decision",
       kind: "flow",
-      caption: "How the scheduler uses **taints**, **tolerations**, and **node affinity** together to decide pod placement.",
+      caption: "The scheduler checks taints and tolerations first, then hard affinity rules, then anti-affinity. Nodes failing any hard constraint are eliminated before scoring.",
       mermaid: `flowchart TD
-    Start["Schedule Pod"] --> T{"Node has\\nTaints?"}
-    T -- No --> A{"Node Affinity\\nMatches?"}
-    T -- Yes --> Tol{"Pod has\\nmatching\\nToleration?"}
-    Tol -- No --> Reject["Node Rejected"]
-    Tol -- Yes --> A
-    A -- "Required: No" --> Reject
-    A -- "Required: Yes\\nor no rule" --> S{"Pod Anti-Affinity\\nViolated?"}
-    S -- Yes --> Reject
-    S -- No --> Score["Node Passes\\nto Scoring"]
-    A -- "Preferred: No" --> S2["Lower Score\\nbut still eligible"]
-
-    style Reject fill:#f66,stroke:#333
-    style Score fill:#6f6,stroke:#333`,
+    START["Candidate Node"] --> T{"Node has\nNoSchedule taint?"}
+    T -->|Yes| TOL{"Pod has\nmatching toleration?"}
+    TOL -->|No| REJECT["Node Eliminated"]
+    TOL -->|Yes| AFF
+    T -->|No| AFF
+    AFF{"Required NodeAffinity\npresent and matches?"} -->|Required - No match| REJECT
+    AFF -->|Required match or no rule| ANTI
+    ANTI{"Pod Anti-Affinity\nviolated on this node?"} -->|Violated| REJECT
+    ANTI -->|OK| SCORE["Node eligible for scoring\nsoft preferences affect score"]`,
+    },
+    {
+      title: "Topology Spread and Pod Distribution",
+      kind: "network",
+      caption: "Topology spread constraints distribute pods evenly across zones with a configurable maxSkew. This prevents availability zone imbalance that pod anti-affinity alone cannot guarantee.",
+      mermaid: `graph TD
+    subgraph Zone1["Zone us-east-1a"]
+      N1["Node A"]
+      N2["Node B"]
+      P1["Pod 1"]
+      P2["Pod 2"]
+      N1 --- P1
+      N2 --- P2
+    end
+    subgraph Zone2["Zone us-east-1b"]
+      N3["Node C"]
+      P3["Pod 3"]
+      N3 --- P3
+    end
+    subgraph Zone3["Zone us-east-1c"]
+      N4["Node D"]
+      P4["Pod 4"]
+      N4 --- P4
+    end
+    RULE["maxSkew: 1\ntopologyKey: zone\nwhenUnsatisfiable: DoNotSchedule\nZone counts: 2 1 1 - skew OK\nNext pod goes to Zone2 or Zone3"]`,
     },
   ],
   comparison: {

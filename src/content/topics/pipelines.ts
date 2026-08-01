@@ -449,14 +449,64 @@ deploy-production:
   },
   diagrams: [
     {
-      title: "Fan-out / Fan-in Pipeline Architecture",
+      title: "Fan-out / Fan-in Pipeline Flow",
       kind: "flow",
-      caption: "A typical production pipeline: build fans out to parallel quality checks (unit tests, integration tests, SAST, lint), which converge at a quality gate before deploying to staging and then production with a manual approval step.",
+      caption: "A typical production pipeline: build fans out to parallel quality checks, which converge at a quality gate before staging and production deploys.",
+      mermaid: `flowchart TD
+    Trigger([Push or PR]) --> Build[Build and Compile\nCache dependencies]
+    Build --> FanOut{Parallel Quality Checks}
+    FanOut --> Unit[Unit Tests\nSharded 3x]
+    FanOut --> Int[Integration Tests\nWith DB service]
+    FanOut --> Lint[Lint and Type Check]
+    FanOut --> SAST[SAST Security Scan]
+    Unit --> Gate{Quality Gate}
+    Int --> Gate
+    Lint --> Gate
+    SAST --> Gate
+    Gate -->|All pass| Staging[Deploy to Staging]
+    Gate -->|Any fail| Notify[Notify Developer\nPipeline stops]
+    Staging --> Approval{Manual Approval}
+    Approval -->|Approved| Prod[Deploy to Production]
+    Approval -->|Rejected| Hold[Hold for fixes]`,
     },
     {
       title: "DAG Pipeline Execution Order",
       kind: "architecture",
-      caption: "DAG mode removes rigid stage boundaries. Frontend deploy depends only on frontend tests; backend deploy depends only on backend tests and container scan. Neither waits for the other track, maximizing parallelism.",
+      caption: "DAG mode removes rigid stage boundaries. Frontend and backend tracks execute independently, maximizing parallelism.",
+      mermaid: `graph TD
+    Checkout[Checkout Code] --> FEBuild[Frontend Build]
+    Checkout --> BEBuild[Backend Build]
+    FEBuild --> FETest[Frontend Tests]
+    BEBuild --> BETest[Backend Tests]
+    BEBuild --> ContainerScan[Container Scan]
+    FETest --> FEDeploy[Frontend Deploy]
+    BETest --> BEDeploy[Backend Deploy]
+    ContainerScan --> BEDeploy
+    FEDeploy --> E2E[End-to-End Tests]
+    BEDeploy --> E2E
+    E2E --> Release[Release]`,
+    },
+    {
+      title: "CI/CD Pipeline Execution Lifecycle",
+      kind: "sequence",
+      caption: "Interaction between developer, CI platform, runners, and deployment targets across the full pipeline lifecycle.",
+      mermaid: `sequenceDiagram
+    participant Dev as Developer
+    participant CI as CI Platform
+    participant Runner as Runner / Pod
+    participant Reg as Container Registry
+    participant K8s as Kubernetes
+    Dev->>CI: git push triggers webhook
+    CI->>Runner: Allocate runner, checkout code
+    Runner->>Runner: Build image, run tests
+    Runner->>Reg: Push image with commit SHA tag
+    Runner-->>CI: Report test results
+    CI->>Dev: Notify on failure
+    CI->>CI: Wait for manual approval
+    CI->>K8s: Update Deployment image tag
+    K8s->>K8s: Rolling update with readiness probes
+    K8s-->>CI: Rollout complete
+    CI-->>Dev: Deployment success`,
     },
   ],
   animations: [

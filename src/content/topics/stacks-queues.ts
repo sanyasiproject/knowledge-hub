@@ -146,16 +146,76 @@ public:
   ],
   diagrams: [
     {
-      title: "Stack vs Queue Operation Flow",
+      title: "Stack LIFO Operations",
       kind: "flow",
-      caption:
-        "Stack: push and pop both operate on the top (same end). Queue: enqueue adds to the rear, dequeue removes from the front (opposite ends). Deque: operations at both ends.",
+      caption: "Stack data structure with LIFO ordering. Push adds to the top, pop removes from the top. Used for function call stacks, undo operations, and expression parsing.",
+      mermaid: `flowchart TD
+    A([Stack operations]) --> B{Operation type}
+    B -->|Push 5| C[Add 5 to top]
+    C --> D[Stack: 5 - 3 - 1 - bottom to top]
+    B -->|Pop| E[Remove top element]
+    E --> F[Returns 5 - Stack: 3 - 1]
+    B -->|Peek| G[View top without removing]
+    G --> H[Returns current top]
+    B -->|isEmpty| I{Stack empty?}
+    I -->|Yes| J[Return true]
+    I -->|No| K[Return false]`,
     },
     {
-      title: "Binary Heap Array Layout",
+      title: "Queue FIFO Operations",
+      kind: "flow",
+      caption: "Queue data structure with FIFO ordering. Enqueue adds to the back, dequeue removes from the front. Used for task queues, BFS, and message passing.",
+      mermaid: `flowchart TD
+    A([Queue operations]) --> B{Operation type}
+    B -->|Enqueue C| C[Add C to back]
+    C --> D[Queue: A - B - C - front to back]
+    B -->|Dequeue| E[Remove front element]
+    E --> F[Returns A - Queue: B - C]
+    B -->|Peek front| G[View front without removing]
+    G --> H[Returns B]
+    B -->|Size| I[Count elements]
+    I --> J[Returns 2]`,
+    },
+    {
+      title: "Stack vs Queue Comparison",
       kind: "architecture",
-      caption:
-        "A min-heap stored in an array. Parent of index i is at (i-1)/2; children are at 2i+1 and 2i+2. The root (index 0) is always the minimum. Insert sifts up; extract-min sifts down.",
+      caption: "Side-by-side comparison of stack and queue operations, ordering principles, time complexities, and common use cases.",
+      mermaid: `graph TD
+    subgraph Stack["Stack - LIFO"]
+      S1[Push - O1 - add to top]
+      S2[Pop - O1 - remove from top]
+      S3[Peek - O1 - view top]
+      S4[Use cases: call stack - undo - DFS]
+    end
+    subgraph Queue["Queue - FIFO"]
+      Q1[Enqueue - O1 - add to back]
+      Q2[Dequeue - O1 - remove from front]
+      Q3[Peek - O1 - view front]
+      Q4[Use cases: task queue - BFS - rate limiting]
+    end`,
+    },
+    {
+      title: "Call Stack Execution",
+      kind: "sequence",
+      caption: "How the program call stack grows and shrinks as functions call each other and return, demonstrating stack LIFO behavior in practice.",
+      mermaid: `sequenceDiagram
+    participant Runtime
+    participant Main as main()
+    participant A as functionA()
+    participant B as functionB()
+
+    Runtime->>Main: Call main
+    Note over Runtime: Stack: [main]
+    Main->>A: Call functionA
+    Note over Runtime: Stack: [main, functionA]
+    A->>B: Call functionB
+    Note over Runtime: Stack: [main, functionA, functionB]
+    B-->>A: return result
+    Note over Runtime: Stack: [main, functionA]
+    A-->>Main: return result
+    Note over Runtime: Stack: [main]
+    Main-->>Runtime: return
+    Note over Runtime: Stack: []`,
     },
   ],
   animations: [

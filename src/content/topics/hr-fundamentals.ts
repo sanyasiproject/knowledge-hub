@@ -336,57 +336,84 @@ void testSearchCaseInsensitive() {
 
   diagrams: [
     {
-      title: "HR Screening Process Flow",
+      title: "Hiring Process Flow",
       kind: "flow",
-      caption: "End-to-end flow from application received through HR screening to technical interview handoff, including decision points and feedback loops.",
+      caption: "Standard hiring pipeline from job posting to offer acceptance.",
       mermaid: `flowchart TD
-    A["**Application Received**"] --> B["**Resume Review**\\n*Qualification check*"]
-    B -->|"*Does not meet*\\n*basic criteria*"| C["Rejection Email"]
-    B -->|"*Meets criteria*"| D["**Schedule HR Screen**\\n*30-45 min call*"]
-    D --> E["**HR Screening Call**"]
-    E --> F["Background & Motivation"]
-    E --> G["Role Alignment"]
-    E --> H["Culture Fit Assessment"]
-    E --> I["Salary Expectations"]
-    E --> J["Logistics & Timeline"]
-    F & G & H & I & J --> K{"**Screener Assessment**"}
-    K -->|"*Green flags:*\\n*Enthusiasm, research,*\\n*clear goals*"| L["**Recommend: Proceed**"]
-    K -->|"*Red flags:*\\n*Badmouthing, vague,*\\n*misaligned salary*"| M["**Recommend: Reject**"]
-    L --> N["**Written Summary**\\n*Submitted to hiring manager*"]
-    M --> N
-    N -->|"*Proceed*"| O["**Technical Interview Loop**"]
-    N -->|"*Reject*"| P["Feedback & Rejection"]`,
+    A[Define Role and JD] --> B[Post Job Opening]
+    B --> C[Screen Applications]
+    C --> D[Phone Screen]
+    D --> E{Pass screen?}
+    E -- No --> F[Reject with feedback]
+    E -- Yes --> G[Technical Assessment]
+    G --> H{Pass assessment?}
+    H -- No --> F
+    H -- Yes --> I[Panel Interviews]
+    I --> J[Debrief and Decision]
+    J --> K{Hire?}
+    K -- Yes --> L[Extend Offer]
+    L --> M[Negotiation and Acceptance]
+    K -- No --> F`,
     },
     {
-      title: "Candidate Evaluation Dimensions",
+      title: "Performance Review Cycle",
+      kind: "state",
+      caption: "Annual performance review cycle states and transitions.",
+      mermaid: `stateDiagram-v2
+    [*] --> GoalSetting: Start of year
+    GoalSetting --> MidYearCheck: Goals finalized
+    MidYearCheck --> Coaching: Checkpoint done
+    Coaching --> SelfReview: Continuous feedback
+    SelfReview --> ManagerReview: Self review submitted
+    ManagerReview --> Calibration: Manager draft done
+    Calibration --> FinalReview: Calibration complete
+    FinalReview --> GoalSetting: Next cycle begins
+    FinalReview --> PIP: Underperformance identified`,
+    },
+    {
+      title: "Employee Lifecycle Stages",
       kind: "mindmap",
-      caption: "The six core dimensions HR screeners evaluate: communication, motivation, role alignment, cultural fit, compensation alignment, and logistical feasibility, with sub-criteria for each.",
+      caption: "Key phases and activities across the full employee lifecycle.",
       mermaid: `mindmap
-  root(("**HR Screening\\nEvaluation**"))
-    ("**Communication Clarity**")
-      ("*Concise & coherent*")
-      ("*Structured responses*")
-      ("*Active listening*")
-    ("**Motivation & Intent**")
-      ("*Moving toward, not away*")
-      ("*Genuine enthusiasm*")
-      ("*Intrinsic drivers*")
-    ("**Role Alignment**")
-      ("*Skills match*")
-      ("*Experience relevance*")
-      ("*Level appropriateness*")
-    ("**Cultural Compatibility**")
-      ("*Work style fit*")
-      ("*Values alignment*")
-      ("*Team dynamics*")
-    ("**Compensation Alignment**")
-      ("*Within salary band*")
-      ("*Realistic expectations*")
-      ("*Total comp awareness*")
-    ("**Logistical Feasibility**")
-      ("*Notice period*")
-      ("*Location / visa*")
-      ("*Availability*")`,
+  root((Employee Lifecycle))
+    Attract
+      Employer branding
+      Job postings
+      Referrals
+    Hire
+      Screening
+      Interviews
+      Offer negotiation
+    Onboard
+      Orientation
+      Training
+      Buddy program
+    Develop
+      L and D programs
+      Mentorship
+      Promotions
+    Retain
+      Compensation
+      Culture
+      Work-life balance
+    Offboard
+      Exit interview
+      Knowledge transfer`,
+    },
+    {
+      title: "Total Compensation Structure",
+      kind: "architecture",
+      caption: "Components of total compensation in a typical tech company.",
+      mermaid: `graph TD
+    TC[Total Compensation] --> Base[Base Salary]
+    TC --> Bonus[Performance Bonus]
+    TC --> Equity[Equity RSU or Options]
+    TC --> Benefits[Benefits Package]
+    Benefits --> Health[Health Dental Vision]
+    Benefits --> Retirement[401k matching]
+    Benefits --> PTO[Paid Time Off]
+    Benefits --> Perks[Learning Budget and Perks]
+    Equity --> VestSched[4-year vest 1-year cliff]`,
     },
   ],
 

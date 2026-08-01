@@ -260,19 +260,62 @@ fn main() {
   ],
   diagrams: [
     {
-      title: "Classic Compiler Pipeline",
+      title: "Compilation vs Interpretation Pipeline",
       kind: "flow",
-      caption: "Source Code -> Lexer (tokens) -> Parser (AST) -> Semantic Analysis (typed AST) -> IR Generation -> Optimization Passes -> Code Generation -> Object File -> Linker -> Executable.",
+      caption: "Side-by-side flow comparison of how compiled and interpreted languages process source code to execution.",
+      mermaid: `flowchart TD
+    SRC["Source Code"]
+    SRC --> COMP_PATH & INTERP_PATH
+
+    subgraph COMP_PATH["Compiled Path"]
+        direction TD
+        LEX1["Lexer and Parser"] --> AST1["AST"]
+        AST1 --> OPT1["Optimiser"]
+        OPT1 --> OBJ["Machine Code or Bytecode"]
+        OBJ --> EXEC1["Direct CPU Execution"]
+    end
+
+    subgraph INTERP_PATH["Interpreted Path"]
+        direction TD
+        LEX2["Lexer and Parser"] --> AST2["AST"]
+        AST2 --> EVAL["Tree-walk Evaluator"]
+        EVAL --> EXEC2["Result via Interpreter"]
+    end`,
     },
     {
-      title: "JIT Compilation Tiers (HotSpot JVM)",
+      title: "Language Execution Models",
       kind: "architecture",
-      caption: "Java bytecode enters the Interpreter (tier 0), then is compiled by C1 (tiers 1-3, fast compilation, basic optimizations), and finally by C2 (tier 4, aggressive optimizations, speculative inlining). Deoptimization can fall back from C2 to interpreter.",
+      caption: "Architecture of different language execution models from pure interpretation to native compilation.",
+      mermaid: `graph LR
+    SRC["Source Code"]
+    SRC --> INT["Interpreter\nPython, Ruby"]
+    SRC --> JIT["JIT Compiler\nJava JVM, JS V8"]
+    SRC --> AOT["AOT Compiler\nC, C++, Rust, Go"]
+    SRC --> TRANS["Transpiler\nTypeScript, Babel"]
+
+    INT --> OUT1["Immediate Output\nNo compile step"]
+    JIT --> BC["Bytecode"] --> RT["Runtime Optimisation"]
+    AOT --> BIN["Native Binary"]
+    TRANS --> JS["Target Language"] --> AOT`,
     },
     {
-      title: "LLVM's Three-Phase Design",
-      kind: "architecture",
-      caption: "Multiple front ends (Clang for C/C++, rustc, swiftc) all emit LLVM IR. The middle end applies target-independent optimizations. Multiple back ends (x86, ARM, RISC-V, WebAssembly) generate target-specific code. This M x N decoupling is LLVM's key architectural insight.",
+      title: "JIT Compilation Sequence",
+      kind: "sequence",
+      caption: "How a JIT compiler progressively optimises hot code paths at runtime.",
+      mermaid: `sequenceDiagram
+    participant VM as VM or Runtime
+    participant INTERP as Interpreter
+    participant PROF as Profiler
+    participant JIT as JIT Compiler
+    participant CPU as CPU
+    VM->>INTERP: Execute bytecode
+    INTERP->>PROF: Record call counts
+    PROF-->>VM: Hot path detected
+    VM->>JIT: Compile hot function
+    JIT-->>VM: Native machine code
+    VM->>CPU: Execute native code
+    CPU-->>VM: Faster result
+    VM->>PROF: Continue profiling`,
     },
   ],
   animations: [

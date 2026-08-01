@@ -76,14 +76,68 @@ app.delete('/users/:id', (req, res) => {
   ],
   diagrams: [
     {
-      title: "REST resource hierarchy",
+      title: "REST Resource Hierarchy",
       kind: "architecture",
-      caption: "URL structure mapping: /users → /users/{id} → /users/{id}/orders → /users/{id}/orders/{orderId}",
+      caption: "REST APIs model resources as a hierarchy with consistent URL patterns. Collections contain items; items can have nested sub-resources.",
+      mermaid: `graph TD
+    Root["/"] --> Users["/users"]
+    Root --> Products["/products"]
+    Users --> UserItem["/users/:id"]
+    UserItem --> Orders["/users/:id/orders"]
+    Orders --> OrderItem["/users/:id/orders/:orderId"]
+    Products --> ProductItem["/products/:id"]
+    ProductItem --> Reviews["/products/:id/reviews"]`,
     },
     {
-      title: "HTTP method semantics",
+      title: "HTTP Methods and CRUD Mapping",
+      kind: "architecture",
+      caption: "REST maps HTTP verbs to CRUD operations. GET reads, POST creates, PUT replaces, PATCH partially updates, and DELETE removes resources.",
+      mermaid: `graph LR
+    subgraph Collection["Collection /users"]
+      GET_C["GET - list all users"]
+      POST_C["POST - create user"]
+    end
+    subgraph Item["Item /users/123"]
+      GET_I["GET - get user 123"]
+      PUT_I["PUT - replace user 123"]
+      PATCH_I["PATCH - partial update"]
+      DELETE_I["DELETE - remove user 123"]
+    end`,
+    },
+    {
+      title: "REST Request-Response Flow",
+      kind: "sequence",
+      caption: "A typical REST API request and response cycle showing headers, content negotiation, status codes, and hypermedia links.",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant API as REST API
+    participant Auth as Auth Middleware
+    participant DB as Database
+
+    Client->>API: GET /users/123 - Accept: application/json
+    API->>Auth: Validate Bearer token
+    Auth-->>API: User authenticated - role: admin
+    API->>DB: SELECT * FROM users WHERE id=123
+    DB-->>API: User record
+    API-->>Client: 200 OK - JSON body - ETag header
+    Client->>API: PUT /users/123 - If-Match: etag-value
+    API->>DB: UPDATE users WHERE id=123
+    DB-->>API: Updated
+    API-->>Client: 200 OK - updated resource`,
+    },
+    {
+      title: "REST Maturity Model",
       kind: "flow",
-      caption: "GET (read), POST (create), PUT (replace), PATCH (partial update), DELETE (remove) — with idempotency and safety properties.",
+      caption: "Richardson Maturity Model levels: Level 0 uses HTTP as tunnel, Level 1 adds resources, Level 2 adds verbs and status codes, Level 3 adds HATEOAS.",
+      mermaid: `flowchart TD
+    L0[Level 0 - One endpoint - POST for everything] --> L1
+    L1[Level 1 - Multiple resource URIs] --> L2
+    L2[Level 2 - HTTP verbs + status codes] --> L3
+    L3[Level 3 - HATEOAS - hypermedia links in responses]
+    L0 -->|Example| E0[POST /api - action: getUser]
+    L1 -->|Example| E1[GET /users/123]
+    L2 -->|Example| E2[DELETE /users/123 returns 204]
+    L3 -->|Example| E3[Response includes links to related resources]`,
     },
   ],
   animations: [

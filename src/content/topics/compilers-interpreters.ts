@@ -202,14 +202,52 @@ int main(void) {
     {
       title: "Compiler Pipeline",
       kind: "flow",
-      caption:
-        "Source code flows through lexing, parsing, semantic analysis, IR generation, optimisation passes, and code generation to produce an executable.",
+      caption: "The classic multi-stage compiler pipeline from source text to executable binary.",
+      mermaid: `flowchart TD
+    A["Source Code"] --> B["Lexer\nTokenisation"]
+    B --> C["Parser\nBuild AST"]
+    C --> D["Semantic Analysis\nType checking and scope"]
+    D --> E["IR Generation\nIntermediate Representation"]
+    E --> F["Optimiser\nDead code, inlining"]
+    F --> G["Code Generator\nTarget assembly"]
+    G --> H["Linker\nResolve symbols"]
+    H --> I["Executable Binary"]`,
     },
     {
-      title: "JIT Compilation Architecture",
+      title: "Compiler vs Interpreter Architecture",
       kind: "architecture",
-      caption:
-        "Bytecode interpreter with profiling, tiered compilation (baseline -> optimising), on-stack replacement, and deoptimisation feedback loop.",
+      caption: "Structural comparison of a compiler toolchain versus an interpreter runtime.",
+      mermaid: `graph LR
+    subgraph Compiler["Compiler Toolchain"]
+        SRC1["Source"] --> FE["Front End\nLex, Parse, Analyse"]
+        FE --> MID["Middle End\nIR and Optimise"]
+        MID --> BE["Back End\nCode Generate"]
+        BE --> BIN["Binary"]
+    end
+    subgraph Interpreter["Interpreter Runtime"]
+        SRC2["Source"] --> PARSE["Parser"]
+        PARSE --> AST["AST"]
+        AST --> EVAL["Evaluator or VM"]
+        EVAL --> OUT["Output"]
+    end`,
+    },
+    {
+      title: "Token and AST State",
+      kind: "state",
+      caption: "State transitions as source code moves through the early compiler front-end stages.",
+      mermaid: `stateDiagram-v2
+    [*] --> RawText
+    RawText : Raw source characters
+    RawText --> Tokens : Lexer runs
+    Tokens --> ParseError : Invalid syntax
+    Tokens --> AST : Parser succeeds
+    ParseError --> [*]
+    AST --> TypeError : Semantic check fails
+    AST --> TypedAST : Types resolve
+    TypeError --> [*]
+    TypedAST --> IR : IR generation
+    IR --> Optimised : Optimiser pass
+    Optimised --> Binary : Code generation`,
     },
   ],
   animations: [

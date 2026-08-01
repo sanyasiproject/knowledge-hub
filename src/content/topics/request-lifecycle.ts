@@ -131,14 +131,82 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Full request lifecycle",
+      title: "HTTP Request Lifecycle",
       kind: "sequence",
-      caption: "Browser → DNS → TCP → TLS → Load Balancer → Server middleware → Handler → Database → Response path back.",
+      caption: "End-to-end lifecycle of an HTTP request from browser to server and back, including DNS resolution, TCP handshake, TLS negotiation, and response.",
+      mermaid: `sequenceDiagram
+    participant B as Browser
+    participant DNS as DNS Resolver
+    participant TCP as TCP Layer
+    participant TLS as TLS Layer
+    participant S as Web Server
+    participant App as Application
+
+    B->>DNS: Resolve hostname
+    DNS-->>B: IP address
+    B->>TCP: SYN
+    TCP-->>B: SYN-ACK
+    B->>TCP: ACK (connected)
+    B->>TLS: Client Hello
+    TLS-->>B: Server Hello + Certificate
+    B->>TLS: Key exchange
+    B->>S: HTTP GET /resource
+    S->>App: Route request
+    App-->>S: Response data
+    S-->>B: HTTP 200 + body`,
     },
     {
-      title: "Server-side request pipeline",
+      title: "Request Processing Pipeline",
       kind: "flow",
-      caption: "Load Balancer → Reverse Proxy → Middleware Stack → Router → Handler → Service Layer → Data Access → Response.",
+      caption: "How a web framework processes an incoming request through middleware, routing, authentication, business logic, and response serialization.",
+      mermaid: `flowchart TD
+    A([Incoming request]) --> B[Rate limiter middleware]
+    B --> C{Rate limit exceeded?}
+    C -->|Yes| D[Return 429 Too Many Requests]
+    C -->|No| E[Auth middleware]
+    E --> F{Authenticated?}
+    F -->|No| G[Return 401 Unauthorized]
+    F -->|Yes| H[Router - match route]
+    H --> I{Route found?}
+    I -->|No| J[Return 404 Not Found]
+    I -->|Yes| K[Controller handler]
+    K --> L[Business logic]
+    L --> M[Serialize response]
+    M --> N([Return 200 with data])`,
+    },
+    {
+      title: "Browser to CDN to Origin Request Flow",
+      kind: "architecture",
+      caption: "Modern request lifecycle with CDN caching layer. Cache hits serve content at the edge. Cache misses propagate to origin servers.",
+      mermaid: `graph LR
+    Browser[Browser] --> CDN[CDN Edge Node]
+    CDN --> CacheCheck{Cache hit?}
+    CacheCheck -->|Yes| CachedResp[Serve cached response]
+    CachedResp --> Browser
+    CacheCheck -->|No| LB[Load Balancer]
+    LB --> App1[App Server 1]
+    LB --> App2[App Server 2]
+    App1 --> DB[(Database)]
+    App2 --> DB
+    App1 -->|Cache response| CDN
+    App2 -->|Cache response| CDN`,
+    },
+    {
+      title: "Connection Pooling and Keep-Alive",
+      kind: "state",
+      caption: "HTTP connection states showing how keep-alive connections are reused across multiple requests to avoid repeated TCP handshake overhead.",
+      mermaid: `stateDiagram-v2
+    [*] --> Idle
+    Idle --> Connecting: New request
+    Connecting --> Handshaking: TCP connected
+    Handshaking --> Active: TLS complete
+    Active --> SendingRequest: Connection ready
+    SendingRequest --> WaitingResponse: Request sent
+    WaitingResponse --> ReadingResponse: Response headers received
+    ReadingResponse --> Idle: Keep-Alive - response complete
+    ReadingResponse --> Closed: Connection close header
+    Idle --> Closed: Idle timeout
+    Closed --> [*]`,
     },
   ],
   animations: [

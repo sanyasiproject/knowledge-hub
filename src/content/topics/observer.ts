@@ -325,16 +325,78 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Observer pattern class structure",
+      title: "Observer Pattern Class Structure",
       kind: "architecture",
-      caption:
-        "Shows Subject holding a list of Observer references, with attach/detach/notify methods. ConcreteSubject stores state and calls notify on change. ConcreteObservers implement the update method.",
+      caption: "Subject holds a list of Observer references. ConcreteSubject notifies observers when state changes.",
+      mermaid: `graph TD
+    Subject["Subject Interface\nattach detach notify"] --> CS["ConcreteSubject\nstate, getState"]
+    Observer["Observer Interface\nupdate"] --> CO1["ConcreteObserver A\nupdate impl"]
+    Observer --> CO2["ConcreteObserver B\nupdate impl"]
+    CS -->|holds list of| Observer
+    CS -->|calls notify| Observer
+    CO1 -->|reads state from| CS
+    CO2 -->|reads state from| CS`,
     },
     {
-      title: "Push vs Pull notification models",
+      title: "Push vs Pull Notification Models",
       kind: "sequence",
-      caption:
-        "Push model: Subject passes data directly in update(data). Pull model: Subject sends update(this), and observers call subject.getState() to retrieve the specific data they need.",
+      caption: "Push sends data in update call; pull sends self-reference and observers fetch what they need.",
+      mermaid: `sequenceDiagram
+    participant S as Subject
+    participant O1 as Observer A
+    participant O2 as Observer B
+
+    Note over S,O2: Push Model
+    S->>S: state changes
+    S->>O1: update price=42.5 volume=1000
+    S->>O2: update price=42.5 volume=1000
+
+    Note over S,O2: Pull Model
+    S->>S: state changes
+    S->>O1: update subject=self
+    O1->>S: getPrice()
+    S-->>O1: 42.5
+    S->>O2: update subject=self
+    O2->>S: getVolume()
+    S-->>O2: 1000`,
+    },
+    {
+      title: "Observer Pattern Flow",
+      kind: "flow",
+      caption: "Lifecycle of registering observers, triggering notifications, and handling unsubscription.",
+      mermaid: `flowchart TD
+    A["Observer calls subject.attach self"] --> B["Observer added to list"]
+    B --> C["Subject state changes"]
+    C --> D["Subject calls notify"]
+    D --> E["For each observer in list"]
+    E --> F["Call observer.update"]
+    F --> G{"Observer still interested?"}
+    G -->|Yes| H["Observer processes update"]
+    G -->|No| I["Observer calls detach"]
+    I --> J["Removed from list"]`,
+    },
+    {
+      title: "Observer Pattern Use Cases",
+      kind: "mindmap",
+      caption: "Real-world applications of the observer pattern across different domains.",
+      mermaid: `mindmap
+    root["Observer Pattern"]
+      UI Frameworks
+        DOM event listeners
+        React state updates
+        Angular change detection
+      Data Streams
+        RxJS Observables
+        Kafka consumers
+        WebSocket handlers
+      System Events
+        File system watchers
+        Database triggers
+        Log aggregators
+      Business Logic
+        Order status updates
+        Price change alerts
+        Inventory notifications`,
     },
   ],
   animations: [

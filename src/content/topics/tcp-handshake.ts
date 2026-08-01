@@ -276,28 +276,76 @@ int main() {
   ],
   diagrams: [
     {
-      title: "TCP Three-Way Handshake Sequence",
+      title: "TCP Three-Way Handshake",
       kind: "sequence",
-      caption:
-        "Client sends SYN(seq=x), server replies SYN-ACK(seq=y, ack=x+1), client completes with ACK(seq=x+1, ack=y+1). Both sides reach ESTABLISHED state.",
+      caption: "SYN, SYN-ACK, and ACK exchange that establishes a TCP connection between client and server.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant S as Server
+    Note over C: CLOSED
+    Note over S: LISTEN
+    C->>S: SYN seq=x
+    Note over C: SYN_SENT
+    S-->>C: SYN-ACK seq=y ack=x+1
+    Note over S: SYN_RECEIVED
+    C->>S: ACK ack=y+1
+    Note over C: ESTABLISHED
+    Note over S: ESTABLISHED`,
     },
     {
       title: "TCP Connection State Machine",
       kind: "state",
-      caption:
-        "Full TCP state transitions: CLOSED -> LISTEN/SYN_SENT -> SYN_RECEIVED -> ESTABLISHED -> FIN_WAIT_1 -> FIN_WAIT_2/CLOSING -> TIME_WAIT -> CLOSED, with all intermediate states for both active and passive close.",
+      caption: "Full TCP connection lifecycle from CLOSED through handshake, data transfer, to termination.",
+      mermaid: `stateDiagram-v2
+    [*] --> CLOSED
+    CLOSED --> LISTEN : passive open
+    CLOSED --> SYN_SENT : active open - send SYN
+    LISTEN --> SYN_RECEIVED : receive SYN - send SYN-ACK
+    SYN_SENT --> ESTABLISHED : receive SYN-ACK - send ACK
+    SYN_RECEIVED --> ESTABLISHED : receive ACK
+    ESTABLISHED --> FIN_WAIT_1 : close - send FIN
+    FIN_WAIT_1 --> FIN_WAIT_2 : receive ACK
+    FIN_WAIT_2 --> TIME_WAIT : receive FIN - send ACK
+    TIME_WAIT --> CLOSED : timeout 2MSL`,
     },
     {
-      title: "TCP Segment Header Layout",
-      kind: "architecture",
-      caption:
-        "32-bit word layout showing source port, destination port, sequence number, acknowledgment number, data offset, flags (URG, ACK, PSH, RST, SYN, FIN), window size, checksum, urgent pointer, and options.",
+      title: "TCP Four-Way Termination",
+      kind: "sequence",
+      caption: "FIN and ACK exchange that gracefully closes a TCP connection in both directions.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant S as Server
+    C->>S: FIN
+    Note over C: FIN_WAIT_1
+    S-->>C: ACK
+    Note over C: FIN_WAIT_2
+    Note over S: CLOSE_WAIT
+    S->>C: FIN
+    Note over S: LAST_ACK
+    C-->>S: ACK
+    Note over C: TIME_WAIT
+    Note over S: CLOSED`,
     },
     {
-      title: "SYN Flood Attack and SYN Cookie Defense",
-      kind: "flow",
-      caption:
-        "Attacker sends many SYN packets with spoofed source IPs, filling the server's SYN backlog queue. SYN cookies encode state in the ISN of the SYN-ACK, eliminating the need for queue storage.",
+      title: "TCP vs UDP at a Glance",
+      kind: "mindmap",
+      caption: "Key characteristics contrasting TCP reliable ordered delivery with UDP lightweight datagrams.",
+      mermaid: `mindmap
+  root((Transport Layer))
+    TCP
+      Connection-oriented
+      Three-way handshake
+      Reliable delivery
+      Ordered segments
+      Flow control
+      Congestion control
+    UDP
+      Connectionless
+      No handshake
+      Best-effort
+      Unordered datagrams
+      Low overhead
+      Real-time use cases`,
     },
   ],
   animations: [

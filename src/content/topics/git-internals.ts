@@ -278,118 +278,66 @@ git count-objects -vH
 
   diagrams: [
     {
-      title: "Git Object Model Relationships",
+      title: "Git Internal Directory Structure",
       kind: "architecture",
-      caption: "How commits, trees, and blobs form a directed acyclic graph (DAG)",
+      caption: "Internal structure of the .git directory and object database.",
       mermaid: `graph TD
-    C1[Commit c1a2b3] -->|tree| T1[Tree root]
-    C1 -->|parent| C0[Commit f4e5d6]
-    C0 -->|tree| T0[Tree root v0]
-
-    T1 -->|blob README.md| B1[Blob abc123]
-    T1 -->|tree src/| T2[Tree src]
-    T2 -->|blob main.cpp| B2[Blob def456]
-    T2 -->|blob utils.h| B3[Blob 789abc]
-
-    T0 -->|blob README.md| B0[Blob old111]
-    T0 -->|tree src/| T3[Tree src v0]
-    T3 -->|blob main.cpp| B4[Blob old222]
-    T3 -->|blob utils.h| B3
-
-    style C1 fill:#4a90d9,color:#fff
-    style C0 fill:#4a90d9,color:#fff
-    style T1 fill:#50b748,color:#fff
-    style T2 fill:#50b748,color:#fff
-    style T0 fill:#50b748,color:#fff
-    style T3 fill:#50b748,color:#fff
-    style B1 fill:#e8a838,color:#fff
-    style B2 fill:#e8a838,color:#fff
-    style B3 fill:#e8a838,color:#fff
-    style B0 fill:#e8a838,color:#fff
-    style B4 fill:#e8a838,color:#fff`,
+    GIT[.git directory] --> OBJ[objects/]
+    GIT --> REFS[refs/]
+    GIT --> HEAD[HEAD file]
+    GIT --> INDEX[index staging area]
+    OBJ --> PACK[pack files]
+    OBJ --> LOOSE[loose objects]
+    LOOSE --> BLB[Blob file contents]
+    LOOSE --> TRE[Tree directory listing]
+    LOOSE --> CMT[Commit snapshot]
+    LOOSE --> TAG[Annotated Tag]
+    REFS --> HDS[heads branches]
+    REFS --> REM[remotes]
+    REFS --> TGS[tags]`,
     },
     {
-      title: "Git Commit Workflow (Plumbing Level)",
+      title: "Pack File Creation Process",
       kind: "flow",
-      caption: "The sequence of internal operations when git commit runs",
-      mermaid: `flowchart LR
-    A[Working Directory] -->|git add| B[Index / Staging Area]
-    B -->|write-tree| C[Tree Object]
-    C -->|commit-tree| D[Commit Object]
-    D -->|update-ref| E[Branch Ref Updated]
-
-    subgraph ".git/objects/"
-      C
-      D
-      F[Blob Objects]
-    end
-
-    A -->|hash-object -w| F
-    F -.->|referenced by| C`,
-    },
-    {
-      title: "Ref Resolution Chain",
-      kind: "flow",
-      caption: "How Git resolves HEAD to an actual commit SHA",
+      caption: "How Git creates pack files to compress loose objects during gc.",
       mermaid: `flowchart TD
-    HEAD[".git/HEAD\nref: refs/heads/main"] -->|symbolic ref| MAIN[".git/refs/heads/main\nabc123def456..."]
-    MAIN -->|SHA-1| COMMIT["Commit Object\nabc123def456..."]
-    COMMIT -->|tree| TREE["Root Tree Object"]
-    COMMIT -->|parent| PARENT["Parent Commit"]
-
-    DETACHED["Detached HEAD\n.git/HEAD\nabc123def456..."] -->|direct SHA| COMMIT2["Commit Object"]
-
-    style HEAD fill:#9b59b6,color:#fff
-    style MAIN fill:#3498db,color:#fff
-    style DETACHED fill:#e74c3c,color:#fff`,
+    A[Many loose objects] --> B[git gc triggers]
+    B --> C[Identify full object graph]
+    C --> D[Compute deltas between similar objects]
+    D --> E[Sort by type size name]
+    E --> F[Write .pack file]
+    F --> G[Write .idx index file]
+    G --> H[Remove packed loose objects]
+    H --> I[Compressed repository]`,
     },
     {
-      title: "Packfile Delta Compression",
+      title: "Git Object Chain",
       kind: "architecture",
-      caption: "How Git stores objects efficiently using delta chains in packfiles",
+      caption: "How commit, tree, and blob objects link together to form history.",
       mermaid: `graph LR
-    subgraph Packfile[".git/objects/pack/pack-xyz.pack"]
-      BASE["Base Object\n(full content)\nmain.cpp v3"]
-      D1["Delta 1\n(diff from base)\nmain.cpp v2"]
-      D2["Delta 2\n(diff from delta 1)\nmain.cpp v1"]
-    end
-
-    subgraph IDX[".git/objects/pack/pack-xyz.idx"]
-      I1["SHA -> offset mapping\nO(log n) lookup"]
-    end
-
-    IDX -.->|"offset lookup"| Packfile
-    BASE -->|"delta chain"| D1
-    D1 -->|"delta chain"| D2`,
+    C2[Commit abc123] --> T2[Tree def456]
+    C2 --> C1[Parent Commit bbb111]
+    C1 --> T1[Tree ccc222]
+    T2 --> F1[Blob src/main.js]
+    T2 --> F2[Blob README.md]
+    T2 --> D1[Tree src/]
+    D1 --> F3[Blob src/util.js]`,
     },
     {
-      title: "Three-Way Merge Process",
+      title: "Git Fetch Transfer Protocol",
       kind: "sequence",
-      caption: "How Git performs a three-way merge between two branches",
+      caption: "How git fetch transfers objects between client and remote server.",
       mermaid: `sequenceDiagram
-    participant U as User
-    participant G as Git
-    participant ODB as Object Database
-
-    U->>G: git merge feature
-    G->>ODB: Find merge base (LCA of HEAD and feature)
-    ODB-->>G: Base commit SHA
-    G->>ODB: Load trees: base, ours (HEAD), theirs (feature)
-    G->>G: Walk trees entry-by-entry
-    alt File changed only in one side
-        G->>G: Accept change automatically
-    else File changed in both sides
-        G->>G: Three-way content merge (Myers diff)
-        alt Clean merge
-            G->>ODB: Write merged blob
-        else Conflict
-            G->>G: Write conflict markers to worktree
-            G->>G: Record stages 1,2,3 in index
-        end
-    end
-    G->>ODB: write-tree (if no conflicts)
-    G->>ODB: commit-tree with two parents
-    G->>G: update-ref HEAD`,
+    participant Client
+    participant Server
+    Client->>Server: git-upload-pack handshake
+    Server-->>Client: Advertise refs and capabilities
+    Client->>Server: Send want SHA list
+    Client->>Server: Send have SHA list
+    Server->>Server: Compute missing objects
+    Server-->>Client: Pack file with deltas
+    Client->>Client: Unpack objects
+    Client->>Client: Update local refs`,
     },
   ],
 

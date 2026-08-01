@@ -248,22 +248,68 @@ decision := "deny" if {
   ],
   diagrams: [
     {
-      title: "RBAC Model",
+      title: "RBAC Model Structure",
       kind: "architecture",
-      caption:
-        "Users are assigned to roles, roles are assigned permissions. Users inherit all permissions from their roles. Role hierarchies allow roles to inherit from other roles.",
+      caption: "Users are assigned to roles. Roles hold permissions. Users inherit all permissions from their assigned roles. Role hierarchies allow inheritance.",
+      mermaid: `graph TD
+    U1[User Alice] --> R1[Role: Editor]
+    U2[User Bob] --> R1
+    U2 --> R2[Role: Viewer]
+    R1 --> P1[Permission: posts:write]
+    R1 --> P2[Permission: posts:read]
+    R2 --> P2
+    R1 --> R2`,
     },
     {
-      title: "ABAC Policy Evaluation",
+      title: "ABAC Policy Evaluation Flow",
       kind: "flow",
-      caption:
-        "An access request with subject, action, resource, and environment attributes is sent to the policy engine. The engine evaluates all matching policies and returns an allow/deny decision.",
+      caption: "Access request carries subject, action, resource, and environment attributes. PDP evaluates matching policies and returns Permit or Deny.",
+      mermaid: `flowchart TD
+    A([Access Request]) --> B[Policy Enforcement Point]
+    B --> C{Send to PDP}
+    C --> D[Collect Subject Attributes]
+    C --> E[Collect Resource Attributes]
+    C --> F[Collect Environment Attributes]
+    D --> G[Evaluate Policies]
+    E --> G
+    F --> G
+    G --> H{Decision}
+    H -->|Permit| I[Allow Request]
+    H -->|Deny| J[Return 403]
+    H -->|Not Applicable| K[Apply default deny]`,
     },
     {
-      title: "ReBAC Relationship Graph (Zanzibar Model)",
+      title: "ReBAC Relationship Graph",
       kind: "network",
-      caption:
-        "Entities (users, groups, documents, folders) are connected by relationships (editor, viewer, parent, member). Access checks traverse the graph: 'Can user X view document Y?' follows relationship edges.",
+      caption: "Access is derived from object relationships. A user who is a member of a group that is an editor of a document can edit it.",
+      mermaid: `graph LR
+    Alice[User: Alice] -->|member| TeamA[Group: Team A]
+    TeamA -->|editor| DocX[Document: Report.pdf]
+    Bob[User: Bob] -->|owner| DocX
+    DocX -->|parent| FolderY[Folder: Q4 Reports]
+    Alice -->|viewer| FolderY`,
+    },
+    {
+      title: "RBAC vs ABAC vs ReBAC",
+      kind: "mindmap",
+      caption: "Comparison of three access control models by complexity, flexibility, and typical use cases.",
+      mermaid: `mindmap
+  root((Access Control Models))
+    RBAC
+      Role-based
+      Simple to manage
+      Best for stable job functions
+      Limited context awareness
+    ABAC
+      Attribute-based
+      Fine-grained policies
+      Handles context and time
+      Higher complexity
+    ReBAC
+      Relationship-based
+      Zanzibar / Google Docs model
+      Dynamic ownership chains
+      Complex graph evaluation`,
     },
   ],
   animations: [

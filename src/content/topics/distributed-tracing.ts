@@ -367,108 +367,86 @@ void handleInventoryCheck(const std::string& productId) {
   ],
   diagrams: [
     {
-      title: "Distributed Trace Flow Across Microservices",
+      title: "Distributed Trace Across Microservices",
       kind: "sequence",
-      caption:
-        "Sequence diagram showing how a single user request generates spans across four services, with context propagation via W3C traceparent headers.",
       mermaid: `sequenceDiagram
     participant User
-    participant APIGateway as API Gateway
-    participant OrderSvc as Order Service
-    participant PaymentSvc as Payment Service
-    participant InventorySvc as Inventory Service
-
-    User->>APIGateway: POST /checkout
-    Note right of APIGateway: Root Span created<br/>traceId: abc123
-
-    APIGateway->>OrderSvc: POST /orders (traceparent: 00-abc123-span1-01)
-    Note right of OrderSvc: Child Span created<br/>parentId: span1
-
-    OrderSvc->>InventorySvc: GET /stock (traceparent: 00-abc123-span2-01)
-    Note right of InventorySvc: Child Span created<br/>parentId: span2
-    InventorySvc-->>OrderSvc: 200 OK (items available)
-
-    OrderSvc->>PaymentSvc: POST /charge (traceparent: 00-abc123-span3-01)
-    Note right of PaymentSvc: Child Span created<br/>parentId: span3
-    PaymentSvc-->>OrderSvc: 200 OK (charged)
-
-    OrderSvc-->>APIGateway: 201 Created
-    APIGateway-->>User: 201 Order Confirmed`,
+    participant GW as API Gateway
+    participant Order as Order Service
+    participant Payment as Payment Service
+    participant Inventory as Inventory Service
+    User->>GW: POST /checkout
+    Note right of GW: Root Span - traceId: abc123
+    GW->>Order: POST /orders traceparent: abc123-span1
+    Note right of Order: Child Span - parentId: span1
+    Order->>Inventory: GET /stock traceparent: abc123-span2
+    Inventory-->>Order: 200 OK items available
+    Order->>Payment: POST /charge traceparent: abc123-span3
+    Payment-->>Order: 200 OK charged
+    Order-->>GW: 201 Created
+    GW-->>User: 201 Order Confirmed`,
+      caption: "A single user request generates a trace tree across four services, linked by traceparent headers propagating the shared traceId.",
     },
     {
-      title: "OpenTelemetry Collector Architecture",
+      title: "OpenTelemetry Collector Pipeline",
       kind: "architecture",
-      caption:
-        "Architecture diagram showing the OpenTelemetry Collector pipeline with receivers, processors, and exporters connecting applications to multiple backends.",
-      mermaid: `flowchart LR
-    subgraph Applications
-        A1[Order Service<br/>OTel SDK]
-        A2[Payment Service<br/>OTel SDK]
-        A3[Inventory Service<br/>OTel SDK]
+      mermaid: `graph LR
+    subgraph Apps["Applications"]
+      A1["Order Service\nOTel SDK"]
+      A2["Payment Service\nOTel SDK"]
     end
-
-    subgraph OTel Collector
-        direction TB
-        subgraph Receivers
-            R1[OTLP gRPC :4317]
-            R2[OTLP HTTP :4318]
-            R3[Zipkin :9411]
-        end
-        subgraph Processors
-            P1[Batch Processor]
-            P2[Tail Sampling]
-            P3[k8s Attributes]
-            P4[Span Metrics]
-        end
-        subgraph Exporters
-            E1[OTLP Exporter]
-            E2[Jaeger Exporter]
-            E3[Prometheus Exporter]
-        end
-        R1 --> P1
-        R2 --> P1
-        R3 --> P1
-        P1 --> P2
-        P2 --> P3
-        P3 --> P4
-        P4 --> E1
-        P4 --> E2
-        P4 --> E3
+    subgraph Collector["OTel Collector"]
+      R["Receivers\nOTLP gRPC 4317\nOTLP HTTP 4318"]
+      P["Processors\nBatch\nTail Sampling\nAttributes"]
+      E["Exporters\nOTLP\nJaeger\nPrometheus"]
+      R --> P --> E
     end
-
-    subgraph Backends
-        B1[(Grafana Tempo)]
-        B2[(Jaeger)]
-        B3[(Prometheus)]
+    subgraph Backends["Backends"]
+      T[("Grafana Tempo")]
+      J[("Jaeger")]
+      Pr[("Prometheus")]
     end
-
-    A1 -->|OTLP/gRPC| R1
-    A2 -->|OTLP/gRPC| R1
-    A3 -->|OTLP/HTTP| R2
-
-    E1 --> B1
-    E2 --> B2
-    E3 --> B3`,
+    A1 -->|OTLP gRPC| R
+    A2 -->|OTLP HTTP| R
+    E --> T
+    E --> J
+    E --> Pr`,
+      caption: "The OTel Collector receives telemetry, processes it through a configurable pipeline, and exports to multiple observability backends.",
     },
     {
-      title: "Trace Lifecycle State Machine",
+      title: "Span Lifecycle State Machine",
       kind: "state",
-      caption:
-        "State diagram showing the lifecycle of a span from creation to export, including error handling and sampling decisions.",
       mermaid: `stateDiagram-v2
-    [*] --> Created: tracer.startSpan()
-    Created --> Active: scope activated
-    Active --> Active: addEvent() / setAttribute()
-    Active --> Error: exception recorded
-    Error --> Ended: span.end()
-    Active --> Ended: span.end()
-    Ended --> Sampled: sampling decision = RECORD_AND_SAMPLE
-    Ended --> Dropped: sampling decision = DROP
-    Sampled --> Batched: BatchSpanProcessor
-    Batched --> Exported: OTLP export to backend
-    Exported --> Stored: backend ingestion
-    Stored --> [*]
+    [*] --> Created : tracer.startSpan()
+    Created --> Active : scope activated
+    Active --> Active : addEvent or setAttribute
+    Active --> Error : exception recorded
+    Error --> Ended : span.end()
+    Active --> Ended : span.end()
+    Ended --> Sampled : decision = RECORD_AND_SAMPLE
+    Ended --> Dropped : decision = DROP
+    Sampled --> Batched : BatchSpanProcessor
+    Batched --> Exported : OTLP export
+    Exported --> [*]
     Dropped --> [*]`,
+      caption: "A span moves from Created through Active to Ended, then is either sampled and exported or dropped based on the sampling decision.",
+    },
+    {
+      title: "Sampling Strategy Overview",
+      kind: "flow",
+      mermaid: `flowchart TD
+    A["Incoming Request"] --> B{"Head-based\nsampling decision"}
+    B -->|Sampled 5 pct| C["Collect all spans\nfor this trace"]
+    B -->|Not sampled| D["Drop trace"]
+    C --> E["Trace completes\nat Collector"]
+    E --> F{"Tail-based\nsampling rules"}
+    F -->|Has ERROR span| G["Keep trace 100 pct"]
+    F -->|Latency over 2s| G
+    F -->|Normal trace| H{"Random 20 pct"}
+    H -->|Keep| G
+    H -->|Drop| I["Discard trace"]
+    G --> J["Export to backend"]`,
+      caption: "Combined head and tail sampling: low head rate controls volume, tail rules ensure errors and slow traces are always retained.",
     },
   ],
   comparison: {

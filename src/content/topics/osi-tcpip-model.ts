@@ -311,34 +311,76 @@ int main() {
   ],
   diagrams: [
     {
-      title: "OSI 7-Layer Model Architecture",
+      title: "OSI 7-Layer Stack",
       kind: "architecture",
-      caption:
-        "The seven layers of the OSI model from Physical (Layer 1) at the bottom to Application (Layer 7) at the top, showing the PDU type at each layer and example protocols.",
+      caption: "The seven OSI layers from Physical at the bottom to Application at the top, with PDU types and example protocols.",
+      mermaid: `graph TD
+    L7["Layer 7 Application\nHTTP DNS SMTP\nPDU: Data"] --> L6["Layer 6 Presentation\nTLS SSL encoding\nPDU: Data"]
+    L6 --> L5["Layer 5 Session\nRPC NetBIOS\nPDU: Data"]
+    L5 --> L4["Layer 4 Transport\nTCP UDP\nPDU: Segment/Datagram"]
+    L4 --> L3["Layer 3 Network\nIP ICMP routing\nPDU: Packet"]
+    L3 --> L2["Layer 2 Data Link\nEthernet WiFi MAC\nPDU: Frame"]
+    L2 --> L1["Layer 1 Physical\nbits on wire\nPDU: Bits"]`,
+    },
+    {
+      title: "TCP Three-Way Handshake",
+      kind: "sequence",
+      caption: "Client sends SYN, server replies SYN-ACK, client sends ACK — connection established.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    C->>S: SYN seq=x
+    S-->>C: SYN-ACK seq=y ack=x+1
+    C->>S: ACK ack=y+1
+    Note over C,S: Connection established
+    C->>S: HTTP GET /
+    S-->>C: HTTP 200 OK + data
+    C->>S: FIN
+    S-->>C: FIN-ACK
+    Note over C,S: Connection closed`,
+    },
+    {
+      title: "Packet Encapsulation Flow",
+      kind: "flow",
+      caption: "Data wraps with headers layer by layer going down the sender stack; unwraps going up the receiver stack.",
+      mermaid: `flowchart TD
+    App["Application Data"] -->|Transport adds| Seg["TCP Segment\nTCP header + data"]
+    Seg -->|Network adds| Pkt["IP Packet\nIP header + segment"]
+    Pkt -->|Data Link adds| Frame["Ethernet Frame\nMAC header + packet + trailer"]
+    Frame -->|Physical| Wire["Bits on wire"]
+    Wire -->|Physical| Frame2["Ethernet Frame received"]
+    Frame2 -->|strip MAC header| Pkt2["IP Packet extracted"]
+    Pkt2 -->|strip IP header| Seg2["TCP Segment extracted"]
+    Seg2 -->|strip TCP header| App2["Application Data delivered"]`,
     },
     {
       title: "OSI vs TCP/IP Layer Mapping",
-      kind: "architecture",
-      caption:
-        "Side-by-side comparison showing how the 7 OSI layers map to the 4 TCP/IP layers: Application+Presentation+Session collapse into TCP/IP Application; Transport maps 1:1; Network maps to Internet; Data Link+Physical collapse into Network Access.",
-    },
-    {
-      title: "Encapsulation and Decapsulation Flow",
-      kind: "flow",
-      caption:
-        "Data flows down the sender's stack — Application data is wrapped with a TCP header (segment), then an IP header (packet), then an Ethernet header and trailer (frame), then transmitted as bits. The receiver reverses the process, stripping headers at each layer.",
-    },
-    {
-      title: "TCP Three-Way Handshake Sequence",
-      kind: "sequence",
-      caption:
-        "Client sends SYN (seq=x), server responds with SYN-ACK (seq=y, ack=x+1), client sends ACK (ack=y+1). Connection is now established and data transfer can begin.",
-    },
-    {
-      title: "Packet Journey Through a Network",
       kind: "network",
-      caption:
-        "A packet traversing from Host A through a switch (Layer 2), router (Layer 3), across the internet, through another router and switch to Host B. At each hop, the Layer 2 frame is stripped and rebuilt with new MAC addresses while the Layer 3 packet remains unchanged.",
+      caption: "How 7 OSI layers collapse into 4 TCP/IP layers.",
+      mermaid: `graph LR
+    subgraph OSI["OSI Model"]
+      O7["Application"]
+      O6["Presentation"]
+      O5["Session"]
+      O4["Transport"]
+      O3["Network"]
+      O2["Data Link"]
+      O1["Physical"]
+    end
+    subgraph TCPIP["TCP/IP Model"]
+      T4["Application"]
+      T3["Transport"]
+      T2["Internet"]
+      T1["Network Access"]
+    end
+    O7 --> T4
+    O6 --> T4
+    O5 --> T4
+    O4 --> T3
+    O3 --> T2
+    O2 --> T1
+    O1 --> T1`,
     },
   ],
   animations: [

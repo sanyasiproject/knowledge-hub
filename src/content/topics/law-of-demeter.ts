@@ -203,13 +203,71 @@ void calculateShipping_afterLoD() {
     {
       title: "LoD Coupling Boundary",
       kind: "architecture",
-      caption: "Shows which objects a method may legally call methods on (green) vs. strangers it must not reach into (red). The boundary keeps coupling to immediate collaborators only."
+      caption: "A method may call methods on self, parameters, created objects, and direct fields - but not strangers reached through chains.",
+      mermaid: `graph LR
+    Order["Order - self"] -->|allowed| OwnMethod["order.calculate()"]
+    Customer["Customer - parameter"] -->|allowed| CustMethod["customer.getName()"]
+    Address["Address - stranger"] -->|VIOLATION| AddrMethod["order.getCustomer().getAddress().getCity()"]
+    Created["LineItem - created here"] -->|allowed| ItemMethod["new LineItem().getPrice()"]
+    Field["fields - direct fields"] -->|allowed| FieldMethod["this.cart.getTotal()"]
+    style Address fill:#ffcccc
+    style AddrMethod fill:#ffcccc`,
     },
     {
       title: "Train Wreck Refactoring Flow",
       kind: "flow",
-      caption: "Step-by-step flow for identifying a train wreck chain, determining the real data need, pushing behavior into the owning class, and verifying the refactored call satisfies LoD."
-    }
+      caption: "Identify the chain, find the data need, push behavior into the owning class, verify the fix satisfies LoD.",
+      mermaid: `flowchart TD
+    A["Spot train wreck: a.getB().getC().doX()"] --> B["What does caller actually need?"]
+    B --> C["Push method into class B"]
+    C --> D["B delegates to C internally"]
+    D --> E["Caller calls a.getB().doX()"]
+    E --> F{"LoD satisfied?"}
+    F -->|Yes| G["Refactoring complete"]
+    F -->|No| H["Push further into A"]
+    H --> I["Caller calls a.doX()"]
+    I --> G`,
+    },
+    {
+      title: "Tell Don't Ask Principle",
+      kind: "sequence",
+      caption: "Instead of asking for data and acting on it, tell the object to perform the action itself.",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant Order
+    participant Discount
+
+    Note over Client,Discount: BAD - asking and acting
+    Client->>Order: getDiscountType()
+    Order-->>Client: PREMIUM
+    Client->>Discount: calculate PREMIUM amount
+    Discount-->>Client: 20.00
+
+    Note over Client,Discount: GOOD - telling
+    Client->>Order: applyDiscount()
+    Order->>Discount: calculate for this.discountType
+    Discount-->>Order: 20.00
+    Order-->>Client: done`,
+    },
+    {
+      title: "LoD Violation Patterns",
+      kind: "mindmap",
+      caption: "Common patterns that violate the Law of Demeter and how to fix them.",
+      mermaid: `mindmap
+    root["Law of Demeter"]
+      Violations
+        Method chains a.b.c.d
+        Reaching inside collections
+        Accessing nested config
+      Fixes
+        Tell dont ask
+        Introduce delegation method
+        Use mediator objects
+      Benefits
+        Reduced coupling
+        Easier to test
+        Simpler refactoring`,
+    },
   ],
 
   animations: [

@@ -237,24 +237,65 @@ int main() {
   ],
   diagrams: [
     {
-      title: "IPv4 Address Structure",
+      title: "IPv4 Address Structure and Subnetting",
       kind: "architecture",
-      caption: "Breakdown of a 32-bit IPv4 address into network and host portions under different subnet masks (/8, /16, /24, /26), showing how the mask boundary determines the network identity and host range.",
+      caption: "A 32-bit IPv4 address is split into network and host portions by the subnet mask. A /26 mask gives 4 subnets from a /24, each with 64 addresses and 62 usable hosts.",
+      mermaid: `graph TD
+    subgraph CIDR["192.168.1.0/24 - 256 addresses"]
+      S0["Subnet 0: 192.168.1.0/26\nhosts .1 to .62\nbroadcast .63"]
+      S1["Subnet 1: 192.168.1.64/26\nhosts .65 to .126\nbroadcast .127"]
+      S2["Subnet 2: 192.168.1.128/26\nhosts .129 to .190\nbroadcast .191"]
+      S3["Subnet 3: 192.168.1.192/26\nhosts .193 to .254\nbroadcast .255"]
+    end
+    MASK["/26 mask = 255.255.255.192\nborrow 2 bits from host\n4 subnets x 64 addresses = 256"]
+    MASK --> CIDR`,
     },
     {
-      title: "Subnetting a /24 into Four /26 Subnets",
+      title: "NAT Packet Translation Flow",
+      kind: "flow",
+      caption: "PAT rewrites the source IP and port on egress, records the mapping, and restores the destination on ingress. Many private hosts share one public IP via unique ports.",
+      mermaid: `flowchart LR
+    HOST["Internal Host\n192.168.1.10:49152"] -->|sends TCP SYN| ROUTER
+    ROUTER["NAT Router\npublic IP 203.0.113.5"]
+    ROUTER -->|"rewrite src to\n203.0.113.5:12345\nstore mapping"| TABLE["Translation Table\n192.168.1.10:49152\n<-> 203.0.113.5:12345"]
+    ROUTER -->|"packet with\nsrc 203.0.113.5:12345"| SERVER["Internet Server\n8.8.8.8:443"]
+    SERVER -->|"reply to\n203.0.113.5:12345"| ROUTER
+    ROUTER -->|"lookup table\nrewrite dst to\n192.168.1.10:49152"| HOST`,
+    },
+    {
+      title: "VLSM Subnet Allocation",
+      kind: "flow",
+      caption: "VLSM allocates different prefix lengths to different subnets. Always start with the largest requirement and work downward to avoid wasted address space.",
+      mermaid: `flowchart TD
+    START["192.168.1.0/24\n256 total addresses"] --> SORT["Sort requirements\nlargest first:\n100 hosts, 50, 25, 2"]
+    SORT --> A["Allocate 192.168.1.0/25\n126 usable for 100 hosts\nnext base: .128"]
+    A --> B["Allocate 192.168.1.128/26\n62 usable for 50 hosts\nnext base: .192"]
+    B --> C["Allocate 192.168.1.192/27\n30 usable for 25 hosts\nnext base: .224"]
+    C --> D["Allocate 192.168.1.224/30\n2 usable for point-to-point\nnext base: .228"]
+    D --> E["228 used of 256\n28 addresses remaining"]`,
+    },
+    {
+      title: "IPv4 vs IPv6 Address Types",
       kind: "network",
-      caption: "Visual decomposition of 192.168.1.0/24 into four /26 subnets (192.168.1.0/26, .64/26, .128/26, .192/26), each with 62 usable hosts, showing network addresses, broadcast addresses, and host ranges.",
-    },
-    {
-      title: "NAT Translation Flow",
-      kind: "flow",
-      caption: "Step-by-step flow of a packet from a private host through a NAT router to a public server and back: source IP/port rewriting on egress, translation table lookup, and destination IP/port restoration on ingress.",
-    },
-    {
-      title: "VLSM Allocation Decision Tree",
-      kind: "flow",
-      caption: "Decision flow for allocating VLSM subnets from a /24 block: sort requirements by size descending, assign the largest prefix that fits each requirement, advance the base address, and recurse until all subnets are allocated.",
+      caption: "IPv4 address categories versus their IPv6 equivalents, showing the mapping from classful/private/loopback to global unicast, unique local, and link-local.",
+      mermaid: `graph LR
+    subgraph IPv4["IPv4 Address Space"]
+      PVT4["Private\n10.0.0.0/8\n172.16.0.0/12\n192.168.0.0/16"]
+      LB4["Loopback\n127.0.0.1"]
+      LL4["Link-Local APIPA\n169.254.0.0/16"]
+      PUB4["Public\nroutable on internet"]
+    end
+    subgraph IPv6["IPv6 Address Space"]
+      UL6["Unique Local\nfc00::/7\nanalog of private"]
+      LB6["Loopback\n::1/128"]
+      LL6["Link-Local\nfe80::/10\nauto-configured"]
+      GU6["Global Unicast\n2000::/3\nroutable on internet"]
+      MC6["Multicast\nff00::/8\nreplaces broadcast"]
+    end
+    PVT4 -.->|equivalent| UL6
+    LB4 -.->|equivalent| LB6
+    LL4 -.->|equivalent| LL6
+    PUB4 -.->|equivalent| GU6`,
     },
   ],
   animations: [

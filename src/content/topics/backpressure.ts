@@ -178,19 +178,84 @@ await pipeline(source, processor, sink);`,
   ],
   diagrams: [
     {
-      title: "Pull vs Push Flow Control",
-      kind: "sequence",
-      caption: "Pull-based: consumer requests data when ready. Push-based: producer sends data, consumer must signal capacity.",
-    },
-    {
-      title: "Backpressure Propagation in a Pipeline",
+      title: "Backpressure Detection and Response Flow",
       kind: "flow",
-      caption: "Slow downstream consumer causes buffers to fill, propagating pause signals upstream through the pipeline.",
+      caption: "How a system detects that a consumer is falling behind and selects a backpressure strategy to prevent buffer overflow.",
+      mermaid: `flowchart TD
+    A["Producer emits events"] --> B["Consumer processes events"]
+    B --> C{"Consumer keeping up?"}
+    C -->|"Yes"| A
+    C -->|"No - buffer filling"| D{"Buffer strategy?"}
+    D -->|"Bounded buffer"| E{"Overflow action?"}
+    E -->|"Drop oldest"| F["Evict head of buffer"]
+    E -->|"Drop newest"| G["Reject incoming item"]
+    E -->|"Block sender"| H["Pause producer until space"]
+    D -->|"Pull-based"| I["Consumer polls when ready - Kafka"]
+    D -->|"Prefetch limit"| J["Broker waits for ACK - RabbitMQ"]
+    D -->|"Request demand"| K["Subscriber calls request of n - Reactive Streams"]
+    F & G & H & I & J & K --> L["Buffer stabilized"]`,
     },
     {
-      title: "TCP Sliding Window Mechanism",
+      title: "Pull vs Push Backpressure Sequence",
       kind: "sequence",
-      caption: "Receiver advertises window size in ACKs; sender limits in-flight bytes to window size.",
+      caption: "Side-by-side comparison of pull-based Kafka consumer and push-based RabbitMQ consumer handling a slow consumer scenario.",
+      mermaid: `sequenceDiagram
+    participant Prod as Producer
+    participant Broker as Broker
+    participant Cons as Slow Consumer
+
+    Note over Prod,Cons: Pull-based - Kafka
+    Cons->>Broker: poll - fetch up to 100 records
+    Broker-->>Cons: Return batch of records
+    Cons->>Cons: Process batch - takes 500ms
+    Cons->>Broker: poll - next batch when ready
+    Note over Broker: Records accumulate on disk safely
+
+    Note over Prod,Cons: Push-based - RabbitMQ
+    Prod->>Broker: Publish message
+    Broker->>Cons: Push message - prefetch 1
+    Cons->>Cons: Processing - slow
+    Note over Broker: Holds remaining messages
+    Cons->>Broker: ACK - frees prefetch slot
+    Broker->>Cons: Push next message`,
+    },
+    {
+      title: "Backpressure Strategies Architecture",
+      kind: "architecture",
+      caption: "Architectural overview of backpressure strategies available at each layer of a data pipeline from network to application.",
+      mermaid: `graph TD
+    subgraph Network["Network Layer"]
+      TCP["TCP Sliding Window<br/>Receiver advertises buffer space"]
+      HTTP2["HTTP/2 WINDOW_UPDATE<br/>Per-stream flow control"]
+    end
+    subgraph Broker["Message Broker Layer"]
+      Kafka["Kafka - Pull model<br/>Consumer controls poll rate"]
+      RMQ["RabbitMQ - basic.qos<br/>Prefetch count limit"]
+    end
+    subgraph App["Application Layer"]
+      RS["Reactive Streams<br/>subscription.request of n"]
+      NS["Node.js Streams<br/>highWaterMark and push returns false"]
+      RL["Rate Limiter<br/>Token bucket or leaky bucket"]
+    end
+    Network --> Broker
+    Broker --> App`,
+    },
+    {
+      title: "System Load States",
+      kind: "state",
+      caption: "State transitions of a producer-consumer system as load increases from healthy through degraded to overloaded and recovery.",
+      mermaid: `stateDiagram-v2
+    [*] --> Healthy
+    Healthy : Buffer below 50 percent
+    Degraded : Buffer 50 to 90 percent
+    Overloaded : Buffer above 90 percent
+    Recovering : Producer throttled
+    Healthy --> Degraded : Consumer falls behind
+    Degraded --> Healthy : Consumer catches up
+    Degraded --> Overloaded : Buffer keeps growing
+    Overloaded --> Recovering : Backpressure signal sent
+    Recovering --> Healthy : Buffer drains
+    Overloaded --> [*] : OOM if no backpressure`,
     },
   ],
   animations: [

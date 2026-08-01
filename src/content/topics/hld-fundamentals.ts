@@ -412,113 +412,75 @@ app.use('/api/', limiter.middleware());`,
   ],
   diagrams: [
     {
-      title: "Typical Web Application HLD Architecture",
+      title: "Standard Distributed System Components",
       kind: "architecture",
-      caption: "A standard high-level architecture showing clients, CDN, load balancer, application tier, caching, database, and async processing layers.",
-      mermaid: `graph TB
-    subgraph Clients
-        WEB[Web Browser]
-        MOB[Mobile App]
-    end
-
-    CDN[CDN / Edge Cache]
-    LB[Load Balancer]
-
-    subgraph Application Tier
-        API1[API Server 1]
-        API2[API Server 2]
-        API3[API Server N]
-    end
-
-    CACHE[(Redis Cache)]
-
-    subgraph Data Stores
-        PRIMARY[(Primary DB\nPostgreSQL)]
-        REPLICA[(Read Replica)]
-        BLOB[(Blob Storage\nS3)]
-    end
-
-    MQ[Message Queue\nKafka / SQS]
-
-    subgraph Async Workers
-        W1[Worker 1]
-        W2[Worker 2]
-    end
-
-    NOTIFY[Notification\nService]
-
-    WEB --> CDN --> LB
-    MOB --> LB
-    LB --> API1
-    LB --> API2
-    LB --> API3
-    API1 --> CACHE
-    API2 --> CACHE
-    CACHE --> PRIMARY
-    API1 --> PRIMARY
-    API2 --> REPLICA
-    API3 --> BLOB
-    API1 --> MQ
-    MQ --> W1
-    MQ --> W2
-    W1 --> PRIMARY
-    W2 --> NOTIFY`,
+      caption: "High-level view of common components in a distributed system.",
+      mermaid: `graph TD
+    Client --> CDN[CDN Edge Cache]
+    CDN --> LB[Load Balancer]
+    LB --> API1[API Server 1]
+    LB --> API2[API Server 2]
+    API1 --> Cache[Redis Cache]
+    API2 --> Cache
+    API1 --> DB[(Primary DB)]
+    API2 --> DB
+    DB --> Replica[(Read Replica)]
+    API1 --> Queue[Message Queue]
+    Queue --> Worker[Background Worker]
+    Worker --> DB`,
     },
     {
-      title: "Request Flow Through System Components",
-      kind: "sequence",
-      caption: "Sequence diagram showing a typical read request path with cache-aside pattern, including cache miss and database fallback.",
-      mermaid: `sequenceDiagram
-    participant C as Client
-    participant LB as Load Balancer
-    participant API as API Server
-    participant Cache as Redis Cache
-    participant DB as PostgreSQL
-
-    C->>LB: GET /api/products/123
-    LB->>API: Forward request
-    API->>Cache: GET product:123
-    alt Cache Hit
-        Cache-->>API: Product data (cached)
-        API-->>LB: 200 OK (from cache)
-    else Cache Miss
-        Cache-->>API: null
-        API->>DB: SELECT * FROM products WHERE id=123
-        DB-->>API: Product row
-        API->>Cache: SETEX product:123 300 {data}
-        Cache-->>API: OK
-        API-->>LB: 200 OK (from DB)
-    end
-    LB-->>C: Response`,
+      title: "CAP Theorem Trade-offs",
+      kind: "mindmap",
+      caption: "CAP theorem properties and how distributed databases make trade-offs.",
+      mermaid: `mindmap
+  root((CAP Theorem))
+    Consistency
+      All nodes same data
+      Linearizability
+      Examples: HBase Zookeeper
+    Availability
+      Every request responds
+      May return stale data
+      Examples: Cassandra CouchDB
+    Partition Tolerance
+      Handles network splits
+      Required in practice
+    CP Systems
+      Sacrifice availability
+    AP Systems
+      Sacrifice consistency`,
     },
     {
-      title: "Circuit Breaker State Machine",
-      kind: "state",
-      caption: "State transitions for a circuit breaker protecting downstream service calls.",
-      mermaid: `stateDiagram-v2
-    [*] --> Closed
-    Closed --> Open: Failure count >= threshold
-    Open --> HalfOpen: Recovery timeout elapsed
-    HalfOpen --> Closed: Success count >= threshold
-    HalfOpen --> Open: Any failure
-    Closed --> Closed: Success (reset counter)
-
-    note right of Closed
-        Normal operation.
-        Requests pass through.
-        Track failure count.
-    end note
-
-    note right of Open
-        Requests rejected immediately.
-        Wait for recovery timeout.
-    end note
-
-    note right of HalfOpen
-        Allow limited test requests.
-        Success closes circuit.
-        Failure re-opens it.
-    end note`,
+      title: "Cache-Aside Read Pattern",
+      kind: "flow",
+      caption: "Cache-aside pattern for handling reads in a high-traffic system.",
+      mermaid: `flowchart TD
+    A[Client Read Request] --> B[Check Cache]
+    B --> C{Cache hit?}
+    C -- Yes --> D[Return cached data]
+    C -- No --> E[Query Database]
+    E --> F[Store in Cache with TTL]
+    F --> G[Return data to client]
+    H[Write Request] --> I[Update Database]
+    I --> J[Invalidate or update cache entry]`,
+    },
+    {
+      title: "System Design Interview Process",
+      kind: "flow",
+      caption: "Step-by-step approach for tackling a high-level system design problem.",
+      mermaid: `flowchart TD
+    A[Clarify Requirements] --> B[Estimate Scale QPS Storage]
+    B --> C[Define APIs]
+    C --> D[Data Model and Storage Choice]
+    D --> E[High-Level Architecture]
+    E --> F[Deep Dive into Components]
+    F --> G{Bottlenecks found?}
+    G -- Yes --> H[Add Caching Layer]
+    H --> I[Add Sharding or Replication]
+    I --> J[Add CDN and Load Balancing]
+    J --> G
+    G -- No --> K[Finalize Architecture]`,
     },
   ],
   comparison: {

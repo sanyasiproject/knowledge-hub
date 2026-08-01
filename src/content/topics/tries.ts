@@ -227,19 +227,75 @@ class Trie {
   ],
   diagrams: [
     {
-      title: "Trie structure for {app, apple, apex, bat, ball}",
+      title: "Trie Structure Example",
       kind: "architecture",
-      caption: "Each node holds a character; paths from root to nodes marked with * spell complete words. Shared prefixes (a-p-p, b-a) are stored once.",
+      caption: "Trie storing the words car, cat, card, and dog showing shared prefix nodes.",
+      mermaid: `graph TD
+    Root["root"] --> C["c"]
+    Root --> D["d"]
+    C --> CA["a"]
+    CA --> CAR["r - end: car"]
+    CA --> CAT["t - end: cat"]
+    CAR --> CARD["d - end: card"]
+    D --> DO["o"]
+    DO --> DOG["g - end: dog"]`,
     },
     {
-      title: "Trie insert operation flow",
+      title: "Trie Insert and Search Flow",
       kind: "flow",
-      caption: "Walk the trie character by character: if the child exists follow it, otherwise create a new node. Mark the final node as end-of-word.",
+      caption: "Step-by-step process for inserting a word into a trie and searching for a prefix or complete word.",
+      mermaid: `flowchart TD
+    A(["insert('card')"]) --> B["Start at root"]
+    B --> C["Process char 'c'
+node exists? use it : create it"]
+    C --> D["Process char 'a'"]
+    D --> E["Process char 'r'"]
+    E --> F["Process char 'd'"]
+    F --> G["Mark node as end of word"]
+    G --> H([Done])
+    Search(["search('car')"]) --> I["Traverse c -> a -> r"]
+    I --> J{Node exists?}
+    J -->|Yes| K{isEnd flag?}
+    K -->|Yes| Found(["Return true"])
+    K -->|No| NotWord(["Prefix only"])
+    J -->|No| NotFound(["Return false"])`,
     },
     {
-      title: "Standard trie vs radix tree compression",
-      kind: "architecture",
-      caption: "Shows how single-child chains in a standard trie collapse into single edges with multi-character labels in a radix tree, reducing node count.",
+      title: "Trie vs Hash Map vs BST",
+      kind: "mindmap",
+      caption: "Trade-off comparison between trie, hash map, and BST for string key storage and prefix operations.",
+      mermaid: `mindmap
+  root((String Key Structures))
+    Trie
+      O(m) lookup m=key length
+      Prefix search native
+      High memory usage
+      Autocomplete
+    Hash Map
+      O(1) average lookup
+      No prefix support
+      Collision handling
+      General key-value
+    BST
+      O(m log n) lookup
+      Lexicographic order
+      Balanced needed
+      Range queries`,
+    },
+    {
+      title: "Autocomplete with Trie",
+      kind: "sequence",
+      caption: "How an autocomplete system uses a trie to return completions for a typed prefix.",
+      mermaid: `sequenceDiagram
+    participant U as User
+    participant AC as Autocomplete Service
+    participant T as Trie
+    U->>AC: type prefix "car"
+    AC->>T: findNode("car")
+    T-->>AC: node at path c->a->r
+    AC->>T: DFS from that node
+    T-->>AC: ["car", "card", "care", "cargo"]
+    AC-->>U: show suggestions`,
     },
   ],
   animations: [

@@ -285,82 +285,79 @@ cbt ls
   ],
   diagrams: [
     {
-      title: "BigQuery Query Execution Flow",
-      kind: "flow",
-      caption: "How a SQL query flows through BigQuery's Dremel engine from submission to result",
-      mermaid: `flowchart TD
-    A["Client submits SQL query"] --> B["BigQuery API / Root Server"]
-    B --> C["Query Parser & Optimizer"]
-    C --> D{"Query uses cached result?"}
-    D -- Yes --> E["Return cached result"]
-    D -- No --> F["Generate Execution Plan"]
-    F --> G["Mixer Layer - Intermediate Servers"]
-    G --> H1["Leaf Slot 1 - Read Colossus"]
-    G --> H2["Leaf Slot 2 - Read Colossus"]
-    G --> H3["Leaf Slot N - Read Colossus"]
-    H1 --> I["Partition & Cluster Pruning"]
-    H2 --> I
-    H3 --> I
-    I --> J["Columnar Scan - Capacitor Format"]
-    J --> K["Shuffle & Aggregate"]
-    K --> L["Mixer: Merge Partial Results"]
-    L --> M["Root Server: Final Aggregation"]
-    M --> N["Result stored in temporary table"]
-    N --> O["Return results to client"]`,
+      title: "GCP Data Service Landscape",
+      kind: "mindmap",
+      caption: "Overview of GCP managed data services by category.",
+      mermaid: `mindmap
+  root((GCP Data))
+    Relational
+      Cloud SQL
+      Cloud Spanner
+      AlloyDB
+    Analytics
+      BigQuery
+      Looker
+    NoSQL
+      Firestore
+      Bigtable
+    Streaming
+      Pub/Sub
+      Dataflow
+    Storage
+      Cloud Storage
+      Filestore`,
     },
     {
-      title: "Cloud Spanner Replication Architecture",
+      title: "BigQuery Query Execution",
+      kind: "flow",
+      caption: "How BigQuery processes a SQL query through its distributed engine.",
+      mermaid: `flowchart TD
+    A[SQL Query Submitted] --> B[Query Parser and Planner]
+    B --> C[Execution Plan Generated]
+    C --> D{Cached result?}
+    D -- Yes --> E[Return from Cache]
+    D -- No --> F[Dremel Execution Engine]
+    F --> G[Distributed Slot Workers]
+    G --> H[Columnar Storage Scan]
+    H --> I[Shuffle and Aggregate]
+    I --> J[Result Assembled]
+    J --> K[Return to Client]`,
+    },
+    {
+      title: "Pub/Sub Message Flow",
+      kind: "sequence",
+      caption: "End-to-end message lifecycle in Google Cloud Pub/Sub.",
+      mermaid: `sequenceDiagram
+    participant Publisher
+    participant Topic as Pub/Sub Topic
+    participant Sub as Subscription
+    participant Subscriber
+    Publisher->>Topic: Publish message
+    Topic-->>Publisher: Message ID
+    Topic->>Sub: Fan-out to subscriptions
+    Subscriber->>Sub: Pull messages
+    Sub-->>Subscriber: Messages batch
+    Subscriber->>Sub: Acknowledge messages
+    alt Not acknowledged
+        Sub->>Subscriber: Redeliver after ack deadline
+    end`,
+    },
+    {
+      title: "Cloud Spanner Architecture",
       kind: "architecture",
-      caption: "Spanner's multi-region Paxos-based replication with TrueTime synchronization",
-      mermaid: `flowchart LR
-    subgraph Region_A["Region A - Leader"]
-        A1["Zone 1: Leader Replica"]
-        A2["Zone 2: Follower Replica"]
+      caption: "Spanner distributed database architecture across regions.",
+      mermaid: `graph TD
+    Client --> FE[Frontend Servers]
+    FE --> Spanserver
+    Spanserver --> Paxos[Paxos Group]
+    Paxos --> R1[Replica Region 1]
+    Paxos --> R2[Replica Region 2]
+    Paxos --> R3[Replica Region 3]
+    Spanserver --> Colossus[Colossus Storage]
+    subgraph TrueTime
+        TT[Atomic Clock and GPS]
     end
-    subgraph Region_B["Region B - Follower"]
-        B1["Zone 1: Follower Replica"]
-        B2["Zone 2: Follower Replica"]
-    end
-    subgraph Region_C["Region C - Witness"]
-        C1["Zone 1: Witness Replica"]
-    end
-    subgraph TrueTime["TrueTime Infrastructure"]
-        GPS["GPS Receivers"]
-        ATOMIC["Atomic Clocks"]
-        GPS --> TT["TrueTime API"]
-        ATOMIC --> TT
-    end
-    A1 -- "Paxos Write" --> A2
-    A1 -- "Paxos Write" --> B1
-    A1 -- "Paxos Write" --> B2
-    A1 -- "Paxos Vote" --> C1
-    TT -- "Commit Timestamps" --> A1
-    A1 -- "Commit Wait" --> COMMIT["Transaction Committed"]
-    B1 -- "Serve Stale Reads" --> CLIENT_B["Client in Region B"]
-    A1 -- "Serve Strong Reads" --> CLIENT_A["Client in Region A"]`,
-    },
-    {
-      title: "GCP Database Decision Tree",
-      kind: "flow",
-      caption: "Choosing the right GCP database service based on workload requirements",
-      mermaid: `flowchart TD
-    START["What type of workload?"] --> OLAP{"OLAP / Analytics?"}
-    OLAP -- Yes --> BQ["BigQuery - Serverless Data Warehouse"]
-    OLAP -- No --> REL{"Need relational SQL?"}
-    REL -- Yes --> GLOBAL{"Need global distribution & 99.999% SLA?"}
-    GLOBAL -- Yes --> SPANNER["Cloud Spanner"]
-    GLOBAL -- No --> SCALE{"Scale > 64 TiB or need disaggregated storage?"}
-    SCALE -- Yes --> ALLOY["AlloyDB - PostgreSQL Compatible"]
-    SCALE -- No --> CSQL["Cloud SQL - MySQL / PostgreSQL / SQL Server"]
-    REL -- No --> LATENCY{"Need sub-10ms latency at PB scale?"}
-    LATENCY -- Yes --> ACCESS{"Access pattern?"}
-    ACCESS -- "Key-value / wide-column" --> BT["Cloud Bigtable"]
-    ACCESS -- "Document / real-time sync" --> FS["Firestore"]
-    LATENCY -- No --> REALTIME{"Need real-time sync & offline?"}
-    REALTIME -- Yes --> FS
-    REALTIME -- No --> CACHE{"In-memory caching?"}
-    CACHE -- Yes --> REDIS["Memorystore - Redis / Memcached"]
-    CACHE -- No --> BT`,
+    Spanserver --> TrueTime`,
     },
   ],
   comparison: {

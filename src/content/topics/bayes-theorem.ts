@@ -142,16 +142,105 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Bayes' theorem components",
+      title: "Bayesian Inference Flow",
       kind: "flow",
-      caption:
-        "Visual breakdown showing how prior P(H), likelihood P(E|H), and evidence P(E) combine to produce the posterior P(H|E).",
+      caption: "How prior belief, observed evidence, and the likelihood function combine through Bayes' theorem to produce an updated posterior probability.",
+      mermaid: `flowchart TD
+    A["Define Prior P of H<br/>Initial belief about hypothesis"] --> B["Observe Evidence E"]
+    B --> C["Compute Likelihood P of E given H<br/>How well does H explain E?"]
+    C --> D["Compute Evidence P of E<br/>Sum over all hypotheses"]
+    D --> E["Apply Bayes Theorem<br/>Posterior equals Likelihood times Prior divided by Evidence"]
+    E --> F["Posterior P of H given E<br/>Updated belief"]
+    F --> G{"More evidence<br/>available?"}
+    G -->|"Yes"| H["Posterior becomes new Prior"]
+    H --> B
+    G -->|"No"| I["Final belief estimate"]`,
     },
     {
-      title: "Bayesian updating over multiple observations",
+      title: "Naive Bayes Classifier Architecture",
+      kind: "architecture",
+      caption: "Structure of a Naive Bayes spam classifier showing how word likelihoods and the class prior combine to compute the posterior spam probability.",
+      mermaid: `graph TD
+    Input["Input Email - word tokens"]
+    Prior["Class Prior<br/>P of spam and P of ham"]
+    Vocab["Vocabulary<br/>Word frequency counts"]
+    Like1["P of word1 given spam"]
+    Like2["P of word2 given spam"]
+    Like3["P of word3 given spam"]
+    Smooth["Laplace Smoothing<br/>count plus 1 over total plus vocab size"]
+    LogSum["Sum of log likelihoods<br/>plus log prior"]
+    Argmax["Argmax over classes"]
+    Output["Predicted class - spam or ham"]
+
+    Input --> Like1
+    Input --> Like2
+    Input --> Like3
+    Vocab --> Smooth
+    Smooth --> Like1
+    Smooth --> Like2
+    Smooth --> Like3
+    Prior --> LogSum
+    Like1 --> LogSum
+    Like2 --> LogSum
+    Like3 --> LogSum
+    LogSum --> Argmax --> Output`,
+    },
+    {
+      title: "Probability Concepts Mindmap",
+      kind: "mindmap",
+      caption: "Key concepts in Bayesian probability organized around Bayes' theorem and its practical applications.",
+      mermaid: `mindmap
+  root["Bayes Theorem"]
+    Components
+      Prior P of H
+      Likelihood P of E given H
+      Evidence P of E
+      Posterior P of H given E
+    Updating
+      Sequential updating
+      Conjugate priors
+      Beta-Binomial
+      Convergence with data
+    Applications
+      Medical testing
+      Spam filtering
+      Naive Bayes classifier
+      Bayesian A/B testing
+    vs Frequentist
+      Credible intervals
+      Confidence intervals
+      p-values
+      Prior information`,
+    },
+    {
+      title: "Bayesian Belief Updating Sequence",
       kind: "sequence",
-      caption:
-        "Step-by-step diagram showing how the posterior from one observation becomes the prior for the next, narrowing uncertainty with each update.",
+      caption: "How a medical diagnosis scenario iteratively updates the disease probability after each independent positive test result.",
+      mermaid: `sequenceDiagram
+    participant D as Doctor
+    participant B as Bayes Engine
+    participant P as Patient Record
+
+    Note over D,P: Prior - disease prevalence 1 percent
+    D->>B: P of disease = 0.01
+    B-->>P: Store prior belief
+
+    Note over D,P: First positive test - sensitivity 99 percent FPR 5 percent
+    D->>B: Apply test result - positive
+    B->>B: Posterior = 0.99 times 0.01 divided by evidence
+    B-->>D: P of disease given positive = 0.167
+    B-->>P: Update belief to 16.7 percent
+
+    Note over D,P: Second independent positive test
+    D->>B: Prior is now 0.167
+    B->>B: Apply Bayes again with new prior
+    B-->>D: P of disease given two positives = 0.795
+    B-->>P: Update belief to 79.5 percent
+
+    Note over D,P: Third positive test
+    D->>B: Prior is now 0.795
+    B->>B: Apply Bayes third time
+    B-->>D: P of disease given three positives = 0.987`,
     },
   ],
   animations: [

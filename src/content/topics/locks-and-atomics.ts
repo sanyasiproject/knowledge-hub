@@ -387,22 +387,76 @@ public class CASExamples {
 
   diagrams: [
     {
-      title: "Lock Acquisition and Thread State Transitions",
+      title: "Thread State Transitions During Lock Acquisition",
       kind: "state" as const,
-      caption:
-        "Shows how a thread transitions between Running, Waiting (blocked on mutex), and Ready states during lock acquisition and release.",
+      caption: "How a thread moves between Running, Blocked, and Ready states when acquiring and releasing a mutex.",
+      mermaid: `stateDiagram-v2
+    [*] --> Ready
+    Ready --> Running: Scheduler selects thread
+    Running --> Ready: Preempted by scheduler
+    Running --> Blocked: mutex.lock() - lock held by another thread
+    Blocked --> Ready: mutex.unlock() by owner - kernel wakes thread
+    Running --> Running: mutex.lock() succeeds - lock was free
+    Running --> [*]: Thread exits`,
     },
     {
-      title: "CAS Operation Flow",
+      title: "CAS Retry Loop Flow",
       kind: "flow" as const,
-      caption:
-        "Flowchart of a compare-and-swap loop: load current value, compute new value, attempt CAS, branch on success or retry on failure.",
+      caption: "Flowchart of a compare-and-swap loop used for lock-free atomic operations.",
+      mermaid: `flowchart TD
+    A["Load atomic variable into expected"] --> B["Compute desired value"]
+    B --> C["CAS: if memory equals expected write desired"]
+    C --> D{"Success?"}
+    D -->|Yes| E["Update applied atomically - continue"]
+    D -->|No| F["Contention detected - another thread modified value"]
+    F --> G["Read actual current value as new expected"]
+    G --> B`,
     },
     {
-      title: "Memory Ordering Relationships",
-      kind: "architecture" as const,
-      caption:
-        "Architecture diagram showing how acquire/release pairs establish happens-before edges between producer and consumer threads, with store buffers and cache coherence protocol in between.",
+      title: "Acquire-Release Memory Ordering",
+      kind: "sequence" as const,
+      caption: "How a release store on Thread A and an acquire load on Thread B establish a happens-before edge that makes writes visible.",
+      mermaid: `sequenceDiagram
+    participant A as Thread A - Producer
+    participant Mem as Shared Memory
+    participant B as Thread B - Consumer
+
+    A->>Mem: Write data = 42
+    A->>Mem: Write flag = 1 with release ordering
+    Note over A,Mem: All prior writes flushed before flag store
+    B->>Mem: Read flag with acquire ordering
+    Note over B,Mem: Spin until flag equals 1
+    Mem-->>B: flag = 1
+    B->>Mem: Read data
+    Mem-->>B: data = 42
+    Note over B: Guaranteed to see data = 42 due to acquire-release pair`,
+    },
+    {
+      title: "Synchronisation Primitive Comparison",
+      kind: "mindmap" as const,
+      caption: "Key properties of mutex, spinlock, semaphore, and RWLock across blocking behaviour, overhead, and use cases.",
+      mermaid: `mindmap
+  root((Sync Primitives))
+    Mutex
+      Sleeps via OS wait queue
+      Context switch overhead
+      General mutual exclusion
+      Futex-based on Linux
+    Spinlock
+      Busy-waits in CPU loop
+      No context switch
+      Very short critical sections
+      Wastes CPU under contention
+    Semaphore
+      Counter-based
+      Limits N concurrent accessors
+      Producer-consumer coordination
+      Not tied to one owner
+    RWLock
+      Multiple concurrent readers
+      Exclusive writers
+      Read-heavy workloads
+      Writer starvation risk`,
     },
   ],
 

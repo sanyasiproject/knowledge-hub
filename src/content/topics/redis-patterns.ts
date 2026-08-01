@@ -314,24 +314,77 @@ int count_active_sessions(sw::redis::Redis& redis) {
   ],
   diagrams: [
     {
-      title: "Fixed window vs sliding window rate limiting",
+      title: "Cache-Aside Pattern Flow",
       kind: "flow",
-      caption: "Fixed window resets at boundaries, allowing burst at edges. Sliding window tracks each request timestamp for smooth enforcement.",
+      caption: "Application checks cache first. On miss, reads from database and populates cache. On hit, returns cached value directly.",
+      mermaid: `flowchart TD
+    A([Read Request]) --> B{Cache hit?}
+    B -->|Yes| C[Return cached value]
+    B -->|No| D[Read from database]
+    D --> E[Store in cache with TTL]
+    E --> F[Return value]`,
     },
     {
-      title: "Redlock acquisition across 5 Redis nodes",
+      title: "Redlock Distributed Lock Sequence",
       kind: "sequence",
-      caption: "Client sends SET NX to all 5 nodes. If majority (3+) respond OK within the validity period, the lock is acquired. Otherwise, release all and retry.",
+      caption: "Client acquires lock on majority of N Redis nodes within validity time. If majority fails or time runs out, releases all acquired locks and retries.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant R1 as Redis 1
+    participant R2 as Redis 2
+    participant R3 as Redis 3
+    C->>R1: SET lock NX PX ttl
+    C->>R2: SET lock NX PX ttl
+    C->>R3: SET lock NX PX ttl
+    R1-->>C: OK
+    R2-->>C: OK
+    R3-->>C: FAIL
+    C->>C: 2 of 3 acquired, time valid?
+    Note over C: Lock acquired - do work
+    C->>R1: DEL lock
+    C->>R2: DEL lock`,
     },
     {
-      title: "Pub/Sub message flow",
+      title: "Pub/Sub vs Streams",
       kind: "architecture",
-      caption: "Publisher sends to channel. Redis broadcasts to all connected subscribers on that channel. No persistence — disconnected subscribers miss messages.",
+      caption: "Pub/Sub is fire-and-forget with no persistence. Streams persist messages, support consumer groups, and allow replay from any offset.",
+      mermaid: `graph TD
+    PUB[Publisher] --> PS[Pub/Sub Channel]
+    PUB --> STR[(Stream)]
+    PS --> S1[Subscriber 1
+online only]
+    PS --> S2[Subscriber 2
+online only]
+    STR --> CG[Consumer Group]
+    CG --> C1[Consumer 1
+with ack]
+    CG --> C2[Consumer 2
+with ack]
+    STR --> REPLAY[Replay from offset]`,
     },
     {
-      title: "Session management architecture",
-      kind: "architecture",
-      caption: "Stateless app servers read/write session hashes in Redis. Load balancer routes any request to any server. Sessions expire via TTL.",
+      title: "Redis Patterns Overview",
+      kind: "mindmap",
+      caption: "Common Redis usage patterns grouped by category.",
+      mermaid: `mindmap
+  root((Redis Patterns))
+    Caching
+      Cache-aside
+      Write-through
+      Write-behind
+      TTL eviction
+    Locking
+      SETNX simple lock
+      Redlock distributed
+      Lua atomic ops
+    Rate Limiting
+      Token bucket
+      Sliding window ZSET
+      Fixed window counter
+    Messaging
+      Pub/Sub fire-and-forget
+      Streams with consumer groups
+      List as simple queue`,
     },
   ],
   animations: [

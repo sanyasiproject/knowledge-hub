@@ -344,16 +344,74 @@ describe("NotificationRouter (Jest mocks)", () => {
   ],
   diagrams: [
     {
-      title: "Test Double Type Hierarchy",
+      title: "Test Double Taxonomy",
       kind: "mindmap",
-      caption:
-        "The five types of test doubles arranged by increasing complexity and behavioral fidelity, from dummies (no behavior) to fakes (real behavior).",
+      caption: "Classification of the five types of test doubles and their distinguishing characteristics.",
+      mermaid: `mindmap
+  root((Test Doubles))
+    Dummy
+      Passed but unused
+      Fills parameter list
+    Stub
+      Returns canned values
+      No behavior verification
+    Fake
+      Working implementation
+      Simplified for tests
+    Spy
+      Records interactions
+      Assert after
+    Mock
+      Pre-programmed expectations
+      Verified on assertion`,
     },
     {
-      title: "Where to Place Test Doubles in a Layered Architecture",
+      title: "Test Double Selection Flow",
+      kind: "flow",
+      caption: "Decision tree for choosing the right type of test double based on what you need to verify.",
+      mermaid: `flowchart TD
+    A([Need a test double?]) --> B{Need to verify
+calls were made?}
+    B -->|Yes| C{Set expectations
+before call?}
+    C -->|Yes| Mock["Use Mock"]
+    C -->|No| Spy["Use Spy"]
+    B -->|No| D{Need return values?}
+    D -->|Yes| E{Real logic needed?}
+    E -->|Yes| Fake["Use Fake"]
+    E -->|No| Stub["Use Stub"]
+    D -->|No| Dummy["Use Dummy"]`,
+    },
+    {
+      title: "Mock Object Interaction",
+      kind: "sequence",
+      caption: "How a mock object is set up with expectations and then verified after the system under test runs.",
+      mermaid: `sequenceDiagram
+    participant Test
+    participant Mock as Mock Object
+    participant SUT as System Under Test
+    Test->>Mock: setExpectation(method, args, return)
+    Test->>SUT: call method under test
+    SUT->>Mock: call dependency method
+    Mock-->>SUT: return canned value
+    Test->>Mock: verify expectations
+    Mock-->>Test: pass or fail`,
+    },
+    {
+      title: "Fake vs Stub Architecture",
       kind: "architecture",
-      caption:
-        "Test doubles are most effective at architectural boundaries (HTTP clients, databases, message queues) rather than between internal domain objects.",
+      caption: "Structural comparison of a stub providing simple canned responses versus a fake with real in-memory logic.",
+      mermaid: `graph TD
+    SUT["System Under Test"] --> RI["Repository Interface"]
+    RI --> Stub["Stub Repository
+return hardcoded data
+no real logic"]
+    RI --> Fake["Fake Repository
+in-memory map
+real CRUD behavior"]
+    RI --> Real["Real Repository
+actual database
+production use"]`,
     },
   ],
   animations: [

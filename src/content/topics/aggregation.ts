@@ -92,8 +92,77 @@ GROUP BY dept_id;`
     },
   ],
   diagrams: [
-    { title: "GROUP BY processing pipeline", kind: "flow", caption: "FROM -> WHERE (filter rows) -> GROUP BY (partition into groups) -> aggregate (compute per-group values) -> HAVING (filter groups) -> SELECT." },
-    { title: "ROLLUP vs CUBE groupings", kind: "mindmap", caption: "ROLLUP(a,b): (a,b), (a), (). CUBE(a,b): (a,b), (a), (b), (). GROUPING SETS: user-defined selection." },
+    {
+      title: "Aggregation vs Composition Structure",
+      kind: "architecture",
+      caption: "Aggregation uses an open diamond: the part can exist independently. Composition uses a filled diamond: the part's lifecycle is owned by the whole.",
+      mermaid: `flowchart LR
+    subgraph Aggregation["Aggregation - open diamond"]
+        Dept["Department"]
+        Emp1["Employee A"]
+        Emp2["Employee B"]
+        Dept o--o Emp1
+        Dept o--o Emp2
+    end
+    subgraph Composition["Composition - filled diamond"]
+        House["House"]
+        Room1["Room 1"]
+        Room2["Room 2"]
+        House *--* Room1
+        House *--* Room2
+    end`,
+    },
+    {
+      title: "Object Lifecycle in Aggregation vs Composition",
+      kind: "flow",
+      caption: "Shows how destruction of the whole propagates differently: aggregation leaves parts alive while composition cascades destruction.",
+      mermaid: `flowchart TD
+    Start["Create Whole Object"] --> Agg["Aggregation:\\nReference existing parts"]
+    Start --> Comp["Composition:\\nCreate owned parts"]
+    Agg --> UseA["Use relationship"]
+    Comp --> UseC["Use relationship"]
+    UseA --> DelA["Delete Whole"]
+    UseC --> DelC["Delete Whole"]
+    DelA --> Surv["Parts survive\\nindependently"]
+    DelC --> Cascade["Parts also\\ndestroyed"]`,
+    },
+    {
+      title: "Relationship Types Overview",
+      kind: "mindmap",
+      caption: "The three main OOP relationship types and their key properties.",
+      mermaid: `mindmap
+  root((OOP Relationships))
+    Association
+      Weak coupling
+      Both sides independent
+      Bidirectional or unidirectional
+    Aggregation
+      Has-A relationship
+      Shared ownership
+      Part outlives whole
+      Open diamond UML
+    Composition
+      Strong Has-A
+      Exclusive ownership
+      Part dies with whole
+      Filled diamond UML`,
+    },
+    {
+      title: "Object Interaction in Aggregation",
+      kind: "sequence",
+      caption: "Demonstrates how an aggregating object holds a reference to a part but does not control its creation or destruction.",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant Team as Team Object
+    participant Dev as Developer Object
+    Client->>Dev: new Developer("Alice")
+    Client->>Team: new Team("Backend")
+    Client->>Team: addMember(dev)
+    Team->>Dev: Use developer reference
+    Client->>Team: disband()
+    Note over Dev: Developer still exists
+    Client->>Dev: assignToTeam(newTeam)`,
+    },
   ],
   animations: [
     {

@@ -147,19 +147,85 @@ void coroutine_resume(Coroutine *co) {
   ],
   diagrams: [
     {
-      title: "Context switch between two processes",
+      title: "Process Context Switch Sequence",
       kind: "sequence",
-      caption: "Shows Process A running, interrupt occurs, kernel saves A's state to PCB_A, loads PCB_B's state, Process B resumes.",
+      caption: "Step-by-step sequence from timer interrupt through saving Process A state, loading Process B state, and resuming execution.",
+      mermaid: `sequenceDiagram
+    participant CPU as CPU
+    participant Kernel as Kernel Scheduler
+    participant PCBA as PCB - Process A
+    participant PCBB as PCB - Process B
+
+    CPU->>Kernel: Timer interrupt fires
+    Kernel->>CPU: Enter kernel mode
+    Kernel->>PCBA: Save registers, PC, SP, CR3
+    Kernel->>Kernel: pick_next_task - select Process B
+    Kernel->>CPU: Write new CR3 - flush TLB
+    Kernel->>PCBB: Load registers, PC, SP
+    Kernel->>CPU: Return to user mode
+    CPU->>CPU: Resume Process B at saved PC`,
     },
     {
-      title: "Hardware context: what gets saved",
+      title: "Context Switch Hardware State",
       kind: "architecture",
-      caption: "Program counter, general registers, stack pointer, FP/SIMD registers, flags register, page table base (CR3), segment registers.",
+      caption: "What the CPU saves into the PCB during a process switch, showing register categories and their roles.",
+      mermaid: `flowchart TB
+    PCB["Process Control Block"]
+
+    subgraph Registers["CPU Register State"]
+        GP["General Purpose Registers\nRAX RBX RCX RDX RSI RDI R8-R15"]
+        PC["Program Counter - RIP\nNext instruction address"]
+        SP["Stack Pointer - RSP\nCurrent stack top"]
+        FL["Flags Register - RFLAGS\nCondition codes"]
+        SIMD["SIMD Registers - YMM0-YMM15\nFloating point and vector state"]
+    end
+
+    subgraph MemCtx["Memory Context"]
+        CR3["CR3 Register\nPage table base address"]
+        PCID["PCID tag\nTLB namespace identifier"]
+    end
+
+    PCB --> Registers
+    PCB --> MemCtx`,
     },
     {
-      title: "Thread vs process context switch cost breakdown",
+      title: "Context Switch Cost Comparison",
       kind: "flow",
-      caption: "Thread switch: save/restore registers only. Process switch: registers + page table switch + TLB flush (unless PCID).",
+      caption: "Flow showing what each switch type saves and the resulting cost differences between coroutine, thread, and process switches.",
+      mermaid: `flowchart TD
+    A["Context Switch Triggered"] --> B{Switch Type?}
+
+    B -->|"Coroutine"| C["Save 6-8 callee-saved regs\nSwap stack pointer only"]
+    B -->|"Thread - same process"| D["Save all GP registers\nSwap kernel stack\nNo page table change"]
+    B -->|"Process"| E["Save all GP + SIMD regs\nSwap kernel stack\nWrite new CR3\nFlush TLB - unless PCID"]
+
+    C --> F["Cost: ~10-100 ns\nNo kernel transition"]
+    D --> G["Cost: ~1-3 us\nKernel mode required"]
+    E --> H["Cost: ~3-10 us direct\nPlus cache and TLB miss penalty"]`,
+    },
+    {
+      title: "Process Lifecycle and Switch Triggers",
+      kind: "state",
+      caption: "States a process moves through and the events that trigger context switches between running and other states.",
+      mermaid: `stateDiagram-v2
+    [*] --> Ready: Process created
+    Ready --> Running: Scheduler dispatches
+    Running --> Ready: Timer interrupt - preemption
+    Running --> Waiting: Blocking syscall - I/O wait - mutex
+    Waiting --> Ready: I/O complete - lock released
+    Running --> Terminated: Process exits
+
+    note right of Running
+        Context switch OUT:
+        save registers, PC, SP
+        save CR3 if process switch
+    end note
+
+    note right of Ready
+        Context switch IN:
+        restore registers, PC, SP
+        restore CR3 if process switch
+    end note`,
     },
   ],
   animations: [

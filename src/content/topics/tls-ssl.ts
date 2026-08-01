@@ -167,24 +167,80 @@ curl --cacert ca.crt \\
   ],
   diagrams: [
     {
-      title: "TLS 1.3 full handshake (1-RTT)",
+      title: "TLS Handshake Sequence",
       kind: "sequence",
-      caption: "Client sends ClientHello with key shares; server responds with ServerHello, key share, encrypted certificate, and Finished; client sends Finished. Application data can flow after 1 round trip.",
+      caption: "Full TLS 1.3 handshake showing ClientHello, ServerHello, certificate exchange, and key derivation.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant S as Server
+    C->>S: ClientHello - TLS version, cipher suites, random
+    S-->>C: ServerHello - chosen cipher, server random
+    S-->>C: Certificate - server public key
+    S-->>C: ServerHelloDone
+    C->>C: Verify certificate against CA
+    C->>S: ClientKeyExchange - encrypted premaster secret
+    C->>S: ChangeCipherSpec
+    C->>S: Finished - encrypted handshake hash
+    S->>S: Derive session keys
+    S-->>C: ChangeCipherSpec
+    S-->>C: Finished
+    Note over C,S: Encrypted application data`,
     },
     {
-      title: "Certificate chain of trust",
+      title: "TLS Certificate Chain",
       kind: "architecture",
-      caption: "Root CA (in trust store) signs Intermediate CA, which signs the leaf certificate for the domain. Client validates each link in the chain.",
+      caption: "Trust chain from root CA through intermediate CA to the server leaf certificate.",
+      mermaid: `graph TD
+    Root["Root CA
+self-signed
+trusted by OS"] -->|signs| Int["Intermediate CA
+signed by root"]
+    Int -->|signs| Leaf["Server Certificate
+example.com
+signed by intermediate"]
+    Leaf --> Verify["Client Verifies
+chain to trusted root"]
+    Root --> Trust["OS Trust Store
+pre-installed CAs"]
+    Trust --> Verify`,
     },
     {
-      title: "TLS 1.2 vs TLS 1.3 handshake comparison",
-      kind: "sequence",
-      caption: "TLS 1.2 requires 2-RTT (ClientHello/ServerHello, then key exchange) while TLS 1.3 completes in 1-RTT by sending key shares in the first flight.",
+      title: "Symmetric vs Asymmetric Crypto in TLS",
+      kind: "mindmap",
+      caption: "How TLS uses asymmetric cryptography for key exchange and symmetric for bulk data encryption.",
+      mermaid: `mindmap
+  root((TLS Cryptography))
+    Asymmetric RSA or ECDH
+      Key exchange phase
+      Slow but secure
+      Public key in certificate
+      Private key on server
+    Symmetric AES-GCM
+      Data encryption phase
+      Fast bulk encryption
+      Session key derived
+      Authenticated encryption
+    Hashing SHA-256
+      Certificate signatures
+      HMAC integrity
+      Handshake verification`,
     },
     {
-      title: "mTLS authentication flow",
+      title: "TLS Record Protocol Flow",
       kind: "flow",
-      caption: "Both client and server present certificates during the handshake. The server sends a CertificateRequest; the client responds with its certificate and CertificateVerify.",
+      caption: "How application data is fragmented, compressed, MACed, and encrypted into TLS records.",
+      mermaid: `flowchart TD
+    A["Application Data"] --> B["Fragment into chunks
+max 16KB per record"]
+    B --> C["Add record header
+content type + version + length"]
+    C --> D["Encrypt with session key
+AES-GCM or ChaCha20"]
+    D --> E["Compute MAC
+integrity tag"]
+    E --> F["TLS Record
+ready to send over TCP"]
+    F --> G["TCP Stream"]`,
     },
   ],
   animations: [

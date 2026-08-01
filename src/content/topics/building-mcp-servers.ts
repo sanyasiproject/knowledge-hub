@@ -203,14 +203,78 @@ int main() {
   },
   diagrams: [
     {
-      title: "MCP Server Architecture",
+      title: "MCP Server Internal Architecture",
       kind: "architecture",
-      caption: "Internal structure of an MCP server showing how the SDK routes incoming JSON-RPC messages through the protocol layer to registered tool handlers, resource providers, and prompt templates, then serializes responses back through the transport.",
+      caption: "How the SDK routes incoming JSON-RPC messages through the protocol layer to registered handlers, then serializes responses back.",
+      mermaid: `graph TD
+    Transport["Transport - stdio or HTTP SSE"]
+    Protocol["Protocol Layer - JSON-RPC 2.0"]
+    Router["Request Router"]
+    Tools["Tool Handlers"]
+    Resources["Resource Providers"]
+    Prompts["Prompt Templates"]
+    Transport --> Protocol
+    Protocol --> Router
+    Router --> Tools
+    Router --> Resources
+    Router --> Prompts
+    Tools --> Protocol
+    Resources --> Protocol
+    Prompts --> Protocol`,
     },
     {
-      title: "MCP Tool Call Request Flow",
+      title: "MCP Tool Call Sequence",
       kind: "sequence",
-      caption: "Sequence diagram showing a tool call lifecycle: LLM generates a tool_use block, the MCP client sends a tools/call JSON-RPC request over the transport, the server validates arguments against the JSON Schema, invokes the handler, and returns the result through the same transport back to the client and LLM.",
+      caption: "End-to-end lifecycle of a tool call from LLM decision through JSON-RPC transport to handler execution and response.",
+      mermaid: `sequenceDiagram
+    participant LLM
+    participant Client as MCP Client
+    participant Server as MCP Server
+    participant Handler as Tool Handler
+    LLM->>Client: tool_use block with name and args
+    Client->>Server: JSON-RPC tools/call request
+    Server->>Server: validate args against JSON Schema
+    Server->>Handler: invoke handler with validated args
+    Handler-->>Server: result content array
+    Server-->>Client: JSON-RPC response
+    Client-->>LLM: tool_result block`,
+    },
+    {
+      title: "MCP Capability Registration Flow",
+      kind: "flow",
+      caption: "How an MCP server registers tools, resources, and prompts during initialization and advertises them to the client.",
+      mermaid: `flowchart TD
+    A([Server startup]) --> B[Create McpServer instance]
+    B --> C[Register tools with JSON Schema]
+    B --> D[Register resource URIs]
+    B --> E[Register prompt templates]
+    C --> F[Connect transport]
+    D --> F
+    E --> F
+    F --> G{Client sends initialize}
+    G --> H[Server responds with capabilities]
+    H --> I{Client sends tools/list}
+    I --> J[Server returns tool descriptors]
+    J --> K([Ready to handle calls])`,
+    },
+    {
+      title: "MCP Server Capability Mind Map",
+      kind: "mindmap",
+      caption: "The three primitive capability types an MCP server can expose and what each one provides to the LLM host.",
+      mermaid: `mindmap
+  root((MCP Server))
+    Tools
+      Invoke actions
+      JSON Schema input validation
+      Returns content array
+    Resources
+      Expose read-only data
+      URI-based addressing
+      Text or binary content
+    Prompts
+      Reusable prompt templates
+      Parameterized arguments
+      Injected into conversation`,
     },
   ],
   animations: [

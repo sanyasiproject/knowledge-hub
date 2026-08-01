@@ -229,19 +229,71 @@ const topProducts = await xfetch(
   ],
   diagrams: [
     {
-      title: "Cache Stampede Scenario",
+      title: "Cache Stampede Sequence",
       kind: "sequence",
-      caption: "Hot key expires, N concurrent requests all miss cache, all query DB simultaneously, DB overloaded.",
+      caption: "Hot key expires; all concurrent requests miss cache simultaneously and hammer the database.",
+      mermaid: `sequenceDiagram
+    participant R1 as Request 1
+    participant R2 as Request 2
+    participant R3 as Request 3
+    participant Cache
+    participant DB
+    Note over Cache: hot-key TTL expires
+    R1->>Cache: GET hot-key
+    R2->>Cache: GET hot-key
+    R3->>Cache: GET hot-key
+    Cache-->>R1: MISS
+    Cache-->>R2: MISS
+    Cache-->>R3: MISS
+    R1->>DB: SELECT expensive query
+    R2->>DB: SELECT expensive query
+    R3->>DB: SELECT expensive query
+    Note over DB: overloaded - all three queries fire simultaneously`,
     },
     {
       title: "Event-Driven Invalidation Architecture",
       kind: "architecture",
-      caption: "Data service writes to DB and publishes invalidation events. Cache service subscribes and deletes stale entries.",
+      caption: "Data service writes to DB and publishes invalidation events; cache service subscribes and deletes stale entries.",
+      mermaid: `graph TD
+    DataService["Data Service"]
+    DB["Primary Database"]
+    EventBus["Event Bus - Kafka or Redis Pub/Sub"]
+    CacheService["Cache Invalidation Service"]
+    Cache["Redis Cache"]
+    DataService --> DB
+    DataService --> EventBus
+    EventBus --> CacheService
+    CacheService -->|DEL stale key| Cache`,
     },
     {
-      title: "Probabilistic Early Expiration Timeline",
+      title: "Invalidation Strategy Selection Flow",
       kind: "flow",
-      caption: "As TTL approaches, probability of triggering refresh increases. One request refreshes before expiry, preventing stampede.",
+      caption: "Decision tree for choosing the right cache invalidation strategy based on consistency and performance requirements.",
+      mermaid: `flowchart TD
+    A([Choose invalidation strategy]) --> B{Strong consistency required?}
+    B -->|Yes| C[Write-through - update cache and DB together]
+    B -->|No| D{Can tolerate stale reads?}
+    D -->|Yes| E[TTL-based expiry]
+    D -->|No| F{Event bus available?}
+    F -->|Yes| G[Event-driven invalidation]
+    F -->|No| H[Cache-aside with DEL on write]
+    C --> I{High write volume?}
+    I -->|Yes| J[Write-behind with async flush]
+    I -->|No| K([Done])`,
+    },
+    {
+      title: "Cache Entry Lifecycle State",
+      kind: "state",
+      caption: "States a cache entry passes through from creation to eviction or explicit deletion.",
+      mermaid: `stateDiagram-v2
+    [*] --> Fresh : SET key value EX ttl
+    Fresh --> Stale : TTL expires
+    Fresh --> Deleted : explicit DEL on write
+    Stale --> Fresh : background refresh
+    Stale --> Missing : evicted by LRU
+    Deleted --> [*]
+    Missing --> Fresh : cache miss triggers reload
+    Missing --> [*] : key not reloaded`,
     },
   ],
   animations: [

@@ -441,6 +441,81 @@ int main() {
 }`,
     },
   ],
+  diagrams: [
+    {
+      title: "System Design Interview Framework",
+      kind: "flow",
+      caption: "Step-by-step framework for approaching a system design interview from requirements to detailed design.",
+      mermaid: `flowchart TD
+    A([Start]) --> B["Clarify Requirements\nfunctional + non-functional"]
+    B --> C["Estimate Scale\nQPS, storage, bandwidth"]
+    C --> D["Define API\nendpoints and contracts"]
+    D --> E["High-Level Design\ncore components and data flow"]
+    E --> F["Data Model\nschemas and storage choices"]
+    F --> G["Deep Dive\nbottlenecks and trade-offs"]
+    G --> H["Scale and Reliability\ncaching, sharding, replication"]
+    H --> I([Present and Discuss])`,
+    },
+    {
+      title: "Typical Large-Scale Architecture",
+      kind: "architecture",
+      caption: "Common high-level system architecture with load balancing, caching, database replication, and CDN.",
+      mermaid: `graph LR
+    Client --> CDN["CDN\nStatic Assets"]
+    Client --> LB["Load Balancer"]
+    LB --> S1["App Server 1"]
+    LB --> S2["App Server 2"]
+    LB --> S3["App Server 3"]
+    S1 --> Cache["Redis Cache"]
+    S2 --> Cache
+    S3 --> Cache
+    S1 --> DB["Primary DB"]
+    DB --> R1["Read Replica 1"]
+    DB --> R2["Read Replica 2"]`,
+    },
+    {
+      title: "CAP Theorem Trade-offs",
+      kind: "mindmap",
+      caption: "How distributed systems must choose two of three guarantees under network partition.",
+      mermaid: `mindmap
+  root((CAP Theorem))
+    Consistency
+      All nodes same data
+      CP systems
+        HBase
+        Zookeeper
+    Availability
+      Always respond
+      AP systems
+        DynamoDB
+        Cassandra
+    Partition Tolerance
+      Network splits handled
+      Required in practice`,
+    },
+    {
+      title: "Read and Write Path",
+      kind: "sequence",
+      caption: "How writes flow to the database and reads use cache with fallback to the database.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant LB as Load Balancer
+    participant S as App Server
+    participant Ca as Cache
+    participant DB as Database
+    C->>LB: POST write request
+    LB->>S: route to server
+    S->>DB: write data
+    S->>Ca: invalidate cache key
+    C->>LB: GET read request
+    LB->>S: route to server
+    S->>Ca: check cache
+    Ca-->>S: cache miss
+    S->>DB: read data
+    S->>Ca: populate cache
+    S-->>C: return data`,
+    },
+  ],
   exercises: [
     "**Requirements Gathering (Easy):** You are asked to design a URL shortener. Write down at least 8 clarifying questions you would ask the interviewer, covering functional requirements, non-functional requirements, and constraints. For each question, explain how the answer would change your design.",
     "**Estimation Practice (Medium):** Estimate the storage, QPS, and bandwidth requirements for a photo-sharing app like Instagram with 500M DAU. Assume each user uploads 1 photo/day (2MB average), views 100 photos/day, and photos are stored for 10 years with 3x replication. How many storage servers do you need if each server has 10TB?",

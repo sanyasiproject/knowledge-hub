@@ -187,14 +187,73 @@ fn main() {
   ],
   diagrams: [
     {
-      title: "Generational heap layout",
+      title: "Generational Heap Layout",
       kind: "architecture",
-      caption: "Heap divided into young generation (Eden + two survivor spaces) and old generation. Objects are allocated in Eden, promoted to survivor, then to old gen after surviving multiple collections.",
+      caption: "Heap divided into young generation (Eden + survivor spaces) and old generation; objects are promoted as they survive collections.",
+      mermaid: `graph LR
+    ALLOC["New Object\nAllocated"] --> EDEN["Eden Space\nyoung gen"]
+    EDEN -->|"Minor GC survivor"| S0["Survivor Space S0"]
+    S0 -->|"Minor GC survivor"| S1["Survivor Space S1"]
+    S1 -->|"Age threshold reached"| OLD["Old Generation\ntenured objects"]
+    OLD -->|"Major / Full GC"| FREE["Memory Freed"]`,
     },
     {
-      title: "Tri-color marking",
+      title: "Tri-Color Marking",
       kind: "flow",
-      caption: "Objects start white. Roots are grayed. Gray objects have their children grayed and themselves blackened. When no gray objects remain, all white objects are garbage.",
+      caption: "Objects start white, are grayed when reachable from roots, then blackened once all their references are processed.",
+      mermaid: `flowchart TD
+    START["All objects WHITE\nnot yet visited"] --> ROOTS["Mark GC roots GRAY\nstack / globals / registers"]
+    ROOTS --> PROC{Any GRAY objects?}
+    PROC -->|Yes| GRAY["Pick a GRAY object\nMark its children GRAY"]
+    GRAY --> BLACK["Mark current object BLACK\nall children processed"]
+    BLACK --> PROC
+    PROC -->|No| SWEEP["Sweep all WHITE objects\nunreachable = garbage"]
+    SWEEP --> FREE["Memory reclaimed"]`,
+    },
+    {
+      title: "Mark-and-Sweep GC Cycle",
+      kind: "sequence",
+      caption: "Timeline of a stop-the-world mark-and-sweep cycle from roots identification to memory reclaim.",
+      mermaid: `sequenceDiagram
+    participant App as Application
+    participant GC as Garbage Collector
+    participant Heap
+
+    App->>GC: Allocation fails or threshold hit
+    GC->>App: Stop the world (STW pause)
+    GC->>Heap: Identify root references
+    GC->>Heap: Mark phase - traverse all reachable objects
+    Heap-->>GC: All live objects marked
+    GC->>Heap: Sweep phase - reclaim unmarked objects
+    Heap-->>GC: Memory freed
+    GC->>App: Resume application threads`,
+    },
+    {
+      title: "GC Algorithm Comparison",
+      kind: "mindmap",
+      caption: "Key garbage collection algorithms, their strategies, and tradeoffs at a glance.",
+      mermaid: `mindmap
+  root((GC Algorithms))
+    Mark and Sweep
+      Stop the world
+      Simple implementation
+      Fragmentation risk
+    Mark and Compact
+      Moves live objects
+      Eliminates fragmentation
+      Higher pause times
+    Copying Collector
+      Semi-space
+      No fragmentation
+      Half memory wasted
+    Incremental
+      Interleaved with app
+      Tri-color invariant
+      Write barriers needed
+    Concurrent
+      GC runs alongside app
+      G1 CMS ZGC
+      Shorter pauses`,
     },
   ],
   animations: [

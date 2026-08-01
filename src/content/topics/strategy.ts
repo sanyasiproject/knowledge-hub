@@ -372,16 +372,73 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Strategy pattern class structure",
+      title: "Strategy Pattern Class Structure",
       kind: "architecture",
-      caption:
-        "Shows the Context holding a reference to the Strategy interface. Multiple ConcreteStrategy classes implement the interface. The Context delegates algorithmic work to whichever strategy is currently set.",
+      caption: "Context holds a Strategy interface reference. ConcreteStrategy classes implement the algorithm. Client injects the chosen strategy.",
+      mermaid: `graph TD
+    Client --> Context["Context
+-strategy: Strategy
++setStrategy()
++executeStrategy()"]
+    Context -->|delegates to| SI["<<interface>>
+Strategy
++execute(data)"]
+    SI --> CS1["ConcreteStrategyA
++execute(data)"]
+    SI --> CS2["ConcreteStrategyB
++execute(data)"]
+    SI --> CS3["ConcreteStrategyC
++execute(data)"]`,
     },
     {
-      title: "Strategy vs State pattern comparison",
-      kind: "architecture",
-      caption:
-        "Both patterns have nearly identical structure (Context + interface + concrete implementations), but Strategy selects algorithms externally while State manages internal behavioral transitions.",
+      title: "Strategy Selection Flow",
+      kind: "flow",
+      caption: "How a client selects and injects a strategy into the context at runtime.",
+      mermaid: `flowchart TD
+    A([Client]) --> B{Which algorithm?}
+    B -->|Quick sort| C["new QuickSortStrategy"]
+    B -->|Merge sort| D["new MergeSortStrategy"]
+    B -->|Heap sort| E["new HeapSortStrategy"]
+    C --> F["context.setStrategy(strategy)"]
+    D --> F
+    E --> F
+    F --> G["context.sort(data)"]
+    G --> H["strategy.execute(data)"]
+    H --> I([Sorted Result])`,
+    },
+    {
+      title: "Strategy vs Template Method",
+      kind: "mindmap",
+      caption: "Comparison of two patterns that both address algorithm variation but use different mechanisms.",
+      mermaid: `mindmap
+  root((Algorithm Variation))
+    Strategy Pattern
+      Composition
+      Inject strategy object
+      Swap at runtime
+      Independent strategies
+      Client selects
+    Template Method
+      Inheritance
+      Override subclass steps
+      Fixed at compile time
+      Shared skeleton
+      Parent controls flow`,
+    },
+    {
+      title: "Payment Processing with Strategy",
+      kind: "sequence",
+      caption: "A checkout context delegating payment to whichever payment strategy the user chose.",
+      mermaid: `sequenceDiagram
+    participant U as User
+    participant C as CheckoutContext
+    participant S as PaymentStrategy
+    U->>C: selectPayment(creditCard)
+    C->>C: setStrategy(CreditCardStrategy)
+    U->>C: confirmOrder(amount)
+    C->>S: execute(amount)
+    S-->>C: PaymentResult
+    C-->>U: OrderConfirmation`,
     },
   ],
   animations: [

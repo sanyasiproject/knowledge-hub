@@ -62,8 +62,90 @@ SELECT name FROM terminated_employees;`
     },
   ],
   diagrams: [
-    { title: "Relational model structure", kind: "architecture", caption: "Relations (tables) with tuples (rows) and attributes (columns), linked by primary and foreign keys." },
-    { title: "Three-schema architecture", kind: "architecture", caption: "External views, conceptual schema, and internal storage — the layers that provide data independence." },
+    {
+      title: "Relational Model Core Concepts",
+      kind: "mindmap",
+      caption: "Core concepts of the relational model: relations, tuples, attributes, keys, and constraints that enforce data integrity.",
+      mermaid: `mindmap
+  root((Relational Model))
+    Relation
+      Table with rows and columns
+      Set of tuples
+      Schema defines structure
+    Keys
+      Primary Key - unique identifier
+      Foreign Key - references another table
+      Candidate Key - minimal superkey
+    Constraints
+      Entity Integrity
+      Referential Integrity
+      Domain Constraints
+    Operations
+      Select
+      Project
+      Join
+      Union`,
+    },
+    {
+      title: "Entity Relationship to Tables",
+      kind: "architecture",
+      caption: "How an entity-relationship model maps to relational tables with primary and foreign keys maintaining referential integrity.",
+      mermaid: `graph TD
+    subgraph ER["Entity-Relationship"]
+      E1[Customer Entity]
+      E2[Order Entity]
+      E3[Product Entity]
+      E1 -->|places| E2
+      E2 -->|contains| E3
+    end
+    subgraph Tables["Relational Tables"]
+      T1[customers - id PK - name - email]
+      T2[orders - id PK - customer_id FK - date]
+      T3[order_items - order_id FK - product_id FK - qty]
+      T4[products - id PK - name - price]
+      T1 --> T2
+      T2 --> T3
+      T3 --> T4
+    end`,
+    },
+    {
+      title: "Normalization Progression",
+      kind: "flow",
+      caption: "The normalization process from an unnormalized relation through 1NF, 2NF, and 3NF, eliminating different types of data anomalies at each step.",
+      mermaid: `flowchart TD
+    A[Unnormalized Data] --> B{Atomic values in all columns?}
+    B -->|No| C[Split repeating groups]
+    C --> B
+    B -->|Yes| D[1NF - First Normal Form]
+    D --> E{All non-key attrs fully dependent on PK?}
+    E -->|No| F[Remove partial dependencies]
+    F --> E
+    E -->|Yes| G[2NF - Second Normal Form]
+    G --> H{No transitive dependencies?}
+    H -->|No| I[Remove transitive dependencies]
+    I --> H
+    H -->|Yes| J[3NF - Third Normal Form]`,
+    },
+    {
+      title: "SQL Join Types on Relational Tables",
+      kind: "architecture",
+      caption: "Visual representation of how INNER JOIN, LEFT JOIN, RIGHT JOIN, and FULL OUTER JOIN combine rows from two relational tables.",
+      mermaid: `graph LR
+    subgraph TableA["Table A"]
+      A1[Row 1]
+      A2[Row 2]
+      A3[Row 3 - no match]
+    end
+    subgraph TableB["Table B"]
+      B1[Row 1]
+      B2[Row 2]
+      B4[Row 4 - no match]
+    end
+    A1 -->|INNER JOIN| B1
+    A2 -->|INNER JOIN| B2
+    A3 -->|LEFT JOIN only| L[Left result only]
+    B4 -->|RIGHT JOIN only| R[Right result only]`,
+    },
   ],
   animations: [
     {

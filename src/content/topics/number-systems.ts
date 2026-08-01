@@ -187,12 +187,61 @@ int main() {
     {
       title: "IEEE 754 Single-Precision Layout",
       kind: "architecture",
-      caption: "Bit layout of a 32-bit float: 1 sign bit, 8 exponent bits (bias 127), 23 mantissa bits with an implicit leading 1",
+      caption: "32-bit float: 1 sign bit, 8 exponent bits (bias 127), 23 mantissa bits with implicit leading 1.",
+      mermaid: `graph LR
+    Bits["32-bit float"] --> Sign["Bit 31\nSign\n0=positive 1=negative"]
+    Bits --> Exp["Bits 30-23\nExponent 8 bits\nbias = 127"]
+    Bits --> Mantissa["Bits 22-0\nMantissa 23 bits\nimplicit leading 1"]
+    Exp --> ExpNote["Stored = actual + 127\nAll zeros = subnormal\nAll ones = inf or NaN"]
+    Mantissa --> ValNote["value = sign x 1.mantissa x 2 exp-127"]`,
     },
     {
-      title: "Two's Complement Number Line",
+      title: "Two's Complement Negation",
+      kind: "flow",
+      caption: "Convert a positive binary number to its negative two's complement representation.",
+      mermaid: `flowchart TD
+    A["Start: +5 = 00000101"] --> B["Invert all bits: 11111010"]
+    B --> C["Add 1: 11111011"]
+    C --> D["-5 in two's complement"]
+    D --> E["Verify: 00000101 + 11111011"]
+    E --> F["= 100000000 discard carry bit"]
+    F --> G["= 00000000 correct - sum is zero"]`,
+    },
+    {
+      title: "Base Conversion Relationships",
+      kind: "mindmap",
+      caption: "How binary, octal, decimal, and hexadecimal relate and convert between each other.",
+      mermaid: `mindmap
+    root["Number Systems"]
+      Binary base 2
+        digits 0 and 1
+        direct hardware mapping
+        grouping of 4 = hex digit
+      Octal base 8
+        digits 0-7
+        grouping of 3 binary digits
+        Unix file permissions
+      Decimal base 10
+        digits 0-9
+        human natural system
+      Hexadecimal base 16
+        digits 0-9 A-F
+        memory addresses
+        color codes RGB`,
+    },
+    {
+      title: "Number System Overflow States",
       kind: "state",
-      caption: "Circular number line showing how n-bit two's complement wraps: 0 at top, positive values clockwise to 2^(n-1)-1, negative values counterclockwise from -1 down to -2^(n-1)",
+      caption: "State transitions when integer arithmetic overflows in fixed-width representations.",
+      mermaid: `stateDiagram-v2
+    [*] --> Normal : valid range value
+    Normal --> Overflow : add past MAX
+    Normal --> Underflow : subtract past MIN
+    Overflow --> Wrapped : unsigned wraps to 0
+    Overflow --> UndefinedBehavior : signed in C/C++
+    Overflow --> Exception : Java long overflow
+    Underflow --> Wrapped : wraps to MAX
+    Wrapped --> Normal : continue arithmetic`,
     },
   ],
   animations: [

@@ -59,8 +59,62 @@ ORDER BY pg_relation_size(indexrelid) DESC;`
     },
   ],
   diagrams: [
-    { title: "B+ tree structure", kind: "architecture", caption: "Internal nodes contain keys and child pointers; leaf nodes contain keys and row pointers, linked sequentially for range scans." },
-    { title: "Index scan vs sequential scan decision", kind: "flow", caption: "Optimizer chooses index scan when selectivity is high (few matching rows) and sequential scan when most rows match." },
+    {
+      title: "B-Tree Index Structure",
+      kind: "architecture",
+      caption: "B-tree index showing internal nodes and leaf pointers to data pages.",
+      mermaid: `graph TD
+    Root[Root Node: 50] --> L1[Internal: 10-30]
+    Root --> L2[Internal: 40-48]
+    Root --> L3[Internal: 60-80]
+    L1 --> D1[Leaf: 10 20 30]
+    L2 --> D2[Leaf: 40 45 48]
+    L3 --> D3[Leaf: 60 70 80]
+    D1 --> DP1[Data Pages]
+    D2 --> DP2[Data Pages]
+    D3 --> DP3[Data Pages]`,
+    },
+    {
+      title: "Index Scan vs Full Table Scan",
+      kind: "flow",
+      caption: "Query planner decision between index scan and full table scan.",
+      mermaid: `flowchart TD
+    A[SELECT with WHERE clause] --> B{Index exists on column?}
+    B -- Yes --> C{Query selectivity high?}
+    C -- Yes --> D[Index Seek and Scan]
+    C -- No --> E[Optimizer may prefer full scan]
+    B -- No --> F[Full Table Scan read all rows]
+    D --> G[Read only matching data pages]
+    F --> H[Read all data pages]
+    G --> I[Return results quickly]
+    H --> I`,
+    },
+    {
+      title: "Types of Database Indexes",
+      kind: "mindmap",
+      caption: "Common database index types and when to use each.",
+      mermaid: `mindmap
+  root((DB Index Types))
+    B-Tree
+      Default index type
+      Range queries
+      Equality lookups
+    Hash Index
+      Exact equality only
+      Faster for exact match
+      No range support
+    GIN Index
+      Full text search
+      Array columns
+      JSONB in Postgres
+    GiST Index
+      Geometric data
+      IP ranges
+    Partial Index
+      Index subset of rows
+      Smaller footprint
+      Query specific`,
+    },
   ],
   animations: [
     {

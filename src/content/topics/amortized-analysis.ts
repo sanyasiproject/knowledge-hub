@@ -148,14 +148,62 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Dynamic array resize cost pattern",
+      title: "Dynamic Array Growth and Amortized Cost",
       kind: "flow",
-      caption: "Shows the cost of each append operation: mostly O(1) with occasional O(n) spikes at powers of 2. The total area under the curve is less than 3n.",
+      caption: "Each append costs O(1) normally. When capacity is full, a resize doubles the array at O(n) cost, but amortized over n appends the cost per operation is O(1).",
+      mermaid: `flowchart TD
+    Append["append(element)"] --> Check{"size == capacity?"}
+    Check -->|No| Insert["Insert at index size\\ncost = O(1)"]
+    Check -->|Yes| Resize["Allocate 2x array\\nCopy all elements\\ncost = O(n)"]
+    Resize --> Insert
+    Insert --> Inc["size++"]
+    Inc --> Done["Done"]
+    Resize --> Credit["Amortized cost\\nspread over past\\ninsertions = O(1)"]`,
     },
     {
-      title: "Accounting method credit flow for dynamic array",
-      kind: "flow",
-      caption: "Each insertion deposits 2 credits. When a resize occurs, each element spends 1 credit to pay for its own copy, leaving zero deficit.",
+      title: "Dynamic Array States",
+      kind: "state",
+      caption: "State transitions of a dynamic array as elements are appended and resize events occur.",
+      mermaid: `stateDiagram-v2
+    [*] --> Empty: create(initial_cap=1)
+    Empty --> Partial: first append
+    Partial --> Partial: append, size < capacity
+    Partial --> Full: append fills capacity
+    Full --> Resizing: append triggers resize
+    Resizing --> Partial: new array allocated\\nelements copied\\ncapacity doubled
+    Partial --> Empty: clear()
+    Full --> Empty: clear()`,
+    },
+    {
+      title: "Amortized Analysis Techniques",
+      kind: "mindmap",
+      caption: "Three standard methods for amortized analysis and when to apply each.",
+      mermaid: `mindmap
+  root((Amortized Analysis))
+    Aggregate Method
+      Sum total cost
+      Divide by n operations
+      Dynamic array appends
+    Accounting Method
+      Assign amortized cost
+      Store credits on objects
+      Credits pay future work
+      Dynamic array 3 credits per push
+    Potential Method
+      Define potential function
+      Amortized = actual + delta Phi
+      Dynamic array Phi = 2 size - capacity`,
+    },
+    {
+      title: "Accounting Method Credit Flow",
+      kind: "architecture",
+      caption: "Each insertion deposits credits that pre-pay for future resize copies, ensuring no operation ever runs into debt.",
+      mermaid: `flowchart LR
+    Insert["Insert element\\ndeposit 2 credits"] --> Bank["Credit bank\\non element"]
+    Bank --> Pay1["1 credit pays\\nfor this insert"]
+    Bank --> Pay2["1 credit saved\\nfor future resize copy"]
+    Resize["Resize triggered\\nn elements copied"] --> Spend["Each element\\nspends saved credit"]
+    Spend --> NoDebt["Total cost covered\\nno debt accumulated"]`,
     },
   ],
   animations: [

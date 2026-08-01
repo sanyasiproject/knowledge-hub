@@ -150,14 +150,59 @@ int main() {
   ],
   diagrams: [
     {
-      title: "Pascal's Triangle and Binomial Coefficients",
-      kind: "architecture",
-      caption: "Pascal's triangle showing C(n,r) values with the recurrence C(n,r) = C(n-1,r-1) + C(n-1,r) highlighted by arrows; edges annotated with key identities like row sums = 2^n and diagonal sums = Fibonacci numbers",
+      title: "Counting Principles Overview",
+      kind: "mindmap",
+      caption: "Core combinatorics concepts organized around the fundamental counting techniques.",
+      mermaid: `mindmap
+  root((Combinatorics))
+    Counting Principles
+      Rule of Product
+      Rule of Sum
+      Inclusion Exclusion
+    Permutations
+      Without repetition nPr
+      With repetition n^r
+      Circular permutations
+    Combinations
+      Without repetition nCr
+      With repetition
+      Binomial theorem
+    Advanced
+      Pigeonhole principle
+      Generating functions
+      Recurrence relations
+      Catalan numbers`,
     },
     {
-      title: "Inclusion-Exclusion Venn Diagram",
-      kind: "network",
-      caption: "Three-set Venn diagram illustrating how |A union B union C| is computed by adding individual sizes, subtracting pairwise intersections, and adding the triple intersection",
+      title: "Permutation vs Combination Decision",
+      kind: "flow",
+      caption: "Decision tree for choosing the correct counting formula based on problem constraints.",
+      mermaid: `flowchart TD
+    A["Counting Problem"] --> B{"Does order matter?"}
+    B -->|Yes| C["Permutation"]
+    B -->|No| D["Combination"]
+    C --> E{"Repetition allowed?"}
+    D --> F{"Repetition allowed?"}
+    E -->|No| G["n! / (n-r)!"]
+    E -->|Yes| H["n^r"]
+    F -->|No| I["n! / r!(n-r)!"]
+    F -->|Yes| J["(n+r-1)! / r!(n-1)!"]`,
+    },
+    {
+      title: "Binomial Expansion Tree",
+      kind: "architecture",
+      caption: "Pascal triangle relationship showing how binomial coefficients are built from combinatorial values.",
+      mermaid: `graph TD
+    R["Pascal Triangle"]
+    R --> L1["Row 0: 1"]
+    R --> L2["Row 1: 1 1"]
+    R --> L3["Row 2: 1 2 1"]
+    R --> L4["Row 3: 1 3 3 1"]
+    R --> L5["Row 4: 1 4 6 4 1"]
+    L1 --> NOTE1["C(0,0)=1"]
+    L3 --> NOTE2["C(2,1)=2"]
+    L4 --> NOTE3["C(3,2)=3"]
+    L5 --> NOTE4["C(4,2)=6"]`,
     },
   ],
   animations: [

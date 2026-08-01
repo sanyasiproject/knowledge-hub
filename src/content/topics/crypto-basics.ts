@@ -376,79 +376,78 @@ int main() {
 
   diagrams: [
     {
-      title: "Hybrid Encryption Flow (TLS Pattern)",
+      title: "Hybrid Encryption Flow - TLS Pattern",
       kind: "sequence",
-      caption: "Shows how asymmetric and symmetric encryption combine in practice: the handshake uses RSA/ECC to exchange a session key, then AES encrypts the data.",
+      caption: "Asymmetric encryption handles the key exchange handshake. Once both sides share a session key, faster symmetric AES-GCM encrypts all data.",
       mermaid: `sequenceDiagram
     participant Client
     participant Server
-    Note over Client,Server: **Asymmetric Phase** (Key Exchange)
-    Client->>Server: ClientHello (supported ciphers, random)
-    Server->>Client: ServerHello + Server Certificate (public key)
-    Client->>Client: Generate random *session key*
-    Client->>Server: Session key encrypted with Server's **public key**
-    Server->>Server: Decrypt session key with **private key**
-    Note over Client,Server: **Symmetric Phase** (Bulk Encryption)
-    Client->>Server: Data encrypted with AES-GCM(session key)
-    Server->>Client: Data encrypted with AES-GCM(session key)
-    Note over Client,Server: All further traffic uses the fast symmetric key`,
+    Client->>Server: ClientHello with supported ciphers
+    Server->>Client: ServerHello and Certificate with public key
+    Client->>Client: Generate random session key
+    Client->>Server: Session key encrypted with server public key
+    Server->>Server: Decrypt session key with private key
+    Client->>Server: Data encrypted with AES-GCM session key
+    Server->>Client: Data encrypted with AES-GCM session key`,
     },
     {
-      title: "Cryptographic Hash Function Properties",
+      title: "Cryptographic Primitives Overview",
       kind: "mindmap",
-      caption: "The core properties every secure hash function must satisfy and the common algorithms in use.",
+      caption: "The main cryptographic primitives, their algorithms, and primary use cases.",
       mermaid: `mindmap
-  root((Cryptographic Hashing))
-    Properties
-      **Deterministic**
-        Same input -> same output
-      **One-way**
-        Cannot reverse hash to input
-      **Collision resistant**
-        Infeasible to find two inputs with same hash
-      **Avalanche effect**
-        1-bit change -> ~50% output change
-    Algorithms
-      MD5 ~~broken~~
-        128-bit, collisions trivial
-      SHA-1 ~~deprecated~~
-        160-bit, collision in 2017
-      **SHA-256** ~~recommended~~
-        256-bit, SHA-2 family
-      **SHA-3**
-        Keccak sponge construction
-    Use Cases
-      File integrity checksums
-      Digital signature hashing
-      Password storage with salt
-      Merkle trees in blockchain`,
+  root[Cryptography]
+    Symmetric Encryption
+      AES-256-GCM
+      Fast bulk data
+      Shared key required
+    Asymmetric Encryption
+      RSA-2048
+      ECC P-256
+      Key exchange
+      Digital signatures
+    Hashing
+      SHA-256
+      SHA-3
+      Integrity and fingerprinting
+    Password Hashing
+      bcrypt
+      Argon2id
+      Intentionally slow
+    MAC
+      HMAC-SHA256
+      Integrity plus authentication`,
     },
     {
       title: "AES-GCM Internal Architecture",
       kind: "flow",
-      caption: "Internal data flow of AES-GCM showing the parallel CTR encryption track and the GHASH authentication track.",
+      caption: "AES-GCM runs two parallel tracks: CTR mode encrypts plaintext, GHASH authenticates both ciphertext and additional data to produce a 128-bit authentication tag.",
       mermaid: `flowchart TD
-    subgraph Inputs
-        K[/"**AES Key** (128/256-bit)"/]
-        IV[/"**IV/Nonce** (96-bit)"/]
-        PT[/"**Plaintext** blocks"/]
-        AAD[/"**Additional Auth Data**"/]
-    end
-
-    K --> AES["AES Block Cipher"]
-    IV --> CTR["Counter Generator<br/>IV || counter++"]
+    KEY["AES Key 128 or 256 bit"] --> AES["AES Block Cipher"]
+    NONCE["Nonce 96 bit"] --> CTR["Counter Generator"]
     CTR --> AES
     AES --> KS["Keystream Block"]
-    KS --> XOR["XOR"]
-    PT --> XOR
-    XOR --> CT["**Ciphertext** Block"]
-
-    CT --> GHASH["GHASH<br/>(Galois Field Multiply)"]
-    AAD --> GHASH
-    GHASH --> TAG["**Authentication Tag**<br/>(128-bit)"]
-
-    CT --> OUT[/"Encrypted Output"/]
+    PT["Plaintext Blocks"] --> XOR["XOR with Keystream"]
+    KS --> XOR
+    XOR --> CT["Ciphertext Blocks"]
+    CT --> GHASH["GHASH - Galois Field Multiply"]
+    AAD["Additional Auth Data"] --> GHASH
+    GHASH --> TAG["Auth Tag 128 bit"]
+    CT --> OUT["Encrypted Output"]
     TAG --> OUT`,
+    },
+    {
+      title: "Symmetric vs Asymmetric Key Usage",
+      kind: "architecture",
+      caption: "When to use symmetric vs asymmetric encryption, showing the typical hybrid envelope encryption pattern used in TLS, PGP, and cloud KMS.",
+      mermaid: `graph TD
+    A["Choose Crypto Primitive"] --> B{Use case?}
+    B -->|Bulk data encryption| C["AES-256-GCM - symmetric"]
+    B -->|Key exchange| D["ECDH or RSA - asymmetric"]
+    B -->|Digital signature| E["ECDSA or RSA-PSS - asymmetric"]
+    B -->|Password storage| F["Argon2id or bcrypt"]
+    B -->|Integrity only| G["HMAC-SHA256"]
+    C --> H["Envelope Pattern: wrap AES key with RSA or ECC"]
+    D --> H`,
     },
   ],
 

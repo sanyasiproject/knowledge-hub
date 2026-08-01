@@ -343,16 +343,67 @@ buildUser().then(console.log); // { name: "Alice", age: 30 }`,
 
   diagrams: [
     {
-      title: "Functor / Applicative / Monad hierarchy",
+      title: "Functor / Applicative / Monad Hierarchy",
       kind: "architecture",
-      caption:
-        "Shows the typeclass hierarchy: Functor (map) -> Applicative (apply + pure) -> Monad (bind + return). Each layer adds power but restricts generality. Arrows indicate 'is-a' relationships; every Monad is an Applicative, every Applicative is a Functor.",
+      caption: "Each typeclass layer adds capability: Functor adds map, Applicative adds apply and pure, Monad adds bind and return.",
+      mermaid: `graph TD
+    F["Functor\nmap: F a -> F b\napply plain function to wrapped value"]
+    A["Applicative\napply: F(a->b) -> F a -> F b\npure: a -> F a\nwrapped function to wrapped value"]
+    M["Monad\nbind: F a -> (a -> F b) -> F b\nreturn: a -> F a\nchain computations that produce wrapped values"]
+    F --> A
+    A --> M
+    EX1["Examples\nMaybe, Either, List, IO, Promise"]
+    M --> EX1`,
     },
     {
-      title: "Maybe monad chain -- short-circuit flow",
+      title: "Maybe Monad Short-Circuit Flow",
       kind: "flow",
-      caption:
-        "Illustrates how a chain of flatMap/bind operations on Maybe propagates Nothing: Just(x) -> f -> Just(y) -> g -> Nothing -> h (skipped) -> Nothing. Once a Nothing is produced, all subsequent steps are bypassed without executing.",
+      caption: "Once a Nothing is produced in a flatMap chain, all subsequent steps are skipped without executing.",
+      mermaid: `flowchart TD
+    START["Just(x)"] --> F1["flatMap(f)\nf(x) = Just(y)"]
+    F1 --> F2["flatMap(g)\ng(y) = Nothing"]
+    F2 --> F3["flatMap(h)\nSKIPPED - h never runs"]
+    F3 --> END["Nothing\nno value, no error thrown"]`,
+    },
+    {
+      title: "Monad Laws as State Transitions",
+      kind: "state",
+      caption: "The three monad laws expressed as state transitions: left identity, right identity, and associativity.",
+      mermaid: `stateDiagram-v2
+    [*] --> LeftIdentity
+    LeftIdentity : Left Identity\nreturn(a).bind(f) === f(a)
+    LeftIdentity --> RightIdentity
+    RightIdentity : Right Identity\nm.bind(return) === m
+    RightIdentity --> Associativity
+    Associativity : Associativity\nm.bind(f).bind(g) === m.bind(x => f(x).bind(g))
+    Associativity --> [*]`,
+    },
+    {
+      title: "Common Monad Instances and Use Cases",
+      kind: "mindmap",
+      caption: "Practical monad instances and the problem each solves in real codebases.",
+      mermaid: `mindmap
+  root((Monads))
+    Maybe
+      Null safety
+      Optional values
+      No null exceptions
+    Either
+      Error handling
+      Left for error
+      Right for success
+    List
+      Nondeterminism
+      Multiple results
+      Cartesian product
+    IO
+      Side effect tracking
+      Referential transparency
+      Haskell IO actions
+    Promise
+      Async sequencing
+      then as bind
+      Chained async ops`,
     },
   ],
 

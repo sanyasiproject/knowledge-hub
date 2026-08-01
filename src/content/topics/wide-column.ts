@@ -151,24 +151,91 @@ WHERE location = 'warehouse-A'
   ],
   diagrams: [
     {
-      title: "LSM tree write and compaction flow",
-      kind: "flow",
-      caption: "Writes go to memtable + commit log. Memtable flushes to immutable SSTable. Background compaction merges SSTables, discarding tombstones.",
-    },
-    {
-      title: "Cassandra consistent hashing ring",
+      title: "Wide-Column Store Data Model",
       kind: "architecture",
-      caption: "Nodes own token ranges on the ring. Partition keys are hashed to tokens. Replicas are placed on subsequent nodes in the ring.",
+      caption: "How Cassandra organizes data into keyspaces, tables, partition keys, and dynamic column families.",
+      mermaid: `graph TD
+    KS["Keyspace
+replication config"] --> T["Table
+schema + partition key"]
+    T --> PK["Partition Key
+determines node"]
+    T --> CK["Clustering Key
+sort order within partition"]
+    T --> SC["Static Columns
+per partition"]
+    T --> RC["Regular Columns
+per row"]
+    PK --> Node1["Node 1
+holds partitions"]
+    PK --> Node2["Node 2
+holds partitions"]`,
     },
     {
-      title: "Cassandra read path through storage layers",
+      title: "Write Path in Cassandra",
       kind: "sequence",
-      caption: "Read checks memtable, row cache, bloom filter, partition key cache, compression offset map, then SSTable data on disk.",
+      caption: "How a write request flows from client through coordinator to replica nodes with commitlog and memtable.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant CO as Coordinator Node
+    participant R1 as Replica 1
+    participant R2 as Replica 2
+    C->>CO: write with consistency level QUORUM
+    CO->>R1: write request
+    CO->>R2: write request
+    R1->>R1: write to commitlog
+    R1->>R1: write to memtable
+    R2->>R2: write to commitlog
+    R2->>R2: write to memtable
+    R1-->>CO: ACK
+    R2-->>CO: ACK
+    CO-->>C: write success - quorum achieved`,
     },
     {
-      title: "HBase architecture with HDFS",
-      kind: "architecture",
-      caption: "HBase Master assigns regions to RegionServers. Each RegionServer manages MemStores and HFiles on HDFS. ZooKeeper coordinates master election.",
+      title: "Wide-Column vs Relational vs Document",
+      kind: "mindmap",
+      caption: "Comparing wide-column stores with relational databases and document stores across key dimensions.",
+      mermaid: `mindmap
+  root((NoSQL vs SQL))
+    Wide-Column
+      Cassandra, HBase
+      Sparse columns
+      Partition key routing
+      High write throughput
+      Time-series and IoT
+    Relational
+      PostgreSQL, MySQL
+      Strict schema
+      JOIN support
+      ACID transactions
+      General purpose
+    Document
+      MongoDB, Firestore
+      Nested JSON
+      Flexible schema
+      Rich queries
+      Content management`,
+    },
+    {
+      title: "Compaction Process Flow",
+      kind: "flow",
+      caption: "How Cassandra compacts SSTables on disk to reclaim space and improve read performance.",
+      mermaid: `flowchart TD
+    A["Memtable full"] --> B["Flush to SSTable
+on disk"]
+    B --> C["Multiple SSTables
+accumulate on disk"]
+    C --> D{Compaction
+triggered?}
+    D -->|Yes| E["Merge SSTables
+sorted merge"]
+    E --> F["Apply tombstones
+remove deleted data"]
+    F --> G["Write new SSTable
+compacted"]
+    G --> H["Delete old SSTables"]
+    H --> I["Read performance
+improved"]`,
     },
   ],
   animations: [

@@ -453,74 +453,91 @@ int main() {
     {
       title: "Transformer Decoder Architecture",
       kind: "architecture",
-      caption: "Internal structure of a decoder-only Transformer block, showing the flow from input embeddings through N stacked layers to output logits.",
+      caption: "Internal structure of a decoder-only Transformer showing embeddings, stacked blocks, and the autoregressive output loop.",
       mermaid: `graph TD
-    A["Input Text"] --> B["Tokenizer"]
-    B --> C["Token Embeddings + Positional Encoding"]
-    C --> D["Transformer Block x N"]
-
-    subgraph TB["Transformer Block"]
-        direction TB
-        D1["Layer Norm (RMSNorm)"] --> D2["Multi-Head Causal Self-Attention"]
-        D2 --> D3["Residual Connection"]
-        D3 --> D4["Layer Norm (RMSNorm)"]
-        D4 --> D5["Feed-Forward Network (SwiGLU)"]
-        D5 --> D6["Residual Connection"]
-    end
-
-    D --> TB
-    TB --> E["Final Layer Norm"]
-    E --> F["Unembedding (Linear Projection)"]
-    F --> G["Logits over Vocabulary"]
-    G --> H["Sampling (temperature, top-p, top-k)"]
-    H --> I["Output Token"]
-    I -->|"Autoregressive Loop"| C`,
-    },
-    {
-      title: "Self-Attention Mechanism Flow",
-      kind: "flow",
-      caption: "Step-by-step computation of scaled dot-product attention: from input vectors through Q/K/V projections, score computation, softmax, and weighted value aggregation.",
-      mermaid: `graph LR
-    X["Input Embeddings (X)"] --> Q["Q = X * W_Q"]
-    X --> K["K = X * W_K"]
-    X --> V["V = X * W_V"]
-
-    Q --> DOT["MatMul: Q * K^T"]
-    K --> DOT
-    DOT --> SCALE["Scale: / sqrt(d_k)"]
-    SCALE --> MASK["Apply Causal Mask\n(set future positions to -inf)"]
-    MASK --> SM["Softmax\n(row-wise normalization)"]
-    SM --> MUL["MatMul: Attention Weights * V"]
-    V --> MUL
-    MUL --> OUT["Context-Aware Representations"]
-
-    style MASK fill:#ff6b6b22,stroke:#ff6b6b
-    style SM fill:#4ecdc422,stroke:#4ecdc4
-    style OUT fill:#45b7d122,stroke:#45b7d1`,
+    A["Input Tokens"] --> B["Token Embeddings + Positional Encoding"]
+    B --> C["Transformer Block x N"]
+    C --> D["Final Layer Norm"]
+    D --> E["Linear Projection to Vocabulary"]
+    E --> F["Logits"]
+    F --> G["Sampling - temperature, top-p, top-k"]
+    G --> H["Next Token"]
+    H -->|"Autoregressive loop"| B
+    subgraph Block["Single Transformer Block"]
+        B1["RMSNorm"] --> B2["Multi-Head Causal Self-Attention"]
+        B2 --> B3["Residual Add"]
+        B3 --> B4["RMSNorm"]
+        B4 --> B5["Feed-Forward Network"]
+        B5 --> B6["Residual Add"]
+    end`,
     },
     {
       title: "LLM Inference Pipeline",
       kind: "flow",
-      caption: "End-to-end inference showing the prefill and decode phases, KV cache usage, and token-by-token generation loop.",
-      mermaid: `graph TD
-    START["User Prompt"] --> TOK["Tokenize Input"]
-    TOK --> PREFILL["Prefill Phase\n(process all prompt tokens in parallel)"]
-    PREFILL --> KV["Initialize KV Cache"]
-    KV --> DECODE["Decode Phase"]
-
-    subgraph LOOP["Autoregressive Generation Loop"]
-        direction TB
-        DECODE --> ATT["Compute Attention\n(new token queries cached K,V)"]
-        ATT --> FFN["Feed-Forward Network"]
-        FFN --> LOGITS["Compute Logits"]
-        LOGITS --> SAMPLE["Sample Next Token"]
-        SAMPLE --> CHECK{"EOS or\nmax_tokens?"}
-        CHECK -->|No| UPDATE["Append to KV Cache"]
-        UPDATE --> DECODE
-    end
-
-    CHECK -->|Yes| DETOK["Detokenize"]
-    DETOK --> RESP["Generated Response"]`,
+      caption: "End-to-end inference flow showing prefill, KV cache initialisation, and the token-by-token decode loop.",
+      mermaid: `flowchart TD
+    A["User Prompt"] --> B["Tokenize Input"]
+    B --> C["Prefill Phase - process all prompt tokens in parallel"]
+    C --> D["Initialise KV Cache"]
+    D --> E["Compute Attention using cached K and V"]
+    E --> F["Feed-Forward Network"]
+    F --> G["Compute Logits"]
+    G --> H["Sample Next Token"]
+    H --> I{"EOS token or\nmax tokens reached?"}
+    I -->|No| J["Append token to KV Cache"]
+    J --> E
+    I -->|Yes| K["Detokenize Output"]
+    K --> L["Generated Response"]`,
+    },
+    {
+      title: "Token Sampling Decision Flow",
+      kind: "flow",
+      caption: "Decision flow for sampling strategies: how temperature, top-k, and top-p filters are applied to raw logits before sampling.",
+      mermaid: `flowchart TD
+    A["Raw Logits from Model"] --> B["Apply Temperature Scaling\nlogits = logits / T"]
+    B --> C{"top-k > 0?"}
+    C -->|Yes| D["Keep top-k highest logits\nset rest to negative infinity"]
+    C -->|No| E["Keep all logits"]
+    D --> F{"top-p < 1.0?"}
+    E --> F
+    F -->|Yes| G["Sort descending, cumulative softmax\nremove tokens beyond threshold p"]
+    F -->|No| H["Keep filtered logits as-is"]
+    G --> I["Softmax to Probabilities"]
+    H --> I
+    I --> J["Multinomial Sample"]
+    J --> K["Selected Token ID"]`,
+    },
+    {
+      title: "LLM Training and Inference Concepts Mindmap",
+      kind: "mindmap",
+      caption: "Key concepts across LLM architecture, training, and inference organised as a mindmap.",
+      mermaid: `mindmap
+  root((LLM Fundamentals))
+    Architecture
+      Transformer blocks
+      Multi-head attention
+      Residual connections
+      RoPE positional encoding
+    Training
+      Next token prediction
+      Chinchilla scaling laws
+      RLHF alignment
+      SFT fine-tuning
+    Inference
+      Prefill phase
+      Decode phase
+      KV cache
+      Speculative decoding
+    Sampling
+      Temperature
+      Top-k filtering
+      Top-p nucleus
+      Repetition penalty
+    Optimisation
+      Quantisation int8 int4
+      Continuous batching
+      PagedAttention vLLM
+      FlashAttention`,
     },
   ],
 

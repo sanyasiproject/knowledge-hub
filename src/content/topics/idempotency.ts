@@ -251,72 +251,82 @@ function sleep(ms: number) {
   ],
   diagrams: [
     {
-      title: "Idempotency Key Request Flow",
+      title: "Idempotency Key Pattern",
       kind: "sequence",
-      caption: "Sequence diagram showing how the **idempotency key middleware** handles a *first request*, a *duplicate retry*, and a *concurrent duplicate* scenario.",
+      caption: "How idempotency keys prevent duplicate operations on retry.",
       mermaid: `sequenceDiagram
-    participant C as Client
-    participant MW as Idempotency Middleware
-    participant DB as Idempotency Keys Table
-    participant H as Request Handler
-    participant Ext as External Service
-
-    rect rgb(200, 255, 220)
-    Note over C,Ext: **First Request** — key is new
-    C->>MW: POST /payments<br/>Idempotency-Key: abc-123
-    MW->>DB: INSERT key abc-123<br/>status = processing
-    DB-->>MW: Inserted (new key)
-    MW->>H: Process payment
-    H->>Ext: Charge $99.99
-    Ext-->>H: Success
-    H->>DB: UPDATE key abc-123<br/>status = completed<br/>response = {txId: ...}
-    H-->>C: 200 OK {txId: tx_456}
-    end
-
-    rect rgb(200, 220, 255)
-    Note over C,Ext: **Retry** — same key, already completed
-    C->>MW: POST /payments<br/>Idempotency-Key: abc-123
-    MW->>DB: INSERT key abc-123
-    DB-->>MW: Conflict (key exists)
-    MW->>DB: SELECT response WHERE key = abc-123
-    DB-->>MW: status=completed, response={txId: tx_456}
-    MW-->>C: 200 OK {txId: tx_456}<br/>(cached response, no re-processing)
-    end`
+    participant Client
+    participant API
+    participant DB
+    Client->>API: POST /payments Idempotency-Key: abc123
+    API->>DB: Check if key abc123 exists
+    DB-->>API: Not found
+    API->>DB: Process payment store key abc123
+    DB-->>API: Success
+    API-->>Client: 200 Payment processed
+    Note over Client: Network error - client retries
+    Client->>API: POST /payments Idempotency-Key: abc123
+    API->>DB: Check if key abc123 exists
+    DB-->>API: Found - return cached response
+    API-->>Client: 200 Same response no duplicate charge`,
     },
     {
-      title: "Transactional Outbox Pattern",
+      title: "HTTP Method Idempotency Matrix",
       kind: "architecture",
-      caption: "Architecture of the **transactional outbox pattern** showing how *business writes* and *event records* are committed in the same transaction, solving the **dual-write problem**.",
-      mermaid: `graph TD
-    API["**API Handler**"] --> TX["**Database Transaction**"]
-
-    subgraph TX ["Same Transaction"]
-        BizWrite["**Business Write**<br/>INSERT INTO orders<br/>VALUES (...)"]
-        OutboxWrite["**Outbox Write**<br/>INSERT INTO outbox<br/>(event_type, payload)"]
+      caption: "Idempotency and safety properties of standard HTTP methods.",
+      mermaid: `graph LR
+    subgraph Safe and Idempotent
+        GET
+        HEAD
+        OPTIONS
     end
-
-    BizWrite --> Commit["**COMMIT**"]
-    OutboxWrite --> Commit
-
-    Commit --> Poller["**Outbox Poller / CDC**<br/>*reads new outbox rows*"]
-    Poller --> Broker["**Message Broker**<br/>*RabbitMQ / Kafka*"]
-    Broker --> Consumer["**Consumer**<br/>*idempotent processing*"]
-    Consumer --> DedupCheck{"**Already processed?**<br/>*check event_id*"}
-    DedupCheck -->|"No"| Process["Process event"]
-    DedupCheck -->|"Yes"| Skip["Skip (idempotent)"]`
+    subgraph Idempotent Not Safe
+        PUT
+        DELETE
+    end
+    subgraph Neither Safe Nor Idempotent
+        POST
+        PATCH
+    end`,
     },
     {
-      title: "Idempotent vs Non-Idempotent Operations",
+      title: "Designing Idempotent Operations",
       kind: "flow",
-      caption: "Decision flow for determining whether an operation is **naturally idempotent** or requires an *artificial idempotency mechanism* like idempotency keys.",
-      mermaid: `graph TD
-    Op["**Operation**"] --> Q1{"Does repeating it<br/>produce the **same state**?"}
-    Q1 -->|"Yes"| Natural["**Naturally Idempotent**<br/>*SET, UPSERT, DELETE*<br/>No extra mechanism needed"]
-    Q1 -->|"No"| Q2{"Can it be made<br/>idempotent with a<br/>**unique constraint**?"}
-    Q2 -->|"Yes"| DBLevel["**DB-Level Idempotency**<br/>*UPSERT, unique index*<br/>*optimistic locking*"]
-    Q2 -->|"No"| Q3{"Does it involve<br/>**external side effects**?<br/>*(email, payment, SMS)*"}
-    Q3 -->|"No"| AppLevel["**Idempotency Key**<br/>*client UUID + server store*<br/>*return cached response*"]
-    Q3 -->|"Yes"| TwoPhase["**Two-Phase Approach**<br/>*1. Record intent in DB*<br/>*2. Call external API*<br/>*3. Mark as done*<br/>*Check status on retry*"]`
+      caption: "Decision flow for making a distributed operation idempotent.",
+      mermaid: `flowchart TD
+    A[Design Operation] --> B[Assign unique operation ID]
+    B --> C[Check if ID already processed]
+    C --> D{Already processed?}
+    D -- Yes --> E[Return same cached response]
+    D -- No --> F[Execute operation]
+    F --> G{Success?}
+    G -- Yes --> H[Record ID and result atomically]
+    H --> I[Return success response]
+    G -- No --> J{Retryable error?}
+    J -- Yes --> K[Let client retry with same ID]
+    J -- No --> L[Return non-retryable error]`,
+    },
+    {
+      title: "Idempotency Across System Components",
+      kind: "mindmap",
+      caption: "Where idempotency matters across distributed system components.",
+      mermaid: `mindmap
+  root((Idempotency))
+    Payment Systems
+      Stripe idempotency keys
+      Deduplication windows
+    Message Queues
+      At-least-once delivery
+      Consumer deduplication
+    Database Operations
+      INSERT OR IGNORE
+      UPSERT patterns
+    API Design
+      PUT over POST for updates
+      Conditional requests ETags
+    Event Sourcing
+      Event deduplication
+      Sequence numbers`,
     },
   ],
   exercises: [

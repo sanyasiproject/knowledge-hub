@@ -364,15 +364,71 @@ safeComputation = (\\x -> safeDivide 100 x) >=> (\\y -> safeDivide y 2)`
 
   diagrams: [
     {
-      title: "HOF Data Flow: map/filter/reduce Pipeline",
-      kind: "flow",
-      caption: "Shows how data flows through a chain of higher-order functions. Input collection enters map (transformation), flows to filter (selection), then to reduce (aggregation), producing a single output value. Intermediate arrays are created at each step unless transducers or lazy evaluation are used."
+      title: "Higher-Order Function Patterns",
+      kind: "mindmap",
+      caption: "Common higher-order function patterns in functional programming.",
+      mermaid: `mindmap
+  root((Higher-Order Functions))
+    Takes Function Arg
+      map transform each element
+      filter select elements
+      reduce fold to single value
+      forEach side effects
+    Returns New Function
+      Currying partial apply
+      Memoize cache results
+      Throttle debounce
+    Pipeline Builders
+      compose right to left
+      pipe left to right
+      flatMap map then flatten`,
     },
     {
-      title: "Closure Memory Model",
+      title: "Map Filter Reduce Pipeline",
+      kind: "flow",
+      caption: "Data transformation pipeline using map, filter, and reduce chained together.",
+      mermaid: `flowchart LR
+    A[Input Array] --> B[filter with predicate]
+    B --> C[Filtered Array]
+    C --> D[map with transform]
+    D --> E[Transformed Array]
+    E --> F[reduce with accumulator]
+    F --> G[Final Single Value]`,
+    },
+    {
+      title: "Function Composition vs Pipe",
       kind: "architecture",
-      caption: "Illustrates how a closure captures its lexical environment. The outer function's activation record (stack frame) contains local variables. The inner function holds a reference to this environment, keeping it alive after the outer function returns. Multiple closures from the same invocation share the same environment object."
-    }
+      caption: "How compose and pipe build pipelines by combining small functions.",
+      mermaid: `graph LR
+    subgraph pipe left to right
+        P1[parse] --> P2[validate]
+        P2 --> P3[transform]
+        P3 --> P4[format]
+        P4 --> POut[output]
+    end
+    subgraph compose right to left
+        CIn[input] --> C4[format]
+        C4 --> C3[transform]
+        C3 --> C2[validate]
+        C2 --> C1[parse]
+    end`,
+    },
+    {
+      title: "Currying and Partial Application",
+      kind: "sequence",
+      caption: "How currying transforms a multi-argument function into chained calls.",
+      mermaid: `sequenceDiagram
+    participant Code
+    participant Curried as Curried add
+    participant Partial as Partial Applied add5
+    Code->>Curried: add(1)(2)(3)
+    Curried-->>Code: Returns 6
+    Code->>Partial: const add5 = add(5)
+    Partial-->>Code: Returns new function
+    Code->>Partial: add5(3)
+    Partial-->>Code: Returns 8
+    Note over Code: Partial application fixes initial args`,
+    },
   ],
 
   animations: [

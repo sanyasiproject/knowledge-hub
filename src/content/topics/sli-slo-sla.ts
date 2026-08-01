@@ -369,72 +369,84 @@ console.log(
   ],
   diagrams: [
     {
-      title: "SLI / SLO / SLA Hierarchy",
-      kind: "flow",
-      caption: "How SLIs feed into SLOs which underpin SLAs, with error budgets linking them to engineering decisions",
-      mermaid: `flowchart TD
-    SLI["**SLI** — Service Level Indicator\\n*Measured metric (e.g., success rate)*"]
-    SLO["**SLO** — Service Level Objective\\n*Internal target (e.g., 99.9% / 30d)*"]
-    SLA["**SLA** — Service Level Agreement\\n*Contract with penalties*"]
-    EB["**Error Budget**\\n*1 - SLO target = allowed unreliability*"]
-    BR["**Burn Rate Alerts**\\n*Fast: 14.4x page / Slow: 1x ticket*"]
-    EBP["**Error Budget Policy**\\n*Freeze features when budget exhausted*"]
-    DASH["**Dashboard**\\n*Remaining budget visualization*"]
-
-    SLI -->|"feeds into"| SLO
-    SLO -->|"stricter than"| SLA
-    SLO -->|"defines"| EB
-    EB -->|"tracked via"| DASH
-    EB -->|"monitored by"| BR
-    EB -->|"governed by"| EBP
-    BR -->|"triggers"| EBP`,
-    },
-    {
-      title: "Error Budget Burn Rate Alerting Flow",
-      kind: "sequence",
-      caption: "Sequence of events from SLI degradation through burn rate detection to incident response",
-      mermaid: `sequenceDiagram
-    participant U as User Traffic
-    participant LB as Load Balancer
-    participant P as Prometheus
-    participant A as Alertmanager
-    participant OC as On-Call Engineer
-    participant T as Ticket System
-
-    U->>LB: HTTP requests
-    LB->>P: Expose metrics (status codes, latency)
-    P->>P: Evaluate burn rate rules every 30s
-
-    alt Burn rate >= 14.4x (fast burn)
-        P->>A: Fire HighBurnRate_Page alert
-        A->>OC: PAGE via PagerDuty
-        OC->>OC: Investigate & mitigate
-    else Burn rate >= 6x (moderate burn)
-        P->>A: Fire ModerateBurnRate_Page alert
-        A->>OC: PAGE with lower urgency
-    else Burn rate >= 1x (slow burn)
-        P->>A: Fire SlowBurnRate_Ticket alert
-        A->>T: Create ticket for next sprint
-    end`,
-    },
-    {
-      title: "SLI Measurement Points",
+      title: "SLI SLO SLA Hierarchy",
       kind: "architecture",
-      caption: "Where to instrument SLIs across a typical web service architecture",
-      mermaid: `flowchart LR
-    Client["**Client / Browser**\\n*RUM SLI: true user experience*"]
-    CDN["**CDN / Edge**\\n*Edge SLI: includes network latency*"]
-    LB["**Load Balancer**\\n*Recommended SLI point*"]
-    App["**App Server**\\n*Server SLI: misses infra failures*"]
-    DB["**Database**\\n*Backend SLI: query performance*"]
+      caption: "SLIs are the raw measurements, SLOs are the internal targets set on those measurements, and SLAs are the external contractual commitments derived from SLOs.",
+      mermaid: `graph TD
+    subgraph SLA["SLA - External Contract"]
+      Contract["Contract with customer - 99.9 percent uptime"]
+      Penalty["Penalties for breach"]
+    end
+    subgraph SLO["SLO - Internal Target"]
+      Target["Internal target - 99.95 percent"]
+      ErrorBudget["Error budget: 4.38 hours per year"]
+    end
+    subgraph SLI["SLI - Measurement"]
+      Metric["Metric: successful requests divided by total requests"]
+      Window["Measured over 30-day rolling window"]
+    end
+    SLA --> SLO
+    SLO --> SLI`,
+    },
+    {
+      title: "Error Budget Flow",
+      kind: "flow",
+      caption: "Error budget is consumed by incidents and releases. When depleted, engineering must prioritize reliability over new features.",
+      mermaid: `flowchart TD
+    A[Monthly error budget: 43.8 minutes for 99.9 percent SLO] --> B{Incident occurs}
+    B -->|5 min outage| C[Budget remaining: 38.8 min]
+    C --> D{New deployment?}
+    D -->|Deploy - error rate spikes| E[Another 10 min consumed]
+    E --> F[Budget remaining: 28.8 min]
+    F --> G{Budget < 10 percent?}
+    G -->|Yes| H[Freeze deployments]
+    H --> I[Focus on reliability work]
+    G -->|No| J[Continue normal operations]
+    I --> K([Budget resets next month])`,
+    },
+    {
+      title: "Common SLI Types",
+      kind: "mindmap",
+      caption: "Categories of SLIs used to measure service reliability across availability, latency, throughput, and correctness dimensions.",
+      mermaid: `mindmap
+  root((SLI Categories))
+    Availability
+      Request success rate
+      Uptime percentage
+      Health check pass rate
+    Latency
+      p50 response time
+      p95 response time
+      p99 response time
+    Throughput
+      Requests per second
+      Transactions per second
+    Error Rate
+      5xx errors per minute
+      Failed transactions
+    Saturation
+      CPU utilization
+      Memory usage
+      Queue depth`,
+    },
+    {
+      title: "SLO Burn Rate Alerting",
+      kind: "sequence",
+      caption: "Multi-window burn rate alerts detect SLO violations at different severity levels: fast burn for immediate outages, slow burn for creeping degradation.",
+      mermaid: `sequenceDiagram
+    participant Monitor as Monitoring System
+    participant PagerDuty as Alert Manager
+    participant OncallEng as On-Call Engineer
+    participant Team as Engineering Team
 
-    Client -->|"request"| CDN
-    CDN -->|"forward"| LB
-    LB -->|"route"| App
-    App -->|"query"| DB
-
-    style LB fill:#2d6a4f,color:#fff,stroke:#1b4332
-    style Client fill:#264653,color:#fff,stroke:#1d3557`,
+    Monitor->>Monitor: Calculate 1h burn rate: 14x normal
+    Monitor->>PagerDuty: CRITICAL: Fast burn alert
+    PagerDuty->>OncallEng: Page immediately
+    OncallEng->>OncallEng: Investigate and mitigate
+    Monitor->>Monitor: Calculate 6h burn rate: 3x normal
+    Monitor->>PagerDuty: WARNING: Slow burn alert
+    PagerDuty->>Team: Ticket created
+    Team->>Team: Investigate during business hours`,
     },
   ],
   comparison: {

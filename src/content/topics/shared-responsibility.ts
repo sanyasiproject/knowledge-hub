@@ -297,14 +297,72 @@ aws guardduty list-detectors --query 'DetectorIds' --output text`
   diagrams: [
     {
       title: "Shared Responsibility by Service Type",
-      kind: "architecture" as const,
-      caption: "Side-by-side comparison showing how the responsibility boundary shifts between IaaS (EC2), PaaS (RDS), and Serverless (Lambda) service models"
+      kind: "architecture",
+      caption: "Responsibility boundary shifts between IaaS, PaaS, and Serverless service models.",
+      mermaid: `graph TD
+    subgraph IaaS["IaaS - EC2"]
+      AWS1["AWS: Hardware, network, hypervisor"]
+      Cust1["Customer: OS, runtime, app, data"]
+    end
+    subgraph PaaS["PaaS - RDS"]
+      AWS2["AWS: Hardware, OS, DB engine, patching"]
+      Cust2["Customer: Schema, data, user access"]
+    end
+    subgraph SaaS["Serverless - Lambda"]
+      AWS3["AWS: Hardware, OS, runtime, scaling"]
+      Cust3["Customer: Function code and data"]
+    end`,
     },
     {
       title: "Defense in Depth Security Controls",
-      kind: "flow" as const,
-      caption: "Flow diagram showing preventive controls (SCPs, IAM, security groups) feeding into detective controls (GuardDuty, Config, Macie) feeding into responsive controls (EventBridge, Lambda auto-remediation)"
-    }
+      kind: "flow",
+      caption: "Preventive, detective, and responsive controls layered to achieve defense in depth.",
+      mermaid: `flowchart TD
+    Threat["Threat or Attack"] --> Prev["Preventive Controls\nSCPs, IAM, Security Groups, WAF"]
+    Prev -->|bypass| Det["Detective Controls\nGuardDuty, Config, CloudTrail, Macie"]
+    Det -->|alert| Resp["Responsive Controls\nEventBridge, Lambda auto-remediation"]
+    Resp --> Cont["Contain and Remediate"]
+    Cont --> Post["Post-Incident Hardening"]`,
+    },
+    {
+      title: "AWS Security Event Response",
+      kind: "sequence",
+      caption: "Automated detection and response flow for a security finding in AWS.",
+      mermaid: `sequenceDiagram
+    participant Act as Attacker
+    participant GD as GuardDuty
+    participant EB as EventBridge
+    participant L as Lambda
+    participant SNS as SNS Alert
+
+    Act->>Act: uses compromised credential
+    GD->>GD: analyze CloudTrail logs
+    GD->>EB: emit finding UnauthorizedAccess
+    EB->>L: trigger remediation function
+    L->>L: attach deny-all IAM policy
+    L->>L: disable access key
+    L->>SNS: notify security team
+    SNS-->>SNS: alert sent`,
+    },
+    {
+      title: "Shared Responsibility Coverage Map",
+      kind: "mindmap",
+      caption: "What AWS and the customer each own across IaaS, PaaS, and serverless.",
+      mermaid: `mindmap
+    root["Shared Responsibility"]
+      AWS Always Owns
+        Physical data centers
+        Global network
+        Hypervisor layer
+      Customer Always Owns
+        Data classification
+        IAM and access control
+        Application security
+      Shifts by Model
+        IaaS customer owns OS up
+        PaaS customer owns app up
+        Serverless customer owns code only`,
+    },
   ],
 
   animations: [

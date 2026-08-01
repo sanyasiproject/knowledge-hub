@@ -239,12 +239,92 @@ int main() {
     {
       title: "Chomsky Hierarchy",
       kind: "architecture",
-      caption: "Nested containment of language classes: Regular (Type 3) inside Context-Free (Type 2) inside Context-Sensitive (Type 1) inside Recursively Enumerable (Type 0), each with its corresponding automaton model",
+      caption: "Nested containment of language classes: Regular inside Context-Free inside Context-Sensitive inside Recursively Enumerable, each paired with its automaton model.",
+      mermaid: `graph TD
+    RE["Type 0: Recursively Enumerable\nTuring Machine"]
+    CS["Type 1: Context-Sensitive\nLinear-Bounded Automaton"]
+    CF["Type 2: Context-Free\nPushdown Automaton"]
+    REG["Type 3: Regular\nFinite Automaton"]
+    RE --> CS
+    CS --> CF
+    CF --> REG
+    note1["Grammar: uAv → uwv"]
+    note2["Grammar: A → αBβ"]
+    note3["Grammar: A → aB or A → a"]
+    note4["Grammar: S → aSb | ε"]
+    REG -.-> note3
+    CF -.-> note4
+    CS -.-> note2
+    RE -.-> note1`,
+    },
+    {
+      title: "DFA State Transitions",
+      kind: "state",
+      caption: "A DFA accepting strings over alphabet a,b that end with 'ab'. States track the longest suffix matched so far.",
+      mermaid: `stateDiagram-v2
+    [*] --> q0
+    q0 --> q0 : b
+    q0 --> q1 : a
+    q1 --> q1 : a
+    q1 --> q2 : b
+    q2 --> q1 : a
+    q2 --> q0 : b
+    q2 --> [*]
+    note right of q0: Start - no suffix
+    note right of q1: Saw 'a'
+    note right of q2: Saw 'ab' - accept`,
     },
     {
       title: "NFA to DFA Subset Construction",
       kind: "flow",
-      caption: "Flowchart showing how epsilon-closure is computed, then for each DFA state (a set of NFA states) transitions are computed by unioning NFA transitions and taking epsilon-closure again",
+      caption: "Flowchart showing how epsilon-closure is computed, then DFA states are built from sets of NFA states via transition unioning.",
+      mermaid: `flowchart TD
+    A["Start: NFA with states Q, alphabet Σ"] --> B["Compute ε-closure of start state"]
+    B --> C["Create initial DFA state = ε-closure"]
+    C --> D["Pick unmarked DFA state S"]
+    D --> E{"All symbols\nprocessed?"}
+    E -->|No| F["Take symbol a from Σ"]
+    F --> G["Compute move(S, a)"]
+    G --> H["Compute ε-closure of result"]
+    H --> I{"New DFA\nstate?"}
+    I -->|Yes| J["Add to DFA state set"]
+    I -->|No| K["Add transition to existing state"]
+    J --> E
+    K --> E
+    E -->|Yes| L{"More unmarked\nDFA states?"}
+    L -->|Yes| D
+    L -->|No| M["Mark states containing NFA accept states as accept"]
+    M --> N["DFA construction complete"]`,
+    },
+    {
+      title: "Automata Types Overview",
+      kind: "mindmap",
+      caption: "Mind map of automata theory concepts organised by machine type and their key properties.",
+      mermaid: `mindmap
+  root((Automata Theory))
+    Finite Automata
+      DFA
+        Deterministic transitions
+        Single path per input
+      NFA
+        Multiple transitions
+        Epsilon moves
+        Equivalent to DFA
+    Pushdown Automata
+      Stack memory
+      Context-free languages
+      Deterministic PDA
+      Nondeterministic PDA
+    Turing Machines
+      Infinite tape
+      Read and write head
+      Decidable languages
+      Recognizable languages
+    Formal Languages
+      Regular expressions
+      Context-free grammars
+      Pumping lemma
+      Closure properties`,
     },
   ],
   animations: [

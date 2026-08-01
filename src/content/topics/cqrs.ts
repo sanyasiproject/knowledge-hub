@@ -527,55 +527,48 @@ int main() {
     {
       title: "CQRS Architecture Overview",
       kind: "architecture",
-      caption: "High-level view of CQRS with separate command and query paths, event bus, and multiple read model projections.",
+      caption: "High-level view of CQRS with separate command and query paths, outbox relay, event bus, and multiple read model projections.",
       mermaid: `flowchart TB
-    Client["Client / UI"]
+    Client["Client or UI"]
 
-    subgraph CommandSide["Command Side (Write)"]
-        CmdAPI["Command API"]
-        CmdHandler["Command Handler"]
-        Validation["Validation & Business Rules"]
-        WriteDB[("Write Database\n(Normalized)")]
-        Outbox[("Outbox Table")]
+    subgraph CommandSide["Command Side - Write"]
+        CmdAPI["Command API\nPOST /commands"]
+        CmdHandler["Command Handler\nValidate and persist"]
+        WriteDB[("Write Database\nNormalized SQL")]
+        Outbox[("Outbox Table\nsame transaction")]
     end
 
     subgraph EventInfra["Event Infrastructure"]
-        Relay["Outbox Relay / CDC"]
-        EventBus["Event Bus\n(Kafka / RabbitMQ)"]
+        Relay["Outbox Relay or CDC"]
+        EventBus["Event Bus\nKafka or RabbitMQ"]
     end
 
-    subgraph QuerySide["Query Side (Read)"]
-        Proj1["Projection Handler\n(Orders)"]
-        Proj2["Projection Handler\n(Search)"]
-        Proj3["Projection Handler\n(Analytics)"]
+    subgraph QuerySide["Query Side - Read"]
+        Proj1["Projection Handler\nOrders"]
+        Proj2["Projection Handler\nSearch"]
+        Proj3["Projection Handler\nAnalytics"]
         ReadDB1[("PostgreSQL\nRead Replica")]
         ReadDB2[("Elasticsearch\nSearch Index")]
         ReadDB3[("ClickHouse\nAnalytics")]
-        QueryAPI["Query API"]
+        QueryAPI["Query API\nGET /queries"]
     end
 
-    Client -->|"POST /commands"| CmdAPI
-    CmdAPI --> CmdHandler
-    CmdHandler --> Validation
-    Validation --> WriteDB
-    Validation --> Outbox
-    Outbox --> Relay
-    Relay --> EventBus
-    EventBus --> Proj1
-    EventBus --> Proj2
-    EventBus --> Proj3
-    Proj1 --> ReadDB1
-    Proj2 --> ReadDB2
-    Proj3 --> ReadDB3
-    Client -->|"GET /queries"| QueryAPI
+    Client --> CmdAPI --> CmdHandler
+    CmdHandler --> WriteDB
+    CmdHandler --> Outbox
+    Outbox --> Relay --> EventBus
+    EventBus --> Proj1 --> ReadDB1
+    EventBus --> Proj2 --> ReadDB2
+    EventBus --> Proj3 --> ReadDB3
+    Client --> QueryAPI
     QueryAPI --> ReadDB1
     QueryAPI --> ReadDB2
     QueryAPI --> ReadDB3`,
     },
     {
-      title: "CQRS Command Processing Flow",
+      title: "CQRS Command Processing Sequence",
       kind: "sequence",
-      caption: "Sequence diagram showing the lifecycle of a command from client submission through event projection to read model update.",
+      caption: "Full lifecycle of a command from client submission through atomic write and outbox, async projection, and eventual query availability.",
       mermaid: `sequenceDiagram
     participant C as Client
     participant CA as Command API
@@ -591,49 +584,79 @@ int main() {
     CA->>CH: CreateOrderCommand
     CH->>CH: Validate business rules
     CH->>WDB: BEGIN TRANSACTION
-    CH->>WDB: INSERT order
+    CH->>WDB: INSERT order row
     CH->>OB: INSERT outbox event
     CH->>WDB: COMMIT
     CH-->>CA: 202 Accepted
-    CA-->>C: { status: "accepted" }
+    CA-->>C: status accepted
 
-    Note over OB,EB: Async: Outbox Relay polls
-
+    Note over OB,EB: Async outbox relay polls
     OB->>EB: Publish OrderCreated event
     EB->>PH: Deliver event
     PH->>PH: Check idempotency key
-    PH->>RDB: UPSERT read model
+    PH->>RDB: UPSERT read model row
 
-    Note over C,QA: Later: Client queries
-
+    Note over C,QA: Client queries later
     C->>QA: GET /queries/orders/ORD-001
     QA->>RDB: SELECT from read model
     RDB-->>QA: OrderSummaryDto
-    QA-->>C: { orderId, status, ... }`,
+    QA-->>C: orderId status totalAmount`,
     },
     {
-      title: "CQRS State Transitions",
+      title: "CQRS Command Lifecycle State Machine",
       kind: "state",
-      caption: "State machine showing how a command flows through validation, persistence, event publication, and projection states.",
+      caption: "State transitions a command passes through from receipt to read model availability, including failure and retry paths.",
       mermaid: `stateDiagram-v2
-    [*] --> CommandReceived
-    CommandReceived --> Validating: Parse & validate
-    Validating --> Rejected: Validation fails
-    Validating --> Persisting: Validation passes
+    [*] --> CommandReceived: Client submits command
+    CommandReceived --> Validating: Parse payload
+    Validating --> Rejected: Business rule violation
+    Validating --> Persisting: All rules pass
 
-    Rejected --> [*]: Return 400 error
+    Rejected --> [*]: Return 400 with error
 
     Persisting --> WritePersisted: Write DB commit
-    WritePersisted --> OutboxStored: Event in outbox
+    WritePersisted --> OutboxStored: Event in outbox table
 
-    OutboxStored --> EventPublished: Relay publishes
-    EventPublished --> Projecting: Handler receives
+    OutboxStored --> EventPublished: Relay reads and publishes
+    EventPublished --> Projecting: Handler receives event
 
-    Projecting --> ProjectionFailed: Error in handler
-    Projecting --> ReadModelUpdated: Projection complete
+    Projecting --> ProjectionFailed: Handler throws error
+    Projecting --> ReadModelUpdated: Projection written
 
     ProjectionFailed --> Projecting: Retry with backoff
+    ProjectionFailed --> DeadLetter: Max retries exceeded
     ReadModelUpdated --> [*]: Query returns updated data`,
+    },
+    {
+      title: "CQRS vs CRUD Data Flow",
+      kind: "flow",
+      caption: "Comparison of CRUD single-model flow versus CQRS separate write and read model flow, showing where each approach diverges.",
+      mermaid: `flowchart TD
+    subgraph CRUD["Traditional CRUD"]
+        CR["Client Request\nread or write"]
+        SM["Single Model\nnormalized schema"]
+        SD[("Single Database\nPostgreSQL")]
+        CR --> SM --> SD
+        SD --> SM --> CR
+    end
+
+    subgraph CQRS["CQRS Pattern"]
+        CMD["Command\nwrite intent"]
+        QRY["Query\nread request"]
+        WM["Write Model\naggregate and rules"]
+        RM1["Read Model A\ndenormalized"]
+        RM2["Read Model B\nsearch index"]
+        WDB2[("Write DB\nnormalized")]
+        RDB1[("Read DB A\nPostgreSQL")]
+        RDB2[("Read DB B\nElasticsearch")]
+        EV["Domain Events\noutbox pattern"]
+        CMD --> WM --> WDB2
+        WDB2 --> EV
+        EV --> RM1 --> RDB1
+        EV --> RM2 --> RDB2
+        QRY --> RDB1
+        QRY --> RDB2
+    end`,
     },
   ],
 

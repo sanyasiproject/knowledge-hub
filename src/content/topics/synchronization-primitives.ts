@@ -212,34 +212,72 @@ int main(void) {
   ],
   diagrams: [
     {
-      title: "Mutex Lock/Unlock Lifecycle",
-      kind: "state",
-      caption:
-        "State transitions of a mutex: Unlocked -> Locked (on acquire) -> Unlocked (on release by owner). Threads that attempt to acquire a locked mutex enter a Blocked queue and are woken in FIFO or priority order when the owner releases.",
-    },
-    {
-      title: "Semaphore Counter Mechanics",
-      kind: "flow",
-      caption:
-        "Flow of a counting semaphore: wait() decrements the internal counter -- if the result is negative the caller blocks; signal() increments the counter and wakes one blocked thread if any. Illustrates bounded buffer with empty/full semaphore pair.",
-    },
-    {
-      title: "Spinlock CAS Loop (Test-and-Test-and-Set)",
-      kind: "flow",
-      caption:
-        "Flowchart of the TTAS spinlock: (1) Relaxed load -- if locked, spin on local cache line. (2) When observed free, attempt CAS with acquire semantics. (3) If CAS succeeds, enter critical section. (4) If CAS fails (contention), return to step 1.",
-    },
-    {
-      title: "Read-Write Lock Access Modes",
-      kind: "sequence",
-      caption:
-        "Sequence diagram showing multiple readers holding the lock concurrently, a writer waiting until all readers release, acquiring exclusive access, and readers re-acquiring after the writer releases.",
-    },
-    {
-      title: "Synchronization Primitives Taxonomy",
+      title: "Synchronization Primitives Overview",
       kind: "mindmap",
-      caption:
-        "Mind map of synchronization primitives: Blocking (Mutex, Semaphore, RWLock, Condition Variable) vs. Non-blocking (Spinlock, Lock-free CAS, Wait-free algorithms). Sub-branches show variants like recursive mutex, binary vs. counting semaphore, reader-preferring vs. writer-preferring RWLock.",
+      caption: "Taxonomy of common synchronization primitives and their use cases in concurrent programming.",
+      mermaid: `mindmap
+  root((Sync Primitives))
+    Mutex
+      Mutual exclusion
+      One owner at a time
+      Blocking acquire
+    Semaphore
+      Counting access
+      N concurrent users
+      Binary semaphore
+    Condition Variable
+      Wait for condition
+      Signal and broadcast
+      Used with mutex
+    Read-Write Lock
+      Concurrent readers
+      Exclusive writer
+      Reader preference`,
+    },
+    {
+      title: "Mutex Lock-Unlock Flow",
+      kind: "flow",
+      caption: "How threads compete for a mutex and the flow of acquiring, holding, and releasing the lock.",
+      mermaid: `flowchart TD
+    T1["Thread 1"] -->|acquire| L{Mutex available?}
+    T2["Thread 2"] -->|acquire| L
+    L -->|yes - locked| CS["Critical Section
+execute protected code"]
+    L -->|no - blocked| W["Wait in queue"]
+    CS --> R["Release mutex"]
+    R --> N["Notify next waiter"]
+    N --> W`,
+    },
+    {
+      title: "Producer-Consumer with Semaphore",
+      kind: "sequence",
+      caption: "Producer and consumer threads coordinating via counting semaphores to manage buffer capacity.",
+      mermaid: `sequenceDiagram
+    participant P as Producer
+    participant FS as FreeSlots Semaphore
+    participant B as Buffer
+    participant IS as ItemsReady Semaphore
+    participant C as Consumer
+    P->>FS: wait - decrement free slots
+    P->>B: write item to buffer
+    P->>IS: signal - increment items ready
+    C->>IS: wait - decrement items ready
+    C->>B: read item from buffer
+    C->>FS: signal - increment free slots`,
+    },
+    {
+      title: "Deadlock State Diagram",
+      kind: "state",
+      caption: "How two threads can reach deadlock when each holds one lock and waits for the other.",
+      mermaid: `stateDiagram-v2
+    [*] --> ThreadsRunning
+    ThreadsRunning --> T1HoldsA : Thread1 acquires Lock A
+    T1HoldsA --> Deadlock : Thread1 waits for Lock B
+Thread2 holds Lock B
+Thread2 waits for Lock A
+    ThreadsRunning --> T2HoldsB : Thread2 acquires Lock B
+    T2HoldsB --> Deadlock
+    Deadlock --> [*] : timeout or detection`,
     },
   ],
   animations: [

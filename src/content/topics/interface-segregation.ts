@@ -233,13 +233,92 @@ supervisor.assignWork([human, robot]); // both are Workable
     {
       title: "Fat Interface vs Segregated Interfaces",
       kind: "architecture",
-      caption: "Left: single fat MultiFunctionDevice interface with 5 methods, forcing BasicPrinter to implement unused methods. Right: segregated Printer, Scanner, Fax interfaces -- BasicPrinter only implements Printer."
+      caption: "A fat MultiFunctionDevice forces all implementers to stub unsupported methods. Splitting into Printer, Scanner, Fax, and Stapler lets each class implement only what it can support.",
+      mermaid: `graph TD
+    subgraph Fat["Fat Interface - ISP Violation"]
+      MFD["MultiFunctionDevice\nprint, scan, fax, staple, copy"]
+      BP["BasicPrinter\nprint OK\nscan - throws\nfax - throws\nstaple - throws\ncopy - throws"]
+      MFD --> BP
+    end
+    subgraph Segregated["Segregated Interfaces - ISP Compliant"]
+      PR["Printer\nprint"]
+      SC["Scanner\nscan"]
+      FX["Fax\nfax"]
+      ST["Stapler\nstaple"]
+      BPR["BasicPrinter\nimplements Printer only"]
+      OFP["OfficePrinter\nimplements all four"]
+      PR --> BPR
+      PR --> OFP
+      SC --> OFP
+      FX --> OFP
+      ST --> OFP
+    end`,
     },
     {
-      title: "Client-Specific Interface Dependencies",
+      title: "Client Dependency on Role Interfaces",
       kind: "network",
-      caption: "Shows how different clients (PrintService, ScanService, FaxService) each depend on only their relevant interface, minimizing coupling and recompilation dependencies."
-    }
+      caption: "Each client depends only on the narrow interface it needs. PrintService depends on Printer, ScanService on Scanner. A change to Scanner does not force PrintService to recompile.",
+      mermaid: `graph LR
+    PS["PrintService"]
+    SS["ScanService"]
+    FS["FaxService"]
+    PR["Printer\ninterface"]
+    SC["Scanner\ninterface"]
+    FX["Fax\ninterface"]
+    OP["OfficePrinter\nimplements all"]
+    BP["BasicPrinter\nimplements Printer"]
+    PS -->|depends on| PR
+    SS -->|depends on| SC
+    FS -->|depends on| FX
+    PR -.->|implemented by| OP
+    SC -.->|implemented by| OP
+    FX -.->|implemented by| OP
+    PR -.->|implemented by| BP`,
+    },
+    {
+      title: "Adapter Pattern for Fat Third-Party Interfaces",
+      kind: "sequence",
+      caption: "When a fat third-party interface cannot be changed, an Adapter wraps it and exposes only the narrow interface your code depends on.",
+      mermaid: `sequenceDiagram
+    participant Client as PrintService
+    participant NarrowI as Printer interface
+    participant Adapter as PrinterAdapter
+    participant Fat as ThirdPartyMFD
+    Client->>NarrowI: print(doc)
+    NarrowI->>Adapter: print(doc)
+    Adapter->>Fat: performPrint(doc)
+    Fat-->>Adapter: result
+    Adapter-->>NarrowI: result
+    NarrowI-->>Client: done
+    Note over Adapter,Fat: Adapter shields client from fat interface churn`,
+    },
+    {
+      title: "ISP Relationship to SOLID Principles",
+      kind: "mindmap",
+      caption: "ISP is the interface-level analog of SRP and reinforces DIP and LSP. Understanding its connections to the rest of SOLID clarifies when and why to apply it.",
+      mermaid: `mindmap
+    root((ISP))
+      Violations
+        Fat interfaces
+        UnsupportedOperationException
+        No-op method stubs
+        Recompilation blast radius
+      Solutions
+        Role interfaces
+        Capability-named interfaces
+        Adapter for third-party fat APIs
+        Backend for Frontend at API level
+      Relationships
+        SRP
+          Interface-level analog
+          Fat interface signals SRP violation
+        LSP
+          No-op methods violate LSP
+          ISP prevents forced stubs
+        DIP
+          Narrow interfaces reduce coupling
+          Depend on minimal abstractions`,
+    },
   ],
   animations: [
     {

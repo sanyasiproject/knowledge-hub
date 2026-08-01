@@ -216,14 +216,73 @@ subscription OnPostCreated {
   },
   diagrams: [
     {
-      title: "GraphQL request resolution lifecycle",
+      title: "GraphQL Request Lifecycle",
       kind: "sequence",
-      caption: "Client sends query to server; parser validates against schema; executor walks the query tree calling resolvers top-down; DataLoader batches database calls; response is assembled and returned.",
+      caption: "How a GraphQL query is parsed, validated, and resolved on the server.",
+      mermaid: `sequenceDiagram
+    participant Client
+    participant Server as GraphQL Server
+    participant Resolver
+    participant DB as Data Source
+    Client->>Server: POST /graphql with query
+    Server->>Server: Parse query to AST
+    Server->>Server: Validate against schema
+    alt Validation error
+        Server-->>Client: 400 Validation errors
+    end
+    Server->>Resolver: Execute field resolvers
+    Resolver->>DB: Fetch required data
+    DB-->>Resolver: Data returned
+    Resolver-->>Server: Resolved fields
+    Server-->>Client: JSON response`,
     },
     {
-      title: "Apollo Federation architecture",
+      title: "REST vs GraphQL Data Fetching",
+      kind: "flow",
+      caption: "Comparing REST multiple round-trips to GraphQL single precise request.",
+      mermaid: `flowchart TD
+    subgraph REST Multiple Requests
+        R1[GET /user/1] --> R2[GET /user/1/posts]
+        R2 --> R3[GET /posts/1/comments]
+        R3 --> R4[3 round trips with overfetch]
+    end
+    subgraph GraphQL Single Request
+        G1[POST /graphql] --> G2[Resolve user fields]
+        G2 --> G3[Resolve nested posts]
+        G3 --> G4[Resolve nested comments]
+        G4 --> G5[One response exact fields]
+    end`,
+    },
+    {
+      title: "GraphQL Schema Structure",
       kind: "architecture",
-      caption: "Gateway (Apollo Router) receives client queries and distributes them to subgraphs (Users, Posts, Reviews). Each subgraph owns its types and resolvers. The gateway merges results into a unified response.",
+      caption: "Core building blocks of a GraphQL schema definition.",
+      mermaid: `graph TD
+    Schema --> Query[Query type root reads]
+    Schema --> Mutation[Mutation type root writes]
+    Schema --> Subscription[Subscription type realtime]
+    Query --> OT[Object Types]
+    OT --> SF[Scalar fields]
+    OT --> NF[Nested object fields]
+    OT --> LF[List fields]
+    Schema --> Interfaces
+    Schema --> Unions
+    Schema --> InputTypes[Input Types for args]`,
+    },
+    {
+      title: "N+1 Problem and DataLoader Solution",
+      kind: "flow",
+      caption: "How the N+1 query problem arises in GraphQL and how DataLoader solves it.",
+      mermaid: `flowchart TD
+    A[Query posts with authors] --> B[Resolve posts list 1 query]
+    B --> C{DataLoader used?}
+    C -- No --> D[Resolve author for post 1]
+    D --> E[Resolve author for post 2]
+    E --> F[Resolve author for post N]
+    F --> G[N plus 1 total DB queries]
+    C -- Yes --> H[Batch all author IDs]
+    H --> I[Single query WHERE id IN ids]
+    I --> J[1 query total]`,
     },
   ],
   animations: [

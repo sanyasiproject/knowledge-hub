@@ -478,97 +478,81 @@ int main() {
     {
       title: "Capacity Planning Cycle",
       kind: "flow",
-      caption: "The **continuous capacity planning cycle** — from *measurement* through *validation* and back, ensuring infrastructure stays ahead of demand.",
+      caption: "The continuous capacity planning cycle from measurement through validation, ensuring infrastructure stays ahead of demand.",
       mermaid: `flowchart TD
-    A["📊 Measure Current State\\n- Baseline throughput\\n- Latency percentiles\\n- Resource utilization"] --> B["📈 Model Demand Growth\\n- Historical trends\\n- Business forecasts\\n- Seasonal patterns"]
-    B --> C["🔍 Identify Bottlenecks\\n- CPU / Memory\\n- Database connections\\n- Network bandwidth"]
-    C --> D["📋 Plan Capacity Additions\\n- Define headroom targets\\n- Select scaling strategy\\n- Budget allocation"]
-    D --> E["🧪 Validate with Load Tests\\n- Smoke → Load → Stress\\n- Soak tests for leaks\\n- Spike tests for surges"]
-    E --> F{"✅ SLOs Met?"}
-    F -->|Yes| G["🚀 Deploy & Monitor\\n- Auto-scaling policies\\n- Alerting thresholds\\n- Cost tracking"]
-    F -->|No| H["🔧 Optimize & Tune\\n- Right-size instances\\n- Cache optimization\\n- Query tuning"]
+    A["Measure Baselines"] --> B["Forecast Demand"]
+    B --> C["Identify Bottlenecks"]
+    C --> D["Plan Additions"]
+    D --> E["Load Test"]
+    E --> F{"SLOs Met?"}
+    F -->|Yes| G["Deploy and Monitor"]
+    F -->|No| H["Optimize"]
     H --> D
-    G --> I["📅 Quarterly Review\\n- Re-evaluate projections\\n- Update growth models\\n- Adjust headroom"]
+    G --> I["Quarterly Review"]
     I --> A`,
     },
     {
       title: "Auto-Scaling Architecture",
       kind: "architecture",
-      caption: "**Production auto-scaling architecture** showing *target tracking*, predictive scaling, and the relationship between **stateless** and *stateful* tiers.",
-      mermaid: `flowchart LR
-    subgraph Monitoring["Monitoring & Metrics"]
-        CW["CloudWatch\\nMetrics"]
-        PROM["Prometheus\\nCustom Metrics"]
-    end
-
-    subgraph Scaling["Scaling Engine"]
-        TT["Target Tracking\\nCPU @ 60%"]
-        PS["Predictive Scaling\\nML-based forecast"]
-        STEP["Step Scaling\\nRequest count"]
-    end
-
-    subgraph StatelessTier["Stateless Tier (Auto-Scaled)"]
-        ASG["Auto Scaling Group\\nmin: 2 / max: 50"]
-        EC2A["Instance A"]
-        EC2B["Instance B"]
-        EC2C["Instance C"]
-        EC2D["Instance ...N"]
-    end
-
-    subgraph StatefulTier["Stateful Tier (Planned Capacity)"]
-        RDS["RDS Primary\\n+ Read Replicas"]
-        REDIS["ElastiCache\\nRedis Cluster"]
-        SQS["SQS / Kafka\\nMessage Queue"]
-    end
-
+      caption: "Production auto-scaling architecture showing the relationship between stateless compute tiers and stateful data tiers.",
+      mermaid: `graph LR
     subgraph Traffic["Traffic Layer"]
-        ALB["Application\\nLoad Balancer"]
-        CF["CloudFront\\nCDN"]
+        CDN["CDN"]
+        LB["Load Balancer"]
     end
-
-    CF --> ALB
-    ALB --> ASG
-    ASG --> EC2A & EC2B & EC2C & EC2D
-    EC2A & EC2B & EC2C & EC2D --> RDS & REDIS & SQS
-    CW & PROM --> TT & PS & STEP
-    TT & PS & STEP --> ASG`,
+    subgraph Compute["Stateless Tier"]
+        ASG["Auto Scaling Group"]
+        A1["Instance 1"]
+        A2["Instance 2"]
+        A3["Instance N"]
+    end
+    subgraph Data["Stateful Tier"]
+        DB["Primary DB"]
+        CACHE["Redis Cache"]
+        QUEUE["Message Queue"]
+    end
+    subgraph Metrics["Scaling Engine"]
+        MON["Metrics Collector"]
+        POL["Scaling Policy"]
+    end
+    CDN --> LB --> ASG
+    ASG --> A1 & A2 & A3
+    A1 & A2 & A3 --> DB & CACHE & QUEUE
+    MON --> POL --> ASG`,
     },
     {
-      title: "Capacity Runway Visualization",
-      kind: "flow",
-      caption: "**Growth modeling** and *capacity runway* — visualizing how current usage trends toward the **exhaustion threshold** across different growth scenarios.",
-      mermaid: `flowchart TD
-    subgraph CurrentState["📊 Current State"]
-        USAGE["Current Usage\\n3,500 RPS"]
-        CAP["Provisioned Capacity\\n5,000 RPS"]
-        UTIL["Utilization: 70%"]
-    end
-
-    subgraph GrowthModels["📈 Growth Scenarios"]
-        LIN["Linear Growth\\n+300 RPS/month"]
-        EXP["Exponential Growth\\n+15%/month"]
-        EVT["Event-Driven Spike\\n+2x on launch day"]
-    end
-
-    subgraph Thresholds["⚠️ Capacity Thresholds"]
-        WARN["Warning: 80% utilization\\n4,000 RPS"]
-        CRIT["Critical: 90% utilization\\n4,500 RPS"]
-        MAX["Max Capacity\\n5,000 RPS"]
-    end
-
-    subgraph Actions["🔧 Actions by Runway"]
-        OK["> 90 days runway\\nMonitor & optimize"]
-        PLAN["30-90 days runway\\nBegin procurement"]
-        URGENT["< 30 days runway\\nEmergency scale-up"]
-    end
-
-    USAGE --> LIN & EXP & EVT
-    LIN --> WARN
-    EXP --> CRIT
-    EVT --> MAX
-    WARN --> OK
-    CRIT --> PLAN
-    MAX --> URGENT`,
+      title: "Resource Utilization State Machine",
+      kind: "state",
+      caption: "State transitions for a resource pool as utilization crosses warning and critical thresholds.",
+      mermaid: `stateDiagram-v2
+    [*] --> Normal
+    Normal --> Warning : utilization > 70%
+    Warning --> Critical : utilization > 85%
+    Critical --> Emergency : utilization > 95%
+    Warning --> Normal : scale out succeeds
+    Critical --> Warning : scale out succeeds
+    Emergency --> Critical : emergency capacity added
+    Emergency --> Incident : SLO breached`,
+    },
+    {
+      title: "Capacity Estimation Process",
+      kind: "sequence",
+      caption: "Sequence of interactions between teams when performing a formal capacity estimation exercise.",
+      mermaid: `sequenceDiagram
+    participant PM as Product
+    participant Eng as Engineering
+    participant Ops as SRE/Ops
+    participant Infra as Infrastructure
+    PM->>Eng: Share growth forecast
+    Eng->>Ops: Request baseline metrics
+    Ops-->>Eng: Current RPS, latency, utilization
+    Eng->>Eng: Model demand scenarios
+    Eng->>Infra: Submit capacity request
+    Infra-->>Eng: Cost estimate and timeline
+    Eng->>PM: Confirm runway and budget
+    Ops->>Infra: Execute provisioning
+    Infra-->>Ops: Resources ready
+    Ops->>Ops: Validate with load tests`,
     },
   ],
 

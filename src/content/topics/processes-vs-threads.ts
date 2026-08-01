@@ -29,9 +29,53 @@ export const processesVsThreads: TopicContent = {
   },
   diagrams: [
     {
-      title: "Process vs thread memory layout",
+      title: "Process vs Thread Memory Layout",
       kind: "architecture",
-      caption: "One process, shared heap and code, per-thread stacks — contrasted with two fully isolated processes.",
+      caption: "One process with a shared heap and code segment and per-thread stacks — contrasted with two fully isolated processes each with their own address space.",
+      mermaid: `graph TD
+    subgraph ProcessA["Process A - own address space"]
+        CodeA[Code Segment - shared read-only]
+        HeapA[Heap - shared between threads]
+        T1[Thread 1 Stack]
+        T2[Thread 2 Stack]
+        T3[Thread 3 Stack]
+    end
+    subgraph ProcessB["Process B - isolated address space"]
+        CodeB[Code Segment]
+        HeapB[Heap]
+        TB1[Thread 1 Stack]
+    end
+    ProcessA <-->|IPC: pipes, sockets, shared mem| ProcessB`,
+    },
+    {
+      title: "Process and Thread State Transitions",
+      kind: "state",
+      caption: "OS scheduler state machine: how processes and threads move between new, ready, running, waiting, and terminated states.",
+      mermaid: `stateDiagram-v2
+    [*] --> New: fork or pthread_create
+    New --> Ready: Admitted to ready queue
+    Ready --> Running: Scheduler dispatches
+    Running --> Ready: Preempted by scheduler or yield
+    Running --> Waiting: I/O request or lock wait
+    Waiting --> Ready: I/O complete or lock acquired
+    Running --> Terminated: exit or return
+    Terminated --> [*]`,
+    },
+    {
+      title: "Thread Communication and Synchronization",
+      kind: "flow",
+      caption: "How threads coordinate access to shared state using mutexes, condition variables, and atomic operations.",
+      mermaid: `flowchart TD
+    T1[Thread 1] --> TryLock{Try to acquire mutex}
+    TryLock -->|Available| Lock[Lock acquired\nEnter critical section]
+    TryLock -->|Held by other thread| Block[Block on mutex\nWait queue]
+    Lock --> Work[Read or write shared data]
+    Work --> Unlock[Release mutex]
+    Unlock --> Signal{Condition to signal?}
+    Signal -->|Yes| Cond[Broadcast or signal\ncondition variable]
+    Signal -->|No| Done([Thread continues])
+    Cond --> Wake[Waiting threads wake\nre-check condition]
+    Block --> TryLock`,
     },
   ],
   code: [

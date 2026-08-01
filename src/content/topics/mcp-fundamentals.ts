@@ -305,20 +305,71 @@ int main() {
     {
       title: "MCP Host-Client-Server Architecture",
       kind: "architecture",
-      caption:
-        "A host application contains one or more MCP clients, each connected to a separate MCP server via stdio or HTTP transport. Servers expose tools, resources, and prompts.",
+      caption: "A host application contains MCP clients, each connected to a separate MCP server via stdio or HTTP transport. Servers expose tools, resources, and prompts.",
+      mermaid: `graph TD
+    subgraph Host["Host Application - Claude Desktop or IDE"]
+        LLM["LLM Engine"]
+        C1["MCP Client 1"]
+        C2["MCP Client 2"]
+        C3["MCP Client 3"]
+        LLM --> C1
+        LLM --> C2
+        LLM --> C3
+    end
+    subgraph S1["MCP Server - Filesystem"]
+        T1["Tools - read_file, write_file"]
+        R1["Resources - file URIs"]
+    end
+    subgraph S2["MCP Server - Database"]
+        T2["Tools - query, insert"]
+        R2["Resources - schema URIs"]
+    end
+    subgraph S3["MCP Server - Web Search"]
+        T3["Tools - search, fetch"]
+    end
+    C1 -->|stdio transport| S1
+    C2 -->|HTTP transport| S2
+    C3 -->|stdio transport| S3`,
     },
     {
-      title: "MCP Connection Initialization Flow",
+      title: "MCP Connection Initialisation Sequence",
       kind: "sequence",
-      caption:
-        "Sequence of messages exchanged during MCP initialization: the client sends an initialize request, the server responds with capabilities, and the client confirms with an initialized notification.",
+      caption: "Messages exchanged during MCP session setup: initialize request, capabilities response, and initialized notification.",
+      mermaid: `sequenceDiagram
+    participant H as Host
+    participant C as MCP Client
+    participant S as MCP Server
+
+    H->>S: Spawn process or open HTTP connection
+    C->>S: initialize - protocolVersion, clientInfo, capabilities
+    S-->>C: initialize response - protocolVersion, serverInfo, capabilities
+    Note over C,S: Capabilities negotiated: tools, resources, prompts, sampling
+    C->>S: notifications/initialized
+    Note over C,S: Session active - client may now send requests
+    C->>S: tools/list
+    S-->>C: Array of tool definitions with inputSchema
+    C->>S: resources/list
+    S-->>C: Array of available resource URIs`,
     },
     {
       title: "MCP Tool Call Flow",
       kind: "flow",
-      caption:
-        "Flow from user prompt to tool execution: Host receives user input, LLM decides to call a tool, client sends tools/call request to server, server executes and returns result, LLM incorporates result into response.",
+      caption: "Flow from user prompt through LLM tool selection, client dispatch, server execution, and result incorporation.",
+      mermaid: `flowchart TD
+    A["User sends message to Host"] --> B["LLM receives message and tool definitions"]
+    B --> C{"LLM decides to\ncall a tool?"}
+    C -->|No| D["LLM responds directly to user"]
+    C -->|Yes| E["LLM produces tool name and arguments"]
+    E --> F["Host shows confirmation if configured"]
+    F --> G["Client sends tools/call to MCP Server"]
+    G --> H["Server validates input against JSON Schema"]
+    H --> I{"Validation\npassed?"}
+    I -->|No| J["Return error content with isError true"]
+    I -->|Yes| K["Server executes tool logic"]
+    K --> L["Return content array - text, image, or resource"]
+    J --> M["LLM receives result and incorporates into response"]
+    L --> M
+    M --> N["LLM responds to user or calls another tool"]`,
     },
   ],
   animations: [

@@ -294,14 +294,93 @@ end`,
   },
   diagrams: [
     {
-      title: "Pull-Based Configuration Management Architecture",
+      title: "Pull vs Push Configuration Architecture",
       kind: "architecture",
-      caption: "Shows how Puppet/Chef agents on managed nodes periodically pull their catalogs/run-lists from a central server, with facts stored in a database and configurations sourced from version control.",
+      caption: "Pull model: agents on nodes periodically poll the config server. Push model: a control machine initiates connections to managed nodes.",
+      mermaid: `graph TB
+    subgraph Pull["Pull Model - Puppet Chef"]
+        CS["Config Server"]
+        A1["Node Agent 1"] -->|"poll every 30min"| CS
+        A2["Node Agent 2"] -->|"poll every 30min"| CS
+        A3["Node Agent 3"] -->|"poll every 30min"| CS
+        CS --> VCS["Version Control"]
+        CS --> DB["Facts Database"]
+    end
+    subgraph Push["Push Model - Ansible"]
+        CM["Control Machine"]
+        CM -->|"SSH"| N1["Node 1"]
+        CM -->|"SSH"| N2["Node 2"]
+        CM -->|"SSH"| N3["Node 3"]
+        INV["Inventory File"] --> CM
+    end`,
     },
     {
       title: "Ansible Playbook Execution Flow",
       kind: "flow",
-      caption: "Traces the lifecycle of an Ansible playbook run: inventory parsing, fact gathering, task compilation, SSH transport, module execution on targets, handler notification, and result reporting.",
+      caption: "Step-by-step flow of an Ansible playbook run from inventory parsing through fact gathering, task execution, handler notification, and result reporting.",
+      mermaid: `flowchart TD
+    Start["ansible-playbook run"] --> Inv["Parse inventory"]
+    Inv --> Facts["Gather facts via setup module"]
+    Facts --> Tasks["Compile tasks with Jinja2"]
+    Tasks --> Check{"Condition met?"}
+    Check -->|"No"| Skip["Skip task"]
+    Check -->|"Yes"| Transfer["Transfer module to remote"]
+    Transfer --> Exec["Execute with sudo if needed"]
+    Exec --> Result{"Result?"}
+    Result -->|"changed"| Notify["Notify handlers"]
+    Result -->|"failed"| Fail["Abort or rescue block"]
+    Result -->|"ok"| Next["Next task"]
+    Notify --> Flush["Flush handlers at end of play"]
+    Flush --> Report["Print play recap"]`,
+    },
+    {
+      title: "Configuration Management Tool Landscape",
+      kind: "mindmap",
+      caption: "Mindmap of configuration management tools categorized by approach, language, and key characteristics.",
+      mermaid: `mindmap
+  root["Config Management Tools"]
+    Ansible
+      Agentless SSH push
+      YAML playbooks
+      Jinja2 templates
+      Ansible Vault secrets
+      Galaxy roles registry
+    Puppet
+      Agent pull model
+      Declarative DSL
+      PuppetDB facts
+      Hiera hierarchy
+      Forge modules
+    Chef
+      Ruby DSL cookbooks
+      Chef Server pull
+      Test Kitchen
+      Data bags secrets
+    SaltStack
+      Agent or agentless
+      YAML states
+      Pillar secrets
+      Salt Cloud`,
+    },
+    {
+      title: "Secret Delivery in Config Management",
+      kind: "sequence",
+      caption: "Secrets are stored encrypted in a vault, retrieved at runtime by the config management tool, and injected into nodes without appearing in plaintext in version control.",
+      mermaid: `sequenceDiagram
+    participant Dev as Developer
+    participant VCS as Git Repo
+    participant Vault as Secret Store
+    participant CM as Config Tool
+    participant Node as Managed Node
+
+    Dev->>Vault: Store secret encrypted
+    Dev->>VCS: Commit encrypted reference
+    CM->>VCS: Clone playbook or manifest
+    CM->>Vault: Authenticate and fetch secret
+    Vault-->>CM: Return plaintext secret
+    CM->>Node: Deploy config with injected secret
+    Node->>Node: Write to protected file
+    Note over Node: Secret never stored in VCS`,
     },
   ],
   animations: [

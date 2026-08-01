@@ -192,17 +192,80 @@ async function getViewCount(productId: string): Promise<number> {
     {
       title: "Embedding vs Referencing Decision Tree",
       kind: "flow",
-      caption: "Choose embedding when data is bounded, read together, and changes infrequently. Choose referencing when data is unbounded, queried independently, or shared.",
+      caption: "Choose embedding when data is bounded, co-read, and rarely changes. Choose referencing when data is unbounded, queried independently, or shared across multiple parents.",
+      mermaid: `flowchart TD
+    A[Start: Model Relationship] --> B{Data bounded in size?}
+    B -->|No - unbounded| R[Use Referencing]
+    B -->|Yes| C{Always read together?}
+    C -->|No - queried independently| R
+    C -->|Yes| D{Shared across multiple parents?}
+    D -->|Yes| R
+    D -->|No| E{Updated frequently?}
+    E -->|Yes - high write churn| R
+    E -->|No| M[Use Embedding]
+    M --> M1[Single document read]
+    R --> R1[Separate documents with ID refs]`,
     },
     {
       title: "DynamoDB Single-Table Design",
       kind: "architecture",
-      caption: "All entity types (users, orders, products) stored in one table with composite PK/SK keys and GSI overloading.",
+      caption: "All entity types stored in one table using overloaded composite PK and SK keys. GSIs serve additional access patterns.",
+      mermaid: `graph LR
+    subgraph Table ["DynamoDB Table"]
+        Row1["PK: USER#u1 | SK: METADATA"]
+        Row2["PK: USER#u1 | SK: ORDER#2024-01"]
+        Row3["PK: USER#u1 | SK: ORDER#2024-02"]
+        Row4["PK: PRODUCT#p1 | SK: METADATA"]
+    end
+    subgraph GSI ["GSI1 - Inverted Index"]
+        G1["GSI1PK: ORDER#2024-01 | GSI1SK: USER#u1"]
+        G2["GSI1PK: ORDER#2024-02 | GSI1SK: USER#u1"]
+    end
+    Row2 -.-> G1
+    Row3 -.-> G2`,
     },
     {
-      title: "One-to-Many Relationship Patterns",
+      title: "NoSQL Data Model Types",
       kind: "mindmap",
-      caption: "Three sub-patterns: one-to-few (embed array), one-to-many (reference array or parent ref), one-to-squillions (parent ref only).",
+      caption: "The four main NoSQL data model families and their typical use cases and representative databases.",
+      mermaid: `mindmap
+  root[NoSQL Models]
+    Document
+      Nested JSON objects
+      MongoDB, Firestore
+      Flexible schema
+      Rich query support
+    Key-Value
+      Simple get and set
+      Redis, DynamoDB
+      High throughput
+      Limited query patterns
+    Wide-Column
+      Sparse column families
+      Cassandra, HBase
+      Time-series, analytics
+      Partition key critical
+    Graph
+      Nodes and edges
+      Neo4j, Amazon Neptune
+      Relationship queries
+      Social networks`,
+    },
+    {
+      title: "One-to-Many Relationship Patterns in MongoDB",
+      kind: "flow",
+      caption: "Three sub-patterns based on cardinality: one-to-few uses embedding, one-to-many uses reference arrays or parent refs, one-to-squillions uses only parent refs.",
+      mermaid: `flowchart TD
+    A[One-to-Many Relationship] --> B{Cardinality?}
+    B -->|Few items 1-10| C[Embed array in parent document]
+    B -->|Many items 10-1000| D{Access pattern?}
+    B -->|Squillions 1000+| G[Parent ref on child document]
+    D -->|Mostly from parent| E[Array of child IDs in parent]
+    D -->|Mostly from child| F[Parent ref on each child]
+    C --> C1[Single read for parent and children]
+    E --> E1[Query parent then fetch IDs]
+    F --> F1[Index on parentId field]
+    G --> G1[Query by parentId with index]`,
     },
   ],
   animations: [

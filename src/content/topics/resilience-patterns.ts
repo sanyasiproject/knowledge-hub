@@ -502,51 +502,71 @@ function createResilientCall<T>(
     {
       title: "Circuit Breaker State Machine",
       kind: "state",
-      caption:
-        "The three states of a circuit breaker and the transitions between them based on failure thresholds, timeouts, and test call outcomes.",
+      caption: "The circuit breaker pattern has three states: Closed (normal), Open (blocking calls), and Half-Open (testing recovery). It prevents cascade failures.",
       mermaid: `stateDiagram-v2
     [*] --> Closed
-    Closed --> Open : Failure rate >= threshold
-    Open --> HalfOpen : Wait duration elapsed
-    HalfOpen --> Closed : Test calls succeed\\n(success >= successThreshold)
-    HalfOpen --> Open : Test call fails
-
-    state Closed {
-        [*] --> Monitoring
-        Monitoring --> Monitoring : Count successes/failures\\nin sliding window
-    }
-
-    state Open {
-        [*] --> Rejecting
-        Rejecting --> Rejecting : All calls rejected\\nimmediately (fail fast)
-    }
-
-    state HalfOpen {
-        [*] --> Testing
-        Testing --> Testing : Allow limited\\ntest requests through
-    }`,
+    Closed --> Open: Failure threshold exceeded
+    Open --> HalfOpen: Timeout elapsed - probe
+    HalfOpen --> Closed: Probe request succeeds
+    HalfOpen --> Open: Probe request fails
+    note right of Closed
+      Requests pass through
+      Failures counted
+    end note
+    note right of Open
+      All requests fail fast
+      No calls to downstream
+    end note
+    note right of HalfOpen
+      Single test request
+      Checking recovery
+    end note`,
     },
     {
-      title: "Resilience Pattern Layering",
+      title: "Bulkhead Pattern",
+      kind: "architecture",
+      caption: "Bulkheads isolate failures by partitioning resources into separate thread pools or connection pools. A failure in one bulkhead does not exhaust resources for others.",
+      mermaid: `graph TD
+    Client[Client Requests] --> LB[Load Balancer]
+    LB --> BH1[Bulkhead 1 - Search Service - 20 threads]
+    LB --> BH2[Bulkhead 2 - Payment Service - 10 threads]
+    LB --> BH3[Bulkhead 3 - Notification Service - 5 threads]
+    BH1 --> S[Search Backend]
+    BH2 --> P[Payment Backend]
+    BH3 --> N[Notification Backend]
+    S -->|Slow - fills pool| BH1
+    Note1[Payment and Notification unaffected] -.-> BH2
+    Note1 -.-> BH3`,
+    },
+    {
+      title: "Retry with Exponential Backoff",
       kind: "flow",
-      caption:
-        "How resilience patterns are layered around a downstream service call, from outermost (bulkhead) to innermost (timeout).",
+      caption: "Retry logic with exponential backoff and jitter reduces thundering herd on recovering services. Max retries prevent infinite loops.",
       mermaid: `flowchart TD
-    A[Incoming Request] --> B{Bulkhead\\nPermit available?}
-    B -- No --> B1[Reject: Resource limit]
-    B -- Yes --> C{Circuit Breaker\\nState?}
-    C -- OPEN --> C1[Reject: Circuit open]
-    C1 --> F[Fallback Response]
-    C -- CLOSED / HALF_OPEN --> D[Retry with Backoff]
-    D --> E{Timeout\\nExceeded?}
-    E -- Yes --> D1{Retries\\nremaining?}
-    D1 -- Yes --> D
-    D1 -- No --> G[Record failure]
-    G --> F
-    E -- No --> H[Downstream Service Call]
-    H -- Success --> I[Return response]
-    H -- Failure --> D1
-    B1 --> F`,
+    A([Make request]) --> B[Send request]
+    B --> C{Success?}
+    C -->|Yes| D([Return response])
+    C -->|No| E{Retryable error?}
+    E -->|No - 4xx| F([Fail immediately])
+    E -->|Yes - 5xx or timeout| G{Max retries reached?}
+    G -->|Yes| H([Return error])
+    G -->|No| I[Calculate backoff: 2^attempt * base + jitter]
+    I --> J[Wait backoff duration]
+    J --> B`,
+    },
+    {
+      title: "Resilience Patterns Interaction",
+      kind: "network",
+      caption: "How resilience patterns layer together: timeouts feed circuit breakers, circuit breakers trigger fallbacks, retries use backoff, and bulkheads isolate pools.",
+      mermaid: `graph LR
+    Timeout["Timeout"] --> CircuitBreaker["Circuit Breaker"]
+    CircuitBreaker --> Fallback["Fallback"]
+    CircuitBreaker --> Retry["Retry with Backoff"]
+    Retry --> Timeout
+    Bulkhead["Bulkhead"] --> Timeout
+    Fallback --> Cache["Cache"]
+    Fallback --> Default["Default Response"]
+    RateLimit["Rate Limiter"] --> CircuitBreaker`,
     },
   ],
 

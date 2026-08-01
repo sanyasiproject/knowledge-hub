@@ -311,53 +311,65 @@ setupChoreography().catch(console.error);`,
     {
       title: "Event-Driven Architecture Overview",
       kind: "architecture",
-      caption: "Producers publish events to the broker; consumers subscribe independently, enabling loose coupling and independent scaling.",
       mermaid: `graph LR
-  P1[Order Service] -->|OrderPlaced| B[Message Broker]
-  P2[Payment Service] -->|PaymentProcessed| B
-  B -->|OrderPlaced| C1[Inventory Service]
-  B -->|OrderPlaced| C2[Notification Service]
-  B -->|OrderPlaced| C3[Analytics Service]
-  B -->|PaymentProcessed| C4[Shipping Service]
-  B -->|PaymentProcessed| C2`,
+    subgraph Producers["Event Producers"]
+      P1["Order Service"]
+      P2["Payment Service"]
+    end
+    subgraph Broker["Message Broker"]
+      T1["Topic: order.placed"]
+      T2["Topic: payment.processed"]
+    end
+    subgraph Consumers["Event Consumers"]
+      C1["Inventory Service"]
+      C2["Notification Service"]
+      C3["Analytics Service"]
+      C4["Shipping Service"]
+    end
+    P1 -->|OrderPlaced| T1
+    P2 -->|PaymentProcessed| T2
+    T1 --> C1
+    T1 --> C2
+    T1 --> C3
+    T2 --> C4
+    T2 --> C2`,
+      caption: "Producers publish to topic channels; multiple consumers subscribe independently, enabling loose coupling and independent scaling.",
     },
     {
-      title: "Choreography vs Orchestration Flow",
+      title: "Choreography vs Orchestration",
       kind: "sequence",
-      caption: "Choreography: services react independently to events. Orchestration: a coordinator directs each step.",
       mermaid: `sequenceDiagram
-  participant OS as OrderService
-  participant Broker as Message Broker
-  participant PS as PaymentService
-  participant IS as InventoryService
-
-  rect rgb(200, 230, 255)
-  Note over OS, IS: Choreography Pattern
-  OS->>Broker: publish OrderPlaced
-  Broker->>PS: deliver OrderPlaced
-  Broker->>IS: deliver OrderPlaced
-  PS->>Broker: publish PaymentProcessed
-  IS->>Broker: publish StockReserved
-  end
-
-  rect rgb(255, 230, 200)
-  Note over OS, IS: Orchestration Pattern
-  OS->>PS: charge(orderId)
-  PS-->>OS: success
-  OS->>IS: reserve(orderId)
-  IS-->>OS: success
-  end`,
+    participant OS as OrderService
+    participant Broker as Message Broker
+    participant PS as PaymentService
+    participant IS as InventoryService
+    rect rgb(200, 230, 255)
+    Note over OS,IS: Choreography - services react to events
+    OS->>Broker: publish OrderPlaced
+    Broker->>PS: deliver OrderPlaced
+    Broker->>IS: deliver OrderPlaced
+    PS->>Broker: publish PaymentProcessed
+    IS->>Broker: publish StockReserved
+    end
+    rect rgb(255, 230, 200)
+    Note over OS,IS: Orchestration - coordinator directs steps
+    OS->>PS: charge orderId
+    PS-->>OS: success
+    OS->>IS: reserve orderId
+    IS-->>OS: success
+    end`,
+      caption: "Choreography: services react to events independently. Orchestration: a coordinator explicitly calls each service in sequence.",
     },
     {
-      title: "Event Types Mind Map",
+      title: "Event Type Taxonomy",
       kind: "mindmap",
-      caption: "Overview of event categories and their characteristics in EDA.",
       mermaid: `mindmap
-  root((EDA Events))
+  root((EDA Event Types))
     Domain Events
       OrderPlaced
       PaymentReceived
       Scoped to bounded context
+      Rich business meaning
     Integration Events
       Cross-context communication
       Stable versioned schemas
@@ -367,9 +379,31 @@ setupChoreography().catch(console.error);`,
       Consumer calls back for details
       Low schema coupling
     State Transfer Events
-      Full payload included
+      Full entity payload
       No callback needed
-      Higher schema coupling`,
+      Higher schema coupling
+    Commands
+      Intent to do something
+      Single targeted consumer
+      Different from events`,
+      caption: "Event types differ in payload size, coupling, and audience; choosing the right type affects consumer coupling and schema evolution.",
+    },
+    {
+      title: "Event Processing Guarantee Flow",
+      kind: "flow",
+      mermaid: `flowchart TD
+    A["Event arrives at consumer"] --> B{"Already processed?\nCheck idempotency key"}
+    B -->|Duplicate| C["Acknowledge and skip"]
+    B -->|New event| D["Begin processing"]
+    D --> E{"Processing succeeds?"}
+    E -->|Yes| F["Commit offset or ACK"]
+    E -->|No| G{"Retry limit\nreached?"}
+    G -->|No| H["Retry with backoff"]
+    H --> D
+    G -->|Yes| I["Route to dead letter queue"]
+    I --> J["Alert on-call team"]
+    F --> K["Publish downstream events"]`,
+      caption: "At-least-once delivery requires idempotent consumers; failed events after retry exhaustion go to DLQ for manual inspection.",
     },
   ],
   comparison: {

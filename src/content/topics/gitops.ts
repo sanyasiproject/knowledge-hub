@@ -235,15 +235,76 @@ spec:
   },
   diagrams: [
     {
-      title: "GitOps Reconciliation Architecture",
-      kind: "architecture",
-      caption: "Shows the pull-based flow from Git repository through the GitOps operator to the Kubernetes cluster, including the reconciliation feedback loop"
+      title: "GitOps Reconciliation Loop",
+      kind: "flow",
+      caption: "Continuous reconciliation between Git desired state and cluster actual state.",
+      mermaid: `flowchart TD
+    A[Developer commits to Git] --> B[Git Repository updated]
+    B --> C[GitOps Operator detects change]
+    C --> D{Desired equals Actual?}
+    D -- Yes --> E[No action needed]
+    D -- No --> F[Apply diff to cluster]
+    F --> G[Cluster state updated]
+    G --> H[Observe new actual state]
+    H --> D
+    E --> I[Continue watching]
+    I --> D`,
     },
     {
-      title: "GitOps Deployment Pipeline Flow",
-      kind: "flow",
-      caption: "End-to-end flow from developer commit through CI build, config repo update, operator sync, and cluster deployment with drift detection"
-    }
+      title: "GitOps Deployment Pipeline",
+      kind: "sequence",
+      caption: "End-to-end flow from code commit to production deployment via GitOps.",
+      mermaid: `sequenceDiagram
+    participant Dev as Developer
+    participant AppRepo as App Repo
+    participant CI as CI Pipeline
+    participant ConfigRepo as Config Repo
+    participant Operator as GitOps Operator
+    participant Cluster as K8s Cluster
+    Dev->>AppRepo: Push code change
+    AppRepo->>CI: Trigger build
+    CI->>CI: Build and test image
+    CI->>ConfigRepo: Update image tag in manifests
+    ConfigRepo->>Operator: Webhook or polling trigger
+    Operator->>Operator: Detect drift
+    Operator->>Cluster: Apply new manifests
+    Cluster-->>Operator: Reconciled successfully`,
+    },
+    {
+      title: "Push vs Pull Deployment Model",
+      kind: "architecture",
+      caption: "Comparing traditional push-based CD with GitOps pull-based deployment.",
+      mermaid: `graph TD
+    subgraph Push-Based CD
+        P1[CI Server] -->|kubectl apply with credentials| P2[K8s Cluster]
+    end
+    subgraph Pull-Based GitOps
+        G1[Git Repo] --> G2[Operator inside cluster]
+        G2 -->|pulls and applies manifests| G3[Cluster Resources]
+    end`,
+    },
+    {
+      title: "GitOps Tool Ecosystem",
+      kind: "mindmap",
+      caption: "Key features and concepts across popular GitOps tools.",
+      mermaid: `mindmap
+  root((GitOps Tools))
+    ArgoCD
+      Web UI
+      App of Apps
+      Sync waves
+      RBAC
+    Flux
+      CLI focused
+      Kustomize native
+      Image automation
+      Multi-tenancy
+    Core Concepts
+      Desired state in Git
+      Drift detection
+      Auto reconcile
+      Audit trail`,
+    },
   ],
   animations: [
     {

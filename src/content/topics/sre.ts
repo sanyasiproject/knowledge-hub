@@ -468,98 +468,72 @@ error_budget_policy:
 
   diagrams: [
     {
-      title: "SRE Incident Response Flow",
+      title: "SRE Toil vs Engineering Work",
       kind: "flow",
-      caption: "End-to-end incident lifecycle from detection through postmortem and follow-up action items.",
+      caption: "SRE teams cap toil at 50 percent of their time. The rest goes to engineering work that reduces future toil through automation and improved systems.",
       mermaid: `flowchart TD
-    A["Alert Fires\\n(SLO burn rate exceeded)"] --> B{"On-Call\\nAcknowledges?"}
-    B -- "Yes" --> C["Assess Severity\\n& Declare Incident Level"]
-    B -- "No (5 min)" --> B2["Escalate to\\nBackup On-Call"]
-    B2 --> C
-    C --> D{"Severity?"}
-    D -- "SEV1/SEV2" --> E["Open War Room\\n#inc-service-date"]
-    D -- "SEV3/SEV4" --> F["Individual\\nTroubleshooting"]
-    E --> G["Assign Roles:\\nIC / Ops Lead / Comms Lead"]
-    G --> H["Mitigate First:\\nRollback / Scale / Failover"]
-    F --> H
-    H --> I{"Service\\nRestored?"}
-    I -- "No" --> J["Escalate to\\nNext Expertise Tier"]
-    J --> H
-    I -- "Yes" --> K["Confirm Steady State\\n& Close Incident"]
-    K --> L["Schedule Blameless\\nPostmortem (48h)"]
-    L --> M["Write Postmortem:\\nTimeline + Root Cause + Actions"]
-    M --> N["Review & Publish\\nPostmortem"]
-    N --> O["Track Action Items\\nin Backlog"]
-    O --> P["Retrospective:\\nVerify Completion"]`,
+    A([SRE work items]) --> B{Is it toil?}
+    B -->|Yes| C{Toil > 50 percent of time?}
+    C -->|Yes| D[Escalate to reduce toil]
+    D --> E[Automate or eliminate]
+    C -->|No| F[Do the toil]
+    B -->|No - engineering work| G[Build automation]
+    G --> H[Improve reliability]
+    H --> I[Reduce future toil]
+    E --> I
+    F --> J{Toil automatable?}
+    J -->|Yes| K[Add to backlog]
+    J -->|No| L[Accept as necessary]`,
     },
     {
-      title: "SRE Error Budget Lifecycle",
+      title: "Incident Response Lifecycle",
       kind: "state",
-      caption: "State transitions of the error budget over a 30-day rolling window, showing policy actions at each threshold.",
+      caption: "The stages of incident response from detection through resolution and post-incident review, ensuring learning from every incident.",
       mermaid: `stateDiagram-v2
-    [*] --> Healthy
-    Healthy: Budget > 75%\\nShip features freely
-    Healthy --> Caution: Budget drops below 75%
-
-    Caution: Budget 50-75%\\nIncrease canary duration
-    Caution --> Healthy: Budget recovers above 75%
-    Caution --> Warning: Budget drops below 50%
-
-    Warning: Budget 25-50%\\nRequire SRE approval for deploys
-    Warning --> Caution: Budget recovers above 50%
-    Warning --> Critical: Budget drops below 25%
-
-    Critical: Budget < 25%\\nFreeze feature deployments
-    Critical --> Warning: Budget recovers above 25%
-    Critical --> Exhausted: Budget reaches 0%
-
-    Exhausted: Budget = 0%\\nReliability sprint\\nVP override required
-    Exhausted --> Critical: Budget recovers above 0%`,
+    [*] --> Detected: Alert fires or user reports
+    Detected --> Triaged: Severity assessed
+    Triaged --> Investigating: Incident commander assigned
+    Investigating --> Mitigating: Root cause identified
+    Mitigating --> Resolved: Service restored
+    Resolved --> PostMortem: Blameless review
+    PostMortem --> ActionItems: Improvements identified
+    ActionItems --> [*]: Action items tracked to completion
+    Investigating --> Escalated: Need more help
+    Escalated --> Investigating: Additional responders engaged`,
     },
     {
-      title: "SRE Observability Architecture",
+      title: "SRE Reliability Hierarchy",
       kind: "architecture",
-      caption: "How metrics, logs, and traces flow from services through the observability stack to dashboards and alerts.",
-      mermaid: `flowchart LR
-    subgraph Services
-      S1["Service A"]
-      S2["Service B"]
-      S3["Service C"]
-    end
-
-    subgraph Collection["Collection Layer"]
-      P["Prometheus\\n(Metrics)"]
-      L["Loki\\n(Logs)"]
-      J["Jaeger\\n(Traces)"]
-    end
-
-    subgraph Storage["Storage & Query"]
-      TS["Thanos / Cortex\\n(Long-term metrics)"]
-      LS["Log Storage\\n(S3 / GCS)"]
-      TS2["Trace Storage\\n(Elasticsearch)"]
-    end
-
-    subgraph Presentation["Presentation & Action"]
-      G["Grafana\\n(Dashboards)"]
-      AM["Alertmanager\\n(Routing)"]
-      PD["PagerDuty\\n(Paging)"]
-      SL["Slack\\n(Notifications)"]
-      TK["Jira / Linear\\n(Tickets)"]
-    end
-
-    S1 & S2 & S3 -->|"/metrics"| P
-    S1 & S2 & S3 -->|"stdout/stderr"| L
-    S1 & S2 & S3 -->|"OpenTelemetry"| J
-
-    P --> TS
-    L --> LS
-    J --> TS2
-
-    TS & LS & TS2 --> G
-    P -->|"alert rules"| AM
-    AM -->|"SEV1/SEV2"| PD
-    AM -->|"SEV3"| SL
-    AM -->|"SEV4"| TK`,
+      caption: "The SRE reliability pyramid: monitoring and alerting at the base, then incident response, post-mortems, capacity planning, and change management.",
+      mermaid: `graph TD
+    CM[Change Management - safe deployments] --> CP[Capacity Planning - headroom]
+    CP --> PM[Post-Mortems - learning from failures]
+    PM --> IR[Incident Response - fast MTTR]
+    IR --> MA[Monitoring and Alerting - fast MTTD]
+    MA --> Found[Foundation: SLIs and SLOs]`,
+    },
+    {
+      title: "Four Golden Signals",
+      kind: "mindmap",
+      caption: "Google SRE's four golden signals for monitoring any service: latency, traffic, errors, and saturation, each capturing a different failure mode.",
+      mermaid: `mindmap
+  root((Four Golden Signals))
+    Latency
+      Time to serve requests
+      p50 p95 p99 percentiles
+      Distinguish success vs error latency
+    Traffic
+      Request rate per second
+      Transactions per second
+      Active connections
+    Errors
+      Explicit 5xx errors
+      Implicit wrong content
+      Rate and count
+    Saturation
+      How full is the service
+      CPU memory queue depth
+      Leading indicator of degradation`,
     },
   ],
 

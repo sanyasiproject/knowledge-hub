@@ -148,14 +148,87 @@ int main() {
   ],
   diagrams: [
     {
-      title: "JWT structure",
+      title: "JWT Token Structure",
       kind: "architecture",
-      caption: "Three base64url parts: Header (alg, typ) + Payload (sub, exp, iat, custom claims) + Signature (HMAC/RSA of header.payload).",
+      caption: "A JWT has three base64url-encoded parts separated by dots. The payload is readable by anyone — only the signature proves integrity. Use JWE to encrypt the payload.",
+      mermaid: `graph LR
+    JWT["eyJhbGc...eyJzdWI...SflKxw"] --> H
+    JWT --> P
+    JWT --> S
+    subgraph H["Header - base64url"]
+      HA["alg: HS256 or RS256"]
+      HT["typ: JWT"]
+    end
+    subgraph P["Payload - base64url - READABLE"]
+      PS["sub: user ID"]
+      PE["exp: expiration timestamp"]
+      PI["iat: issued at"]
+      PC["roles: custom claim"]
+    end
+    subgraph S["Signature - HMAC or RSA"]
+      SIG["HMAC-SHA256\nheader.payload\nsigned with secret or private key"]
+    end`,
     },
     {
-      title: "Access + Refresh token flow",
+      title: "Access and Refresh Token Flow",
       kind: "sequence",
-      caption: "Client authenticates → receives access token (15min) + refresh token (7d). Access token is used for API calls. When expired, refresh token is sent to get a new access token.",
+      caption: "Short-lived access tokens are used for API calls. When they expire, the client exchanges the long-lived revocable refresh token for a new pair.",
+      mermaid: `sequenceDiagram
+    participant C as Client
+    participant A as Auth Server
+    participant API as API Server
+    C->>A: POST /login credentials
+    A-->>C: access_token 15min + refresh_token 7d
+    C->>API: GET /data Authorization: Bearer access_token
+    API->>API: verify signature and exp
+    API-->>C: 200 data
+    Note over C,API: access token expires after 15 min
+    C->>A: POST /refresh body: refresh_token
+    A->>A: validate refresh_token in DB\ncheck not revoked
+    A-->>C: new access_token + new refresh_token
+    Note over A: old refresh_token invalidated - rotation`,
+    },
+    {
+      title: "HS256 vs RS256 Signing",
+      kind: "flow",
+      caption: "HS256 uses a shared secret so all services that verify tokens must know the secret. RS256 uses a private key to sign and a public key to verify, enabling microservice distribution.",
+      mermaid: `flowchart TD
+    A["Choose signing algorithm"] --> B{"Architecture?"}
+    B -->|Single service| HS["HS256 - Symmetric\nAuth service signs with secret\nSame secret used to verify\nSimple but secret must be shared"]
+    B -->|Microservices| RS["RS256 - Asymmetric\nAuth service signs with private key\nAny service verifies with public key\nPublic key published at JWKS endpoint"]
+    RS --> JWKS["/.well-known/jwks.json\nPublic keys for key rotation\nServices fetch and cache"]
+    HS --> RISK["Risk: secret compromise\naffects all services"]`,
+    },
+    {
+      title: "JWT Security Threat Model",
+      kind: "mindmap",
+      caption: "Common JWT vulnerabilities and their mitigations. Algorithm confusion and none algorithm attacks are critical to prevent at the server verification step.",
+      mermaid: `mindmap
+    root((JWT Security))
+      Attacks
+        alg none attack
+          library accepts unsigned tokens
+          always whitelist expected algorithm
+        Algorithm confusion
+          RS256 public key used as HS256 secret
+          hardcode expected algorithm server-side
+        XSS token theft
+          token in localStorage readable by JS
+          use httpOnly cookies
+        Token replay
+          stolen token used until expiry
+          short access token lifetime 15min
+      Best Practices
+        Storage
+          httpOnly Secure SameSite cookie
+          never localStorage
+        Verification
+          whitelist algorithms in verify call
+          always check exp iss aud
+        Revocation
+          short access token lifetime
+          refresh token rotation
+          jti blocklist if needed`,
     },
   ],
   animations: [

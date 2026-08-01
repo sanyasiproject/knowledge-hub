@@ -447,73 +447,85 @@ void batched_attention(
   ],
   diagrams: [
     {
-      title: "Speculative Decoding Flow",
+      title: "LLM Inference Request Pipeline",
       kind: "sequence",
-      caption: "The draft model proposes multiple tokens; the target model verifies them in a single forward pass. Accepted tokens are kept, the first rejected token is resampled, and subsequent draft tokens are discarded.",
+      caption: "Flow of a request through an optimized LLM inference pipeline.",
       mermaid: `sequenceDiagram
     participant Client
-    participant Draft as Draft Model (small)
-    participant Target as Target Model (large)
-    participant Output as Output Buffer
-
-    Client->>Draft: Generate k candidate tokens
-    loop For each of k tokens
-        Draft->>Draft: Autoregressive decode (fast)
+    participant Gateway as API Gateway
+    participant Cache as KV Cache
+    participant Batcher as Request Batcher
+    participant GPU as GPU Worker
+    Client->>Gateway: Inference request
+    Gateway->>Cache: Check prefix KV cache
+    alt Cache hit
+        Cache-->>Gateway: Return cached attention states
+    else Cache miss
+        Gateway->>Batcher: Enqueue request
+        Batcher->>Batcher: Dynamic batching window
+        Batcher->>GPU: Batched forward pass
+        GPU-->>Cache: Store KV states
+        GPU-->>Gateway: Generated tokens
     end
-    Draft-->>Target: Send k draft tokens + probabilities
-
-    Target->>Target: Single forward pass over all k tokens
-    Target->>Target: Compare draft vs target distributions
-
-    alt All k tokens accepted
-        Target-->>Output: Append all k tokens
-        Target-->>Output: Sample bonus token (k+1)
-    else Token j rejected (j ≤ k)
-        Target-->>Output: Append tokens 1..j-1 (accepted)
-        Target->>Target: Resample token j from corrected distribution
-        Target-->>Output: Append resampled token j
-        Note over Target: Discard draft tokens j+1..k
-    end
-
-    Output-->>Client: Return accepted tokens
-    Client->>Draft: Continue from last accepted position`,
+    Gateway-->>Client: Streamed response`,
     },
     {
-      title: "Inference Optimization Decision Tree",
+      title: "Quantization Precision Decision",
       kind: "flow",
-      caption: "A practical guide for choosing inference optimizations based on deployment constraints and performance goals.",
+      caption: "Selecting model quantization precision based on constraints.",
       mermaid: `flowchart TD
-    Start([Start: Optimize Inference]) --> MemCheck{Memory constrained?}
-
-    MemCheck -->|Yes| QuantQ{Acceptable quality loss?}
-    QuantQ -->|Minimal loss OK| INT8[Apply INT8 Quantization<br/>~2x memory reduction]
-    QuantQ -->|More aggressive| INT4[Apply INT4 Quantization<br/>~4x memory reduction]
-    QuantQ -->|No loss allowed| MultiGPU[Use Tensor Parallelism<br/>across multiple GPUs]
-
-    MemCheck -->|No| ThroughputCheck{Throughput or latency goal?}
-
-    ThroughputCheck -->|Throughput| BatchQ{Many concurrent requests?}
-    BatchQ -->|Yes| ContBatch[Enable Continuous Batching<br/>+ PagedAttention]
-    BatchQ -->|No| PrefixQ{Shared prefix across requests?}
-    PrefixQ -->|Yes| PrefixCache[Enable Prefix Caching]
-    PrefixQ -->|No| FlashAttn[Enable Flash Attention<br/>+ Operator Fusion]
-
-    ThroughputCheck -->|Latency| SpecQ{Draft model available?}
-    SpecQ -->|Yes| SpecDec[Apply Speculative Decoding<br/>2-3x latency reduction]
-    SpecQ -->|No| MedusaQ{Can add prediction heads?}
-    MedusaQ -->|Yes| Medusa[Use Medusa / EAGLE<br/>No separate draft model needed]
-    MedusaQ -->|No| FlashAttn2[Enable Flash Attention<br/>+ KV Cache Optimization]
-
-    INT8 --> Combine[Combine with batching<br/>and caching strategies]
-    INT4 --> Combine
-    MultiGPU --> Combine
-    ContBatch --> Measure([Benchmark and iterate])
-    PrefixCache --> Measure
-    FlashAttn --> Measure
-    SpecDec --> Measure
-    Medusa --> Measure
-    FlashAttn2 --> Measure
-    Combine --> Measure`,
+    A[Deploy inference model] --> B{Memory constrained?}
+    B -- No --> C[FP32 full precision]
+    B -- Yes --> D{Accuracy critical?}
+    D -- Yes --> E[BF16 or FP16 mixed precision]
+    D -- No --> F{Extreme memory constraint?}
+    F -- Yes --> G[INT4 quantization GPTQ or AWQ]
+    F -- No --> H[INT8 quantization]
+    G --> I[Benchmark accuracy regression]
+    H --> I
+    E --> J[Deploy to production]
+    I --> J`,
+    },
+    {
+      title: "Inference Optimization Techniques",
+      kind: "mindmap",
+      caption: "Key techniques to improve LLM inference throughput and latency.",
+      mermaid: `mindmap
+  root((Inference Optimization))
+    Batching
+      Dynamic batching
+      Continuous batching
+    KV Cache
+      Prefix caching
+      PagedAttention vLLM
+    Quantization
+      INT8 post-training
+      INT4 GPTQ
+      AWQ activation aware
+    Parallelism
+      Tensor parallelism
+      Pipeline parallelism
+    Compilation
+      TorchCompile
+      TensorRT
+      XLA`,
+    },
+    {
+      title: "Continuous vs Static Batching",
+      kind: "architecture",
+      caption: "How continuous batching improves GPU utilization over static batching.",
+      mermaid: `graph TD
+    subgraph Static Batching
+        SB1[Full batch arrives] --> SB2[All requests run together]
+        SB2 --> SB3[Wait for all to finish]
+        SB3 --> SB4[GPU idles between batches]
+    end
+    subgraph Continuous Batching
+        CB1[Request arrives] --> CB2[Add to active batch]
+        CB2 --> CB3[Finished request leaves]
+        CB3 --> CB4[New request fills slot]
+        CB4 --> CB5[GPU always utilized]
+    end`,
     },
   ],
   comparison: {
