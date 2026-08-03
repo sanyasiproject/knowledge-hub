@@ -1,6 +1,27 @@
 import { Link, useSearchParams } from "react-router-dom";
 import { searchTopics, topicPath } from "../data/taxonomy";
+import { getContent } from "../content";
 import { Card, LevelBadge } from "../components/ui/primitives";
+import { ContentCompletenessBadge } from "../components/ui/ProgressBadge";
+
+const CONTENT_KEYS = [
+  "quickSummary", "detailed", "deepDive", "code", "diagrams", "animations",
+  "comparison", "interviewQA", "followUps", "mcqs", "exercises", "flashcards",
+  "revisionNotes", "cheatSheet", "resources", "glossary",
+] as const;
+const TOTAL_SECTIONS = CONTENT_KEYS.length;
+
+function countAuthored(topicSlug: string): number {
+  const c = getContent(topicSlug);
+  if (!c) return 0;
+  return CONTENT_KEYS.filter((k) => {
+    const v = c[k];
+    if (v == null) return false;
+    if (Array.isArray(v)) return v.length > 0;
+    if (typeof v === "object") return Object.keys(v).length > 0;
+    return true;
+  }).length;
+}
 
 export function SearchResults() {
   const [params] = useSearchParams();
@@ -32,9 +53,12 @@ export function SearchResults() {
                   </div>
                 </div>
                 <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{hit.topic.summary}</p>
-                <p className="mt-2 text-xs font-medium text-brand-600 dark:text-brand-300">
-                  {hit.domain.title} · {hit.category.title}
-                </p>
+                <div className="mt-2 flex items-center justify-between">
+                  <p className="text-xs font-medium text-brand-600 dark:text-brand-300">
+                    {hit.domain.title} &middot; {hit.category.title}
+                  </p>
+                  <ContentCompletenessBadge authored={countAuthored(hit.topic.slug)} total={TOTAL_SECTIONS} />
+                </div>
               </Card>
             </Link>
           ))}

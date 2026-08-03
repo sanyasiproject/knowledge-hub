@@ -33,3 +33,82 @@ body {
 .thin-scroll::-webkit-scrollbar-track {
   @apply bg-transparent;
 }
+
+/* ── Print styles ──────────────────────────────────────────────────── */
+@media print {
+  /* Hide non-content chrome */
+  header,
+  nav,
+  aside,
+  .sidebar,
+  button,
+  .back-to-top,
+  [aria-label="Toggle navigation"],
+  [aria-label="Toggle theme"],
+  [aria-label="Random topic"],
+  [aria-label="Back to top"] {
+    display: none !important;
+  }
+
+  /* Let content fill the page */
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  main {
+    padding: 0 !important;
+    max-width: 100% !important;
+  }
+  .mx-auto {
+    max-width: 100% !important;
+  }
+
+  /* Expand all sections (remove collapsed states) */
+  section,
+  details {
+    display: block !important;
+    visibility: visible !important;
+  }
+  [class*="hidden"] {
+    display: block !important;
+  }
+
+  /* Remove shadows, borders, and hover effects */
+  .shadow-sm,
+  .shadow-md,
+  .shadow-lg,
+  .shadow-xl,
+  .shadow-2xl {
+    box-shadow: none !important;
+  }
+
+  /* Clean typography */
+  h1, h2, h3 {
+    page-break-after: avoid;
+  }
+  pre, code, table {
+    page-break-inside: avoid;
+  }
+  a {
+    text-decoration: underline;
+    color: inherit !important;
+  }
+
+  /* Remove sticky positioning */
+  .sticky {
+    position: static !important;
+  }
+
+  /* Remove fixed elements */
+  .fixed {
+    display: none !important;
+  }
+
+  /* Remove grid layout for sidebar */
+  .lg\:grid {
+    display: block !important;
+  }
+  .lg\:grid-cols-\[1fr_15rem\] {
+    grid-template-columns: 1fr !important;
+  }
+}

@@ -6,6 +6,9 @@ import { DomainPage } from "./pages/DomainPage";
 import { CategoryPage } from "./pages/CategoryPage";
 import { TopicPage } from "./pages/TopicPage";
 import { SearchResults } from "./pages/SearchResults";
+import { LearningPaths } from "./pages/LearningPaths";
+import { LearningPathDetail } from "./pages/LearningPathDetail";
+import { Bookmarks } from "./pages/Bookmarks";
 import { NotFound } from "./pages/NotFound";
 
 /** Scroll to top on every route change (but honor in-page #anchors). */
@@ -26,6 +29,9 @@ export default function App() {
         <Route path="/domain/:domainSlug" element={<DomainPage />} />
         <Route path="/domain/:domainSlug/:categorySlug" element={<CategoryPage />} />
         <Route path="/topic/:domainSlug/:categorySlug/:topicSlug" element={<TopicPage />} />
+        <Route path="/paths" element={<LearningPaths />} />
+        <Route path="/paths/:pathSlug" element={<LearningPathDetail />} />
+        <Route path="/bookmarks" element={<Bookmarks />} />
         <Route path="/search" element={<SearchResults />} />
         <Route path="*" element={<NotFound />} />
       </Routes>

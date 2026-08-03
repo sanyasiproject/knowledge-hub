@@ -74,10 +74,35 @@ import { decorator } from "./topics/decorator";
 import { deliveryGuarantees } from "./topics/delivery-guarantees";
 import { dependencyInversion } from "./topics/dependency-inversion";
 import { deploymentModels } from "./topics/deployment-models";
+import { designAmazon } from "./topics/design-amazon";
+import { designCdn } from "./topics/design-cdn";
 import { designChatSystem } from "./topics/design-chat-system";
+import { designDistributedCache } from "./topics/design-distributed-cache";
+import { designDistributedId } from "./topics/design-distributed-id";
+import { designGoogleDocs } from "./topics/design-google-docs";
+import { designGoogleMaps } from "./topics/design-google-maps";
+import { designInstagram } from "./topics/design-instagram";
+import { designLoadBalancer } from "./topics/design-load-balancer";
+import { designMessageQueue } from "./topics/design-message-queue";
+import { designNetflix } from "./topics/design-netflix";
 import { designNewsFeed } from "./topics/design-news-feed";
+import { designNotificationSystem } from "./topics/design-notification-system";
+import { designObjectStorage } from "./topics/design-object-storage";
+import { designPastebin } from "./topics/design-pastebin";
+import { designPaymentSystem } from "./topics/design-payment-system";
 import { designRateLimiter } from "./topics/design-rate-limiter";
+import { designSearchEngine } from "./topics/design-search-engine";
+import { designSpotify } from "./topics/design-spotify";
+import { designTaskScheduler } from "./topics/design-task-scheduler";
+import { designTicketmaster } from "./topics/design-ticketmaster";
+import { designTinder } from "./topics/design-tinder";
+import { designTwitter } from "./topics/design-twitter";
+import { designTypeahead } from "./topics/design-typeahead";
+import { designUber } from "./topics/design-uber";
 import { designUrlShortener } from "./topics/design-url-shortener";
+import { designWebCrawler } from "./topics/design-web-crawler";
+import { designWhatsapp } from "./topics/design-whatsapp";
+import { designYoutube } from "./topics/design-youtube";
 import { devopsCulture } from "./topics/devops-culture";
 import { distributedCaching } from "./topics/distributed-caching";
 import { distributedTracing } from "./topics/distributed-tracing";
@@ -350,10 +375,35 @@ export const CONTENT: ContentMap = {
   "delivery-guarantees": deliveryGuarantees,
   "dependency-inversion": dependencyInversion,
   "deployment-models": deploymentModels,
+  "design-amazon": designAmazon,
+  "design-cdn": designCdn,
   "design-chat-system": designChatSystem,
+  "design-distributed-cache": designDistributedCache,
+  "design-distributed-id": designDistributedId,
+  "design-google-docs": designGoogleDocs,
+  "design-google-maps": designGoogleMaps,
+  "design-instagram": designInstagram,
+  "design-load-balancer": designLoadBalancer,
+  "design-message-queue": designMessageQueue,
+  "design-netflix": designNetflix,
   "design-news-feed": designNewsFeed,
+  "design-notification-system": designNotificationSystem,
+  "design-object-storage": designObjectStorage,
+  "design-pastebin": designPastebin,
+  "design-payment-system": designPaymentSystem,
   "design-rate-limiter": designRateLimiter,
+  "design-search-engine": designSearchEngine,
+  "design-spotify": designSpotify,
+  "design-task-scheduler": designTaskScheduler,
+  "design-ticketmaster": designTicketmaster,
+  "design-tinder": designTinder,
+  "design-twitter": designTwitter,
+  "design-typeahead": designTypeahead,
+  "design-uber": designUber,
   "design-url-shortener": designUrlShortener,
+  "design-web-crawler": designWebCrawler,
+  "design-whatsapp": designWhatsapp,
+  "design-youtube": designYoutube,
   "devops-culture": devopsCulture,
   "distributed-caching": distributedCaching,
   "distributed-tracing": distributedTracing,

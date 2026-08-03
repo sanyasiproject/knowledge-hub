@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { domainsByGroup, hubStats } from "../data/taxonomy";
 import { StatusBadge } from "../components/ui/primitives";
+import { useProgress } from "../hooks/useProgress";
 
 /* ---- Group accent colours -------------------------------------------------------- */
 const GROUP_ACCENT: Record<string, { border: string; bg: string; icon: string }> = {
@@ -34,6 +35,8 @@ const LEVEL_CHIP: Record<string, string> = {
 export function Home() {
   const groups = domainsByGroup();
   const stats = hubStats();
+  const { getStats, resetProgress } = useProgress();
+  const progressStats = getStats();
 
   return (
     <>
@@ -153,6 +156,47 @@ export function Home() {
             </div>
           ))}
         </section>
+
+        {/* ── Your Progress ───────────────────────────────────────────────── */}
+        {progressStats.topicsRead > 0 && (
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-widest text-slate-400">Your Progress</h2>
+              <button
+                onClick={() => { if (window.confirm("Reset all progress? This cannot be undone.")) resetProgress(); }}
+                className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-medium text-slate-500 transition hover:border-red-300 hover:text-red-600 dark:border-slate-700 dark:hover:border-red-700 dark:hover:text-red-400"
+              >
+                Reset Progress
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <div className="text-2xl font-extrabold tabular-nums text-brand-600 dark:text-brand-300">
+                  {progressStats.topicsRead}/{stats.topics}
+                </div>
+                <div className="text-sm text-slate-500">topics explored</div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                  <div
+                    className="h-full rounded-full bg-brand-500"
+                    style={{ width: `${Math.round((progressStats.topicsRead / stats.topics) * 100)}%` }}
+                  />
+                </div>
+              </div>
+              <div>
+                <div className="text-2xl font-extrabold tabular-nums text-brand-600 dark:text-brand-300">
+                  {progressStats.mcqsTaken}
+                </div>
+                <div className="text-sm text-slate-500">MCQ quizzes taken</div>
+              </div>
+              <div>
+                <div className="text-2xl font-extrabold tabular-nums text-brand-600 dark:text-brand-300">
+                  {progressStats.flashcardsReviewed}
+                </div>
+                <div className="text-sm text-slate-500">flashcard sets reviewed</div>
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* ── What you get strip ─────────────────────────────────────────────── */}
         <section className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-6 dark:border-slate-800 dark:from-slate-900 dark:to-slate-900/60">

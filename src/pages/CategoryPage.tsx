@@ -1,9 +1,31 @@
 import { Link, useParams } from "react-router-dom";
 import { getCategory, getDomain } from "../data/taxonomy";
 import { CATEGORY_STRUCTURE } from "../data/categoryStructure";
+import { getContent } from "../content";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { Card, LevelBadge } from "../components/ui/primitives";
+import { ProgressBadge, ContentCompletenessBadge } from "../components/ui/ProgressBadge";
 import { NotFound } from "./NotFound";
+
+/** Count how many of the standard content sections are populated for a topic. */
+const CONTENT_KEYS = [
+  "quickSummary", "detailed", "deepDive", "code", "diagrams", "animations",
+  "comparison", "interviewQA", "followUps", "mcqs", "exercises", "flashcards",
+  "revisionNotes", "cheatSheet", "resources", "glossary",
+] as const;
+const TOTAL_SECTIONS = CONTENT_KEYS.length;
+
+function countAuthored(topicSlug: string): number {
+  const c = getContent(topicSlug);
+  if (!c) return 0;
+  return CONTENT_KEYS.filter((k) => {
+    const v = c[k];
+    if (v == null) return false;
+    if (Array.isArray(v)) return v.length > 0;
+    if (typeof v === "object") return Object.keys(v).length > 0;
+    return true;
+  }).length;
+}
 
 /**
  * The category overview. Renders the STANDARD CATEGORY STRUCTURE identically
@@ -31,19 +53,26 @@ export function CategoryPage() {
       <section className="mb-10">
         <h2 className="mb-3 text-lg font-bold text-slate-900 dark:text-white">Topics in this category</h2>
         <div className="grid gap-3 sm:grid-cols-2">
-          {category.topics.map((t) => (
-            <Link key={t.slug} to={`/topic/${domain.slug}/${category.slug}/${t.slug}`}>
-              <Card hover className="h-full">
-                <div className="mb-1 flex items-center gap-2">
-                  <h3 className="font-semibold text-slate-900 dark:text-white">{t.title}</h3>
-                  <div className="ml-auto">
-                    <LevelBadge level={t.level} />
+          {category.topics.map((t) => {
+            const authored = countAuthored(t.slug);
+            return (
+              <Link key={t.slug} to={`/topic/${domain.slug}/${category.slug}/${t.slug}`}>
+                <Card hover className="h-full">
+                  <div className="mb-1 flex items-center gap-2">
+                    <ProgressBadge topicSlug={t.slug} />
+                    <h3 className="font-semibold text-slate-900 dark:text-white">{t.title}</h3>
+                    <div className="ml-auto">
+                      <LevelBadge level={t.level} />
+                    </div>
                   </div>
-                </div>
-                <p className="text-sm text-slate-500 dark:text-slate-400">{t.summary}</p>
-              </Card>
-            </Link>
-          ))}
+                  <p className="text-sm text-slate-500 dark:text-slate-400">{t.summary}</p>
+                  <div className="mt-2">
+                    <ContentCompletenessBadge authored={authored} total={TOTAL_SECTIONS} />
+                  </div>
+                </Card>
+              </Link>
+            );
+          })}
         </div>
       </section>
 
