@@ -100,6 +100,11 @@ Best practice: use API-level enforcement when available, with prompt-level instr
       a: "Implement a validation-retry loop: parse and validate the model's output against the schema. If validation fails, send the validation error back to the model with the original prompt and ask it to fix the output. Set a maximum retry count (typically 2-3). Log failures for monitoring. For critical pipelines, fall back to a more capable model or manual review if retries are exhausted.",
     },
   ],
+  followUps: [
+    "What's the difference between JSON mode and a strict schema?",
+    "How do you handle a response truncated by max_tokens mid-object?",
+    "Why do deeply nested schemas degrade quality?",
+  ],
   mcqs: [
     {
       q: "What does constrained decoding do during structured output generation?",
@@ -189,185 +194,87 @@ Best practice: use API-level enforcement when available, with prompt-level instr
   ],
   code: [
     {
-      language: "cpp",
-      caption: "**Tool use / function calling** with the Anthropic API in C++ -- defining tools and handling responses",
-      source: `#include <iostream>
-#include <string>
-#include <curl/curl.h>
-#include <nlohmann/json.hpp>
+      language: "typescript",
+      caption: "Tool calling with a JSON Schema — the output cannot be malformed",
+      source: `import Anthropic from "@anthropic-ai/sdk";
 
-using json = nlohmann::json;
+const client = new Anthropic();
 
-// libcurl write callback
-size_t write_cb(char* ptr, size_t size, size_t nmemb, std::string* data) {
-    data->append(ptr, size * nmemb);
-    return size * nmemb;
-}
-
-int main() {
-    // Define tools with clear descriptions and typed parameters
-    json tools = json::array({
-        {
-            {"name", "get_weather"},
-            {"description", "Get the current weather for a specific location. "
-                            "Use this when the user asks about weather conditions."},
-            {"input_schema", {
-                {"type", "object"},
-                {"properties", {
-                    {"location", {
-                        {"type", "string"},
-                        {"description", "City and country, e.g. 'London, UK'"}
-                    }},
-                    {"units", {
-                        {"type", "string"},
-                        {"enum", {"celsius", "fahrenheit"}},
-                        {"description", "Temperature unit preference"}
-                    }}
-                }},
-                {"required", {"location"}}
-            }}
-        }
-    });
-
-    // Build the request body
-    json request_body = {
-        {"model", "claude-sonnet-4-20250514"},
-        {"max_tokens", 1024},
-        {"tools", tools},
-        {"messages", json::array({
-            {{"role", "user"}, {"content", "What's the weather in Tokyo?"}}
-        })}
-    };
-
-    // Send request via libcurl
-    CURL* curl = curl_easy_init();
-    std::string response_str;
-    struct curl_slist* headers = nullptr;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    headers = curl_slist_append(headers, "x-api-key: YOUR_API_KEY");
-    headers = curl_slist_append(headers, "anthropic-version: 2023-06-01");
-
-    curl_easy_setopt(curl, CURLOPT_URL, "https://api.anthropic.com/v1/messages");
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    std::string body = request_body.dump();
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_str);
-    curl_easy_perform(curl);
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-
-    // Handle tool use response
-    auto response = json::parse(response_str);
-    for (auto& block : response["content"]) {
-        if (block["type"] == "tool_use") {
-            std::cout << "Tool: " << block["name"] << "\\n";
-            std::cout << "Args: " << block["input"].dump(2) << "\\n";
-            // Your code executes the actual function here
-            // Then send the result back to the model
-        }
-    }
-}`,
+const extractInvoice = {
+  name: "extract_invoice",
+  description: "Extract structured fields from an invoice. Use for every invoice document.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      invoice_number: { type: "string", description: "The invoice reference as printed" },
+      total_pence: { type: "integer", description: "Total in minor units. Never a float." },
+      currency: { type: "string", enum: ["GBP", "USD", "EUR"] },
+      due_date: { type: "string", description: "ISO 8601 date, YYYY-MM-DD" },
     },
-    {
-      language: "cpp",
-      caption: "**Schema-validated structured extraction** using struct definitions and JSON validation in C++",
-      source: `#include <iostream>
-#include <string>
-#include <vector>
-#include <optional>
-#include <stdexcept>
-#include <nlohmann/json.hpp>
-
-using json = nlohmann::json;
-
-// Define your output schema as C++ structs
-enum class Sentiment { POSITIVE, NEGATIVE, NEUTRAL };
-
-std::string sentiment_to_string(Sentiment s) {
-    switch (s) {
-        case Sentiment::POSITIVE: return "positive";
-        case Sentiment::NEGATIVE: return "negative";
-        case Sentiment::NEUTRAL:  return "neutral";
-    }
-    return "unknown";
-}
-
-Sentiment string_to_sentiment(const std::string& s) {
-    if (s == "positive") return Sentiment::POSITIVE;
-    if (s == "negative") return Sentiment::NEGATIVE;
-    if (s == "neutral")  return Sentiment::NEUTRAL;
-    throw std::invalid_argument("Invalid sentiment: " + s);
-}
-
-struct ReviewAnalysis {
-    Sentiment             sentiment;       // Overall sentiment of the review
-    double                confidence;      // Confidence score 0-1
-    std::vector<std::string> key_topics;   // Main topics mentioned
-    bool                  action_required; // Whether this needs human follow-up
-    std::string           summary;         // Brief summary (max 200 chars)
-    std::optional<std::string> customer_name; // Customer name if mentioned
+    required: ["invoice_number", "total_pence", "currency"],
+  },
 };
 
-// Validate and parse the JSON response into our struct
-ReviewAnalysis parse_review(const json& j) {
-    ReviewAnalysis result;
+export async function parseInvoice(documentText: string) {
+  const res = await client.messages.create({
+    model: "claude-sonnet-5",
+    max_tokens: 1024,
+    temperature: 0,
+    tools: [extractInvoice],
+    tool_choice: { type: "tool", name: "extract_invoice" }, // force it; do not let it chat
+    messages: [{ role: "user", content: documentText }],
+  });
 
-    // Validate required fields and types
-    result.sentiment = string_to_sentiment(j.at("sentiment").get<std::string>());
-
-    result.confidence = j.at("confidence").get<double>();
-    if (result.confidence < 0.0 || result.confidence > 1.0)
-        throw std::invalid_argument("confidence must be between 0 and 1");
-
-    result.key_topics = j.at("key_topics").get<std::vector<std::string>>();
-    result.action_required = j.at("action_required").get<bool>();
-
-    result.summary = j.at("summary").get<std::string>();
-    if (result.summary.size() > 200)
-        throw std::invalid_argument("summary exceeds 200 characters");
-
-    if (j.contains("customer_name") && !j["customer_name"].is_null())
-        result.customer_name = j["customer_name"].get<std::string>();
-
-    return result;
+  const call = res.content.find((b) => b.type === "tool_use");
+  if (call?.type !== "tool_use") throw new Error("model did not call the tool");
+  return call.input; // already conforms to the schema
 }
 
-// Serialize back to JSON
-json to_json(const ReviewAnalysis& r) {
-    return {
-        {"sentiment",       sentiment_to_string(r.sentiment)},
-        {"confidence",      r.confidence},
-        {"key_topics",      r.key_topics},
-        {"action_required", r.action_required},
-        {"summary",         r.summary},
-        {"customer_name",   r.customer_name.has_value() ? json(*r.customer_name) : json(nullptr)}
-    };
+// Why this beats "respond only in JSON":
+// Decoding is constrained by the schema, so a response that violates it is not
+// merely unlikely — it is unreachable. No markdown fences, no "Here is the
+// JSON:", no trailing commas.
+//
+// Schema design notes:
+// - enum instead of a free string for anything you branch on.
+// - integer minor units for money; floats lose pennies.
+// - descriptions are read by the model as instructions, so they earn their place.
+// - keep it flat; deeply nested schemas measurably degrade extraction quality.`,
+    },
+    {
+      language: "typescript",
+      caption: "Validate on receipt anyway — schema-valid is not the same as correct",
+      source: `import { z } from "zod";
+
+const Invoice = z.object({
+  invoice_number: z.string().min(1),
+  total_pence: z.number().int().nonnegative(),
+  currency: z.enum(["GBP", "USD", "EUR"]),
+  due_date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/).optional(),
+});
+
+export type Invoice = z.infer<typeof Invoice>; // one source of truth for the type
+
+export async function parseInvoiceSafely(doc: string, attempt = 0): Promise<Invoice> {
+  const raw = await parseInvoice(doc);
+  const result = Invoice.safeParse(raw);
+
+  if (result.success) return result.data;
+
+  // A truncated response (max_tokens cut) or a semantically wrong value lands
+  // here. Feeding the validation error back recovers most of these.
+  if (attempt < 2) {
+    console.warn("invalid extraction, retrying", result.error.issues);
+    return parseInvoiceSafely(doc, attempt + 1);
+  }
+  throw new Error(\`extraction failed after retries: \${result.error.message}\`);
 }
 
-// Example: validation-retry loop (pseudo-code for API call)
-// In production, use libcurl to call the Anthropic API, parse JSON,
-// validate with parse_review(), and retry on validation failure.
-int main() {
-    // Simulated model response (in production, this comes from the API)
-    json model_output = {
-        {"sentiment", "negative"},
-        {"confidence", 0.92},
-        {"key_topics", {"update", "workflow", "frustration"}},
-        {"action_required", true},
-        {"summary", "Long-term customer frustrated by a new update that broke their workflow."},
-        {"customer_name", nullptr}
-    };
-
-    try {
-        ReviewAnalysis analysis = parse_review(model_output);
-        std::cout << to_json(analysis).dump(2) << "\\n";
-        // Guaranteed to match ReviewAnalysis schema
-    } catch (const std::exception& e) {
-        std::cerr << "Validation error: " << e.what() << "\\n";
-        // Retry with error feedback sent back to the model
-    }
-}`,
+// The two failures constrained decoding does NOT protect you from:
+// 1. Truncation — a valid-prefix object cut off mid-way by max_tokens.
+// 2. Semantics — "total_pence": 4999 is schema-valid whether or not the
+//    invoice actually said £49.99.
+// Hence: validate, bound the retries, and log what failed.`,
     },
     {
       language: "javascript",
@@ -493,6 +400,37 @@ TypeScript runtime"]
     Val-->>App: valid typed object`,
     },
   ],
+  animations: [
+    {
+      title: "Why constrained decoding beats asking nicely",
+      steps: [
+        {
+          label: "Prompt-and-hope",
+          detail: "'Respond only in JSON.' Usually works.",
+        },
+        {
+          label: "Failure modes",
+          detail: "A markdown code fence, a leading 'Here is the JSON:', a trailing explanation, or a trailing comma.",
+        },
+        {
+          label: "At scale",
+          detail: "A 2% failure rate is a production incident when the output feeds a parser.",
+        },
+        {
+          label: "Constrained decoding",
+          detail: "The schema is compiled into a grammar; at each step, tokens that would violate it are masked out.",
+        },
+        {
+          label: "Result",
+          detail: "Invalid JSON is not merely unlikely — it is unreachable.",
+        },
+        {
+          label: "Still validate",
+          detail: "Schema-valid can still be semantically wrong, and a `max_tokens` cut can truncate mid-object. Validate and retry with the error.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Approach", "Guarantees", "Implementation Effort", "Reliability", "Best For"],
     rows: [
@@ -524,6 +462,16 @@ TypeScript runtime"]
     "**Schema enforcement** via constrained decoding modifies token sampling to only allow schema-valid tokens at each position. It guarantees structural compliance but requires API support. Use **Instructor** (Python) or **Zod** (TypeScript) for library-level enforcement with automatic retries.",
     "**Production patterns**: always validate before using structured output. Implement the **validation-retry loop** (parse -> validate -> retry with error feedback, max 2-3 attempts). For critical pipelines, fall back to a more capable model or manual review if retries are exhausted.",
     "**Design for failure**: use `nullable` fields for missing data, `enum` constraints for categorical values, clear field `descriptions`, and flat schemas (max 3 nesting levels). Test with **adversarial inputs** including missing data, contradictions, and prompt injection in input text.",
+  ],
+  resources: [
+    {
+      label: "Anthropic documentation — prompt engineering and tool use",
+      kind: "docs",
+    },
+    {
+      label: "JSON Schema specification",
+      kind: "docs",
+    },
   ],
   glossary: [
     {

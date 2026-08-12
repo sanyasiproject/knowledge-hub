@@ -21,310 +21,74 @@ export const planningMemory: TopicContent = {
   ],
   code: [
     {
-      language: "cpp",
-      caption: "Planning agent with a ReAct loop",
-      source: `#include <iostream>
-#include <string>
-#include <vector>
-#include <functional>
-#include <map>
-#include <sstream>
-#include <cmath>
+      language: "typescript",
+      caption: "Context compaction — keeping a long run inside a usable window",
+      source: `type Message = { role: "user" | "assistant"; content: string; tokens: number };
 
-// A tool has a name, description, and a function that takes a string and returns a string
-struct Tool {
-    std::string name;
-    std::string description;
-    std::function<std::string(const std::string&)> func;
-};
+/**
+ * Quality degrades well before the hard context limit: instruction-following
+ * weakens and material in the middle is recalled poorly. So compaction is
+ * about keeping context SMALL and relevant, not about avoiding an error.
+ */
+export class ConversationMemory {
+  private messages: Message[] = [];
+  private summary = "";
 
-// Define tools the agent can use
-std::string search(const std::string& query) {
-    return "Results for: " + query;
+  constructor(
+    private readonly softLimit = 60_000,   // compact here, not at the model's limit
+    private readonly keepRecent = 6        // recent turns stay verbatim
+  ) {}
+
+  add(msg: Message) {
+    this.messages.push(msg);
+  }
+
+  private get used() {
+    return this.messages.reduce((n, m) => n + m.tokens, 0);
+  }
+
+  async compactIfNeeded() {
+    if (this.used < this.softLimit) return;
+
+    const older = this.messages.slice(0, -this.keepRecent);
+    const recent = this.messages.slice(-this.keepRecent);
+    if (older.length === 0) return;
+
+    const res = await client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1024,
+      messages: [{
+        role: "user",
+        content: [
+          "Summarise this conversation so another assistant can continue it.",
+          "Preserve: decisions made, constraints stated, facts established,",
+          "and anything still outstanding. Drop pleasantries and superseded",
+          "attempts. Be specific — names, numbers, and identifiers matter.",
+          "",
+          this.summary ? \`Earlier summary:\\n\${this.summary}\\n\` : "",
+          older.map((m) => \`\${m.role}: \${m.content}\`).join("\\n"),
+        ].join("\\n"),
+      }],
+    });
+
+    const block = res.content.find((b) => b.type === "text");
+    this.summary = block?.type === "text" ? block.text : this.summary;
+    this.messages = recent;
+  }
+
+  /** Goal and constraints go LAST: recall is strongest at the edges. */
+  build(goal: string): Message[] {
+    return [
+      ...(this.summary ? [{ role: "user" as const, content: \`Context so far:\\n\${this.summary}\`, tokens: 0 }] : []),
+      ...this.messages,
+      { role: "user" as const, content: \`Current objective: \${goal}\`, tokens: 0 },
+    ];
+  }
 }
 
-std::string calculator(const std::string& expression) {
-    // Simplified: evaluate basic arithmetic (production code would use a proper parser)
-    try {
-        double result = std::stod(expression); // placeholder for real evaluation
-        std::ostringstream oss;
-        oss << result;
-        return oss.str();
-    } catch (...) {
-        return "Error: could not evaluate expression";
-    }
-}
-
-// Simulate an LLM call that returns the next action or final answer
-// In production, this would call an actual LLM API
-struct AgentResponse {
-    std::string thought;
-    std::string action;       // empty if final answer
-    std::string action_input;
-    std::string final_answer; // non-empty when the agent is done
-};
-
-AgentResponse call_llm(const std::string& prompt, const std::string& scratchpad) {
-    // Placeholder: a real implementation sends prompt + scratchpad to an LLM
-    // and parses the Thought/Action/Action Input or Final Answer from the response
-    AgentResponse resp;
-    resp.thought = "I need to search for the population of France.";
-    resp.action = "Search";
-    resp.action_input = "population of France";
-    if (!scratchpad.empty()) {
-        resp.thought = "I now know the answer.";
-        resp.action.clear();
-        resp.final_answer = "Approximately 22,500,000";
-    }
-    return resp;
-}
-
-int main() {
-    // Register tools in a lookup map
-    std::vector<Tool> tools = {
-        {"Search", "Search for information", search},
-        {"Calculator", "Do math", calculator},
-    };
-    std::map<std::string, std::function<std::string(const std::string&)>> tool_map;
-    for (const auto& t : tools) {
-        tool_map[t.name] = t.func;
-    }
-
-    // ReAct loop: Thought -> Action -> Observation, repeat until Final Answer
-    const int max_iterations = 5;
-    std::string scratchpad;
-    std::string input = "What is the population of France divided by 3?";
-
-    for (int i = 0; i < max_iterations; ++i) {
-        AgentResponse resp = call_llm(input, scratchpad);
-        std::cout << "Thought: " << resp.thought << "\\n";
-
-        if (!resp.final_answer.empty()) {
-            std::cout << "Final Answer: " << resp.final_answer << "\\n";
-            break;
-        }
-
-        // Execute the chosen tool
-        std::string observation = "Tool not found";
-        auto it = tool_map.find(resp.action);
-        if (it != tool_map.end()) {
-            observation = it->second(resp.action_input);
-        }
-        std::cout << "Action: " << resp.action << "\\n";
-        std::cout << "Action Input: " << resp.action_input << "\\n";
-        std::cout << "Observation: " << observation << "\\n\\n";
-
-        // Append to scratchpad for next iteration
-        scratchpad += "Thought: " + resp.thought + "\\n";
-        scratchpad += "Action: " + resp.action + "\\n";
-        scratchpad += "Observation: " + observation + "\\n";
-    }
-    return 0;
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "Memory manager with conversation summarization",
-      source: `#include <iostream>
-#include <string>
-#include <vector>
-#include <deque>
-
-// A single message in the conversation
-struct Message {
-    std::string role; // "user" or "assistant"
-    std::string content;
-};
-
-// Memory manager that keeps recent messages verbatim and summarizes older ones
-class ConversationSummaryBufferMemory {
-    std::deque<Message> buffer_;         // recent messages kept verbatim
-    std::string running_summary_;        // summary of older messages
-    size_t max_buffer_size_;             // max number of recent messages to keep
-
-    // Placeholder: in production, call an LLM to summarize
-    std::string summarize(const std::string& existing_summary,
-                          const std::vector<Message>& messages_to_summarize) {
-        std::string combined = existing_summary;
-        if (!combined.empty()) combined += " ";
-        for (const auto& msg : messages_to_summarize) {
-            combined += msg.role + " said: " + msg.content + ". ";
-        }
-        // A real implementation would call an LLM here to produce a concise summary
-        return combined;
-    }
-
-public:
-    explicit ConversationSummaryBufferMemory(size_t max_buffer_size = 4)
-        : max_buffer_size_(max_buffer_size) {}
-
-    void add_message(const std::string& role, const std::string& content) {
-        buffer_.push_back({role, content});
-
-        // When buffer exceeds limit, summarize the oldest messages
-        while (buffer_.size() > max_buffer_size_) {
-            std::vector<Message> to_summarize = { buffer_.front() };
-            buffer_.pop_front();
-            running_summary_ = summarize(running_summary_, to_summarize);
-        }
-    }
-
-    std::string get_context() const {
-        std::string ctx;
-        if (!running_summary_.empty()) {
-            ctx += "Summary of earlier conversation: " + running_summary_ + "\\n\\n";
-        }
-        ctx += "Recent messages:\\n";
-        for (const auto& msg : buffer_) {
-            ctx += "[" + msg.role + "]: " + msg.content + "\\n";
-        }
-        return ctx;
-    }
-
-    const std::string& summary() const { return running_summary_; }
-    const std::deque<Message>& buffer() const { return buffer_; }
-};
-
-int main() {
-    ConversationSummaryBufferMemory memory(3); // keep last 3 messages verbatim
-
-    // Simulate a multi-turn conversation
-    memory.add_message("user", "Hi, I'm building a RAG pipeline for legal docs.");
-    memory.add_message("user", "I'm using Pinecone for the vector store.");
-    memory.add_message("user", "The chunk size is 512 tokens with 50 token overlap.");
-    memory.add_message("user", "Can you remind me what vector store I chose?");
-    // Older messages are summarized; "Pinecone" is preserved in the summary
-
-    // Inspect what the memory looks like
-    std::cout << "Full context:\\n" << memory.get_context() << "\\n";
-    std::cout << "Summary: " << memory.summary() << "\\n";
-    std::cout << "Buffer size: " << memory.buffer().size() << "\\n";
-    return 0;
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "Vector-based long-term memory store with cosine similarity",
-      source: `#include <iostream>
-#include <string>
-#include <vector>
-#include <cmath>
-#include <algorithm>
-#include <chrono>
-#include <iomanip>
-#include <sstream>
-#include <optional>
-
-// A single memory entry with its embedding and metadata
-struct MemoryEntry {
-    std::string id;
-    std::string content;
-    std::vector<double> embedding;
-    std::string category;    // "fact", "preference", "episode"
-    std::string session_id;
-    std::string timestamp;
-};
-
-// Cosine similarity between two vectors
-double cosine_similarity(const std::vector<double>& a, const std::vector<double>& b) {
-    if (a.size() != b.size() || a.empty()) return 0.0;
-    double dot = 0.0, norm_a = 0.0, norm_b = 0.0;
-    for (size_t i = 0; i < a.size(); ++i) {
-        dot += a[i] * b[i];
-        norm_a += a[i] * a[i];
-        norm_b += b[i] * b[i];
-    }
-    double denom = std::sqrt(norm_a) * std::sqrt(norm_b);
-    return (denom > 0.0) ? (dot / denom) : 0.0;
-}
-
-// Get the current timestamp as an ISO string
-std::string now_iso() {
-    auto now = std::chrono::system_clock::now();
-    auto time = std::chrono::system_clock::to_time_t(now);
-    std::ostringstream oss;
-    oss << std::put_time(std::gmtime(&time), "%Y-%m-%dT%H:%M:%SZ");
-    return oss.str();
-}
-
-// Placeholder embedding function
-// In production, call an embedding API (e.g., OpenAI text-embedding-3-small)
-std::vector<double> embed(const std::string& text) {
-    // Simple hash-based mock embedding for demonstration
-    std::vector<double> vec(64, 0.0);
-    for (size_t i = 0; i < text.size(); ++i) {
-        vec[i % vec.size()] += static_cast<double>(text[i]) / 128.0;
-    }
-    // Normalize
-    double norm = 0.0;
-    for (double v : vec) norm += v * v;
-    norm = std::sqrt(norm);
-    if (norm > 0.0) {
-        for (double& v : vec) v /= norm;
-    }
-    return vec;
-}
-
-// In-memory vector store for long-term memory
-class VectorMemoryStore {
-    std::vector<MemoryEntry> entries_;
-
-public:
-    void store_memory(const std::string& content, const std::string& category,
-                      const std::string& session_id) {
-        MemoryEntry entry;
-        entry.id = session_id + "_" + now_iso();
-        entry.content = content;
-        entry.embedding = embed(content);
-        entry.category = category;
-        entry.session_id = session_id;
-        entry.timestamp = now_iso();
-        entries_.push_back(std::move(entry));
-    }
-
-    // Retrieve top-N memories by cosine similarity, optionally filtered by category
-    std::vector<MemoryEntry> recall(const std::string& query, int n_results = 3,
-                                    const std::optional<std::string>& category = std::nullopt) {
-        auto query_embedding = embed(query);
-
-        // Score each entry
-        struct Scored { double score; size_t index; };
-        std::vector<Scored> scored;
-        for (size_t i = 0; i < entries_.size(); ++i) {
-            if (category.has_value() && entries_[i].category != category.value())
-                continue;
-            double sim = cosine_similarity(query_embedding, entries_[i].embedding);
-            scored.push_back({sim, i});
-        }
-
-        // Sort by descending similarity
-        std::sort(scored.begin(), scored.end(),
-                  [](const Scored& a, const Scored& b) { return a.score > b.score; });
-
-        // Return top N
-        std::vector<MemoryEntry> results;
-        for (int i = 0; i < n_results && i < static_cast<int>(scored.size()); ++i) {
-            results.push_back(entries_[scored[i].index]);
-        }
-        return results;
-    }
-};
-
-int main() {
-    VectorMemoryStore store;
-
-    // Store memories
-    store.store_memory("User prefers dark mode and vim keybindings", "preference", "sess_001");
-    store.store_memory("Deployed v2.3 to production on 2025-01-15", "episode", "sess_002");
-    store.store_memory("Project uses PostgreSQL 16 with pgvector extension", "fact", "sess_003");
-
-    // Later, in a new session: recall relevant memories
-    auto memories = store.recall("What database does the project use?");
-    for (const auto& m : memories) {
-        std::cout << "[" << m.category << "] " << m.content << "\\n";
-    }
-    return 0;
-}`,
+// The alternative that often beats summarising: externalise. Write intermediate
+// results to a file or a store and keep only a reference in context, letting
+// the agent re-read on demand. Summarising is lossy and the loss is silent.`,
     },
   ],
   comparison: {

@@ -46,6 +46,11 @@ export const gitFundamentals: TopicContent = {
       a: "Every commit is identified by a SHA-1 hash computed from its content: the tree snapshot, parent commit hash(es), author, timestamp, and message. This content-addressing means identical content always produces the same hash, and any modification produces a completely different hash. This provides integrity verification — you can confirm that history has not been tampered with. It also enables deduplication and efficient storage. Git is migrating to SHA-256 for stronger collision resistance.",
     },
   ],
+  followUps: [
+    "What's the difference between the working tree, the index, and HEAD?",
+    "How would you undo a commit that's already pushed?",
+    "What does `git reflog` recover, and what can it not?",
+  ],
   mcqs: [
     {
       q: "What does `git add` do?",
@@ -336,6 +341,33 @@ git cherry-pick def5678`,
     },
   ],
 
+  animations: [
+    {
+      title: "Working tree, index, HEAD",
+      steps: [
+        {
+          label: "Edit a file",
+          detail: "The change exists only in the working tree. `git status` shows it as unstaged.",
+        },
+        {
+          label: "`git add`",
+          detail: "A snapshot of that file is copied into the index (staging area) — a proposed next commit.",
+        },
+        {
+          label: "Edit again",
+          detail: "Now the file differs from both the index and HEAD. Committing captures the staged version, not the newest edit.",
+        },
+        {
+          label: "`git commit`",
+          detail: "The index becomes a commit object; HEAD moves to it.",
+        },
+        {
+          label: "Undoing",
+          detail: "`git restore --staged` unstages; `git restore` discards working-tree changes; `git reset` moves HEAD.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Feature", "**Git**", "**SVN (Subversion)**", "**Mercurial (Hg)**"],
     rows: [
@@ -377,6 +409,16 @@ git cherry-pick def5678`,
     "**Remote workflow**: `git fetch` downloads without modifying your branches (safe). `git pull` = fetch + merge (or rebase). Always `git fetch` + inspect before integrating. Remote-tracking branches (`origin/main`) are updated on fetch and are read-only locally.",
   ],
 
+  resources: [
+    {
+      label: "Pro Git — Chacon & Straub (free online)",
+      kind: "book",
+    },
+    {
+      label: "Git reference documentation",
+      kind: "docs",
+    },
+  ],
   glossary: [
     {
       term: "Working tree",

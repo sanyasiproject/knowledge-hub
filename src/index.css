@@ -111,4 +111,45 @@ body {
   .lg\:grid-cols-\[1fr_15rem\] {
     grid-template-columns: 1fr !important;
   }
+
+  /* ── Interview one-pager ─────────────────────────────────────────
+     The one-pager view is meant to be read on paper the morning of an
+     interview, so it prints denser than the on-screen layout: smaller
+     type, two columns for the short bullet blocks, and hard rules
+     against a card splitting across a page break. */
+  .one-pager {
+    font-size: 9.5pt;
+    line-height: 1.35;
+  }
+  .one-pager h2 {
+    font-size: 12pt;
+    margin-top: 0.6em;
+    margin-bottom: 0.25em;
+    border-bottom: 1px solid #999;
+  }
+  .one-pager h3 {
+    font-size: 10pt;
+  }
+  .one-pager .grid {
+    display: block !important;
+  }
+  .one-pager ul,
+  .one-pager ol {
+    margin: 0.2em 0;
+  }
+  .one-pager li {
+    margin-bottom: 0.1em;
+  }
+  /* Cards must never straddle a page break — a half-printed decision
+     table is worse than a page with white space at the bottom. */
+  .one-pager > section > div > div,
+  .break-inside-avoid {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* Print backgrounds (the callout boxes) rather than dropping them. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 }

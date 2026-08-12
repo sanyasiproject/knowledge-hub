@@ -45,6 +45,11 @@ export const containerFundamentals: TopicContent = {
       a: "OverlayFS merges a read-only lower directory (image layers) with a read-write upper directory (container layer) into a unified view. Reads check the upper layer first, then fall back to lower layers. Writes to existing lower-layer files trigger copy-on-write: the file is copied to the upper layer, and modifications happen on the copy. Deletions create whiteout files in the upper layer. Since multiple containers from the same image share the read-only lower layers, only unique container modifications consume additional disk space. Container creation is nearly instant because no filesystem copy occurs — just a new empty upper directory is created and merged with the shared lower layers.",
     },
   ],
+  followUps: [
+    "What isolation do containers NOT give you that a VM does?",
+    "Why does a container share the host kernel, and when is that a security problem?",
+    "What does 'one process per container' actually buy you?",
+  ],
   mcqs: [
     {
       q: "Which Linux namespace provides each container with its own network stack?",
@@ -134,6 +139,16 @@ export const containerFundamentals: TopicContent = {
     {
       front: "What does the OCI Image Specification define?",
       back: "A portable container image format consisting of: a manifest (list of content-addressable layers), a configuration object (metadata, env vars, entrypoint), and an optional index for multi-platform images (different architectures/OS).",
+    },
+  ],
+  resources: [
+    {
+      label: "Docker documentation",
+      kind: "docs",
+    },
+    {
+      label: "Open Container Initiative (OCI) specifications",
+      kind: "docs",
     },
   ],
   glossary: [
@@ -441,6 +456,33 @@ cat /sys/fs/cgroup$CGROUP/cpu.pressure`
     D->>CT: send SIGTERM
     CT->>R: kill process
     R->>K: release namespaces and cgroups`,
+    },
+  ],
+  animations: [
+    {
+      title: "What isolates a container",
+      steps: [
+        {
+          label: "Namespaces",
+          detail: "PID, network, mount, UTS, IPC, and user namespaces give the process its own view of the system.",
+        },
+        {
+          label: "cgroups",
+          detail: "Limit and account for CPU, memory, and I/O. Exceeding the memory limit gets the process OOM-killed.",
+        },
+        {
+          label: "Union filesystem",
+          detail: "Read-only image layers plus a thin writable layer on top.",
+        },
+        {
+          label: "Shared kernel",
+          detail: "Unlike a VM, every container uses the host kernel — this is why they start in milliseconds.",
+        },
+        {
+          label: "The security consequence",
+          detail: "A kernel vulnerability is a container-escape vulnerability. For untrusted code you want a VM boundary.",
+        },
+      ],
     },
   ],
   comparison: {

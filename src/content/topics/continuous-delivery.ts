@@ -46,6 +46,11 @@ export const continuousDelivery: TopicContent = {
       a: "Use rolling deployments (update instances one at a time while others serve traffic), blue-green deployments (switch traffic between two environments), or canary releases (gradually shift traffic). Ensure health checks are configured so the load balancer only routes traffic to healthy instances. Use connection draining to let in-flight requests complete before shutting down old instances. Database schema changes must be backward-compatible. Preload caches before cutover. Test the deployment process regularly so it is reliable when it matters.",
     },
   ],
+  followUps: [
+    "What's the difference between continuous delivery and continuous deployment?",
+    "What has to be true before you can deploy on every merge?",
+    "How do you deploy safely without a manual QA gate?",
+  ],
   mcqs: [
     {
       q: "What is the key difference between Continuous Delivery and Continuous Deployment?",
@@ -111,6 +116,16 @@ export const continuousDelivery: TopicContent = {
     { front: "What is environment parity?", back: "The principle that dev, staging, and production environments should be as identical as possible in configuration, infrastructure, and deployment process." },
     { front: "What is deployment frequency?", back: "A DORA metric measuring how often an organization deploys to production. Elite performers deploy on demand, multiple times per day." },
     { front: "What is a release train?", back: "A scheduled deployment cadence (e.g., weekly) where all changes ready by the cutoff date are deployed together as a batch." },
+  ],
+  resources: [
+    {
+      label: "Continuous Delivery — Humble & Farley",
+      kind: "book",
+    },
+    {
+      label: "Accelerate — Forsgren, Humble & Kim",
+      kind: "book",
+    },
   ],
   glossary: [
     { term: "Continuous Delivery (CD)", definition: "A practice ensuring that code is always in a deployable state, with production releases requiring only a manual approval." },
@@ -383,6 +398,37 @@ ALTER TABLE users DROP COLUMN username;
     },
   ],
 
+  animations: [
+    {
+      title: "Build once, promote everywhere",
+      steps: [
+        {
+          label: "Merge to main",
+          detail: "CI builds one artefact and tags it with the commit SHA.",
+        },
+        {
+          label: "Deploy to staging",
+          detail: "That exact artefact is deployed. Configuration differs; the binary does not.",
+        },
+        {
+          label: "Automated verification",
+          detail: "Integration and smoke tests run against staging.",
+        },
+        {
+          label: "Promote",
+          detail: "The same artefact is deployed to production — nothing is rebuilt, so nothing can differ.",
+        },
+        {
+          label: "Why rebuilding is wrong",
+          detail: "A rebuild can pick up a different transitive dependency, so 'it worked in staging' stops being evidence.",
+        },
+        {
+          label: "Delivery vs deployment",
+          detail: "Continuous delivery means it's always releasable. Continuous deployment means it releases automatically.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["**Strategy**", "**Downtime**", "**Rollback Speed**", "**Resource Cost**", "**Complexity**", "**Best For**"],
     rows: [

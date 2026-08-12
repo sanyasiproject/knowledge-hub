@@ -546,6 +546,12 @@ production use"]`,
       a: "Mock dependencies that cross architectural boundaries: databases, external HTTP services, file systems, message brokers, clocks, and random number generators. Do not mock internal domain objects, value objects, or pure functions — let them run with real implementations. The rule of thumb is: if the dependency involves I/O, latency, or non-determinism, use a test double. If it is deterministic in-process logic, use the real thing.",
     },
   ],
+  followUps: [
+    "What's the practical difference between a mock and a fake, and which do you reach for first?",
+    "Why does heavy mocking produce tests that pass while production breaks?",
+    "How does a contract test cover the gap left by mocking a third party?",
+    "When is it right to assert on interactions rather than on outcomes?",
+  ],
   mcqs: [
     {
       q: "Which type of test double provides canned responses but does NOT verify how it was called?",

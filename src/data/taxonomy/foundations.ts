@@ -13,7 +13,7 @@ export const foundations: Domain[] = [
         title: "Computation & Complexity",
         summary: "How we reason about what computers can do and how expensive it is.",
         topics: [
-          { slug: "big-o-notation", title: "Big-O Notation", summary: "Describing how algorithms scale with input size.", level: "Beginner", tags: ["complexity", "analysis"], contentReady: ["quick-summary", "detailed-explanation", "comparison", "interview-qa", "mcqs"], related: ["time-space-complexity", "amortized-analysis", "recursion", "sorting", "hash-tables"] },
+          { slug: "big-o-notation", title: "Big-O Notation", summary: "Describing how algorithms scale with input size.", level: "Beginner", tags: ["complexity", "analysis"], contentReady: ["quick-summary", "detailed-explanation", "comparison", "interview-qa", "mcqs"], related: ["time-space-complexity", "amortized-analysis", "recursion", "arrays-strings", "hash-tables"] },
           { slug: "time-space-complexity", title: "Time & Space Complexity", summary: "Trading memory for speed and reasoning about both.", level: "Beginner", tags: ["complexity"], related: ["big-o-notation", "amortized-analysis", "memory-hierarchy", "recursion", "hash-tables"] },
           { slug: "amortized-analysis", title: "Amortized Analysis", summary: "Average cost per operation across a sequence.", level: "Advanced", tags: ["complexity"], related: ["big-o-notation", "time-space-complexity", "advanced-structures", "hash-tables", "balanced-trees"] },
           { slug: "p-vs-np", title: "P, NP & NP-Completeness", summary: "The frontier of what is efficiently solvable.", level: "Advanced Concepts", tags: ["theory"], related: ["automata-theory", "turing-machines", "big-o-notation", "graph-theory", "combinatorics"] },

@@ -46,6 +46,11 @@ export const k8sInternals: TopicContent = {
       a: "An operator is a custom controller + CRD that automates domain-specific operations. Build one when your application has complex lifecycle management that cannot be captured by Helm charts or Deployments alone -- things like coordinated rolling upgrades, automated failover, backup scheduling, or certificate rotation. If your runbook for operating the application is more than a few pages, those procedures are candidates for encoding in an operator. For simpler applications, a Helm chart or Kustomize overlay is sufficient.",
     },
   ],
+  followUps: [
+    "What does the kubelet do that the API server does not?",
+    "How does a controller differ from an operator?",
+    "Why is etcd's consistency model the constraint on cluster size?",
+  ],
   mcqs: [
     {
       q: "What is the role of the work queue in the controller pattern?",
@@ -338,6 +343,37 @@ kubectl get deployments --watch -o wide`,
     NOTE["Raft consensus: leader handles\nall writes, followers replicate\nQuorum required for writes"]`,
     },
   ],
+  animations: [
+    {
+      title: "The reconciliation loop",
+      steps: [
+        {
+          label: "Desired state",
+          detail: "You declare what you want. It lives in etcd, reached only through the API server.",
+        },
+        {
+          label: "Watch",
+          detail: "Controllers watch for changes to the resources they own.",
+        },
+        {
+          label: "Compare",
+          detail: "Each controller compares desired state with observed state.",
+        },
+        {
+          label: "Act",
+          detail: "If they differ, it takes one step to close the gap — create a Pod, delete one, update a status.",
+        },
+        {
+          label: "Repeat forever",
+          detail: "This never stops. Delete a Pod manually and it comes back, because the loop notices the discrepancy.",
+        },
+        {
+          label: "Why it's robust",
+          detail: "Nothing depends on a command succeeding once. The system converges after any failure or restart.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Feature", "CRD", "Aggregated API Server", "Admission Webhook"],
     rows: [
@@ -371,6 +407,16 @@ kubectl get deployments --watch -o wide`,
     "**CRDs** declaratively extend the API server with new resource types, providing automatic *CRUD endpoints*, *RBAC*, *etcd storage*, and *kubectl integration*. **Operators** combine CRDs with custom controllers to encode domain-specific operational logic.",
     "**Admission webhooks** intercept requests after AuthN/AuthZ but before persistence. *Mutating* webhooks modify objects (run first); *validating* webhooks accept/reject (run second). `failurePolicy: Fail` makes the webhook a cluster-wide dependency -- scope narrowly and set low `timeoutSeconds`.",
     "**Validating Admission Policies** (GA in K8s 1.30) use *CEL expressions* evaluated in-process by the API server, eliminating the network hop and availability risk of external webhooks for common validation use cases.",
+  ],
+  resources: [
+    {
+      label: "Kubernetes documentation — Cluster Architecture",
+      kind: "docs",
+    },
+    {
+      label: "Programming Kubernetes — Hausenblas & Schimanski",
+      kind: "book",
+    },
   ],
   glossary: [
     {

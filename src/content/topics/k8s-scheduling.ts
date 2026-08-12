@@ -42,6 +42,12 @@ export const k8sScheduling: TopicContent = {
       a: "Topology spread constraints distribute pods evenly across topology domains (nodes, zones, regions). You specify a `topologyKey` (e.g., `topology.kubernetes.io/zone`), a `maxSkew` (maximum difference in pod count between domains), and a `whenUnsatisfiable` action (DoNotSchedule or ScheduleAnyway). Use them to spread replicas across availability zones for HA, or across nodes to balance load. They provide more control than pod anti-affinity, which only says 'not on the same node' without ensuring even distribution.",
     },
   ],
+  followUps: [
+    "How do requests and limits differ, and which one drives scheduling?",
+    "Why do CPU limits cause latency spikes that look like GC pauses?",
+    "What happens when a container exceeds its memory limit?",
+    "When would you use affinity rather than a node selector?",
+  ],
   mcqs: [
     {
       q: "What is the difference between `requiredDuringSchedulingIgnoredDuringExecution` and `preferredDuringSchedulingIgnoredDuringExecution` affinity?",
@@ -351,6 +357,37 @@ kubectl label nodes worker-2 disktype=ssd`,
     RULE["maxSkew: 1\ntopologyKey: zone\nwhenUnsatisfiable: DoNotSchedule\nZone counts: 2 1 1 - skew OK\nNext pod goes to Zone2 or Zone3"]`,
     },
   ],
+  animations: [
+    {
+      title: "Requests, limits, and the two ways a Pod dies",
+      steps: [
+        {
+          label: "Requests",
+          detail: "What the scheduler reserves. A Pod requesting 500m CPU only lands on a node with that much unreserved.",
+        },
+        {
+          label: "Limits",
+          detail: "The ceiling enforced at runtime — a different thing entirely from requests.",
+        },
+        {
+          label: "Exceeding the CPU limit",
+          detail: "The container is throttled, not killed. Latency spikes in a pattern that looks like GC pauses.",
+        },
+        {
+          label: "Exceeding the memory limit",
+          detail: "Memory can't be throttled, so the container is OOM-killed and restarted.",
+        },
+        {
+          label: "Requests too low",
+          detail: "The node is oversubscribed and everything degrades under load.",
+        },
+        {
+          label: "Requests too high",
+          detail: "Capacity sits reserved and idle, and Pods go Pending with nowhere to schedule.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Feature", "Node Selector", "Node Affinity", "Taints & Tolerations", "Pod Affinity/Anti-Affinity", "Topology Spread"],
     rows: [
@@ -383,6 +420,16 @@ kubectl label nodes worker-2 disktype=ssd`,
     "**HPA formula**: `desiredReplicas = ceil(currentReplicas * currentMetric / targetMetric)`. Always set `resources.requests` for CPU-based scaling. Use `behavior.scaleDown.stabilizationWindowSeconds` (default **300s**) to prevent *flapping*.",
     "**Topology spread constraints** with `maxSkew: 1` ensure *even pod distribution* across zones/nodes. They are more precise than `podAntiAffinity`, which only prevents co-location but does not guarantee *balance*.",
     "**Cluster Autoscaler** scales *nodes*; **HPA** scales *replicas*; **VPA** right-sizes *resource requests*; **KEDA** scales from *external events* (and supports scale-to-zero). Avoid targeting the same metric with both HPA and VPA.",
+  ],
+  resources: [
+    {
+      label: "Kubernetes documentation — Scheduling, Preemption and Eviction",
+      kind: "docs",
+    },
+    {
+      label: "Kubernetes documentation — Managing Resources for Containers",
+      kind: "docs",
+    },
   ],
   glossary: [
     {

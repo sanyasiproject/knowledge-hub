@@ -52,6 +52,11 @@ A **headers exchange** routes based on message header attributes instead of the 
       a: "By default, unroutable messages are silently dropped by the exchange. If the producer sets the 'mandatory' flag, the broker returns the message via a basic.return callback. The 'alternate-exchange' argument can specify a fallback exchange — unroutable messages are forwarded there instead of being dropped, enabling dead-letter patterns. For headers exchanges, x-match controls whether all or any headers must match for routing.",
     },
   ],
+  followUps: [
+    "Which exchange type would you use for 'notify these three services of every order', and which for routing by region?",
+    "What happens to a message that matches no binding?",
+    "How do you change routing without dropping in-flight messages?",
+  ],
   mcqs: [
     {
       q: "Which exchange type ignores the routing key entirely?",
@@ -130,6 +135,16 @@ A **headers exchange** routes based on message header attributes instead of the 
     {
       front: "What does the mandatory flag do?",
       back: "It tells the broker to return messages to the producer via basic.return if no queue binding matches, instead of silently dropping them.",
+    },
+  ],
+  resources: [
+    {
+      label: "RabbitMQ documentation — exchanges and routing",
+      kind: "docs",
+    },
+    {
+      label: "Enterprise Integration Patterns — Hohpe & Woolf",
+      kind: "book",
     },
   ],
   glossary: [
@@ -397,6 +412,33 @@ setupAdvancedTopology().catch(console.error);`,
     TX -->|"order.# matches all order keys"| Q2["all-orders queue"]
     TX -->|"order.*.created matches"| Q3["created-orders queue"]
     TX -->|"*.us.* does not match order.us.west.created"| NOMATCH["No route"]`,
+    },
+  ],
+  animations: [
+    {
+      title: "One event routed four ways",
+      steps: [
+        {
+          label: "Direct exchange",
+          detail: "Routing key `order.eu` goes only to the queue bound with exactly that key.",
+        },
+        {
+          label: "Fanout exchange",
+          detail: "Every bound queue gets a copy, routing key ignored — the broadcast case.",
+        },
+        {
+          label: "Topic exchange",
+          detail: "Key `order.eu.created` matches bindings `order.#` and `order.*.created` but not `order.us.#`.",
+        },
+        {
+          label: "Headers exchange",
+          detail: "Routing on header attributes rather than the key, for when the key can't express the condition.",
+        },
+        {
+          label: "No match",
+          detail: "The message is silently dropped unless the exchange has an alternate-exchange configured — a common source of vanishing messages.",
+        },
+      ],
     },
   ],
   comparison: {

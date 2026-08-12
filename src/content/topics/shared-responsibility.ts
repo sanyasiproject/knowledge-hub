@@ -44,6 +44,11 @@ export const sharedResponsibility: TopicContent = {
     }
   ],
 
+  followUps: [
+    "Who is responsible for a misconfigured S3 bucket?",
+    "How does the boundary move between IaaS and SaaS?",
+    "What does the provider explicitly NOT cover that teams assume they do?",
+  ],
   mcqs: [
     {
       q: "In the AWS shared responsibility model, who is responsible for patching the operating system on an EC2 instance?",

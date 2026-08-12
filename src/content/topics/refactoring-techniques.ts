@@ -559,6 +559,12 @@ public class ReportGenerator {
     },
   ],
 
+  followUps: [
+    "How do you refactor safely when the code has no tests?",
+    "What's the difference between refactoring and rewriting, and when does one become the other?",
+    "How do you refactor a module that's actively being changed by another team?",
+    "Why should a refactoring commit contain no behaviour change at all?",
+  ],
   mcqs: [
     {
       q: "What is the primary goal of refactoring?",

@@ -32,6 +32,11 @@ export const designRateLimiter: TopicContent = {
       a: "Define rate limit rules per tier: free users get 100 req/min, premium get 1000, enterprise get 10000. Store the mapping in a configuration store. When a request arrives: (1) Extract the user/API key from the request. (2) Look up their tier and corresponding limits. (3) Apply the limits using the chosen algorithm. For multiple dimensions: apply per-user, per-endpoint, and global limits independently. A request must pass all applicable limits. Store limits in a rules engine that supports dynamic updates so you can change limits without redeploying.",
     },
   ],
+  followUps: [
+    "Why does a fixed window allow a 2× burst at the boundary?",
+    "Fail open or fail closed when the counter store is down?",
+    "How do you rate limit fairly across tenants of very different sizes?",
+  ],
   mcqs: [
     {
       q: "In a token bucket algorithm, what does the bucket capacity (maxTokens) control?",
@@ -427,6 +432,37 @@ export { rateLimiter };`,
     API-->>C: 429 Too Many Requests`,
     },
   ],
+  animations: [
+    {
+      title: "Token bucket in action",
+      steps: [
+        {
+          label: "Bucket",
+          detail: "Capacity 10 tokens, refilling at 1 per second. Starts full.",
+        },
+        {
+          label: "Burst of 10",
+          detail: "All succeed instantly, draining the bucket. Bursts are allowed by design.",
+        },
+        {
+          label: "11th request",
+          detail: "Bucket empty → 429 with `Retry-After: 1`.",
+        },
+        {
+          label: "One second later",
+          detail: "One token refilled; one request allowed.",
+        },
+        {
+          label: "Sustained rate",
+          detail: "Long-run throughput settles at the refill rate; the capacity governs burst size.",
+        },
+        {
+          label: "Distributed",
+          detail: "Bucket state in Redis, updated by an atomic Lua script — in-process state would multiply the limit by instance count.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Feature",
@@ -506,6 +542,16 @@ export { rateLimiter };`,
     "**Production essentials**: Return proper **HTTP 429** with `Retry-After` header. Implement **multi-tier limits** (per-user, per-key, global) as a chain — request must pass *all* tiers. Support **graceful degradation**: fail open (allow on Redis failure) for availability-critical services, fail closed (reject) for security-critical ones. Monitor `rejection_rate` and alert on anomalies.",
     "**Trade-off matrix**: Token Bucket trades burst allowance for slightly more complex tuning (two params). Sliding Window Counter trades ~1% accuracy for O(1) memory. Centralized (Redis) rate limiting trades an extra network round-trip (~1ms) for global accuracy. Local-only limiting trades accuracy for zero added latency. Choose based on your system's **primary constraint**: accuracy, latency, or simplicity.",
     "**Interview talking points**: Rate limiter placement (API Gateway vs middleware vs per-service). Why Lua scripts in Redis (atomicity without distributed locks). How to handle rate limit key extraction (IP for unauthenticated, user ID for authenticated, composite keys for fine-grained control). Adaptive limiting with AIMD. The relationship between rate limiting and **circuit breakers** (rate limiting prevents overload *from clients*; circuit breakers prevent cascading failures *between services*).",
+  ],
+  resources: [
+    {
+      label: "System Design Interview — Alex Xu",
+      kind: "book",
+    },
+    {
+      label: "Stripe engineering — Scaling your API with rate limiters",
+      kind: "article",
+    },
   ],
   glossary: [
     {

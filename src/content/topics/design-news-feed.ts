@@ -32,6 +32,11 @@ export const designNewsFeed: TopicContent = {
       a: "Use cursor-based pagination, not offset-based. The cursor is typically the timestamp or score of the last item on the current page. The next page fetches items with a score lower than the cursor. This is efficient because: (1) Redis ZREVRANGEBYSCORE with a score upper bound is O(log N + M). (2) It handles new posts appearing without shifting pages (unlike offset, where page 2 would shift if new items are added to page 1). (3) The cursor is opaque to the client: encode it as a base64 token containing the score and post ID (for tiebreaking). Return the cursor in the API response for the client to pass in the next request.",
     },
   ],
+  followUps: [
+    "Where would you set the follower threshold for the hybrid fan-out?",
+    "How do you handle a user who follows 5,000 accounts?",
+    "Where does ranking fit relative to retrieval?",
+  ],
   mcqs: [
     {
       q: "Fan-out on write is expensive primarily because:",
@@ -632,6 +637,37 @@ function rankFeed(candidates, viewer, interactionHistory, limit = 20) {
     H --> I[Return feed to client]`,
     },
   ],
+  animations: [
+    {
+      title: "Hybrid fan-out",
+      steps: [
+        {
+          label: "Ordinary user posts",
+          detail: "Fan out on write: push the post id into each of their ~200 followers' feed lists in Redis.",
+        },
+        {
+          label: "Reads are trivial",
+          detail: "Fetch your precomputed list. Fast, which is what a read-heavy product needs.",
+        },
+        {
+          label: "Celebrity posts",
+          detail: "50 million followers would mean 50 million writes for one post.",
+        },
+        {
+          label: "Skip the fan-out",
+          detail: "Above a follower threshold, don't push at all.",
+        },
+        {
+          label: "Read-time merge",
+          detail: "When a user loads their feed, merge their precomputed list with recent posts from the few celebrities they follow.",
+        },
+        {
+          label: "Result",
+          detail: "The common path stays O(followers of a normal user); the worst case is bounded.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",
@@ -711,6 +747,16 @@ function rankFeed(candidates, viewer, interactionHistory, limit = 20) {
     "**Feed ranking** transforms a chronological candidate set into a relevance-ordered feed. The scoring function combines *recency decay* (exponential), *engagement signals* (likes/comments/shares), *affinity* (viewer-author interaction strength), and *content type boost*. Modern systems train **ML models** on engagement labels and serve predictions via a feature store in <100ms per request.",
     "**Cursor-based pagination** is essential for feeds because new posts are continuously inserted at the top. Unlike offset-based pagination (where `page=2` shifts when new items arrive), a cursor anchored to the last seen item's score/ID provides a stable reference point. The cursor is encoded as an opaque token (base64 of score + postId for tiebreaking) and returned in each API response.",
     "**Graceful degradation** is a key design principle: if the ranking service is down, fall back to chronological order; if a Redis shard is unavailable, serve a partial feed from replicas; if celebrity post cache is stale, query the database with a short TTL. The feed should *always render something* rather than return an error. **Read-your-writes consistency** is the one hard requirement: a user must always see their own posts immediately.",
+  ],
+  resources: [
+    {
+      label: "System Design Interview — Alex Xu",
+      kind: "book",
+    },
+    {
+      label: "Scaling Memcache at Facebook — Nishtala et al., 2013",
+      kind: "paper",
+    },
   ],
   glossary: [
     {

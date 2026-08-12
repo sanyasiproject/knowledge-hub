@@ -305,6 +305,11 @@ from committed offsets"]`,
       a: "Adding partitions changes the hash-to-partition mapping for keyed messages. A key that previously mapped to partition 2 may now map to partition 5. This breaks ordering guarantees for existing keys because new messages for that key go to a different partition than historical messages. Existing data in old partitions is not moved. Consumer groups will rebalance to assign the new partitions. For compacted topics, adding partitions can cause the same key to exist in multiple partitions, breaking compaction semantics.",
     },
   ],
+  followUps: [
+    "What happens to ordering when you add partitions to an existing topic?",
+    "How do you choose the partition key, and what does a bad choice cost you?",
+    "Why does adding consumers beyond the partition count do nothing?",
+  ],
   mcqs: [
     {
       q: "What determines which partition a keyed message is sent to in Kafka?",

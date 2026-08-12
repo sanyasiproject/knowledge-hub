@@ -46,6 +46,11 @@ export const rebasing: TopicContent = {
       a: "Rebasing rewrote the commit SHAs on the branch. Your teammate's local branch still points to the old commits, which now diverge from the rebased remote. Their git pull will try to merge the old and new histories, creating duplicates and conflicts. Fix: your teammate should run `git fetch origin` then `git reset --hard origin/<branch>` to discard their local copy and use the rebased version (assuming they have no unpushed work). If they have unpushed work, they need to rebase their local commits onto the new remote tip. Prevention: agree as a team on rebase rules and communicate before force-pushing.",
     },
   ],
+  followUps: [
+    "Why must you never rebase a branch someone else has pulled?",
+    "How does interactive rebase help a reviewer?",
+    "What does `--force-with-lease` protect that `--force` doesn't?",
+  ],
   mcqs: [
     {
       q: "What does rebase do to commit SHAs?",
@@ -128,6 +133,16 @@ export const rebasing: TopicContent = {
     {
       front: "How do you split a commit during interactive rebase?",
       back: "Mark the commit as 'edit', then when Git pauses: git reset HEAD~ (undo the commit, keep changes), git add and commit in parts, then git rebase --continue.",
+    },
+  ],
+  resources: [
+    {
+      label: "Pro Git — Rebasing chapter",
+      kind: "book",
+    },
+    {
+      label: "Git reference documentation",
+      kind: "docs",
     },
   ],
   glossary: [
@@ -296,6 +311,37 @@ git reset --hard HEAD@{3}`,
     D -->|No| F[Merge main into branch]
     E --> G[Force-push feature branch]
     F --> H[Merge commit retained]`,
+    },
+  ],
+  animations: [
+    {
+      title: "Why rebasing shared history breaks people",
+      steps: [
+        {
+          label: "Branch has three commits",
+          detail: "A, B, C — each with a hash derived from its content and parent.",
+        },
+        {
+          label: "A colleague pulls it",
+          detail: "They now have A, B, C locally, and may have built on top.",
+        },
+        {
+          label: "You rebase onto main",
+          detail: "Commits are replayed with new parents, producing A′, B′, C′ — different hashes, same changes.",
+        },
+        {
+          label: "Force-push",
+          detail: "The remote branch now points at C′. A, B, C are unreachable there.",
+        },
+        {
+          label: "Colleague pulls",
+          detail: "Git sees two unrelated histories. Their work is based on commits that no longer exist upstream.",
+        },
+        {
+          label: "The rule",
+          detail: "Rebase only what you haven't shared. Use `--force-with-lease` so you can't clobber a push you hadn't seen.",
+        },
+      ],
     },
   ],
   comparison: {

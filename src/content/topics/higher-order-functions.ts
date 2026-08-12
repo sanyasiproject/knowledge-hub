@@ -510,6 +510,12 @@ safeComputation = (\\x -> safeDivide 100 x) >=> (\\y -> safeDivide y 2)`
     }
   ],
 
+  followUps: [
+    "Why does `map` returning a new array matter more than the loop it replaces?",
+    "What goes wrong when you pass a function that closes over mutable state to `map`?",
+    "When is a `for` loop genuinely clearer than a chain of `map`/`filter`/`reduce`?",
+    "How would you implement `compose` and `pipe`, and why do they differ in argument order?",
+  ],
   mcqs: [
     {
       q: "What does the following code return?\n[1, 2, 3, 4, 5].reduce((acc, n) => acc + n, 10)",

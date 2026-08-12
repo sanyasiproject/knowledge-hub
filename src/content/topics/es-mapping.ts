@@ -430,6 +430,11 @@ POST /orders/_search
     }
   ],
 
+  followUps: [
+    "Why is a `text` field unusable for exact matching, and what does `keyword` give you?",
+    "What happens when dynamic mapping infers the wrong type on the first document?",
+    "Why can't you change a field's mapping in place, and what do you do instead?",
+  ],
   mcqs: [
     {
       q: "What happens when you index a document with a new field into an index with dynamic mapping set to 'strict'?",

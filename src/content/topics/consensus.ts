@@ -78,6 +78,11 @@ BFT is essential in blockchain systems (where nodes are untrusted) and multi-org
       ],
     },
   ],
+  followUps: [
+    "Why does consensus require a majority rather than any two nodes agreeing?",
+    "What happens to availability during a partition in a Raft cluster?",
+    "Why is Raft considered more understandable than Paxos, and does that matter?",
+  ],
   mcqs: [
     {
       q: "How many node failures can a 5-node Raft cluster tolerate while maintaining consensus?",
@@ -587,6 +592,37 @@ public:
     },
   ],
 
+  animations: [
+    {
+      title: "Raft electing a leader and committing an entry",
+      steps: [
+        {
+          label: "Followers wait",
+          detail: "Each follower has a randomised election timeout, so they don't all time out together.",
+        },
+        {
+          label: "Timeout fires",
+          detail: "One follower becomes a candidate, increments the term, and requests votes.",
+        },
+        {
+          label: "Majority votes",
+          detail: "With votes from a majority it becomes leader. A majority is required so two leaders can't be elected in the same term.",
+        },
+        {
+          label: "Client writes",
+          detail: "The leader appends the entry to its log and replicates it to followers.",
+        },
+        {
+          label: "Committed",
+          detail: "Once a majority has persisted it, the entry is committed and the leader replies to the client.",
+        },
+        {
+          label: "Partition",
+          detail: "The minority side can't reach a majority, so it cannot commit anything — consistency is preserved by refusing to be available.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Property",
@@ -694,6 +730,20 @@ public:
     "**Key complexity comparison**: Raft/Multi-Paxos achieve **O(n)** messages per decision in steady state (leader sends to all, majority responds). PBFT requires **O(n^2)** due to all-to-all communication in the prepare and commit phases. HotStuff achieves **O(n)** for BFT using threshold signatures and a star topology (all messages go through the leader).",
   ],
 
+  resources: [
+    {
+      label: "In Search of an Understandable Consensus Algorithm (Raft) — Ongaro & Ousterhout",
+      kind: "paper",
+    },
+    {
+      label: "Paxos Made Simple — Leslie Lamport",
+      kind: "paper",
+    },
+    {
+      label: "etcd documentation — Raft in practice",
+      kind: "docs",
+    },
+  ],
   glossary: [
     {
       term: "Consensus",

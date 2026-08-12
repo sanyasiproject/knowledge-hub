@@ -336,6 +336,37 @@ function sleep(ms: number) {
     "**Implement the transactional outbox pattern:** Create an Express API where `POST /orders` writes the order to the `orders` table and an event to the `outbox` table in the *same transaction*. Build a separate poller process that reads unprocessed outbox rows, publishes them to a Redis stream, and marks them as published. Verify that if the API crashes after the DB commit, the poller still picks up and publishes the event.",
     "**Test non-idempotent external call handling:** Build a payment endpoint that calls a mock external payment API. Implement the **two-phase approach**: record `payment_pending` in the DB, call the external API, then update to `payment_completed`. Simulate three failure scenarios: (1) crash before external call, (2) crash after external call but before DB update, (3) successful completion. Verify correct behavior on retry for each scenario.",
   ],
+  animations: [
+    {
+      title: "A retried payment that only charges once",
+      steps: [
+        {
+          label: "Client generates a key",
+          detail: "A UUID per logical operation, sent as `Idempotency-Key`.",
+        },
+        {
+          label: "First request",
+          detail: "Server opens a transaction and inserts the key into a table with a unique constraint. Insert succeeds.",
+        },
+        {
+          label: "Work executes",
+          detail: "Card is charged, the response is stored against the key, transaction commits.",
+        },
+        {
+          label: "Response is lost",
+          detail: "Network drops it. The client times out and cannot tell whether the charge happened.",
+        },
+        {
+          label: "Client retries",
+          detail: "Same key. The insert now violates the unique constraint.",
+        },
+        {
+          label: "Stored response returned",
+          detail: "Server returns the original result instead of charging again. One charge, whatever the network did.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Technique", "Scope", "Pros", "Cons"],
     rows: [
@@ -372,6 +403,12 @@ function sleep(ms: number) {
       q: "How do you handle idempotency when calling external APIs that are not idempotent?",
       a: "Use a two-phase approach: (1) Record the intent in your database ('SMS pending for order_123'). (2) Call the external API. (3) Update the record to 'SMS sent'. On retry, if the record says 'sent', skip. If it says 'pending', you have ambiguity — the external call may or may not have succeeded. Strategies: check the external API for the operation's status (if supported), accept the risk of duplicate (for non-critical operations), or use the external API's own idempotency mechanism (many payment APIs support idempotency keys).",
     },
+  ],
+  followUps: [
+    "What happens when a retry arrives while the original request is still in flight?",
+    "Which HTTP methods are idempotent by definition, and why isn't POST one of them?",
+    "How long do you keep idempotency keys, and what happens when one expires?",
+    "How do you make a counter increment idempotent?",
   ],
   mcqs: [
     {

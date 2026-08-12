@@ -52,6 +52,11 @@ Event sourcing adds complexity: **eventual consistency** between the event store
       a: "The main technique is crypto-shredding: encrypt personal data in events using a per-user encryption key stored separately. When a user requests deletion, delete the encryption key — the personal data in events becomes unreadable gibberish while the event structure remains intact for replaying business logic. An alternative is event transformation: periodically rewrite the event store replacing personal data with pseudonyms, though this breaks immutability guarantees.",
     },
   ],
+  followUps: [
+    "How do you fix a bug that wrote incorrect events, given events are immutable?",
+    "What is a snapshot for, and when do you need one?",
+    "What does event sourcing make hard that CRUD makes trivial?",
+  ],
   mcqs: [
     {
       q: "In event sourcing, what is the primary source of truth?",
@@ -621,6 +626,37 @@ app.listen(3000, () => {
       Eventual Consistency`,
     },
   ],
+  animations: [
+    {
+      title: "Rebuilding state from a log of events",
+      steps: [
+        {
+          label: "Events, not state",
+          detail: "Instead of a balance column, store `Deposited 100`, `Withdrew 30`, `Deposited 50`.",
+        },
+        {
+          label: "Current state",
+          detail: "Replay the events in order: balance is 120. State is derived, never stored as the source of truth.",
+        },
+        {
+          label: "Full history free",
+          detail: "Every past value is reconstructible, and you can answer questions you didn't think to ask when you designed the schema.",
+        },
+        {
+          label: "Snapshots",
+          detail: "Replaying a million events per read is too slow, so periodically store a snapshot and replay only events after it.",
+        },
+        {
+          label: "Fixing a bad event",
+          detail: "Events are immutable, so you append a compensating event. You never edit history.",
+        },
+        {
+          label: "The cost",
+          detail: "A simple 'set the balance to X' is no longer expressible, and schema evolution of old events is permanent work.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",
@@ -709,6 +745,16 @@ app.listen(3000, () => {
     `**Projections** decouple read and write concerns. They are *asynchronous* (eventually consistent) by default and *synchronous* (strongly consistent) when explicitly needed. Because projections are disposable, new query patterns can be added retroactively by replaying the full event history into a new projection.`,
     `**Event replay** enables temporal queries (state at any past time), debugging (reproduce exact production state), and projection rebuilds. The fold function \`state = events.reduce(apply, init)\` must be **pure** — deterministic and free of side effects.`,
     `Key challenges: **schema evolution** (solved by versioning + upcasting), **GDPR compliance** (solved by *crypto-shredding*), **storage growth** (solved by snapshots + archival), and **eventual consistency** between the event store and projections (mitigated by UI patterns like optimistic updates and polling).`,
+  ],
+  resources: [
+    {
+      label: "Event Sourcing — Martin Fowler",
+      kind: "article",
+    },
+    {
+      label: "Versioning in an Event Sourced System — Greg Young",
+      kind: "book",
+    },
   ],
   glossary: [
     {

@@ -434,6 +434,37 @@ private:
     App->>R: Redirect requests to new primary`,
     },
   ],
+  animations: [
+    {
+      title: "Adding a node without a miss storm",
+      steps: [
+        {
+          label: "Modulo hashing",
+          detail: "`hash(key) % N`. With N = 4 keys are distributed evenly.",
+        },
+        {
+          label: "Add a fifth node",
+          detail: "N changes to 5. Almost every key now maps elsewhere — a near-total cache miss.",
+        },
+        {
+          label: "Consistent hashing",
+          detail: "Nodes and keys are placed on a ring; a key belongs to the next node clockwise.",
+        },
+        {
+          label: "Add a node",
+          detail: "Only the keys between the new node and its predecessor move — roughly 1/N of the keyspace.",
+        },
+        {
+          label: "Virtual nodes",
+          detail: "Each physical node occupies many ring positions, so load stays even and removal spreads across survivors.",
+        },
+        {
+          label: "Still not solved",
+          detail: "A single hot key remains on one node. That needs replication or a client-side cache.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Pattern",

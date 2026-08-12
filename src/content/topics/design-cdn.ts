@@ -499,6 +499,37 @@ private:
     },
   ],
 
+  animations: [
+    {
+      title: "A cache miss and everything after it",
+      steps: [
+        {
+          label: "First user requests an asset",
+          detail: "DNS or anycast routes to the nearest point of presence.",
+        },
+        {
+          label: "Edge miss",
+          detail: "Not cached here yet.",
+        },
+        {
+          label: "Fetch from origin",
+          detail: "Possibly via a mid-tier shield cache, so a cold edge doesn't hit the origin directly.",
+        },
+        {
+          label: "Cached and served",
+          detail: "Stored per `Cache-Control`, then returned to the user.",
+        },
+        {
+          label: "Next users",
+          detail: "Served from the edge in a few milliseconds. Origin sees nothing.",
+        },
+        {
+          label: "The danger",
+          detail: "If the response was personalised and the cache key didn't include the user, the next user gets someone else's data.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "Push-based CDN", "Pull-based CDN", "Hybrid CDN", "P2P-assisted CDN"],
     rows: [

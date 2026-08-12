@@ -42,6 +42,10 @@ export const gcpCompute: TopicContent = {
       a: "SUDs are automatic discounts that apply when a VM instance runs for a significant portion of the billing month. After running for more than 25% of the month, each additional increment is billed at a progressively lower rate. At full month usage, the effective discount is up to 30% off on-demand pricing. SUDs are applied per project per region per machine type family — GCE aggregates usage across all instances of the same machine type in a region. SUDs apply to custom machine types and predefined types but not to E2, A2, or Spot VMs. They stack with Committed Use Discounts only partially — CUDs replace SUDs for committed usage.",
     },
   ],
+  followUps: [
+    "When does Cloud Run beat GKE, and when does it not?",
+    "How do preemptible/spot instances change your architecture?",
+  ],
   mcqs: [
     {
       q: "Which GKE mode bills per pod resource request rather than per node?",
@@ -116,6 +120,16 @@ export const gcpCompute: TopicContent = {
     {
       front: "What is the Serverless VPC Access connector?",
       back: "A managed component that allows Cloud Functions and Cloud Run to connect to resources in a VPC network, enabling access to private IPs, Memorystore instances, Cloud SQL with private IP, and on-premises resources via VPN.",
+    },
+  ],
+  resources: [
+    {
+      label: "Google Cloud documentation — compute options",
+      kind: "docs",
+    },
+    {
+      label: "Google Cloud Architecture Framework",
+      kind: "docs",
     },
   ],
   glossary: [
@@ -362,6 +376,33 @@ resource "google_compute_instance_template" "spot" {
     Cloud Run
       Per request billing
       100ms granularity`,
+    },
+  ],
+  animations: [
+    {
+      title: "Cloud Run handling a traffic spike",
+      steps: [
+        {
+          label: "Idle",
+          detail: "Zero instances running, zero cost.",
+        },
+        {
+          label: "First request",
+          detail: "A container starts — the cold start. Slower for a large image or heavy initialisation.",
+        },
+        {
+          label: "Traffic rises",
+          detail: "Cloud Run starts more instances, each handling its configured concurrency.",
+        },
+        {
+          label: "Spike passes",
+          detail: "Instances are scaled back down, eventually to zero.",
+        },
+        {
+          label: "The database problem",
+          detail: "Each instance opens connections. Hundreds of instances can exhaust the database pool — hence a connection proxy or a pooler.",
+        },
+      ],
     },
   ],
   comparison: {

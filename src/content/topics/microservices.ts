@@ -105,6 +105,12 @@ Martin Fowler's "Monolith First" advice remains sound: start simple, extract ser
       a: "A service mesh is an infrastructure layer that handles service-to-service communication concerns -- traffic routing, load balancing, mutual TLS, retries, circuit breaking, and observability -- via sidecar proxies deployed alongside each service. Introduce one when you have a significant number of services (typically 20+), need consistent security policies across services, or require advanced traffic management (canary deployments, traffic mirroring) without modifying application code. For smaller deployments, library-based solutions (Resilience4j, Polly) may suffice with less operational overhead.",
     },
   ],
+  followUps: [
+    "What organisational problem are microservices actually solving?",
+    "How do you handle a transaction spanning three services?",
+    "What is a distributed monolith and how would you recognise one?",
+    "How do you decide where the service boundary goes?",
+  ],
   mcqs: [
     {
       q: "Which pattern is most appropriate for handling distributed transactions in a microservices architecture?",
@@ -670,6 +676,37 @@ app.listen(8080, () => console.log("[API Gateway] Listening on port 8080"));`,
     },
   ],
 
+  animations: [
+    {
+      title: "One request across three services",
+      steps: [
+        {
+          label: "Order request",
+          detail: "API gateway authenticates and routes to the order service.",
+        },
+        {
+          label: "Synchronous calls",
+          detail: "Order calls inventory to reserve stock and payment to charge. Both must succeed.",
+        },
+        {
+          label: "Payment fails",
+          detail: "There is no transaction spanning three services to roll back.",
+        },
+        {
+          label: "Compensate",
+          detail: "Order issues a release-stock call. If that fails too, you now need retries and a reconciliation job.",
+        },
+        {
+          label: "Debugging",
+          detail: "One user-visible error spans three services and a gateway — hence correlation ids and tracing.",
+        },
+        {
+          label: "The comparison",
+          detail: "In a monolith this was one database transaction and one stack trace. That's the cost you're buying independent deploys with.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",
@@ -754,6 +791,20 @@ app.listen(8080, () => console.log("[API Gateway] Listening on port 8080"));`,
     "Start with a **modular monolith** and extract services only when you have clear *bounded contexts*, sufficient *operational maturity*, and a genuine need for *independent scaling or deployment*. Premature decomposition is the most common microservices anti-pattern.",
   ],
 
+  resources: [
+    {
+      label: "Building Microservices — Sam Newman",
+      kind: "book",
+    },
+    {
+      label: "Microservices Patterns — Chris Richardson",
+      kind: "book",
+    },
+    {
+      label: "martinfowler.com — architecture and pattern articles",
+      kind: "article",
+    },
+  ],
   glossary: [
     {
       term: "Bounded Context",

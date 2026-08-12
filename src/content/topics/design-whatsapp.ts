@@ -617,6 +617,37 @@ public:
         "An Erlang-native distributed real-time database that stores data in-memory with optional disk persistence. WhatsApp uses it for the routing registry that maps online users to their connection server addresses.",
     },
   ],
+  animations: [
+    {
+      title: "End-to-end delivery with receipts",
+      steps: [
+        {
+          label: "A sends",
+          detail: "Message encrypted on A's device; the server never sees plaintext.",
+        },
+        {
+          label: "Server stores and routes",
+          detail: "Persisted until delivered, then routed to B's connected node.",
+        },
+        {
+          label: "Single tick",
+          detail: "Server received it.",
+        },
+        {
+          label: "Double tick",
+          detail: "Delivered to B's device, which acknowledges.",
+        },
+        {
+          label: "Blue ticks",
+          detail: "B opened the chat and the read receipt propagated back.",
+        },
+        {
+          label: "B offline",
+          detail: "Message queues server-side and a push notification is sent; delivered when B reconnects.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",

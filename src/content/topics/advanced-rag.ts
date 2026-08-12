@@ -21,279 +21,105 @@ export const advancedRag: TopicContent = {
   ],
   code: [
     {
-      language: "cpp",
-      caption: "Hybrid search with Reciprocal Rank Fusion (BM25 + vector) — C++ pseudocode",
-      source: `#include <string>
-#include <vector>
-#include <algorithm>
-#include <iostream>
-#include <cmath>
-#include <map>
+      language: "typescript",
+      caption: "Query rewriting — a conversational follow-up is not a search query",
+      source: `import Anthropic from "@anthropic-ai/sdk";
+const client = new Anthropic();
 
-struct Document {
-    std::string page_content;
-    std::map<std::string, std::string> metadata;
-};
+type Turn = { role: "user" | "assistant"; content: string };
 
-// Abstract base class for any retriever
-class Retriever {
-public:
-    virtual ~Retriever() = default;
-    virtual std::vector<Document> retrieve(const std::string& query, int k) = 0;
-};
+/**
+ * "What about the enterprise plan?" retrieves nothing useful on its own. It has
+ * to be folded into a standalone query against the conversation so far. This is
+ * mandatory for any chat-over-documents product and is the single most common
+ * omission.
+ */
+export async function rewriteStandalone(history: Turn[], question: string): Promise<string> {
+  if (history.length === 0) return question;
 
-// BM25 sparse retriever (keyword-based)
-class BM25Retriever : public Retriever {
-    std::vector<Document> corpus;
-public:
-    explicit BM25Retriever(const std::vector<Document>& docs) : corpus(docs) {}
+  const res = await client.messages.create({
+    model: "claude-haiku-4-5-20251001", // small model: this is a cheap, easy task
+    max_tokens: 200,
+    temperature: 0,
+    messages: [
+      {
+        role: "user",
+        content: [
+          "Rewrite the final question so it stands alone, resolving pronouns and",
+          "implied subjects from the conversation. Change nothing else. Output",
+          "only the rewritten question.",
+          "",
+          history.map((t) => \`\${t.role}: \${t.content}\`).join("\\n"),
+          \`user: \${question}\`,
+        ].join("\\n"),
+      },
+    ],
+  });
 
-    std::vector<Document> retrieve(const std::string& query, int k) override {
-        // In production: compute BM25 scores (TF-IDF variant) against corpus
-        // Return top-k documents ranked by term-frequency relevance
-        return std::vector<Document>(corpus.begin(),
-            corpus.begin() + std::min(k, (int)corpus.size()));
-    }
-};
-
-// Dense vector retriever (semantic similarity)
-class VectorRetriever : public Retriever {
-public:
-    std::vector<Document> retrieve(const std::string& query, int k) override {
-        // In production: embed query via embedding model, search FAISS/Qdrant index
-        // Return top-k documents by cosine similarity
-        return {};
-    }
-};
-
-// Reciprocal Rank Fusion to merge ranked lists from multiple retrievers
-class EnsembleRetriever {
-    std::vector<Retriever*> retrievers;
-    std::vector<double> weights;  // e.g., {0.4, 0.6}
-    int rrf_k = 60;              // RRF constant
-
-public:
-    EnsembleRetriever(std::vector<Retriever*> ret, std::vector<double> w)
-        : retrievers(std::move(ret)), weights(std::move(w)) {}
-
-    std::vector<Document> invoke(const std::string& query, int k = 20) {
-        // score(d) = sum_i( weight_i / (rrf_k + rank_i(d)) )
-        std::map<std::string, double> fused_scores;
-        std::map<std::string, Document> doc_map;
-
-        for (size_t i = 0; i < retrievers.size(); ++i) {
-            auto results = retrievers[i]->retrieve(query, k);
-            for (int rank = 0; rank < (int)results.size(); ++rank) {
-                const auto& key = results[rank].page_content;
-                fused_scores[key] += weights[i] / (rrf_k + rank + 1);
-                doc_map[key] = results[rank];
-            }
-        }
-
-        // Sort by fused RRF score descending
-        std::vector<std::pair<double, Document>> ranked;
-        for (auto& [key, score] : fused_scores)
-            ranked.push_back({score, doc_map[key]});
-        std::sort(ranked.begin(), ranked.end(),
-            [](auto& a, auto& b) { return a.first > b.first; });
-
-        std::vector<Document> output;
-        for (int i = 0; i < std::min(k, (int)ranked.size()); ++i)
-            output.push_back(ranked[i].second);
-        return output;
-    }
-};
-
-int main() {
-    std::vector<Document> documents = { /* loaded corpus */ };
-
-    BM25Retriever bm25(documents);
-    VectorRetriever vector_ret;
-
-    // Combine with RRF: 0.4 weight for BM25, 0.6 for semantic
-    EnsembleRetriever ensemble({&bm25, &vector_ret}, {0.4, 0.6});
-
-    auto results = ensemble.invoke("How does attention work in transformers?");
-    for (int i = 0; i < std::min(5, (int)results.size()); ++i)
-        std::cout << results[i].page_content.substr(0, 200) << "\\n";
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "Two-stage retrieval with cross-encoder reranking — C++ pseudocode",
-      source: `#include <string>
-#include <vector>
-#include <algorithm>
-#include <iostream>
-#include <iomanip>
-
-struct Document {
-    std::string page_content;
-};
-
-// Stage 1: Fast bi-encoder retrieval using a vector index
-class BiEncoderRetriever {
-public:
-    std::vector<Document> similarity_search(const std::string& query, int k) {
-        // In production: embed query, search FAISS/Chroma/Qdrant index
-        // Returns top-k candidates ranked by cosine similarity
-        return {};  // placeholder
-    }
-};
-
-// Stage 2: Cross-encoder reranker for precise relevance scoring
-class CrossEncoderReranker {
-    // Model: e.g., "cross-encoder/ms-marco-MiniLM-L-12-v2"
-public:
-    // Score a query-document pair with full cross-attention
-    double predict(const std::string& query, const std::string& document) {
-        // In production: tokenize (query, document) as a single sequence,
-        // run through a transformer model, return the relevance logit
-        return 0.0;  // placeholder
-    }
-
-    // Batch scoring for efficiency
-    std::vector<double> predict_batch(
-        const std::string& query,
-        const std::vector<Document>& documents
-    ) {
-        std::vector<double> scores;
-        scores.reserve(documents.size());
-        for (const auto& doc : documents)
-            scores.push_back(predict(query, doc.page_content));
-        return scores;
-    }
-};
-
-int main() {
-    BiEncoderRetriever retriever;
-    CrossEncoderReranker reranker;
-
-    std::string query = "What are the benefits of retrieval augmented generation?";
-
-    // Stage 1: Retrieve top-50 candidates (fast, approximate)
-    auto candidates = retriever.similarity_search(query, 50);
-
-    // Stage 2: Rerank with cross-encoder (slow, precise)
-    auto scores = reranker.predict_batch(query, candidates);
-
-    // Pair scores with documents and sort descending
-    std::vector<std::pair<double, Document>> ranked;
-    for (size_t i = 0; i < candidates.size(); ++i)
-        ranked.push_back({scores[i], candidates[i]});
-
-    std::sort(ranked.begin(), ranked.end(),
-        [](const auto& a, const auto& b) { return a.first > b.first; });
-
-    // Keep top-5 after reranking
-    for (int i = 0; i < std::min(5, (int)ranked.size()); ++i) {
-        std::cout << std::fixed << std::setprecision(4)
-                  << "Score: " << ranked[i].first << " | "
-                  << ranked[i].second.page_content.substr(0, 100) << "\\n";
-    }
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "Query decomposition pipeline — C++ pseudocode",
-      source: `#include <string>
-#include <vector>
-#include <sstream>
-#include <iostream>
-
-struct Document {
-    std::string page_content;
-};
-
-// Abstract LLM client — wraps API calls to a chat model
-class LLMClient {
-public:
-    // Send a prompt and return the model's text response
-    std::string complete(const std::string& prompt, double temperature = 0.0) {
-        // In production: call chat completion API (e.g., Anthropic, OpenAI)
-        // with the given prompt and temperature
-        return "";  // placeholder
-    }
-};
-
-// Retriever that searches a document index
-class DocumentRetriever {
-public:
-    std::vector<Document> retrieve(const std::string& query, int k = 5) {
-        // In production: embed query, search vector store, return top-k
-        return {};  // placeholder
-    }
-};
-
-// Retrieval QA: retrieve context, then generate an answer
-class RetrievalQA {
-    LLMClient& llm;
-    DocumentRetriever& retriever;
-public:
-    RetrievalQA(LLMClient& l, DocumentRetriever& r) : llm(l), retriever(r) {}
-
-    std::string answer(const std::string& query) {
-        auto docs = retriever.retrieve(query, 5);
-        std::string context;
-        for (const auto& doc : docs)
-            context += doc.page_content + "\\n";
-
-        std::string prompt = "Context:\\n" + context +
-            "\\nQuestion: " + query + "\\nAnswer:";
-        return llm.complete(prompt);
-    }
-};
-
-// Split a newline-separated string into individual lines
-std::vector<std::string> split_lines(const std::string& text) {
-    std::vector<std::string> lines;
-    std::istringstream stream(text);
-    std::string line;
-    while (std::getline(stream, line))
-        if (!line.empty()) lines.push_back(line);
-    return lines;
+  const block = res.content.find((b) => b.type === "text");
+  return block?.type === "text" ? block.text.trim() : question;
 }
 
-int main() {
-    LLMClient llm;
-    DocumentRetriever retriever;
-    RetrievalQA qa(llm, retriever);
+/**
+ * HyDE — embed a hypothetical ANSWER rather than the question.
+ * The reasoning: a question is often more similar to other questions than to
+ * its answer, while a plausible answer looks structurally like the document
+ * you are hunting for. Costs one extra call; use it when recall is measurably
+ * the bottleneck, not by default.
+ */
+export async function hyde(question: string): Promise<string> {
+  const res = await client.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 300,
+    messages: [{
+      role: "user",
+      content: \`Write a short passage that would answer this question, as if
+from internal documentation. Invented specifics are fine — it is used only as
+a search key, never shown to a user.
 
-    std::string question =
-        "How does GraphRAG compare to standard RAG for multi-hop reasoning?";
-
-    // Step 1: Decompose complex query into sub-questions
-    std::string decompose_prompt =
-        "Break the following question into 2-4 independent sub-questions\\n"
-        "that can each be answered separately to address the original question.\\n"
-        "Return each sub-question on a new line.\\n\\n"
-        "Question: " + question + "\\nSub-questions:";
-
-    std::string decomposition = llm.complete(decompose_prompt);
-    auto sub_questions = split_lines(decomposition);
-
-    // Step 2: Retrieve and answer each sub-question independently
-    std::vector<std::string> sub_answers;
-    for (const auto& sub_q : sub_questions) {
-        std::string answer = qa.answer(sub_q);
-        sub_answers.push_back("Q: " + sub_q + "\\nA: " + answer);
-    }
-
-    // Step 3: Synthesize sub-answers into final answer
-    std::string combined;
-    for (const auto& sa : sub_answers)
-        combined += sa + "\\n\\n";
-
-    std::string synthesis_prompt =
-        "Given these sub-questions and answers, provide a comprehensive\\n"
-        "answer to the original question.\\n\\n"
-        "Original question: " + question + "\\n\\n"
-        "Sub-answers:\\n" + combined + "\\n"
-        "Final answer:";
-
-    std::string final_answer = llm.complete(synthesis_prompt);
-    std::cout << final_answer << "\\n";
+Question: \${question}\`,
+    }],
+  });
+  const block = res.content.find((b) => b.type === "text");
+  return block?.type === "text" ? block.text : question;
 }`,
+    },
+    {
+      language: "typescript",
+      caption: "Query decomposition for multi-hop questions",
+      source: `/**
+ * "How does our refund policy differ between the UK and Germany, and which
+ * changed most recently?" cannot be answered by top-k retrieval on one query —
+ * the answer lives in several documents and requires comparing them.
+ */
+export async function answerMultiHop(question: string) {
+  const subQuestions = await decompose(question); // -> ["UK refund policy", "Germany refund policy", ...]
+
+  // Independent sub-questions retrieve concurrently.
+  const contexts = await Promise.all(
+    subQuestions.map(async (sub) => ({
+      question: sub,
+      chunks: await retrieveAndRerank(sub, 3),
+    }))
+  );
+
+  const grounding = contexts
+    .map((c) => \`## \${c.question}\\n\${c.chunks.map((k) => k.text).join("\\n\\n")}\`)
+    .join("\\n\\n");
+
+  return client.messages.create({
+    model: "claude-sonnet-5",
+    max_tokens: 1024,
+    system: "Answer only from the provided context. Cite the section you used for each claim. If the context does not answer part of the question, say so explicitly.",
+    messages: [{ role: "user", content: \`\${grounding}\\n\\nQuestion: \${question}\` }],
+  });
+}
+
+// Cost check before reaching for this: decomposition is one extra call, and
+// each sub-question is its own retrieval plus rerank. On a 3-way split that is
+// roughly 4x the cost and latency of a single-hop query. Route to it only when
+// the question actually needs it — a classifier or a simple heuristic on
+// conjunctions and comparatives is usually enough.`,
     },
   ],
   comparison: {

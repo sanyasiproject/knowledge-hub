@@ -361,6 +361,11 @@ decision := "deny" if {
       a: "Use a policy engine like OPA (Open Policy Agent), Cedar (AWS), or Casbin. The application sends a structured access request (subject, action, resource, context) to the engine via an API call or sidecar. The engine evaluates policies (written in Rego, Cedar, or a DSL) and returns allow/deny. Policies can be updated without code deployments. This separates business logic from authorization logic and ensures consistent enforcement across services.",
     },
   ],
+  followUps: [
+    "At what point does role explosion tell you to move to ABAC?",
+    "How do you answer 'who can access this resource?' under ABAC?",
+    "Where do you enforce the policy — the gateway, the service, or the database?",
+  ],
   mcqs: [
     {
       q: "What is the 'role explosion' problem in RBAC?",

@@ -371,6 +371,11 @@ export const consumersGroups: TopicContent = {
       a: "Static membership (KIP-345) assigns a persistent group.instance.id to each consumer. When a consumer with a static ID disconnects and reconnects within session.timeout.ms, the coordinator recognizes it and restores its previous partition assignment without triggering a rebalance. This is valuable for rolling deployments and stateful consumers where rebalancing forces expensive state migration. The tradeoff is longer detection time for truly dead consumers.",
     },
   ],
+  followUps: [
+    "Why does slow processing trigger a rebalance, and why does that look like an outage?",
+    "Commit offsets before or after processing — what does each choose?",
+    "How do you handle a message that always fails on an ordered partition?",
+  ],
   mcqs: [
     {
       q: "Where are consumer group offsets stored in Kafka?",

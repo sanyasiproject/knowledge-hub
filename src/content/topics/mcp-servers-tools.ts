@@ -92,6 +92,58 @@ export const mcpServersTools: TopicContent = {
   code: [
     {
       language: "typescript",
+      caption: "Tool design — descriptions and schemas are what drive selection accuracy",
+      source: `import { z } from "zod";
+
+// Constrain the arguments so a wrong call is impossible rather than merely
+// discouraged. An enum beats "a string describing the status" every time.
+const SearchInput = {
+  email: z.string().email().describe("Customer email, exact match"),
+  status: z.enum(["pending", "shipped", "delivered", "cancelled"]).optional(),
+  since: z.string().datetime().optional().describe("ISO 8601; defaults to 90 days ago"),
+  limit: z.number().int().min(1).max(50).default(20),
+};
+
+server.tool(
+  "search_orders",
+  // The description is read as an instruction. Say when to use it, when NOT to,
+  // and name the alternative — overlapping descriptions are the usual cause of
+  // the model picking the wrong tool.
+  "Search orders by customer email, optionally filtered by status and date. " +
+    "Returns at most 50, newest first. " +
+    "If you already have an exact order ID, use get_order instead — it is cheaper and exact.",
+  SearchInput,
+  async ({ email, status, since, limit }) => {
+    const rows = await db.orders.search({ email, status, since, limit });
+
+    // Return CONCISE, structured results. Dumping full records burns context
+    // budget and buries the signal the model needs.
+    const summary = rows.map((r) => ({
+      id: r.id,
+      status: r.status,
+      total: r.totalPence,
+      placedAt: r.createdAt,
+    }));
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ count: rows.length, orders: summary }),
+      }],
+    };
+  }
+);
+
+// Errors should be actionable text the model can respond to, not a stack trace:
+//   bad:  "PG::UndefinedColumn: column orders.stat does not exist"
+//   good: "No such status. Valid values: pending, shipped, delivered, cancelled."
+//
+// And test selection as a classification problem: given a query, was the right
+// tool chosen with the right arguments? That is measurable, and it is where
+// almost all "the agent is unreliable" complaints actually resolve.`,
+    },
+    {
+      language: "typescript",
       caption: "Defining an MCP tool with inputSchema in the MCP SDK",
       source: `import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -128,7 +180,7 @@ server.tool(
       ],
     };
   }
-);`
+);`,
     },
     {
       language: "typescript",
@@ -174,7 +226,7 @@ server.resource(
       ],
     };
   }
-);`
+);`,
     },
     {
       language: "typescript",
@@ -227,155 +279,8 @@ server.tool(
 async function fetchDocument(uri: string): Promise<string> {
   // Implementation: read from filesystem, database, or API
   return "Document content here...";
-}`
+}`,
     },
-    {
-      language: "cpp",
-      caption: "Defining tools and resources for an MCP server in C++",
-      source: `// MCP server implementation in C++ using JSON-RPC message handling.
-// Demonstrates tool registration, input validation, and resource serving.
-
-#include <iostream>
-#include <string>
-#include <vector>
-#include <map>
-#include <functional>
-#include <nlohmann/json.hpp>  // JSON library
-
-using json = nlohmann::json;
-
-// Tool definition with JSON Schema for input validation
-struct ToolDef {
-    std::string name;
-    std::string description;
-    json input_schema;
-    std::function<json(const json&)> handler;
-};
-
-// Resource definition
-struct ResourceDef {
-    std::string uri;
-    std::string name;
-    std::string description;
-    std::string mime_type;
-    std::function<json(const std::string&)> handler;
-};
-
-class McpServer {
-public:
-    explicit McpServer(const std::string& server_name)
-        : name_(server_name) {}
-
-    void register_tool(ToolDef tool) {
-        tools_[tool.name] = std::move(tool);
-    }
-
-    void register_resource(ResourceDef resource) {
-        resources_[resource.uri] = std::move(resource);
-    }
-
-    // Handle JSON-RPC "tools/list" request
-    json handle_list_tools() const {
-        json tool_list = json::array();
-        for (const auto& [name, tool] : tools_) {
-            tool_list.push_back({
-                {"name", tool.name},
-                {"description", tool.description},
-                {"inputSchema", tool.input_schema}
-            });
-        }
-        return tool_list;
-    }
-
-    // Handle JSON-RPC "tools/call" request
-    json handle_call_tool(const std::string& name, const json& arguments) const {
-        auto it = tools_.find(name);
-        if (it == tools_.end()) {
-            throw std::runtime_error("Unknown tool: " + name);
-        }
-        return it->second.handler(arguments);
-    }
-
-    // Handle JSON-RPC "resources/list" request
-    json handle_list_resources() const {
-        json resource_list = json::array();
-        for (const auto& [uri, res] : resources_) {
-            resource_list.push_back({
-                {"uri", res.uri}, {"name", res.name},
-                {"description", res.description}, {"mimeType", res.mime_type}
-            });
-        }
-        return resource_list;
-    }
-
-    // Handle JSON-RPC "resources/read" request
-    json handle_read_resource(const std::string& uri) const {
-        auto it = resources_.find(uri);
-        if (it == resources_.end()) {
-            throw std::runtime_error("Unknown resource: " + uri);
-        }
-        return it->second.handler(uri);
-    }
-
-private:
-    std::string name_;
-    std::map<std::string, ToolDef> tools_;
-    std::map<std::string, ResourceDef> resources_;
-};
-
-int main() {
-    McpServer server("analytics-server");
-
-    // Register a "run_query" tool
-    server.register_tool({
-        "run_query",
-        "Execute a read-only SQL query against the analytics database",
-        {{"type", "object"},
-         {"properties", {
-             {"query", {{"type", "string"},
-                        {"description", "SQL SELECT query to execute"}}},
-             {"limit", {{"type", "integer"},
-                        {"description", "Max rows to return"},
-                        {"default", 100}}}
-         }},
-         {"required", {"query"}}},
-        [](const json& args) -> json {
-            std::string query = args.at("query").get<std::string>();
-            int limit = args.value("limit", 100);
-            // In production: execute query against database
-            json rows = json::array();
-            rows.push_back({{"id", 1}, {"name", "example"}, {"value", 42}});
-            return {{"content", {{{"type", "text"},
-                                  {"text", rows.dump(2)}}}}};
-        }
-    });
-
-    // Register a resource for database schemas
-    server.register_resource({
-        "db://schemas/tables",
-        "Database Tables",
-        "List of all tables and their schemas",
-        "application/json",
-        [](const std::string& uri) -> json {
-            json schemas = {{"users", {"id", "name", "email"}},
-                            {"orders", {"id", "user_id", "total"}}};
-            return {{"contents", {{{"uri", uri},
-                                   {"mimeType", "application/json"},
-                                   {"text", schemas.dump(2)}}}}};
-        }
-    });
-
-    // Demonstrate listing and calling
-    std::cout << "Tools: " << server.handle_list_tools().dump(2) << std::endl;
-    std::cout << "Resources: " << server.handle_list_resources().dump(2) << std::endl;
-
-    json result = server.handle_call_tool("run_query",
-        {{"query", "SELECT * FROM users"}, {"limit", 10}});
-    std::cout << "Query result: " << result.dump(2) << std::endl;
-
-    return 0;
-}`
-    }
   ],
   diagrams: [
     {

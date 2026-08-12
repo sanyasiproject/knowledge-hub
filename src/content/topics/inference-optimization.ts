@@ -96,6 +96,12 @@ Medusa and EAGLE are variants that use additional prediction heads on the target
       a: "The model size and memory footprint shrink by roughly 4x, and inference throughput increases due to reduced memory bandwidth requirements. The trade-off is potential quality degradation, especially on tasks requiring precise numerical reasoning or rare knowledge. Modern quantization methods (GPTQ, AWQ) with good calibration data preserve most quality, but there is always some loss at extreme compression levels.",
     },
   ],
+  followUps: [
+    "Why is the first token slow but the rest fast?",
+    "Why does the KV cache dominate memory at long context?",
+    "What does 4-bit quantisation actually cost you in quality?",
+    "Why does batching help decode more than prefill?",
+  ],
   mcqs: [
     {
       q: "What does PagedAttention (used in vLLM) optimize?",
@@ -176,6 +182,20 @@ Medusa and EAGLE are variants that use additional prediction heads on the target
       back: "Reusing the KV cache for a shared prompt prefix across multiple requests, avoiding redundant computation.",
     },
   ],
+  resources: [
+    {
+      label: "FlashAttention — Dao et al., 2022",
+      kind: "paper",
+    },
+    {
+      label: "Efficient Memory Management for LLM Serving with PagedAttention (vLLM) — Kwon et al., 2023",
+      kind: "paper",
+    },
+    {
+      label: "vLLM documentation",
+      kind: "docs",
+    },
+  ],
   glossary: [
     {
       term: "Quantization",
@@ -233,216 +253,57 @@ The most exciting frontier is the **convergence** of previously independent opti
   ],
   code: [
     {
-      language: "cpp",
-      caption: "Simplified KV cache implementation for a single attention layer",
-      source: `#include <vector>
-#include <stdexcept>
-#include <cstring>
+      language: "typescript",
+      caption: "The KV cache — why decode is O(1) per token instead of O(n)",
+      source: `type Vec = Float32Array;
 
-// Simplified KV Cache for a single attention layer.
-// Stores key and value vectors for each cached token position.
-class KVCache {
-public:
-    // head_dim: dimension of each attention head
-    // num_heads: number of key-value heads
-    // max_seq_len: maximum sequence length to cache
-    KVCache(int head_dim, int num_heads, int max_seq_len)
-        : head_dim_(head_dim),
-          num_heads_(num_heads),
-          max_seq_len_(max_seq_len),
-          current_len_(0) {
-        // Pre-allocate contiguous storage for keys and values
-        // Shape: [max_seq_len, num_heads, head_dim]
-        size_t total_elements = static_cast<size_t>(max_seq_len)
-                                * num_heads * head_dim;
-        key_cache_.resize(total_elements, 0.0f);
-        val_cache_.resize(total_elements, 0.0f);
-    }
+/**
+ * During generation each new token attends to every previous token, which
+ * needs their key and value vectors. Recomputing those every step would be
+ * quadratic. Caching them makes per-token work constant in sequence length.
+ */
+export class KVCache {
+  private keys: Vec[] = [];
+  private values: Vec[] = [];
 
-    // Append a new token's key and value projections to the cache.
-    // k_proj, v_proj: arrays of size [num_heads * head_dim]
-    void append(const float* k_proj, const float* v_proj) {
-        if (current_len_ >= max_seq_len_) {
-            throw std::runtime_error("KV cache capacity exceeded");
-        }
-        size_t offset = static_cast<size_t>(current_len_)
-                        * num_heads_ * head_dim_;
-        std::memcpy(&key_cache_[offset], k_proj,
-                     num_heads_ * head_dim_ * sizeof(float));
-        std::memcpy(&val_cache_[offset], v_proj,
-                     num_heads_ * head_dim_ * sizeof(float));
-        ++current_len_;
-    }
+  constructor(
+    private readonly maxLen: number,
+    private readonly headDim: number,
+    private readonly numLayers: number,
+    private readonly numKVHeads: number
+  ) {}
 
-    // Retrieve cached keys for all positions up to current_len_.
-    // Returns pointer to contiguous [current_len_, num_heads, head_dim] data.
-    const float* keys() const { return key_cache_.data(); }
+  append(k: Vec, v: Vec) {
+    if (this.keys.length >= this.maxLen) throw new Error("context window exhausted");
+    this.keys.push(k);
+    this.values.push(v);
+  }
 
-    // Retrieve cached values for all positions up to current_len_.
-    const float* values() const { return val_cache_.data(); }
+  get length() { return this.keys.length; }
 
-    int length() const { return current_len_; }
-
-    // Reset cache for a new sequence (reuses allocated memory).
-    void reset() { current_len_ = 0; }
-
-private:
-    int head_dim_;
-    int num_heads_;
-    int max_seq_len_;
-    int current_len_;
-    std::vector<float> key_cache_;
-    std::vector<float> val_cache_;
-};`,
-    },
-    {
-      language: "cpp",
-      caption: "INT8 dequantization kernel — converts quantized weights back to FP32",
-      source: `#include <cstdint>
-#include <vector>
-
-// INT8 symmetric dequantization.
-// Quantized value is stored as int8_t; the original float is approximated as:
-//     float_val ≈ int8_val * scale
-//
-// scale = max(abs(tensor)) / 127.0  (computed during quantization)
-
-struct QuantizedTensor {
-    std::vector<int8_t> data;   // Quantized weight values
-    float scale;                // Per-tensor (or per-channel) scale factor
-    int rows;
-    int cols;
-};
-
-// Dequantize an INT8 tensor back to FP32.
-// output must be pre-allocated with at least rows * cols elements.
-void dequantize_int8(const QuantizedTensor& qtensor, float* output) {
-    const int total = qtensor.rows * qtensor.cols;
-    const float s = qtensor.scale;
-
-    for (int i = 0; i < total; ++i) {
-        // Core dequantization: multiply quantized int by scale factor
-        output[i] = static_cast<float>(qtensor.data[i]) * s;
-    }
+  /** Bytes held, at fp16. This is usually the real limit on batch size. */
+  bytes(batchSize: number): number {
+    const perToken = 2 * this.numLayers * this.numKVHeads * this.headDim * 2; // K and V, 2 bytes each
+    return perToken * this.keys.length * batchSize;
+  }
 }
 
-// Quantize an FP32 tensor to INT8 (symmetric, per-tensor).
-QuantizedTensor quantize_int8(const float* input, int rows, int cols) {
-    QuantizedTensor qt;
-    qt.rows = rows;
-    qt.cols = cols;
-
-    const int total = rows * cols;
-    qt.data.resize(total);
-
-    // 1. Find the absolute maximum value in the tensor
-    float abs_max = 0.0f;
-    for (int i = 0; i < total; ++i) {
-        float abs_val = (input[i] < 0) ? -input[i] : input[i];
-        if (abs_val > abs_max) abs_max = abs_val;
-    }
-
-    // 2. Compute scale: maps [-abs_max, abs_max] -> [-127, 127]
-    qt.scale = abs_max / 127.0f;
-    float inv_scale = (abs_max > 0.0f) ? 127.0f / abs_max : 0.0f;
-
-    // 3. Quantize each value: round(value / scale), clamp to [-127, 127]
-    for (int i = 0; i < total; ++i) {
-        float scaled = input[i] * inv_scale;
-        int rounded = static_cast<int>(scaled + (scaled >= 0 ? 0.5f : -0.5f));
-        // Clamp to INT8 range
-        if (rounded > 127) rounded = 127;
-        if (rounded < -127) rounded = -127;
-        qt.data[i] = static_cast<int8_t>(rounded);
-    }
-
-    return qt;
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "Batched scaled dot-product attention computation",
-      source: `#include <vector>
-#include <cmath>
-#include <algorithm>
-
-// Compute scaled dot-product attention for a batch of sequences.
+// Worked example — a 70B-class model, 80 layers, 8 KV heads, head dim 128:
+//   per token  = 2 * 80 * 8 * 128 * 2 bytes ≈ 327 KB
+//   32k context, batch of 16 ≈ 327KB * 32,000 * 16 ≈ 167 GB
+// That exceeds the weights by a wide margin, which is why the KV cache — not
+// the model — is what caps concurrency on a GPU.
 //
-// For each batch element b and each head h:
-//   Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+// The two levers:
+// - Grouped-query attention: share K/V across query heads, shrinking the cache
+//   several-fold for a small quality cost.
+// - PagedAttention (vLLM): manage the cache in non-contiguous pages to remove
+//   fragmentation and share identical prefixes between requests.
 //
-// Q: [batch_size, num_heads, seq_len_q, head_dim]
-// K: [batch_size, num_heads, seq_len_kv, head_dim]
-// V: [batch_size, num_heads, seq_len_kv, head_dim]
-// Output: [batch_size, num_heads, seq_len_q, head_dim]
-//
-// All tensors stored in row-major order as flat arrays.
-
-void batched_attention(
-    const float* Q, const float* K, const float* V,
-    float* output,
-    int batch_size, int num_heads,
-    int seq_len_q, int seq_len_kv, int head_dim
-) {
-    const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
-
-    // Temporary storage for attention scores and softmax
-    std::vector<float> scores(seq_len_q * seq_len_kv);
-    std::vector<float> attn_weights(seq_len_q * seq_len_kv);
-
-    for (int b = 0; b < batch_size; ++b) {
-        for (int h = 0; h < num_heads; ++h) {
-            // --- Step 1: Compute Q * K^T * scale ---
-            for (int i = 0; i < seq_len_q; ++i) {
-                for (int j = 0; j < seq_len_kv; ++j) {
-                    float dot = 0.0f;
-                    // Dot product of Q[b,h,i,:] and K[b,h,j,:]
-                    for (int d = 0; d < head_dim; ++d) {
-                        size_t q_idx = ((static_cast<size_t>(b) * num_heads + h)
-                                       * seq_len_q + i) * head_dim + d;
-                        size_t k_idx = ((static_cast<size_t>(b) * num_heads + h)
-                                       * seq_len_kv + j) * head_dim + d;
-                        dot += Q[q_idx] * K[k_idx];
-                    }
-                    scores[i * seq_len_kv + j] = dot * scale;
-                }
-            }
-
-            // --- Step 2: Softmax over the key dimension ---
-            for (int i = 0; i < seq_len_q; ++i) {
-                // Numerically stable softmax: subtract max
-                float max_val = *std::max_element(
-                    &scores[i * seq_len_kv],
-                    &scores[i * seq_len_kv + seq_len_kv]);
-
-                float sum_exp = 0.0f;
-                for (int j = 0; j < seq_len_kv; ++j) {
-                    float e = std::exp(scores[i * seq_len_kv + j] - max_val);
-                    attn_weights[i * seq_len_kv + j] = e;
-                    sum_exp += e;
-                }
-                for (int j = 0; j < seq_len_kv; ++j) {
-                    attn_weights[i * seq_len_kv + j] /= sum_exp;
-                }
-            }
-
-            // --- Step 3: Multiply attention weights by V ---
-            for (int i = 0; i < seq_len_q; ++i) {
-                for (int d = 0; d < head_dim; ++d) {
-                    float val = 0.0f;
-                    for (int j = 0; j < seq_len_kv; ++j) {
-                        size_t v_idx = ((static_cast<size_t>(b) * num_heads + h)
-                                       * seq_len_kv + j) * head_dim + d;
-                        val += attn_weights[i * seq_len_kv + j] * V[v_idx];
-                    }
-                    size_t o_idx = ((static_cast<size_t>(b) * num_heads + h)
-                                   * seq_len_q + i) * head_dim + d;
-                    output[o_idx] = val;
-                }
-            }
-        }
-    }
-}`,
+// This also explains the latency shape users notice: PREFILL processes the
+// whole prompt in parallel and is compute-bound (that is time-to-first-token),
+// while DECODE emits one token at a time, re-reading weights and cache, and is
+// memory-bandwidth-bound — hence roughly constant per token.`,
     },
   ],
   diagrams: [
@@ -526,6 +387,37 @@ void batched_attention(
         CB3 --> CB4[New request fills slot]
         CB4 --> CB5[GPU always utilized]
     end`,
+    },
+  ],
+  animations: [
+    {
+      title: "Prefill, decode, and the KV cache",
+      steps: [
+        {
+          label: "Prefill",
+          detail: "The whole prompt is processed in one parallel pass. Compute-bound; cost grows with prompt length. This is time-to-first-token.",
+        },
+        {
+          label: "KV cache filled",
+          detail: "Keys and values for every prompt token are stored so they're never recomputed.",
+        },
+        {
+          label: "Decode one token",
+          detail: "Only the newest token's K and V are computed; it attends to the cache. Memory-bandwidth-bound.",
+        },
+        {
+          label: "Repeat",
+          detail: "Each token re-reads the weights and the cache — which is why decode speed is roughly constant per token.",
+        },
+        {
+          label: "Cache grows",
+          detail: "It scales with batch × sequence length × layers × heads, and at long context exceeds the weights themselves.",
+        },
+        {
+          label: "Consequences",
+          detail: "Shorten the prompt or cache its prefix to improve TTFT; batch to improve decode throughput.",
+        },
+      ],
     },
   ],
   comparison: {

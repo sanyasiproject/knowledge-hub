@@ -46,6 +46,11 @@ export const configManagement: TopicContent = {
       a: "Use a layered testing approach. Linting tools (ansible-lint, puppet-lint, cookstyle) catch syntax and style issues. Unit testing frameworks (Molecule for Ansible, rspec-puppet, ChefSpec) test individual roles or modules in isolation. Integration tests spin up real VMs or containers (Vagrant, Docker, Test Kitchen) and apply the full configuration, then verify with tools like Testinfra or InSpec. Finally, apply to a staging environment that mirrors production before promoting changes.",
     },
   ],
+  followUps: [
+    "Where should configuration live — image, environment, or a config service?",
+    "How do you roll out a config change safely, and how do you roll it back?",
+    "Why is configuration a more common outage cause than code?",
+  ],
   mcqs: [
     {
       q: "Which configuration management tool is agentless by default?",

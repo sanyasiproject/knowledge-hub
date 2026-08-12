@@ -115,6 +115,11 @@ A good postmortem produces 3-5 specific action items. A great one changes a proc
       a: "Measure toil by tracking the percentage of team time spent on manual, repetitive, automatable work. Categorize work weekly into toil vs. engineering. If toil exceeds 50%, the team cannot invest enough in automation to improve — escalate to leadership. Reduce toil by prioritizing automation of the most frequent tasks (highest ROI), building self-healing systems (auto-restart, auto-scale), creating self-service platforms for developers, and converting manual runbooks into automated workflows. Track toil reduction over quarters to show progress.",
     },
   ],
+  followUps: [
+    "How does an error budget create a real conversation between product and engineering?",
+    "What is toil, and why is capping it a policy rather than a preference?",
+    "What makes a postmortem blameless in practice, not just in name?",
+  ],
   mcqs: [
     {
       q: "What is the SRE-recommended maximum percentage of team time spent on toil?",
@@ -537,6 +542,37 @@ error_budget_policy:
     },
   ],
 
+  animations: [
+    {
+      title: "A blameless postmortem",
+      steps: [
+        {
+          label: "Timeline first",
+          detail: "What happened, when, in facts — no interpretation and no names attached to mistakes.",
+        },
+        {
+          label: "Impact",
+          detail: "Who was affected, how badly, for how long. Quantified.",
+        },
+        {
+          label: "Contributing factors",
+          detail: "Usually several. 'Human error' is never a root cause — ask what made the error possible and undetected.",
+        },
+        {
+          label: "Why blameless",
+          detail: "Blame makes people hide information. You need the person who made the change to explain freely what they saw.",
+        },
+        {
+          label: "Actions",
+          detail: "Specific, owned, dated. 'Be more careful' is not an action.",
+        },
+        {
+          label: "Publish",
+          detail: "Widely. A postmortem nobody reads teaches only the people already in the room.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "SRE", "DevOps", "Traditional Ops"],
     rows: [
@@ -616,6 +652,16 @@ error_budget_policy:
     "The **SRE book** identifies three key practices for managing complexity: *simplicity* (actively fight accidental complexity), *release engineering* (make deploys safe, frequent, and reversible), and *capacity planning* (predict demand and provision ahead of need). All three reduce the probability and blast radius of incidents.",
   ],
 
+  resources: [
+    {
+      label: "Site Reliability Engineering — Google",
+      kind: "book",
+    },
+    {
+      label: "The Site Reliability Workbook — Google",
+      kind: "book",
+    },
+  ],
   glossary: [
     {
       term: "Site Reliability Engineering (SRE)",

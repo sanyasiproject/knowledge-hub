@@ -110,6 +110,37 @@ Migration should be incremental, not a big-bang rewrite:
 
 **Over-engineering**: not every application needs microservices. Many successful, high-traffic systems run as monoliths (Shopify, Stack Overflow, Basecamp). Choose the architecture that fits your team, domain, and scale.`,
   ],
+  animations: [
+    {
+      title: "Extracting the first service",
+      steps: [
+        {
+          label: "Modular monolith",
+          detail: "One deploy, but clear internal module boundaries with explicit interfaces between them.",
+        },
+        {
+          label: "Pressure appears",
+          detail: "One module — say notifications — needs to scale independently and is owned by another team.",
+        },
+        {
+          label: "Harden the boundary",
+          detail: "Route all access through its interface. No other module touches its tables.",
+        },
+        {
+          label: "Split the data",
+          detail: "Give it its own schema. Cross-module joins become API calls — usually the hardest step.",
+        },
+        {
+          label: "Extract",
+          detail: "Move it out behind the same interface. Callers change transport, not semantics.",
+        },
+        {
+          label: "Why this order",
+          detail: "Extracting before the boundary is clean produces a distributed monolith: the coupling remains, now over a network.",
+        },
+      ],
+    },
+  ],
   interviewQA: [
     {
       q: "When would you recommend a monolith over microservices?",
@@ -127,6 +158,11 @@ Migration should be incremental, not a big-bang rewrite:
       q: "What is a distributed monolith and how do you avoid it?",
       a: "A distributed monolith has the worst of both worlds: services are deployed separately but are tightly coupled, requiring lockstep releases and coordinated deployments. It happens when services share databases, have synchronous chains of dependencies, or when boundaries were drawn along technical layers (frontend service, backend service, database service) rather than business domains. Avoid it by ensuring each service owns its data, can deploy independently, and communicates through well-defined async interfaces. Test by asking: can this service be deployed without coordinating with other teams?",
     },
+  ],
+  followUps: [
+    "What makes a monolith modular rather than a big ball of mud?",
+    "What are the actual signals that it's time to extract a service?",
+    "Why is a monolith easier to refactor across boundaries?",
   ],
   mcqs: [
     {
@@ -738,6 +774,16 @@ int main() {
     "Many high-scale systems (Shopify, Stack Overflow, Basecamp) run successfully as monoliths. Choose architecture based on team size, domain clarity, and operational capacity -- not industry trends.",
   ],
 
+  resources: [
+    {
+      label: "MonolithFirst — Martin Fowler",
+      kind: "article",
+    },
+    {
+      label: "Building Microservices — Sam Newman",
+      kind: "book",
+    },
+  ],
   glossary: [
     {
       term: "Monolith",

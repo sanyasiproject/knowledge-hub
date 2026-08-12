@@ -15,6 +15,37 @@ export const gitInternals: TopicContent = {
     "## Garbage Collection\n\n`git gc` performs several maintenance tasks:\n1. **Packs loose objects** into packfiles with delta compression\n2. **Removes unreachable objects** — commits not referenced by any branch, tag, or reflog entry\n3. **Packs refs** — consolidates `.git/refs/` files into `.git/packed-refs` for faster lookup\n4. **Prunes reflog entries** older than the configured expiry\n\nGit runs gc automatically when thresholds are reached (default: 6700+ loose objects or 50+ packfiles). `git gc --aggressive` rebuilds packfiles with more thorough delta compression (slow, rarely needed). `git prune` removes unreachable loose objects immediately.\n\nImportant: unreachable objects are safe for at least 2 weeks by default (gc.pruneExpire), giving you time to recover from mistakes using the reflog.",
     "## Low-Level (Plumbing) Commands\n\nGit distinguishes between porcelain (user-facing) and plumbing (low-level) commands:\n\n- `git hash-object -w <file>` — compute SHA and store as blob\n- `git cat-file -t <sha>` — show object type\n- `git cat-file -p <sha>` — pretty-print object content\n- `git ls-tree <tree-sha>` — list entries in a tree object\n- `git update-index --add <file>` — add entry to the index\n- `git write-tree` — create a tree object from the current index\n- `git commit-tree <tree> -p <parent> -m \"msg\"` — create a commit object\n- `git update-ref refs/heads/branch <sha>` — update a ref\n- `git rev-parse HEAD` — resolve a ref to its SHA\n- `git fsck` — verify integrity of all objects\n\nThese commands let you understand (and manually construct) what porcelain commands do automatically.",
   ],
+  animations: [
+    {
+      title: "What a commit actually is",
+      steps: [
+        {
+          label: "Blob",
+          detail: "File contents, stored by SHA of the content. Identical files anywhere are one blob.",
+        },
+        {
+          label: "Tree",
+          detail: "A directory: names pointing at blobs and other trees.",
+        },
+        {
+          label: "Commit",
+          detail: "A pointer to one tree, plus parent commits, author, and message.",
+        },
+        {
+          label: "Hash chain",
+          detail: "The commit's hash covers the tree and the parents, so changing any history changes every hash after it.",
+        },
+        {
+          label: "Branch",
+          detail: "Just a file containing one commit hash. Creating one is writing 41 bytes — hence branching is free.",
+        },
+        {
+          label: "Renames",
+          detail: "Not stored. Git infers them by comparing content similarity between trees.",
+        },
+      ],
+    },
+  ],
   interviewQA: [
     {
       q: "Explain Git's object model. What are the four object types and how do they relate?",
@@ -41,6 +72,11 @@ export const gitInternals: TopicContent = {
         "What is a thin pack in the context of fetch/push?",
       ],
     },
+  ],
+  followUps: [
+    "What are the four object types, and how does a commit reference a tree?",
+    "Why is a branch just a file containing a hash?",
+    "How does Git detect a rename when it doesn't store renames?",
   ],
   mcqs: [
     {
@@ -379,6 +415,16 @@ git count-objects -vH
     "**Plumbing commands** (`hash-object`, `cat-file`, `write-tree`, `commit-tree`, `update-ref`) are the building blocks that porcelain commands (`add`, `commit`, `merge`) are built upon.",
   ],
 
+  resources: [
+    {
+      label: "Pro Git — Git Internals chapter",
+      kind: "book",
+    },
+    {
+      label: "Building Git — James Coglan",
+      kind: "book",
+    },
+  ],
   glossary: [
     {
       term: "Blob",

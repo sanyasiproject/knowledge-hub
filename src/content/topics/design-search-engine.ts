@@ -381,6 +381,37 @@ private:
     STORE --> INDEX["Send to Indexer"]`,
     },
   ],
+  animations: [
+    {
+      title: "Query to results",
+      steps: [
+        {
+          label: "Index built offline",
+          detail: "Documents are crawled, analysed into terms, and written to an inverted index: term → posting list.",
+        },
+        {
+          label: "Query analysed",
+          detail: "Same analyser as index time — tokenised, lowercased, stemmed. A mismatch here silently breaks matching.",
+        },
+        {
+          label: "Posting lists fetched",
+          detail: "One per term; intersected for AND semantics.",
+        },
+        {
+          label: "Scored",
+          detail: "BM25 ranks by term frequency, inverse document frequency, and length normalisation.",
+        },
+        {
+          label: "Re-ranked",
+          detail: "A second-stage model reorders the top N using features too expensive to compute over everything.",
+        },
+        {
+          label: "Served",
+          detail: "Top 10 returned; deep pagination is deliberately expensive and usually capped.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Feature",

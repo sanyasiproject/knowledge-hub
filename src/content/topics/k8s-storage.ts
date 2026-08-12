@@ -42,6 +42,11 @@ export const k8sStorage: TopicContent = {
       a: "When a ConfigMap is mounted as a volume, kubelet periodically checks for changes and updates the files in the mount (via atomic symlink swap). The application can detect file changes and reload configuration without a pod restart. The update delay is bounded by the kubelet sync period (configurable, default ~60 seconds). Environment variable-based ConfigMaps do not update live and require a pod restart.",
     },
   ],
+  followUps: [
+    "Why is ReadWriteMany harder than ReadWriteOnce?",
+    "What happens to a PVC when the Pod moves to another node?",
+    "How do StatefulSet volume claims differ from a shared PVC?",
+  ],
   mcqs: [
     {
       q: "What does WaitForFirstConsumer volume binding mode do?",
@@ -351,6 +356,37 @@ kubectl get volumeattachment`,
         Namespace isolation`,
     },
   ],
+  animations: [
+    {
+      title: "A Pod moving nodes with its volume",
+      steps: [
+        {
+          label: "PVC created",
+          detail: "The Pod requests storage by claim, not by naming a disk.",
+        },
+        {
+          label: "Dynamic provisioning",
+          detail: "The StorageClass provisions a real volume and binds it to the claim.",
+        },
+        {
+          label: "Mounted",
+          detail: "The volume is attached to the node and mounted into the Pod.",
+        },
+        {
+          label: "Node fails",
+          detail: "The Pod is rescheduled elsewhere.",
+        },
+        {
+          label: "ReadWriteOnce constraint",
+          detail: "A block volume can only attach to one node at a time — the old attachment must be released first, which is why this can be slow.",
+        },
+        {
+          label: "ReadWriteMany",
+          detail: "Needs a network filesystem such as NFS or EFS, not a block device.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Feature", "PV/PVC", "ConfigMap", "Secret", "Projected Volume", "CSI Volume"],
     rows: [
@@ -424,6 +460,16 @@ kubectl get volumeattachment`,
       term: "Reclaim Policy",
       definition:
         "Determines what happens to a PV when its PVC is deleted: Retain preserves data, Delete removes it, Recycle is deprecated.",
+    },
+  ],
+  resources: [
+    {
+      label: "Kubernetes documentation — Storage (Volumes, PV, PVC, StorageClasses)",
+      kind: "docs",
+    },
+    {
+      label: "Container Storage Interface (CSI) specification",
+      kind: "docs",
     },
   ],
 };

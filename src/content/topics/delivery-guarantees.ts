@@ -376,6 +376,11 @@ async function publishOutboxEvents(): Promise<void> {
       a: "Not with broker-level mechanisms alone. Kafka's exactly-once only works within the Kafka ecosystem (consume-transform-produce). When writing to an external system like PostgreSQL, you need application-level exactly-once: consume from Kafka with at-least-once, use an idempotent consumer (dedup table in PostgreSQL), and commit the Kafka offset only after the database transaction succeeds. The consumer stores the Kafka offset in the database alongside business data, so on restart it can seek to the last committed offset stored in the DB rather than relying on Kafka's consumer group offsets.",
     },
   ],
+  followUps: [
+    "Why can't exactly-once exist across a system boundary?",
+    "What does Kafka's transactional API actually cover, and what does it not?",
+    "How do you make a consumer idempotent when the side effect is sending an email?",
+  ],
   mcqs: [
     {
       q: "Which Kafka producer setting enables broker-level deduplication?",

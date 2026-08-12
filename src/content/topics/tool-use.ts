@@ -21,206 +21,115 @@ export const toolUse: TopicContent = {
   ],
   code: [
     {
-      language: "cpp",
-      caption: "Defining tools and calling the Anthropic API",
-      source: `#include <iostream>
-#include <string>
-#include <nlohmann/json.hpp>
-#include <curl/curl.h>
+      language: "typescript",
+      caption: "Defining tools — the description is a prompt, not documentation",
+      source: `import Anthropic from "@anthropic-ai/sdk";
 
-using json = nlohmann::json;
+const client = new Anthropic();
 
-// Callback for libcurl to capture response data
-size_t write_callback(char* ptr, size_t size, size_t nmemb, std::string* data) {
-    data->append(ptr, size * nmemb);
-    return size * nmemb;
-}
+// Few, sharply-distinguished tools. Selection accuracy falls as the list grows,
+// and two tools with overlapping descriptions is the usual cause of the model
+// picking the wrong one.
+const tools: Anthropic.Tool[] = [
+  {
+    name: "get_order",
+    description:
+      "Fetch one order by its exact order ID (format ORD-12345). " +
+      "Use when the customer gives an order number. " +
+      "To find orders by customer email or date, use search_orders instead.",
+    input_schema: {
+      type: "object",
+      properties: { order_id: { type: "string", pattern: "^ORD-\\\\d+$" } },
+      required: ["order_id"],
+    },
+  },
+  {
+    name: "search_orders",
+    description:
+      "Find orders by customer email and optional date range. " +
+      "Returns at most 20 results, newest first. " +
+      "Use when you do NOT have an exact order ID.",
+    input_schema: {
+      type: "object",
+      properties: {
+        email: { type: "string", format: "email" },
+        since: { type: "string", description: "ISO 8601 date" },
+      },
+      required: ["email"],
+    },
+  },
+];
 
-json create_tool_definition() {
-    return {
-        {"name", "get_weather"},
-        {"description", "Get the current weather for a given location. "
-                        "Use when the user asks about weather conditions. "
-                        "Returns temperature in Celsius, conditions, and humidity."},
-        {"input_schema", {
-            {"type", "object"},
-            {"properties", {
-                {"location", {
-                    {"type", "string"},
-                    {"description", "City name, e.g. 'San Francisco, CA'"}
-                }},
-                {"units", {
-                    {"type", "string"},
-                    {"enum", {"celsius", "fahrenheit"}},
-                    {"description", "Temperature units (default: celsius)"}
-                }}
-            }},
-            {"required", {"location"}}
-        }}
-    };
-}
-
-json call_anthropic_api(const json& tools, const json& messages) {
-    CURL* curl = curl_easy_init();
-    std::string response_body;
-
-    json request_body = {
-        {"model", "claude-sonnet-4-20250514"},
-        {"max_tokens", 1024},
-        {"tools", tools},
-        {"messages", messages}
-    };
-
-    struct curl_slist* headers = nullptr;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    headers = curl_slist_append(headers, "x-api-key: YOUR_API_KEY");
-    headers = curl_slist_append(headers, "anthropic-version: 2023-06-01");
-
-    std::string body = request_body.dump();
-    curl_easy_setopt(curl, CURLOPT_URL, "https://api.anthropic.com/v1/messages");
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
-
-    curl_easy_perform(curl);
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-
-    return json::parse(response_body);
-}
-
-int main() {
-    json tools = json::array({create_tool_definition()});
-    json messages = json::array({
-        {{"role", "user"}, {"content", "What's the weather in Tokyo?"}}
-    });
-
-    json response = call_anthropic_api(tools, messages);
-    std::cout << response.dump(2) << std::endl;
-}`,
+// What makes these descriptions work:
+// - Each says when to use it AND when not to, naming the alternative.
+// - The pattern on order_id makes a hallucinated ID a schema violation.
+// - Result size is stated, so the model knows the output is bounded.`,
     },
     {
-      language: "cpp",
-      caption: "Handling tool results in a conversation loop",
-      source: `#include <iostream>
-#include <string>
-#include <vector>
-#include <nlohmann/json.hpp>
+      language: "typescript",
+      caption: "The tool loop — your code executes, the model only requests",
+      source: `type ToolFn = (input: any) => Promise<unknown>;
 
-using json = nlohmann::json;
+const handlers: Record<string, ToolFn> = {
+  get_order: async ({ order_id }) => db.orders.findById(order_id),
+  search_orders: async ({ email, since }) => db.orders.search({ email, since }),
+};
 
-// Forward declaration (see previous example for implementation)
-json call_anthropic_api(const json& tools, const json& messages);
+export async function runAgent(userMessage: string, maxSteps = 8) {
+  const messages: Anthropic.MessageParam[] = [{ role: "user", content: userMessage }];
 
-std::string execute_tool(const std::string& name, const json& input) {
-    // Dispatch tool calls to actual implementations
-    if (name == "get_weather") {
-        // Replace with real API call
-        json result = {{"temp", 22}, {"conditions", "sunny"}, {"humidity", 65}};
-        return result.dump();
-    }
-    json err = {{"error", "Unknown tool: " + name}};
-    return err.dump();
-}
-
-std::string run_agent(const std::string& user_message, const json& tools) {
-    json messages = json::array({
-        {{"role", "user"}, {"content", user_message}}
+  for (let step = 0; step < maxSteps; step++) {   // ALWAYS bound the loop
+    const res = await client.messages.create({
+      model: "claude-sonnet-5",
+      max_tokens: 1024,
+      tools,
+      messages,
     });
 
-    while (true) {
-        json response = call_anthropic_api(tools, messages);
+    messages.push({ role: "assistant", content: res.content });
 
-        // If no tool use, return the text response
-        if (response["stop_reason"] == "end_turn") {
-            std::string result;
-            for (const auto& block : response["content"]) {
-                if (block["type"] == "text") {
-                    result += block["text"].get<std::string>();
-                }
-            }
-            return result;
+    if (res.stop_reason !== "tool_use") {
+      return res.content.find((b) => b.type === "text");
+    }
+
+    const calls = res.content.filter((b) => b.type === "tool_use");
+
+    // Independent calls run concurrently — the model can request several at once.
+    const results = await Promise.all(
+      calls.map(async (call) => {
+        try {
+          const out = await handlers[call.name]?.(call.input);
+          return {
+            type: "tool_result" as const,
+            tool_use_id: call.id,
+            content: JSON.stringify(out ?? { error: "unknown tool" }).slice(0, 4000),
+          };
+        } catch (err) {
+          // Return the error TO the model — it can often recover. Throwing
+          // here ends the run for what may be a retryable problem.
+          return {
+            type: "tool_result" as const,
+            tool_use_id: call.id,
+            is_error: true,
+            content: \`\${(err as Error).message}. Check the arguments and try again.\`,
+          };
         }
+      })
+    );
 
-        // Process all tool use blocks (handles parallel tool calls)
-        json tool_results = json::array();
-        for (const auto& block : response["content"]) {
-            if (block["type"] == "tool_use") {
-                std::string result = execute_tool(
-                    block["name"].get<std::string>(), block["input"]);
-                tool_results.push_back({
-                    {"type", "tool_result"},
-                    {"tool_use_id", block["id"]},
-                    {"content", result}
-                });
-            }
-        }
+    messages.push({ role: "user", content: results });
+  }
 
-        // Append assistant response and tool results, then loop
-        messages.push_back({{"role", "assistant"}, {"content", response["content"]}});
-        messages.push_back({{"role", "user"}, {"content", tool_results}});
-    }
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "Parallel tool call processing with async execution",
-      source: `#include <iostream>
-#include <string>
-#include <vector>
-#include <future>
-#include <thread>
-#include <chrono>
-#include <nlohmann/json.hpp>
-
-using json = nlohmann::json;
-
-std::string execute_tool_async(const std::string& name, const json& input) {
-    // Simulate async tool dispatch with latency
-    if (name == "get_weather") {
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        json result = {{"temp", 22}, {"conditions", "sunny"}};
-        return result.dump();
-    }
-    if (name == "get_calendar") {
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
-        json result = {{"events", {{{"title", "Standup"}, {"time", "10:00"}}}}};
-        return result.dump();
-    }
-    json err = {{"error", "Unknown tool: " + name}};
-    return err.dump();
+  throw new Error("agent exceeded step budget"); // a loop, not progress
 }
 
-json process_parallel_tool_calls(const json& response) {
-    // Collect all tool_use blocks
-    std::vector<json> tool_blocks;
-    for (const auto& block : response["content"]) {
-        if (block["type"] == "tool_use") {
-            tool_blocks.push_back(block);
-        }
-    }
-
-    // Launch all tool calls in parallel using std::async
-    std::vector<std::future<std::string>> futures;
-    for (const auto& block : tool_blocks) {
-        futures.push_back(std::async(std::launch::async,
-            execute_tool_async,
-            block["name"].get<std::string>(),
-            block["input"]));
-    }
-
-    // Collect results
-    json tool_results = json::array();
-    for (size_t i = 0; i < tool_blocks.size(); ++i) {
-        tool_results.push_back({
-            {"type", "tool_result"},
-            {"tool_use_id", tool_blocks[i]["id"]},
-            {"content", futures[i].get()}
-        });
-    }
-    return tool_results;
-}`,
+// The security boundary lives here, not in the model:
+// authorisation, rate limits, and "is this caller allowed to read this order"
+// are enforced in handlers[]. The model can request delete_everything(); whether
+// that runs is entirely your code's decision.
+//
+// Note the truncation on tool output. An unbounded dump fills the context and
+// degrades every later step in the run.`,
     },
   ],
   comparison: {

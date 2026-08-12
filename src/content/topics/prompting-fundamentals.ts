@@ -101,6 +101,11 @@ Other structural techniques:
       a: "Model training data has a cutoff date and may contain errors. Providing explicit context ensures the model reasons over correct, current information rather than potentially outdated training knowledge. It also makes the model's reasoning auditable -- you can verify the source material. For enterprise use, this is critical for accuracy and compliance.",
     },
   ],
+  followUps: [
+    "Why does putting the instruction at the end sometimes work better?",
+    "How do you tell whether a prompt change helped, rather than assuming?",
+    "Why does 'don't hallucinate' not work?",
+  ],
   mcqs: [
     {
       q: "Which prompt is most likely to produce a useful response?",
@@ -190,85 +195,76 @@ Other structural techniques:
   ],
   code: [
     {
-      language: "cpp",
-      caption: "Basic prompt with **system message** and **structured user prompt** using the Anthropic API via libcurl",
-      source: `#include <iostream>
-#include <string>
-#include <cstdlib>
-#include <curl/curl.h>
+      language: "typescript",
+      caption: "A well-structured request: system prompt for role and rules, user message for the task",
+      source: `import Anthropic from "@anthropic-ai/sdk";
 
-// Callback to accumulate the HTTP response body
-static size_t write_callback(char* ptr, size_t size, size_t nmemb, std::string* data) {
-    data->append(ptr, size * nmemb);
-    return size * nmemb;
+const client = new Anthropic(); // reads ANTHROPIC_API_KEY from the environment
+
+const SYSTEM = [
+  "You are a support triage assistant for a B2B SaaS product.",
+  "Classify each ticket and extract the customer's stated impact.",
+  "Answer ONLY from the ticket text. If severity is not stated or implied,",
+  "say \\"unknown\\" rather than guessing.",
+].join(" ");
+
+export async function triage(ticket: string) {
+  const res = await client.messages.create({
+    model: "claude-sonnet-5",
+    max_tokens: 512,
+    temperature: 0,           // deterministic-ish: this output is parsed, not read
+    system: SYSTEM,           // role + rules live here, not in the user turn
+    messages: [
+      {
+        role: "user",
+        content: [
+          "<ticket>",
+          ticket,
+          "</ticket>",
+          "",
+          "Return: category, severity, and a one-line summary.",
+        ].join("\\n"),
+      },
+    ],
+  });
+
+  const text = res.content.find((b) => b.type === "text");
+  return text?.type === "text" ? text.text : "";
 }
 
-int main() {
-    // Read API key from environment variable
-    const char* api_key_env = std::getenv("ANTHROPIC_API_KEY");
-    if (!api_key_env) {
-        std::cerr << "Error: ANTHROPIC_API_KEY environment variable not set\\n";
-        return 1;
-    }
-    std::string api_key = api_key_env;
+// Why it is shaped like this:
+// - System prompt carries the stable instructions, so it is identical on every
+//   call and can be served from the prompt cache.
+// - The variable part (the ticket) is delimited with tags, so the model can
+//   tell instructions from data — the first line of defence against a ticket
+//   containing "ignore your instructions".
+// - Permission to say "unknown" is explicit. Without it the model will invent
+//   a severity, because a plausible answer always scores better than silence.`,
+    },
+    {
+      language: "typescript",
+      caption: "Self-verification: make the model check its own output against stated criteria",
+      source: `const CHECKLIST_PROMPT = \`Draft a reply to the customer below.
 
-    // System prompt sets persistent behavior
-    std::string system_prompt =
-        "You are a senior technical writer.\\n"
-        "Rules:\\n"
-        "- Write for a developer audience\\n"
-        "- Use clear, concise language\\n"
-        "- Always include code examples when relevant\\n"
-        "- Never invent APIs or libraries that do not exist";
+Before you answer, silently check your draft against every item:
+1. Does it address the specific problem they described, not a general case?
+2. Does every factual claim come from the ticket or the docs provided?
+3. Is there a concrete next step with an owner?
+4. Is it under 120 words?
 
-    // Structured user prompt with clear sections
-    std::string user_prompt =
-        "## Task\\n"
-        "Explain Python's Global Interpreter Lock (GIL).\\n\\n"
-        "## Requirements\\n"
-        "- Target audience: intermediate Python developers\\n"
-        "- Length: 150-200 words\\n"
-        "- Include: what it is, why it exists, and its impact on multi-threading\\n"
-        "- Format: 3 short paragraphs with **bold** key terms";
+Then output ONLY the final reply. Do not show the checklist.\`;
 
-    // Build the JSON request body
-    // Using manual string construction (alternatively, use nlohmann/json)
-    std::string json_body =
-        R"({"model":"claude-sonnet-4-20250514","max_tokens":1024,)"
-        R"("system":")" + system_prompt + R"(",)"
-        R"("messages":[{"role":"user","content":")" + user_prompt + R"("}]})";
-
-    // Initialize libcurl and send the request
-    curl_global_init(CURL_GLOBAL_DEFAULT);
-    CURL* curl = curl_easy_init();
-    std::string response_body;
-
-    if (curl) {
-        struct curl_slist* headers = nullptr;
-        headers = curl_slist_append(headers, "Content-Type: application/json");
-        headers = curl_slist_append(headers, ("x-api-key: " + api_key).c_str());
-        headers = curl_slist_append(headers, "anthropic-version: 2023-06-01");
-
-        curl_easy_setopt(curl, CURLOPT_URL, "https://api.anthropic.com/v1/messages");
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_body.c_str());
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
-
-        CURLcode res = curl_easy_perform(curl);
-        if (res != CURLE_OK) {
-            std::cerr << "Request failed: " << curl_easy_strerror(res) << "\\n";
-        } else {
-            // In production, parse JSON to extract content[0].text
-            std::cout << response_body << "\\n";
-        }
-
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
-    }
-    curl_global_cleanup();
-    return 0;
-}`,
+// Why this works: the checklist gives the model criteria to generate against,
+// rather than asking it to be "good". Each numbered item is a test it can
+// actually apply.
+//
+// Why "silently" and "output ONLY": without it the model narrates the check,
+// and you have to strip that out downstream — which is fragile.
+//
+// The limit of this technique: self-verification catches format and
+// completeness failures well, and factual errors poorly, because the model is
+// checking its own claims against its own beliefs. For facts you need
+// retrieval and an external check, not a longer checklist.`,
     },
     {
       language: "javascript",
@@ -303,64 +299,6 @@ const message = await client.messages.create({
   messages: [{ role: "user", content: prompt }],
 });
 console.log(message.content[0].text); // NEGATIVE`,
-    },
-    {
-      language: "cpp",
-      caption: "**Prompt template** with the checklist pattern for self-verification",
-      source: `#include <iostream>
-#include <string>
-
-// Simple string replacement helper (replaces all occurrences of 'from' with 'to')
-std::string replace_all(std::string str, const std::string& from, const std::string& to) {
-    size_t pos = 0;
-    while ((pos = str.find(from, pos)) != std::string::npos) {
-        str.replace(pos, from.length(), to);
-        pos += to.length();
-    }
-    return str;
-}
-
-int main() {
-    // Reusable prompt template with quality checklist
-    std::string summary_template =
-        "## Role\\n"
-        "You are a research analyst specializing in {domain}.\\n"
-        "\\n"
-        "## Context\\n"
-        "<document>\\n"
-        "{document_text}\\n"
-        "</document>\\n"
-        "\\n"
-        "## Task\\n"
-        "Write an executive summary of the above document.\\n"
-        "\\n"
-        "## Output Format\\n"
-        "- **Length**: exactly {num_sentences} sentences\\n"
-        "- **Audience**: {audience}\\n"
-        "- **Focus areas**: {focus_areas}\\n"
-        "- Use **bold** for key findings and *italics* for caveats\\n"
-        "\\n"
-        "## Quality Checklist\\n"
-        "Before responding, verify your summary:\\n"
-        "1. Contains exactly {num_sentences} sentences\\n"
-        "2. Covers all specified focus areas\\n"
-        "3. Uses no jargon unexplained to the target audience\\n"
-        "4. Makes no claims not supported by the document\\n"
-        "5. Includes at least one quantitative finding if available";
-
-    // Usage: fill in the template variables
-    std::string report_text = "..."; // the document content would go here
-
-    std::string prompt = summary_template;
-    prompt = replace_all(prompt, "{domain}", "climate science");
-    prompt = replace_all(prompt, "{document_text}", report_text);
-    prompt = replace_all(prompt, "{num_sentences}", "5");
-    prompt = replace_all(prompt, "{audience}", "policy makers with no scientific background");
-    prompt = replace_all(prompt, "{focus_areas}", "emissions trends, economic impact, recommended actions");
-
-    std::cout << prompt << "\\n";
-    return 0;
-}`,
     },
   ],
   diagrams: [
@@ -428,6 +366,37 @@ int main() {
       Forbidden content`,
     },
   ],
+  animations: [
+    {
+      title: "Iterating on a prompt properly",
+      steps: [
+        {
+          label: "Baseline",
+          detail: "Write the simplest prompt that could work and run it against your eval set.",
+        },
+        {
+          label: "Find the failures",
+          detail: "Look at what actually broke, by category — not at an aggregate score.",
+        },
+        {
+          label: "Change one thing",
+          detail: "Add an instruction, an example, or a format constraint. One change, so you can attribute the effect.",
+        },
+        {
+          label: "Re-run the whole eval",
+          detail: "Not just the case you were fixing — this is where regressions are caught.",
+        },
+        {
+          label: "Compare per category",
+          detail: "An overall improvement can hide a regression in the slice that matters most.",
+        },
+        {
+          label: "Keep or revert",
+          detail: "Then repeat. Without the eval set this loop is just guessing with extra confidence.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "Vague Prompt", "Specific Prompt", "Why It Matters"],
     rows: [
@@ -460,6 +429,16 @@ int main() {
     "**Delimiters** (`<tags>`, backticks, headers) are essential for separating data from instructions. Without them, the model may treat user-provided content as commands, enabling **prompt injection** attacks.",
     "**Prompt structure** matters measurably: organized prompts with clear sections (role, context, task, format, examples) outperform monolithic paragraphs because the model's attention mechanism can better identify relevant instructions.",
     "**Common pitfalls** to avoid: instruction overload (too many conflicting rules), assumed knowledge (not providing necessary context), vague quality criteria (\"write a good summary\"), and ignoring token limits (prompt + response must fit the context window).",
+  ],
+  resources: [
+    {
+      label: "Anthropic documentation — prompt engineering and tool use",
+      kind: "docs",
+    },
+    {
+      label: "OpenAI documentation — prompt engineering guide",
+      kind: "docs",
+    },
   ],
   glossary: [
     {

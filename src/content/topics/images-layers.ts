@@ -15,6 +15,37 @@ export const imagesLayers: TopicContent = {
     "## Image Registries and Distribution\n\nContainer registries store images as blobs (layers) and manifests, accessed via the OCI Distribution Specification HTTP API. Key operations: push (upload layers and manifest), pull (download manifest and layers), and tag (associate a human-readable name like v1.2.3 with a manifest digest). Tags are mutable — pushing to the same tag overwrites the previous manifest. Digests (sha256:abc123...) are immutable references for reproducible deployments. Registries offer features like vulnerability scanning (analyzing image layers for known CVEs), image signing (Cosign, Notary/TUF for verifying provenance), garbage collection (removing unreferenced blobs), geo-replication (for reduced pull latency), and access control (per-repository permissions). Public registries like Docker Hub host community images; private registries (ECR, ACR, Artifact Registry, self-hosted Harbor) store proprietary images with authentication.",
     "## Image Size Optimization\n\nSmaller images pull faster, start faster, consume less storage, and have a smaller attack surface. Strategies: use minimal base images (Alpine Linux at ~5MB, distroless images with only the runtime, or scratch for static binaries). Multi-stage builds exclude build tools. Combine RUN instructions and clean up in the same layer (removing package manager caches, temp files). Use .dockerignore to exclude unnecessary build context (node_modules, .git, test files, docs). Pin base image versions by digest for reproducibility. Use docker image history and dive (third-party tool) to analyze layer sizes and identify bloat. For interpreted languages, use slim variants of official images (python:3.12-slim vs python:3.12).",
   ],
+  animations: [
+    {
+      title: "How layer caching decides your build time",
+      steps: [
+        {
+          label: "Bad order",
+          detail: "`COPY . .` then `npm install`. Any source change invalidates the COPY layer.",
+        },
+        {
+          label: "Cascade",
+          detail: "Every layer after an invalidated one is rebuilt — so `npm install` runs on every commit.",
+        },
+        {
+          label: "Good order",
+          detail: "`COPY package*.json .`, then `npm install`, then `COPY . .`.",
+        },
+        {
+          label: "Source change",
+          detail: "Only the final COPY is invalidated. Dependencies come from cache — build drops from minutes to seconds.",
+        },
+        {
+          label: "Multi-stage",
+          detail: "Build in one stage, copy only the artefact into a slim runtime image. Compilers never ship.",
+        },
+        {
+          label: "Deleting doesn't shrink",
+          detail: "Removing a file in a later layer leaves it in the earlier one. A secret added then deleted is still in the image.",
+        },
+      ],
+    },
+  ],
   interviewQA: [
     {
       q: "Explain how Docker layer caching works and how instruction order in a Dockerfile affects build performance.",
@@ -44,6 +75,11 @@ export const imagesLayers: TopicContent = {
       q: "How does .dockerignore improve build performance and security?",
       a: "The Docker build context is the directory tree sent to the Docker daemon before building. Without .dockerignore, the entire directory (including .git, node_modules, test data, secrets, documentation) is sent, increasing transfer time and risking accidental inclusion of sensitive files in the image. .dockerignore specifies patterns to exclude from the build context, similar to .gitignore. Key exclusions: .git (can be large), node_modules (rebuilt inside the image), *.env files (may contain secrets), test directories, documentation, and IDE configuration. This reduces build context size, speeds up builds, and prevents credentials from being accidentally COPY'd into image layers where they persist even if deleted in a later layer.",
     },
+  ],
+  followUps: [
+    "Why doesn't deleting a file in a later layer shrink the image?",
+    "How would you order a Dockerfile to maximise cache hits?",
+    "Why is a secret in an intermediate layer still a leak?",
   ],
   mcqs: [
     {
@@ -256,6 +292,16 @@ Container image security extends beyond vulnerability scanning to encompass the 
     "The **union filesystem** (OverlayFS) merges layers into a single view. The writable container layer uses **copy-on-write** -- first write to a lower-layer file copies it up.",
     "Use **volumes** for write-heavy workloads (databases, logs) to bypass the copy-on-write overhead of the container's writable layer.",
     "BuildKit enables parallel stage execution, cache mounts, secret mounts, and remote cache backends -- significantly faster and more secure than the legacy builder.",
+  ],
+  resources: [
+    {
+      label: "Docker documentation — Dockerfile best practices",
+      kind: "docs",
+    },
+    {
+      label: "Google distroless base images",
+      kind: "repo",
+    },
   ],
   glossary: [
     {

@@ -342,6 +342,12 @@ PEL: msg-1]`,
       a: "HLL hashes each element and uses the hash bits to assign the element to one of 16384 registers. It records the maximum number of leading zeros seen in each register. The harmonic mean of 2^(max_leading_zeros) across all registers estimates the cardinality. The fixed 16384 registers at 6 bits each use exactly 12 KB. The standard error is 0.81% — mathematically derived from the register count (1.04 / sqrt(16384)).",
     },
   ],
+  followUps: [
+    "Which structure would you use for a leaderboard, and why not a sorted list?",
+    "How would you build a sliding-window rate limiter with these primitives?",
+    "Why is `KEYS *` dangerous and what replaces it?",
+    "When does a Lua script beat MULTI/EXEC?",
+  ],
   mcqs: [
     {
       q: "What is the time complexity of ZADD in a Sorted Set with n elements?",

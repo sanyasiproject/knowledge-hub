@@ -52,6 +52,11 @@ When a consumer subscribes with \`basic.consume\`, the broker **pushes** message
       a: "RabbitMQ uses multiple mechanisms: (1) prefetch count (basic.qos) limits unacknowledged messages delivered to each consumer — the broker stops pushing until acks arrive; (2) TCP-level backpressure through credit-based flow control between internal processes; (3) connection blocking when broker memory exceeds the alarm threshold (default 40% RAM) or disk space is critically low — publishing connections are blocked and receive connection.blocked notifications. These mechanisms prevent the broker from being overwhelmed.",
     },
   ],
+  followUps: [
+    "When would you choose RabbitMQ over Kafka, concretely?",
+    "What happens when a queue grows large — why does broker performance degrade?",
+    "How do acknowledgements interact with prefetch?",
+  ],
   mcqs: [
     {
       q: "What is the default virtual host in RabbitMQ?",
@@ -125,6 +130,16 @@ When a consumer subscribes with \`basic.consume\`, the broker **pushes** message
     {
       front: "How does credit-based flow control work in RabbitMQ?",
       back: "Internal processes grant 'credits' to upstream processes. Each message sent uses a credit. When credits are exhausted, the sender blocks until the receiver grants more, providing natural backpressure without external coordination.",
+    },
+  ],
+  resources: [
+    {
+      label: "RabbitMQ documentation — tutorials and concepts",
+      kind: "docs",
+    },
+    {
+      label: "Enterprise Integration Patterns — Hohpe & Woolf",
+      kind: "book",
     },
   ],
   glossary: [
@@ -386,6 +401,37 @@ startWorker().catch(console.error);`,
     P->>Ch2: basic.publish(user.signup)
     Broker-->>Ch1: basic.ack
     Broker-->>Ch2: basic.ack`,
+    },
+  ],
+  animations: [
+    {
+      title: "Publish, route, consume, acknowledge",
+      steps: [
+        {
+          label: "Publisher sends",
+          detail: "A message goes to an exchange with a routing key — never directly to a queue.",
+        },
+        {
+          label: "Exchange routes",
+          detail: "Bindings decide which queues receive a copy. A direct exchange matches the key exactly; a fanout copies to all bound queues.",
+        },
+        {
+          label: "Queued",
+          detail: "The message waits. If the queue and message are both durable, it survives a broker restart.",
+        },
+        {
+          label: "Consumer receives",
+          detail: "Delivered up to the prefetch limit, so a consumer isn't handed more than it can work on.",
+        },
+        {
+          label: "Acknowledged",
+          detail: "The consumer acks after processing; the broker deletes the message.",
+        },
+        {
+          label: "Consumer dies first",
+          detail: "No ack, so the broker requeues and another consumer gets it — at-least-once, hence idempotent handlers.",
+        },
+      ],
     },
   ],
   comparison: {

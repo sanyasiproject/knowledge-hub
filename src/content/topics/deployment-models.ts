@@ -47,6 +47,11 @@ export const deploymentModels: TopicContent = {
     }
   ],
 
+  followUps: [
+    "What actually drives a hybrid decision — is it ever purely technical?",
+    "What does data residency force on your architecture?",
+    "Why is 'multi-cloud for portability' usually more expensive than the lock-in it avoids?",
+  ],
   mcqs: [
     {
       q: "Which deployment model combines on-premises infrastructure with public cloud services?",

@@ -93,6 +93,12 @@ Overfitting to a single metric is dangerous. Use a primary metric for optimizati
       a: "Stratified k-fold ensures each fold preserves the same class proportions as the full dataset. Regular k-fold splits data randomly, which can produce folds where a minority class is underrepresented or absent. Stratification is especially important for imbalanced datasets to get reliable per-fold estimates.",
     },
   ],
+  followUps: [
+    "Why is accuracy misleading here, and what would you report instead?",
+    "Where could leakage be hiding in this setup?",
+    "How do you cross-validate time-series data?",
+    "How do you monitor quality when labels arrive weeks later?",
+  ],
   mcqs: [
     {
       q: "A model predicts 100 items as positive. 80 are actually positive and 20 are negative. What is the precision?",
@@ -163,6 +169,16 @@ Overfitting to a single metric is dangerous. Use a primary metric for optimizati
       back: "A naive model predicting the majority class achieves high accuracy while failing completely on the minority class.",
     },
   ],
+  resources: [
+    {
+      label: "Designing Machine Learning Systems — Chip Huyen",
+      kind: "book",
+    },
+    {
+      label: "scikit-learn documentation — model evaluation",
+      kind: "docs",
+    },
+  ],
   glossary: [
     {
       term: "Precision",
@@ -202,222 +218,50 @@ Overfitting to a single metric is dangerous. Use a primary metric for optimizati
   ],
   code: [
     {
-      language: "cpp",
-      caption: "Computing classification metrics and ROC AUC from scratch",
-      source: `#include <iostream>
-#include <vector>
-#include <algorithm>
-#include <numeric>
-#include <iomanip>
+      language: "typescript",
+      caption: "Classification metrics from the confusion matrix — and why accuracy lies",
+      source: `type Binary = 0 | 1;
 
-struct ConfusionMatrix { int tp = 0, fp = 0, tn = 0, fn = 0; };
-
-ConfusionMatrix buildCM(const std::vector<int>& y_true,
-                        const std::vector<int>& y_pred) {
-    ConfusionMatrix cm;
-    for (size_t i = 0; i < y_true.size(); ++i) {
-        if (y_true[i] == 1 && y_pred[i] == 1) ++cm.tp;
-        else if (y_true[i] == 0 && y_pred[i] == 1) ++cm.fp;
-        else if (y_true[i] == 0 && y_pred[i] == 0) ++cm.tn;
-        else ++cm.fn;
-    }
-    return cm;
+export function confusionMatrix(yTrue: Binary[], yPred: Binary[]) {
+  let tp = 0, fp = 0, tn = 0, fn = 0;
+  for (let i = 0; i < yTrue.length; i++) {
+    if (yPred[i] === 1 && yTrue[i] === 1) tp++;
+    else if (yPred[i] === 1 && yTrue[i] === 0) fp++;
+    else if (yPred[i] === 0 && yTrue[i] === 0) tn++;
+    else fn++;
+  }
+  return { tp, fp, tn, fn };
 }
 
-double precision(const ConfusionMatrix& cm) {
-    return (cm.tp + cm.fp == 0) ? 0.0 : double(cm.tp) / (cm.tp + cm.fp);
-}
-double recall(const ConfusionMatrix& cm) {
-    return (cm.tp + cm.fn == 0) ? 0.0 : double(cm.tp) / (cm.tp + cm.fn);
-}
-double f1Score(const ConfusionMatrix& cm) {
-    double p = precision(cm), r = recall(cm);
-    return (p + r == 0.0) ? 0.0 : 2.0 * p * r / (p + r);
-}
+export function metrics(yTrue: Binary[], yPred: Binary[]) {
+  const { tp, fp, tn, fn } = confusionMatrix(yTrue, yPred);
+  const safe = (num: number, den: number) => (den === 0 ? 0 : num / den);
 
-// Compute ROC AUC using the trapezoidal rule
-double rocAuc(const std::vector<int>& y_true,
-              const std::vector<double>& y_scores) {
-    // Create index array sorted by descending score
-    std::vector<size_t> idx(y_true.size());
-    std::iota(idx.begin(), idx.end(), 0);
-    std::sort(idx.begin(), idx.end(),
-              [&](size_t a, size_t b) { return y_scores[a] > y_scores[b]; });
+  const precision = safe(tp, tp + fp); // of what I flagged, how much was right
+  const recall = safe(tp, tp + fn);    // of what was really there, how much I caught
 
-    int totalP = std::count(y_true.begin(), y_true.end(), 1);
-    int totalN = static_cast<int>(y_true.size()) - totalP;
-
-    double auc = 0.0, prevFPR = 0.0, prevTPR = 0.0;
-    int tp = 0, fp = 0;
-    for (size_t i : idx) {
-        if (y_true[i] == 1) ++tp; else ++fp;
-        double tpr = double(tp) / totalP;
-        double fpr = double(fp) / totalN;
-        auc += 0.5 * (fpr - prevFPR) * (tpr + prevTPR);  // Trapezoid
-        prevFPR = fpr;
-        prevTPR = tpr;
-    }
-    return auc;
+  return {
+    accuracy: safe(tp + tn, tp + tn + fp + fn),
+    precision,
+    recall,
+    f1: safe(2 * precision * recall, precision + recall),
+    baseRate: safe(tp + fn, yTrue.length), // ALWAYS report this alongside
+  };
 }
 
-int main() {
-    std::vector<int>    y_true  = {0, 0, 1, 1, 1, 0, 1, 0, 1, 1};
-    std::vector<int>    y_pred  = {0, 1, 1, 1, 0, 0, 1, 0, 1, 1};
-    std::vector<double> y_scores = {0.1, 0.6, 0.8, 0.9, 0.3,
-                                    0.2, 0.75, 0.15, 0.85, 0.7};
-
-    auto cm = buildCM(y_true, y_pred);
-    std::cout << "Confusion Matrix:\\n"
-              << "  TP=" << cm.tp << "  FP=" << cm.fp << "\\n"
-              << "  FN=" << cm.fn << "  TN=" << cm.tn << "\\n\\n";
-    std::cout << std::fixed << std::setprecision(2);
-    std::cout << "Precision: " << precision(cm) << "\\n";
-    std::cout << "Recall:    " << recall(cm) << "\\n";
-    std::cout << "F1 Score:  " << f1Score(cm) << "\\n";
-    std::cout << "ROC AUC:   " << rocAuc(y_true, y_scores) << "\\n";
-    return 0;
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "Stratified k-fold cross-validation with metric computation",
-      source: `#include <iostream>
-#include <vector>
-#include <algorithm>
-#include <numeric>
-#include <cmath>
-#include <iomanip>
-#include <random>
-
-struct Metrics { double accuracy, precision, recall, f1; };
-
-Metrics computeMetrics(const std::vector<int>& y_true,
-                       const std::vector<int>& y_pred) {
-    int tp = 0, fp = 0, tn = 0, fn = 0;
-    for (size_t i = 0; i < y_true.size(); ++i) {
-        if (y_true[i] == 1 && y_pred[i] == 1) ++tp;
-        else if (y_true[i] == 0 && y_pred[i] == 1) ++fp;
-        else if (y_true[i] == 0 && y_pred[i] == 0) ++tn;
-        else ++fn;
-    }
-    double prec = (tp + fp > 0) ? double(tp) / (tp + fp) : 0.0;
-    double rec  = (tp + fn > 0) ? double(tp) / (tp + fn) : 0.0;
-    double f1   = (prec + rec > 0) ? 2 * prec * rec / (prec + rec) : 0.0;
-    double acc  = double(tp + tn) / (tp + fp + tn + fn);
-    return {acc, prec, rec, f1};
-}
-
-// Simple majority-class classifier for demonstration
-std::vector<int> majorityClassifier(const std::vector<int>& y_train,
-                                    int testSize) {
-    int ones = std::count(y_train.begin(), y_train.end(), 1);
-    int majority = (ones > static_cast<int>(y_train.size()) / 2) ? 1 : 0;
-    return std::vector<int>(testSize, majority);
-}
-
-int main() {
-    // Generate synthetic labels (90% class 0, 10% class 1)
-    const int N = 1000, K = 5;
-    std::vector<int> y(N);
-    std::fill(y.begin(), y.begin() + 900, 0);
-    std::fill(y.begin() + 900, y.end(), 1);
-    std::mt19937 rng(42);
-    std::shuffle(y.begin(), y.end(), rng);
-
-    // Stratified k-fold: separate indices by class, distribute evenly
-    std::vector<size_t> idx0, idx1;
-    for (size_t i = 0; i < y.size(); ++i)
-        (y[i] == 0 ? idx0 : idx1).push_back(i);
-    std::shuffle(idx0.begin(), idx0.end(), rng);
-    std::shuffle(idx1.begin(), idx1.end(), rng);
-
-    // Assign each index to a fold
-    std::vector<int> fold(N);
-    for (size_t i = 0; i < idx0.size(); ++i) fold[idx0[i]] = i % K;
-    for (size_t i = 0; i < idx1.size(); ++i) fold[idx1[i]] = i % K;
-
-    // Cross-validate
-    std::vector<Metrics> foldMetrics;
-    for (int f = 0; f < K; ++f) {
-        std::vector<int> yTrain, yTest;
-        for (int i = 0; i < N; ++i)
-            (fold[i] == f ? yTest : yTrain).push_back(y[i]);
-
-        auto yPred = majorityClassifier(yTrain, yTest.size());
-        foldMetrics.push_back(computeMetrics(yTest, yPred));
-    }
-
-    // Report mean +/- std
-    auto report = [&](const char* name, auto getter) {
-        double sum = 0, sumSq = 0;
-        for (auto& m : foldMetrics) {
-            double v = getter(m); sum += v; sumSq += v * v;
-        }
-        double mean = sum / K;
-        double stddev = std::sqrt(sumSq / K - mean * mean);
-        std::cout << std::fixed << std::setprecision(3)
-                  << name << ": " << mean << " +/- " << stddev << "\\n";
-    };
-    report("accuracy",  [](const Metrics& m) { return m.accuracy; });
-    report("precision", [](const Metrics& m) { return m.precision; });
-    report("recall",    [](const Metrics& m) { return m.recall; });
-    report("f1",        [](const Metrics& m) { return m.f1; });
-    return 0;
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "Simple confusion matrix computation and metric extraction in C++",
-      source: `#include <iostream>
-#include <vector>
-#include <cmath>
-
-struct ConfusionMatrix {
-    int tp = 0, fp = 0, tn = 0, fn = 0;
-};
-
-// Build confusion matrix from predictions and ground truth
-ConfusionMatrix build_confusion_matrix(
-    const std::vector<int>& y_true,
-    const std::vector<int>& y_pred
-) {
-    ConfusionMatrix cm;
-    for (size_t i = 0; i < y_true.size(); ++i) {
-        if (y_true[i] == 1 && y_pred[i] == 1) cm.tp++;
-        else if (y_true[i] == 0 && y_pred[i] == 1) cm.fp++;
-        else if (y_true[i] == 0 && y_pred[i] == 0) cm.tn++;
-        else if (y_true[i] == 1 && y_pred[i] == 0) cm.fn++;
-    }
-    return cm;
-}
-
-double precision(const ConfusionMatrix& cm) {
-    return (cm.tp + cm.fp == 0) ? 0.0 : static_cast<double>(cm.tp) / (cm.tp + cm.fp);
-}
-
-double recall(const ConfusionMatrix& cm) {
-    return (cm.tp + cm.fn == 0) ? 0.0 : static_cast<double>(cm.tp) / (cm.tp + cm.fn);
-}
-
-double f1_score(const ConfusionMatrix& cm) {
-    double p = precision(cm), r = recall(cm);
-    return (p + r == 0.0) ? 0.0 : 2.0 * p * r / (p + r);
-}
-
-int main() {
-    std::vector<int> y_true = {1, 0, 1, 1, 0, 1, 0, 0, 1, 1};
-    std::vector<int> y_pred = {1, 0, 1, 0, 0, 1, 1, 0, 1, 1};
-
-    auto cm = build_confusion_matrix(y_true, y_pred);
-
-    std::cout << "TP=" << cm.tp << " FP=" << cm.fp
-              << " TN=" << cm.tn << " FN=" << cm.fn << std::endl;
-    std::cout << "Precision: " << precision(cm) << std::endl;
-    std::cout << "Recall:    " << recall(cm) << std::endl;
-    std::cout << "F1 Score:  " << f1_score(cm) << std::endl;
-
-    return 0;
-}`,
+// The trap, made concrete. 1,000 transactions, 5 of them fraudulent.
+// A model that predicts "not fraud" for everything:
+//   accuracy  = 995/1000 = 99.5%   <- looks excellent
+//   recall    = 0/5      = 0%      <- catches nothing
+//   precision = undefined          <- never flags anything
+//
+// This is why accuracy is meaningless without the base rate, and why
+// imbalanced problems are reported with precision, recall, and PR-AUC.
+// ROC-AUC is also over-optimistic here: the false-positive rate has a huge
+// denominator (995 negatives) so it stays flatteringly low.
+//
+// The threshold is a business decision, not a model property: pick it from the
+// cost of a missed fraud versus the cost of blocking a real customer.`,
     },
   ],
   diagrams: [
@@ -461,6 +305,37 @@ int main() {
     F --> K{Ranking Needed?}
     K -->|Yes| L[Use AUC-ROC, NDCG, MAP]
     K -->|No| M[Use F1 or PR AUC]`,
+    },
+  ],
+  animations: [
+    {
+      title: "Where leakage hides",
+      steps: [
+        {
+          label: "Load the full dataset",
+          detail: "All rows, all features.",
+        },
+        {
+          label: "Scale it",
+          detail: "Fit the scaler on everything, then split into train and test.",
+        },
+        {
+          label: "The leak",
+          detail: "The scaler's mean and variance were computed using test rows — the test set influenced the transform.",
+        },
+        {
+          label: "Result",
+          detail: "Validation scores look excellent, because the model was evaluated on data it indirectly saw.",
+        },
+        {
+          label: "Production",
+          detail: "Performance drops sharply, and nothing in the offline process predicted it.",
+        },
+        {
+          label: "Fix",
+          detail: "Split first, then fit every transform inside the training fold only. Put preprocessing in a pipeline so this can't be forgotten.",
+        },
+      ],
     },
   ],
   comparison: {

@@ -224,6 +224,11 @@ describe("Money", () => {
       a: "Three main strategies: (1) Embedded -- store value object attributes as columns in the owning entity's table (e.g., address_street, address_city in the customers table). (2) Serialized -- store as JSON in a single column, which is flexible but loses queryability. (3) Separate table with a technical PK but no domain identity. Embedded is preferred for simple value objects. Watch for ORM friction: many ORMs expect all objects to have IDs, so use framework-specific features like JPA @Embeddable.",
     },
   ],
+  followUps: [
+    "What makes something an entity rather than a value object?",
+    "Why should value objects be immutable?",
+    "How does this distinction change your database schema?",
+  ],
   mcqs: [
     {
       q: "How is equality determined for a value object?",
@@ -302,6 +307,16 @@ describe("Money", () => {
     {
       front: "Context-dependent classification",
       back: "The same concept can be an entity or value object depending on the bounded context. Address is a value object in e-commerce (a shipping destination) but an entity in real estate (unique property with history). Always ask: does it need identity in THIS context?",
+    },
+  ],
+  resources: [
+    {
+      label: "Domain-Driven Design — Eric Evans",
+      kind: "book",
+    },
+    {
+      label: "Implementing Domain-Driven Design — Vaughn Vernon",
+      kind: "book",
     },
   ],
   glossary: [
@@ -594,6 +609,37 @@ private:
       Consistency boundary
       External references via root ID only`,
       caption: "Entities are tracked by identity across mutations; value objects are interchangeable when attributes match; aggregates group both under one consistency boundary.",
+    },
+  ],
+  animations: [
+    {
+      title: "Identity versus value",
+      steps: [
+        {
+          label: "Two £10 notes",
+          detail: "Interchangeable. You don't care which one you have — that's a value object.",
+        },
+        {
+          label: "Two people named Alex",
+          detail: "Not interchangeable, even with identical attributes. Identity persists — that's an entity.",
+        },
+        {
+          label: "Entity",
+          detail: "Has an id. Its attributes can all change and it's still the same thing.",
+        },
+        {
+          label: "Value object",
+          detail: "No id. Equality is by attributes. Change any attribute and it's a different value.",
+        },
+        {
+          label: "Therefore immutable",
+          detail: "Mutating a shared `Money` or `Address` would change it for everyone holding it. Return a new one instead.",
+        },
+        {
+          label: "In the schema",
+          detail: "Entities get tables with primary keys. Value objects are usually columns on the owner's table.",
+        },
+      ],
     },
   ],
   comparison: {

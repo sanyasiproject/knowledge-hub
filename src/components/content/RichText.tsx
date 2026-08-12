@@ -145,6 +145,17 @@ function parseTable(lines: string[]): ReactNode | null {
   );
 }
 
+/**
+ * Inline-only markdown: `code`, **bold**, *italic*.
+ *
+ * Unlike `RichText` this adds no block wrapper, so it is safe inside an
+ * existing `<li>`, `<td>`, or `<p>` — which is what the Interview pages need,
+ * since their content is already structured as lists and tables.
+ */
+export function Inline({ text }: { text: string }) {
+  return <>{parseInline(text)}</>;
+}
+
 export function RichText({ text }: { text: string }) {
   const lines = text.split("\n");
   const elements: ReactNode[] = [];

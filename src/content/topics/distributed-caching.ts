@@ -64,6 +64,12 @@ Mitigations: (1) **Locking**: the first request that misses acquires a lock, loa
       a: "Choose Memcached when: you need simple key-value caching of strings or serialized objects; you want multi-threaded performance scaling on a single node; you do not need data structures, persistence, or replication; and the dataset is large enough that Memcached's more efficient memory usage per key matters. Redis is better when you need rich data structures (sorted sets for leaderboards, lists for queues), persistence, replication, pub/sub, or Lua scripting. For most modern applications, Redis is the default choice due to its versatility.",
     },
   ],
+  followUps: [
+    "What happens to your database the moment the cache cluster restarts?",
+    "Why does consistent hashing matter here, and what do virtual nodes fix?",
+    "Should the cache fail open or fail closed, and how do you decide?",
+    "When is an in-process cache still the right answer despite the inconsistency?",
+  ],
   mcqs: [
     {
       q: "In consistent hashing, approximately what fraction of keys are remapped when one node is added to an N-node cluster?",
@@ -453,6 +459,37 @@ async function invalidateUser(userId: string): Promise<void> {
     },
   ],
 
+  animations: [
+    {
+      title: "A cache-aside read, and what happens on a miss storm",
+      steps: [
+        {
+          label: "Request arrives",
+          detail: "Service checks Redis for key `user:42`.",
+        },
+        {
+          label: "Hit",
+          detail: "Value returned in ~0.5 ms. The database never sees the request.",
+        },
+        {
+          label: "Miss",
+          detail: "Service queries the database (~5–50 ms), writes the result into Redis with a TTL, returns it.",
+        },
+        {
+          label: "The key expires",
+          detail: "Every concurrent request for that key now misses at the same instant.",
+        },
+        {
+          label: "Stampede",
+          detail: "Ten thousand identical queries hit a database sized for hundreds. Latency spikes, retries pile up, it falls over.",
+        },
+        {
+          label: "Mitigated",
+          detail: "Single-flight lock: one request repopulates while the rest serve the stale value or wait briefly. Jittered TTLs stop keys expiring together.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Feature",
@@ -549,6 +586,20 @@ async function invalidateUser(userId: string): Promise<void> {
     "**Redis vs Memcached**: Redis offers rich data structures, persistence (RDB/AOF), replication, clustering, and scripting. Memcached is simpler, multi-threaded, and more memory-efficient for pure string caching. **Hazelcast** adds embedded Java caching, distributed compute, and synchronous replication for CP-heavy workloads.",
   ],
 
+  resources: [
+    {
+      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      kind: "book",
+    },
+    {
+      label: "Redis documentation — clustering and eviction",
+      kind: "docs",
+    },
+    {
+      label: "Caching at Scale With Redis — Redis Labs",
+      kind: "article",
+    },
+  ],
   glossary: [
     {
       term: "Consistent Hashing",

@@ -190,6 +190,11 @@ Daily data transfer:
       a: "Assumptions: 50M DAU, 40 messages sent per user per day, average message 200 bytes. Ingress: 50M x 40 x 200B / 100K = 4 MB/s -- trivial. But each message is delivered to recipients. If average group size is 5, fan-out makes it 50M x 40 x 5 x 200B / 100K = 20 MB/s egress. With media (5% of messages include a 200KB image): 50M x 40 x 0.05 x 200KB / 100K = 20 GB/s. Media dominates bandwidth; text is negligible.",
     },
   ],
+  followUps: [
+    "What does your estimate actually change about the design?",
+    "What's a reasonable peak-to-average ratio, and why?",
+    "How would the design change if the read:write ratio inverted?",
+  ],
   mcqs: [
     {
       q: "How many seconds are in a day, rounded for estimation purposes?",
@@ -268,6 +273,16 @@ Daily data transfer:
     {
       front: "Read-heavy vs. write-heavy system implications",
       back: "Read-heavy (100:1 ratio): invest in caches, read replicas, CDN, denormalized read models. Write-heavy (1:1 or writes dominate): focus on write-optimized stores (LSM trees), sharding, async processing, eventual consistency.",
+    },
+  ],
+  resources: [
+    {
+      label: "Latency Numbers Every Programmer Should Know — Jeff Dean",
+      kind: "article",
+    },
+    {
+      label: "System Design Interview — Alex Xu",
+      kind: "book",
     },
   ],
   glossary: [
@@ -590,6 +605,37 @@ int main() {
     PEAK --> CACHE["Cache Tier\nread-heavy ratio"]
     QPS --> STORAGE["Daily Storage\nQPS x record size x 86400"]
     STORAGE --> SHARDS["DB Shards\nstorage exceeds single node"]`,
+    },
+  ],
+  animations: [
+    {
+      title: "A back-of-envelope that changes the design",
+      steps: [
+        {
+          label: "Users",
+          detail: "10 million DAU.",
+        },
+        {
+          label: "Actions",
+          detail: "20 requests per user per day → 200M requests/day.",
+        },
+        {
+          label: "Per second",
+          detail: "200M / ~100,000 s ≈ 2,000 req/s average.",
+        },
+        {
+          label: "Peak",
+          detail: "×3 → ~6,000 req/s.",
+        },
+        {
+          label: "Storage",
+          detail: "1 KB per event × 200M/day = 200 GB/day = ~73 TB/year, before replication and indexes.",
+        },
+        {
+          label: "Conclusion",
+          detail: "6,000 req/s is fine for a few application instances; 73 TB/year is not one database. That single number decides partitioning.",
+        },
+      ],
     },
   ],
   comparison: {

@@ -66,6 +66,11 @@ The saga's state must be persisted durably — if the orchestrator crashes mid-s
       a: "Compensating transactions must be designed as idempotent and retriable. If one fails: (1) retry with exponential backoff — most failures are transient; (2) if retries are exhausted, persist the failure state and alert operators for manual intervention; (3) log the saga state comprehensively so operators can complete compensation manually. Never leave a saga in a partially compensated state silently. The system should track which compensations succeeded and which are pending.",
     },
   ],
+  followUps: [
+    "How do you compensate for an action that can't be undone, like an email that's been sent?",
+    "Choreography or orchestration — what does each cost you in debuggability?",
+    "What happens when a compensating transaction itself fails?",
+  ],
   mcqs: [
     {
       q: "What is the fundamental difference between a saga and a distributed transaction (2PC)?",
@@ -575,6 +580,37 @@ int main() {
     },
   ],
 
+  animations: [
+    {
+      title: "A booking that has to unwind",
+      steps: [
+        {
+          label: "Step 1",
+          detail: "Payment service charges the card. Succeeds.",
+        },
+        {
+          label: "Step 2",
+          detail: "Inventory service reserves the seat. Succeeds.",
+        },
+        {
+          label: "Step 3",
+          detail: "Ticketing service issues the ticket. Fails.",
+        },
+        {
+          label: "No distributed rollback",
+          detail: "There is no transaction spanning the three services to roll back.",
+        },
+        {
+          label: "Compensate in reverse",
+          detail: "Release the seat reservation, then refund the payment. Each step has a defined compensating action.",
+        },
+        {
+          label: "The hard part",
+          detail: "Some actions can't be undone — an email already sent. You compensate with a correction, not an erasure.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",
@@ -650,6 +686,16 @@ int main() {
     "**Production essentials**: persist saga state for crash recovery, use correlation IDs (`sagaId`) for distributed tracing, implement timeout handling for unresponsive services, monitor saga metrics (duration, failure rate, stuck sagas), and test every failure permutation with a saga test harness.",
   ],
 
+  resources: [
+    {
+      label: "Sagas — Garcia-Molina & Salem, 1987",
+      kind: "paper",
+    },
+    {
+      label: "Microservices Patterns — Chris Richardson",
+      kind: "book",
+    },
+  ],
   glossary: [
     {
       term: "Saga",

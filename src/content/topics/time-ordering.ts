@@ -68,6 +68,11 @@ HLC provides: causal ordering (like Lamport clocks), closeness to real time (phy
       ],
     },
   ],
+  followUps: [
+    "Why can't you order distributed events by wall-clock timestamp?",
+    "What does a vector clock tell you that a Lamport clock doesn't?",
+    "How does clock skew break a naive 'last write wins' strategy?",
+  ],
   mcqs: [
     {
       q: "What does a Lamport clock guarantee?",
@@ -146,6 +151,16 @@ HLC provides: causal ordering (like Lamport clocks), closeness to real time (phy
     {
       front: "What are Snowflake IDs?",
       back: "Distributed unique ID generators embedding timestamp + machine ID + sequence number. Roughly time-ordered without coordination, but do not guarantee strict ordering across machines.",
+    },
+  ],
+  resources: [
+    {
+      label: "Time, Clocks, and the Ordering of Events — Leslie Lamport, 1978",
+      kind: "paper",
+    },
+    {
+      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      kind: "book",
     },
   ],
   glossary: [
@@ -434,6 +449,37 @@ or Causal Broadcast"]
     G -->|Yes| H["Partition by key
 single leader per key"]
     G -->|No| F`,
+    },
+  ],
+  animations: [
+    {
+      title: "Why wall clocks can't order distributed events",
+      steps: [
+        {
+          label: "Two nodes, two events",
+          detail: "Node A writes at its clock time 10:00:00.100. Node B writes at its clock time 10:00:00.050.",
+        },
+        {
+          label: "Naive conclusion",
+          detail: "B happened first. Last-write-wins keeps A's value.",
+        },
+        {
+          label: "Clock skew",
+          detail: "B's clock is 200 ms fast. B actually wrote at real time 09:59:59.850 — genuinely first, but the timestamps lied.",
+        },
+        {
+          label: "Lamport clocks",
+          detail: "Each node keeps a counter, incremented on every event and carried on every message. Causally-related events are correctly ordered.",
+        },
+        {
+          label: "What Lamport can't do",
+          detail: "It can't tell you whether two events were concurrent — only that one may have caused the other.",
+        },
+        {
+          label: "Vector clocks",
+          detail: "One counter per node lets you detect true concurrency, and therefore detect a genuine conflict rather than silently discarding a write.",
+        },
+      ],
     },
   ],
   comparison: {

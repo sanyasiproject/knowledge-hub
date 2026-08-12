@@ -300,6 +300,11 @@ ORDER BY betweenness DESC`
       a: "Neo4j causal clustering uses the Raft consensus protocol for writes. All writes go through the leader of the core cluster, which replicates them to a majority of core members before acknowledging. This limits write throughput to a single leader's capacity — Neo4j does not shard writes across multiple independent write leaders. Read scalability is addressed by read replicas that asynchronously replicate from core servers. For workloads requiring extreme write throughput, the data model or architecture may need to partition across multiple independent Neo4j clusters at the application level.",
     },
   ],
+  followUps: [
+    "What query would be catastrophic as a SQL self-join but cheap here?",
+    "When is a graph database the wrong answer despite the data being graph-shaped?",
+    "How does index-free adjacency actually work?",
+  ],
   mcqs: [
     {
       q: "What does index-free adjacency mean in a native graph database?",

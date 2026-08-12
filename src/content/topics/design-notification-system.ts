@@ -655,6 +655,37 @@ private:
         "A client-generated unique identifier (typically UUID) attached to a notification request. The server uses it to detect and deduplicate retried requests, ensuring that network-level retries or client bugs do not result in the same notification being delivered multiple times.",
     },
   ],
+  animations: [
+    {
+      title: "One event, three channels",
+      steps: [
+        {
+          label: "Event published",
+          detail: "`OrderShipped` lands on a topic.",
+        },
+        {
+          label: "Notification service consumes",
+          detail: "Resolves the user's preferences and locale.",
+        },
+        {
+          label: "Fan out per channel",
+          detail: "Separate queues for push, email, and SMS — each with its own rate limits and failure behaviour.",
+        },
+        {
+          label: "Template rendered",
+          detail: "Per channel and locale, with the payload.",
+        },
+        {
+          label: "Provider called",
+          detail: "With retries and backoff. A provider outage backs up one queue without affecting the others.",
+        },
+        {
+          label: "Deduplicate",
+          detail: "An idempotency key per (user, event) stops a redelivered event sending the same notification twice.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",

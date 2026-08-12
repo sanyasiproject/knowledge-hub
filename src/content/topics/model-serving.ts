@@ -75,6 +75,11 @@ Shadow mode is typically used before A/B testing as an initial validation step. 
       a: "A canary deployment routes a small fraction of live traffic to a new model while the majority continues to hit the existing model. If the canary shows healthy metrics (latency, error rate, business KPIs), traffic is gradually shifted. If problems arise, traffic is immediately routed back. This limits the blast radius of a bad model release.",
     },
   ],
+  followUps: [
+    "Batch or real-time — what does the prediction actually depend on?",
+    "What is training-serving skew and how do you detect it?",
+    "How do you roll out a new model version safely?",
+  ],
   mcqs: [
     {
       q: "Which serving pattern is best suited for a nightly product recommendation refresh?",
@@ -155,6 +160,16 @@ Shadow mode is typically used before A/B testing as an initial validation step. 
       back: "Infrastructure that provides consistent, low-latency access to precomputed features for both training and serving.",
     },
   ],
+  resources: [
+    {
+      label: "Designing Machine Learning Systems — Chip Huyen",
+      kind: "book",
+    },
+    {
+      label: "Machine Learning Design Patterns — Lakshmanan, Robinson & Munn",
+      kind: "book",
+    },
+  ],
   glossary: [
     {
       term: "Online Serving",
@@ -207,347 +222,75 @@ ML systems require monitoring that goes *beyond traditional software metrics*. *
   ],
   code: [
     {
-      language: "cpp",
-      caption: "HTTP model serving endpoint with health check using cpp-httplib",
-      source: `// Model serving HTTP endpoint in C++ using cpp-httplib.
-// Demonstrates request/response handling, model loading, and latency tracking.
+      language: "typescript",
+      caption: "A serving endpoint: validation, timeout, batching, and health",
+      source: `import express from "express";
+import * as ort from "onnxruntime-node";
+import { z } from "zod";
 
-#include <httplib.h>          // cpp-httplib (header-only)
-#include <nlohmann/json.hpp>  // JSON library
-#include <iostream>
-#include <vector>
-#include <chrono>
-#include <cmath>
-#include <mutex>
-#include <string>
-#include <fstream>
+const app = express();
+app.use(express.json({ limit: "1mb" })); // unbounded bodies are a DoS vector
 
-using json = nlohmann::json;
+let session: ort.InferenceSession | null = null;
+let modelVersion = "unknown";
 
-// Simple linear model for demonstration (in production: use ONNX Runtime)
-struct Model {
-    std::vector<double> weights;
-    double bias = 0.0;
-    bool loaded = false;
+const Input = z.object({
+  features: z.array(z.number()).length(32),
+});
 
-    bool load(const std::string& path) {
-        std::ifstream file(path);
-        if (!file.is_open()) return false;
-        file >> bias;
-        double w;
-        while (file >> w) weights.push_back(w);
-        loaded = !weights.empty();
-        return loaded;
-    }
+// LIVENESS: is the process alive? Restart if not.
+app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 
-    std::pair<int, double> predict(const std::vector<double>& features) const {
-        double score = bias;
-        for (size_t i = 0; i < features.size() && i < weights.size(); ++i)
-            score += weights[i] * features[i];
-        // Sigmoid for probability
-        double prob = 1.0 / (1.0 + std::exp(-score));
-        int label = prob >= 0.5 ? 1 : 0;
-        double confidence = label == 1 ? prob : 1.0 - prob;
-        return {label, confidence};
-    }
-};
+// READINESS: can it actually serve? The load balancer uses this. Failing it
+// removes the instance from rotation WITHOUT restarting it — which is what you
+// want while a model is still loading.
+app.get("/readyz", (_req, res) =>
+  session ? res.status(200).json({ modelVersion }) : res.status(503).send("model not loaded")
+);
 
-int main() {
-    httplib::Server svr;
-    Model model;
-    std::mutex model_mutex;
-    const std::string model_version = "v2.1.0";
+app.post("/predict", async (req, res) => {
+  if (!session) return res.status(503).json({ error: "model not loaded" });
 
-    // Load model on startup
-    if (!model.load("models/classifier_weights.txt")) {
-        // Fallback: create dummy weights for demo
-        model.weights = {0.5, -0.3, 0.8, 0.1};
-        model.bias = -0.2;
-        model.loaded = true;
-        std::cout << "Using demo model weights" << std::endl;
-    }
-    std::cout << "Model loaded: " << model.weights.size() << " features" << std::endl;
+  const parsed = Input.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid input", issues: parsed.error.issues });
+  }
 
-    // GET /health
-    svr.Get("/health", [&](const httplib::Request&, httplib::Response& res) {
-        json resp = {{"status", "ok"}, {"model_loaded", model.loaded}};
-        res.set_content(resp.dump(), "application/json");
-    });
+  const tensor = new ort.Tensor("float32", Float32Array.from(parsed.data.features), [1, 32]);
 
-    // POST /predict
-    svr.Post("/predict", [&](const httplib::Request& req, httplib::Response& res) {
-        std::lock_guard<std::mutex> lock(model_mutex);
-        if (!model.loaded) {
-            res.status = 503;
-            res.set_content(R"({"error":"Model not loaded"})", "application/json");
-            return;
-        }
+  try {
+    const out = await withTimeout(session.run({ input: tensor }), 500);
+    const scores = Array.from(out.output.data as Float32Array);
+    res.json({ scores, modelVersion });
+  } catch (err) {
+    // Log the detail, return a generic message plus a correlation id.
+    req.log.error({ err }, "inference failed");
+    res.status(500).json({ error: "inference failed", requestId: req.id });
+  }
+});
 
-        auto start = std::chrono::high_resolution_clock::now();
-        auto body = json::parse(req.body, nullptr, false);
-        if (body.is_discarded() || !body.contains("features")) {
-            res.status = 400;
-            res.set_content(R"({"error":"Missing features"})", "application/json");
-            return;
-        }
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<never>((_, rej) => setTimeout(() => rej(new Error("inference timeout")), ms)),
+  ]);
+}
 
-        std::vector<double> features = body["features"].get<std::vector<double>>();
-        auto [prediction, confidence] = model.predict(features);
+// Load BEFORE accepting traffic, so readiness only passes once we can serve.
+(async () => {
+  session = await ort.InferenceSession.create("./model.onnx");
+  modelVersion = process.env.MODEL_VERSION ?? "dev";
+  app.listen(8080);
+})();
 
-        auto end = std::chrono::high_resolution_clock::now();
-        double latency_ms = std::chrono::duration<double, std::milli>(end - start).count();
-
-        json resp = {
-            {"prediction", prediction},
-            {"confidence", confidence},
-            {"model_version", model_version},
-            {"latency_ms", std::round(latency_ms * 100) / 100}
-        };
-        if (body.contains("request_id"))
-            resp["request_id"] = body["request_id"];
-
-        res.set_content(resp.dump(2), "application/json");
-    });
-
-    // POST /predict/batch
-    svr.Post("/predict/batch", [&](const httplib::Request& req, httplib::Response& res) {
-        std::lock_guard<std::mutex> lock(model_mutex);
-        if (!model.loaded) {
-            res.status = 503;
-            res.set_content(R"({"error":"Model not loaded"})", "application/json");
-            return;
-        }
-
-        auto start = std::chrono::high_resolution_clock::now();
-        auto requests = json::parse(req.body, nullptr, false);
-
-        json results = json::array();
-        for (const auto& item : requests) {
-            auto features = item["features"].get<std::vector<double>>();
-            auto [pred, conf] = model.predict(features);
-            json r = {{"prediction", pred}, {"confidence", conf},
-                      {"model_version", model_version}};
-            if (item.contains("request_id")) r["request_id"] = item["request_id"];
-            results.push_back(r);
-        }
-
-        auto end = std::chrono::high_resolution_clock::now();
-        double latency_ms = std::chrono::duration<double, std::milli>(end - start).count();
-        for (auto& r : results) r["latency_ms"] = std::round(latency_ms * 100) / 100;
-
-        res.set_content(results.dump(2), "application/json");
-    });
-
-    std::cout << "Server starting on port 8000..." << std::endl;
-    svr.listen("0.0.0.0", 8000);
-
-    return 0;
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "ONNX model loading, validation, and batch prediction with ONNX Runtime C++ API",
-      source: `// Load an ONNX model, configure optimizations, and run batch inference
-// using the ONNX Runtime C++ API. Companion to the C++ inference example below.
-
-#include <onnxruntime_cxx_api.h>
-#include <iostream>
-#include <vector>
-#include <string>
-#include <algorithm>
-#include <numeric>
-#include <chrono>
-#include <cassert>
-
-class OnnxPredictor {
-public:
-    explicit OnnxPredictor(const std::string& model_path)
-        : env_(ORT_LOGGING_LEVEL_WARNING, "ModelServing") {
-        // Configure session with optimizations
-        Ort::SessionOptions opts;
-        opts.SetIntraOpNumThreads(4);
-        opts.SetInterOpNumThreads(2);
-        opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-
-        // Try GPU first, fall back to CPU
-        try {
-            OrtCUDAProviderOptions cuda_opts{};
-            opts.AppendExecutionProvider_CUDA(cuda_opts);
-        } catch (...) {
-            std::cout << "CUDA not available, using CPU" << std::endl;
-        }
-
-        session_ = std::make_unique<Ort::Session>(env_, model_path.c_str(), opts);
-
-        // Cache input/output names
-        Ort::AllocatorWithDefaultOptions alloc;
-        for (size_t i = 0; i < session_->GetInputCount(); ++i) {
-            auto name = session_->GetInputNameAllocated(i, alloc);
-            input_names_str_.push_back(name.get());
-        }
-        for (size_t i = 0; i < session_->GetOutputCount(); ++i) {
-            auto name = session_->GetOutputNameAllocated(i, alloc);
-            output_names_str_.push_back(name.get());
-        }
-        // Build c_str pointer arrays
-        for (auto& s : input_names_str_) input_names_.push_back(s.c_str());
-        for (auto& s : output_names_str_) output_names_.push_back(s.c_str());
-
-        std::cout << "Model loaded: " << input_names_str_.size() << " inputs, "
-                  << output_names_str_.size() << " outputs" << std::endl;
-    }
-
-    // Run batch prediction, return class indices
-    std::vector<int> predict(const std::vector<float>& features,
-                             int64_t batch_size, int64_t num_features) {
-        auto mem_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-        std::vector<int64_t> shape = {batch_size, num_features};
-
-        Ort::Value input = Ort::Value::CreateTensor<float>(
-            mem_info,
-            const_cast<float*>(features.data()),
-            features.size(),
-            shape.data(), shape.size()
-        );
-        assert(input.IsTensor());
-
-        auto start = std::chrono::high_resolution_clock::now();
-        auto outputs = session_->Run(
-            Ort::RunOptions{nullptr},
-            input_names_.data(), &input, 1,
-            output_names_.data(), output_names_.size()
-        );
-        auto end = std::chrono::high_resolution_clock::now();
-        double ms = std::chrono::duration<double, std::milli>(end - start).count();
-        std::cout << "Inference latency: " << ms << " ms" << std::endl;
-
-        // Extract predictions (argmax per row)
-        float* logits = outputs[0].GetTensorMutableData<float>();
-        auto out_shape = outputs[0].GetTensorTypeAndShapeInfo().GetShape();
-        int64_t num_classes = out_shape[1];
-
-        std::vector<int> predictions(batch_size);
-        for (int64_t i = 0; i < batch_size; ++i) {
-            float* row = logits + i * num_classes;
-            predictions[i] = static_cast<int>(
-                std::distance(row, std::max_element(row, row + num_classes))
-            );
-        }
-        return predictions;
-    }
-
-private:
-    Ort::Env env_;
-    std::unique_ptr<Ort::Session> session_;
-    std::vector<std::string> input_names_str_, output_names_str_;
-    std::vector<const char*> input_names_, output_names_;
-};
-
-int main() {
-    OnnxPredictor predictor("models/classifier.onnx");
-
-    // Batch of 3 samples, 4 features each
-    std::vector<float> batch = {
-        5.1f, 3.5f, 1.4f, 0.2f,   // sample 0
-        6.7f, 3.0f, 5.2f, 2.3f,   // sample 1
-        5.0f, 2.3f, 3.3f, 1.0f    // sample 2
-    };
-
-    auto preds = predictor.predict(batch, 3, 4);
-
-    std::cout << "Batch predictions: [";
-    for (size_t i = 0; i < preds.size(); ++i)
-        std::cout << (i ? ", " : "") << preds[i];
-    std::cout << "]" << std::endl;
-
-    return 0;
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "ONNX Runtime inference in C++ — load model, create input tensor, run inference",
-      source: `#include <onnxruntime_cxx_api.h>
-#include <iostream>
-#include <vector>
-#include <numeric>
-#include <algorithm>
-#include <cassert>
-
-int main() {
-    // Initialize ONNX Runtime environment
-    Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "ModelInference");
-
-    // Configure session options
-    Ort::SessionOptions session_options;
-    session_options.SetIntraOpNumThreads(4);
-    session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-
-    // Load the ONNX model
-    const char* model_path = "models/classifier.onnx";
-    Ort::Session session(env, model_path, session_options);
-
-    // Query model input/output metadata
-    Ort::AllocatorWithDefaultOptions allocator;
-    auto input_name_ptr = session.GetInputNameAllocated(0, allocator);
-    auto output_name_ptr = session.GetOutputNameAllocated(0, allocator);
-    const char* input_name = input_name_ptr.get();
-    const char* output_name = output_name_ptr.get();
-
-    std::cout << "Input: " << input_name << ", Output: " << output_name << std::endl;
-
-    // Prepare input data (batch_size=2, features=4)
-    constexpr int64_t batch_size = 2;
-    constexpr int64_t num_features = 4;
-    std::vector<int64_t> input_shape = {batch_size, num_features};
-    std::vector<float> input_data = {
-        5.1f, 3.5f, 1.4f, 0.2f,   // sample 1
-        6.7f, 3.0f, 5.2f, 2.3f    // sample 2
-    };
-
-    // Create input tensor
-    auto memory_info = Ort::MemoryInfo::CreateCpu(
-        OrtArenaAllocator, OrtMemTypeDefault
-    );
-    Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-        memory_info,
-        input_data.data(),
-        input_data.size(),
-        input_shape.data(),
-        input_shape.size()
-    );
-    assert(input_tensor.IsTensor());
-
-    // Run inference
-    const char* input_names[] = {input_name};
-    const char* output_names[] = {output_name};
-
-    auto output_tensors = session.Run(
-        Ort::RunOptions{nullptr},
-        input_names,
-        &input_tensor,
-        1,              // num inputs
-        output_names,
-        1               // num outputs
-    );
-
-    // Process results
-    float* output_data = output_tensors[0].GetTensorMutableData<float>();
-    auto output_shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
-    int64_t num_classes = output_shape[1];
-
-    for (int64_t i = 0; i < batch_size; ++i) {
-        float* logits = output_data + i * num_classes;
-        int predicted_class = std::distance(
-            logits, std::max_element(logits, logits + num_classes)
-        );
-        std::cout << "Sample " << i
-                  << " -> Predicted class: " << predicted_class
-                  << " (logit: " << logits[predicted_class] << ")"
-                  << std::endl;
-    }
-
-    return 0;
-}`,
+// The failure this shape prevents: without a readiness probe, Kubernetes sends
+// traffic the moment the port is open — while the model is still loading — and
+// every request in that window 500s on each deploy.
+//
+// Batching note: inference throughput improves markedly if you accumulate
+// requests for a few milliseconds and run them as one batch, at the cost of
+// per-request latency. That is the core serving trade-off, and it should be a
+// deliberate, measured choice rather than a default.`,
     },
   ],
   diagrams: [
@@ -641,6 +384,37 @@ int main() {
     MR->>CI: Trigger production deploy
     CI->>PRD: Canary rollout (5% -> 25% -> 100%)
     PRD-->>DS: Production metrics healthy`,
+    },
+  ],
+  animations: [
+    {
+      title: "How training-serving skew appears",
+      steps: [
+        {
+          label: "Training",
+          detail: "A pandas pipeline computes `days_since_signup`, filling nulls with the median.",
+        },
+        {
+          label: "Serving",
+          detail: "A service reimplements it in application code, filling nulls with 0.",
+        },
+        {
+          label: "Both look right",
+          detail: "Each passes its own tests. Neither is obviously wrong.",
+        },
+        {
+          label: "Production",
+          detail: "New users have null signup dates. Training saw the median; serving sees 0.",
+        },
+        {
+          label: "Silent degradation",
+          detail: "No error, no alert — just predictions that are quietly worse for the newest users.",
+        },
+        {
+          label: "Fix",
+          detail: "One implementation shared by both paths, or a feature store. Then log served feature values and compare distributions.",
+        },
+      ],
     },
   ],
   comparison: {

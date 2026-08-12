@@ -696,6 +696,37 @@ private:
     }
   ],
 
+  animations: [
+    {
+      title: "Running a job exactly when it's due",
+      steps: [
+        {
+          label: "Job scheduled",
+          detail: "Stored with a next-run timestamp, indexed on that column.",
+        },
+        {
+          label: "Poller",
+          detail: "Queries for jobs due now, in small batches.",
+        },
+        {
+          label: "Claim atomically",
+          detail: "`UPDATE ... SET locked_by = ?, locked_until = ? WHERE id = ? AND locked_by IS NULL` — only one worker wins.",
+        },
+        {
+          label: "Execute",
+          detail: "Worker runs the job.",
+        },
+        {
+          label: "Worker dies",
+          detail: "The lock expires and another worker picks it up — so jobs must be idempotent.",
+        },
+        {
+          label: "Recurring",
+          detail: "On success, compute and write the next run time. Missed windows need an explicit catch-up policy.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "Polling-Based Scheduler", "Push-Based (Delay Queue)", "Hybrid Approach", "Time-Bucket Index"],
     rows: [

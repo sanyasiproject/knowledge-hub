@@ -417,6 +417,11 @@ GET /_cat/recovery/products-split?v&h=index,shard,stage,bytes_percent`
     }
   ],
 
+  followUps: [
+    "Why can't you change the primary shard count after index creation?",
+    "What is split brain and how does `minimum_master_nodes` / quorum prevent it?",
+    "How do you size shards — what goes wrong with too many and with too few?",
+  ],
   mcqs: [
     {
       q: "What does a yellow cluster health status indicate?",

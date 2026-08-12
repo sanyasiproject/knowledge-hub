@@ -46,6 +46,11 @@ export const devopsCulture: TopicContent = {
       ],
     },
   ],
+  followUps: [
+    "What does 'you build it, you run it' change about how code gets written?",
+    "Why is a blameless postmortem a technical practice, not just a cultural one?",
+    "What are the DORA metrics and what do they actually predict?",
+  ],
   mcqs: [
     {
       q: "What does the 'L' in CALMS stand for?",
@@ -135,6 +140,20 @@ export const devopsCulture: TopicContent = {
     {
       front: "What is psychological safety?",
       back: "The belief that one can speak up, report errors, and take risks without fear of punishment -- the strongest predictor of team effectiveness (Google's Project Aristotle).",
+    },
+  ],
+  resources: [
+    {
+      label: "Accelerate — Forsgren, Humble & Kim",
+      kind: "book",
+    },
+    {
+      label: "The Phoenix Project — Kim, Behr & Spafford",
+      kind: "book",
+    },
+    {
+      label: "DORA State of DevOps reports",
+      kind: "article",
     },
   ],
   glossary: [
@@ -569,6 +588,33 @@ value_stream:
     },
   ],
 
+  animations: [
+    {
+      title: "The four DORA metrics",
+      steps: [
+        {
+          label: "Deployment frequency",
+          detail: "How often you ship. Elite teams deploy on demand, multiple times a day.",
+        },
+        {
+          label: "Lead time for changes",
+          detail: "Commit to production. Elite is under an hour.",
+        },
+        {
+          label: "Change failure rate",
+          detail: "What fraction of deploys cause a degradation needing remediation.",
+        },
+        {
+          label: "Time to restore",
+          detail: "How fast you recover. Elite is under an hour.",
+        },
+        {
+          label: "The counter-intuitive finding",
+          detail: "Speed and stability rise together. Teams deploying more often have *lower* failure rates, because changes are small and rollback is practised.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",

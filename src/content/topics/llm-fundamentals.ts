@@ -86,6 +86,11 @@ The embedding layer maps each token ID to a dense vector, which is then processe
       a: "Standard self-attention is O(n^2) in sequence length, making long contexts computationally expensive and memory-intensive. Approaches to extend context include sparse attention patterns, sliding window attention, linear attention approximations, and better positional encodings like RoPE that generalize to unseen lengths. Some architectures also use retrieval to bring in relevant information without fitting it all in the context window.",
     },
   ],
+  followUps: [
+    "Why is attention O(n²), and what do people do about it?",
+    "What does the causal mask change about generation?",
+    "Why does tokenisation make character counting hard?",
+  ],
   mcqs: [
     {
       q: "Which architecture do most modern LLMs like GPT use?",
@@ -182,97 +187,65 @@ Running LLMs in production introduces engineering challenges beyond model qualit
 
   code: [
     {
-      language: "cpp",
-      caption: "Local model inference using llama.cpp (C++ LLM runtime)",
-      source: `// Run inference on a local LLM using llama.cpp.
-// Demonstrates model loading, tokenization, generation parameters, and decoding.
+      language: "typescript",
+      caption: "Scaled dot-product attention, written out so the shapes are visible",
+      source: `type Matrix = number[][];
 
-#include <llama.h>
-#include <common.h>
-#include <iostream>
-#include <string>
-#include <vector>
+/** softmax over each row, shifted by the row max for numerical stability. */
+function softmaxRows(m: Matrix): Matrix {
+  return m.map((row) => {
+    const max = Math.max(...row);
+    const exps = row.map((x) => Math.exp(x - max)); // subtracting max avoids overflow
+    const sum = exps.reduce((a, b) => a + b, 0);
+    return exps.map((e) => e / sum);
+  });
+}
 
-int main() {
-    // Initialize llama.cpp backend
-    llama_backend_init();
+function matmul(a: Matrix, b: Matrix): Matrix {
+  const inner = b.length, cols = b[0].length;
+  return a.map((row) =>
+    Array.from({ length: cols }, (_, j) => {
+      let s = 0;
+      for (let k = 0; k < inner; k++) s += row[k] * b[k][j];
+      return s;
+    })
+  );
+}
 
-    // Load model parameters
-    llama_model_params model_params = llama_model_default_params();
-    model_params.n_gpu_layers = 99;  // Offload all layers to GPU
+const transpose = (m: Matrix): Matrix => m[0].map((_, j) => m.map((row) => row[j]));
 
-    llama_model* model = llama_load_model_from_file(
-        "models/llama-3.1-8b-instruct.gguf", model_params
-    );
-    if (!model) {
-        std::cerr << "Failed to load model" << std::endl;
-        return 1;
+/**
+ * attention(Q, K, V) = softmax(QKᵀ / √d) · V
+ *
+ * Q: [seqLen, d]  what each position is looking for
+ * K: [seqLen, d]  what each position offers
+ * V: [seqLen, d]  what each position contributes if attended to
+ */
+export function attention(Q: Matrix, K: Matrix, V: Matrix, causal = true): Matrix {
+  const d = Q[0].length;
+
+  // [seqLen, seqLen] — relevance of every position to every other position.
+  // This matrix is why attention is O(n²) in sequence length.
+  const scores = matmul(Q, transpose(K)).map((row) =>
+    row.map((s) => s / Math.sqrt(d))   // the √d scaling is NOT cosmetic
+  );
+
+  // Causal mask: a token may not see the future. This is what makes
+  // generation autoregressive.
+  if (causal) {
+    for (let i = 0; i < scores.length; i++) {
+      for (let j = i + 1; j < scores[i].length; j++) scores[i][j] = -Infinity;
     }
+  }
 
-    // Create inference context
-    llama_context_params ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = 2048;    // Context window size
-    ctx_params.n_batch = 512;   // Batch size for prompt processing
+  return matmul(softmaxRows(scores), V);
+}
 
-    llama_context* ctx = llama_new_context_with_model(model, ctx_params);
-
-    // Tokenize the prompt
-    std::string prompt = "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\\n"
-                         "You are a helpful AI assistant.<|eot_id|>"
-                         "<|start_header_id|>user<|end_header_id|>\\n"
-                         "Explain the attention mechanism in 3 sentences.<|eot_id|>"
-                         "<|start_header_id|>assistant<|end_header_id|>\\n";
-
-    std::vector<llama_token> tokens(prompt.size() + 1);
-    int n_tokens = llama_tokenize(model, prompt.c_str(), prompt.size(),
-                                  tokens.data(), tokens.size(), true, false);
-    tokens.resize(n_tokens);
-
-    // Evaluate the prompt (prefill phase)
-    llama_batch batch = llama_batch_init(n_tokens, 0, 1);
-    for (int i = 0; i < n_tokens; ++i) {
-        llama_batch_add(batch, tokens[i], i, {0}, false);
-    }
-    batch.logits[batch.n_tokens - 1] = true;  // Get logits for last token
-    llama_decode(ctx, batch);
-
-    // Autoregressive generation with sampling
-    llama_sampler* sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
-    llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.7f));      // Temperature
-    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.9f, 1));  // Nucleus sampling
-    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
-        64, 1.1f, 0.0f, 0.0f  // Repetition penalty
-    ));
-    llama_sampler_chain_add(sampler, llama_sampler_init_dist(42));        // Random seed
-
-    int max_new_tokens = 256;
-    for (int i = 0; i < max_new_tokens; ++i) {
-        llama_token new_token = llama_sampler_sample(sampler, ctx, -1);
-
-        // Check for end-of-sequence
-        if (llama_token_is_eog(model, new_token)) break;
-
-        // Decode token to text and print
-        char buf[128];
-        int len = llama_token_to_piece(model, new_token, buf, sizeof(buf), 0, true);
-        std::cout << std::string(buf, len);
-
-        // Prepare next batch with the generated token
-        llama_batch_clear(batch);
-        llama_batch_add(batch, new_token, n_tokens + i, {0}, true);
-        llama_decode(ctx, batch);
-    }
-    std::cout << std::endl;
-
-    // Cleanup
-    llama_sampler_free(sampler);
-    llama_batch_free(batch);
-    llama_free(ctx);
-    llama_free_model(model);
-    llama_backend_free();
-
-    return 0;
-}`,
+// Why divide by √d: dot products grow with dimension. At d = 4096 the raw
+// scores are large enough that softmax saturates — one weight goes to ~1, the
+// rest to ~0 — and the gradient vanishes. The scaling keeps them in a usable
+// range. Removing it does not merely change the numbers; it stops the model
+// training.`,
     },
     {
       language: "typescript",
@@ -338,114 +311,6 @@ async function streamCompletion(): Promise<void> {
   console.log("\\n=== Streaming Completion ===");
   await streamCompletion();
 })();`,
-    },
-    {
-      language: "cpp",
-      caption: "Computing and displaying attention weights in C++",
-      source: `// Compute scaled dot-product attention weights and display as a matrix.
-// Demonstrates the core attention calculation without framework dependencies.
-
-#include <iostream>
-#include <vector>
-#include <cmath>
-#include <iomanip>
-#include <string>
-#include <numeric>
-#include <algorithm>
-
-using Matrix = std::vector<std::vector<float>>;
-
-// Softmax over each row of a matrix
-Matrix softmax(const Matrix& mat) {
-    Matrix result(mat.size(), std::vector<float>(mat[0].size()));
-    for (size_t i = 0; i < mat.size(); ++i) {
-        float max_val = *std::max_element(mat[i].begin(), mat[i].end());
-        float sum = 0.0f;
-        for (size_t j = 0; j < mat[i].size(); ++j) {
-            result[i][j] = std::exp(mat[i][j] - max_val);
-            sum += result[i][j];
-        }
-        for (size_t j = 0; j < mat[i].size(); ++j) {
-            result[i][j] /= sum;
-        }
-    }
-    return result;
-}
-
-// Matrix multiply: A (m x k) * B^T (n x k) -> (m x n)
-Matrix matmul_transposed(const Matrix& A, const Matrix& B) {
-    size_t m = A.size(), n = B.size(), k = A[0].size();
-    Matrix result(m, std::vector<float>(n, 0.0f));
-    for (size_t i = 0; i < m; ++i)
-        for (size_t j = 0; j < n; ++j)
-            for (size_t p = 0; p < k; ++p)
-                result[i][j] += A[i][p] * B[j][p];
-    return result;
-}
-
-// Apply causal mask: set upper-triangle entries to -infinity
-void apply_causal_mask(Matrix& scores) {
-    for (size_t i = 0; i < scores.size(); ++i)
-        for (size_t j = i + 1; j < scores[0].size(); ++j)
-            scores[i][j] = -1e9f;
-}
-
-int main() {
-    // Simulated tokens and their Q, K embeddings (d_k = 4)
-    std::vector<std::string> tokens = {"The", "cat", "sat", "on", "the", "mat"};
-    size_t seq_len = tokens.size();
-    size_t d_k = 4;
-
-    // Random Q and K matrices (seq_len x d_k) — in practice, from learned projections
-    Matrix Q = {
-        {0.1f, 0.9f, 0.3f, 0.5f}, {0.8f, 0.2f, 0.7f, 0.1f},
-        {0.3f, 0.6f, 0.4f, 0.8f}, {0.5f, 0.1f, 0.9f, 0.2f},
-        {0.2f, 0.7f, 0.1f, 0.6f}, {0.9f, 0.3f, 0.5f, 0.4f},
-    };
-    Matrix K = Q;  // Self-attention: Q and K derived from same input
-
-    // Step 1: Compute raw attention scores = Q * K^T / sqrt(d_k)
-    Matrix scores = matmul_transposed(Q, K);
-    float scale = std::sqrt(static_cast<float>(d_k));
-    for (auto& row : scores)
-        for (auto& val : row)
-            val /= scale;
-
-    // Step 2: Apply causal mask (decoder-style)
-    apply_causal_mask(scores);
-
-    // Step 3: Softmax to get attention weights
-    Matrix attention = softmax(scores);
-
-    // Display the attention heatmap as a formatted table
-    std::cout << "Attention Weights (Layer 0, Head 0)\\n";
-    std::cout << std::string(60, '-') << "\\n";
-
-    // Column headers
-    std::cout << std::setw(8) << " ";
-    for (const auto& tok : tokens)
-        std::cout << std::setw(8) << tok;
-    std::cout << "\\n";
-
-    // Attention matrix rows
-    for (size_t i = 0; i < seq_len; ++i) {
-        std::cout << std::setw(8) << tokens[i];
-        for (size_t j = 0; j < seq_len; ++j)
-            std::cout << std::setw(8) << std::fixed << std::setprecision(3)
-                      << attention[i][j];
-        std::cout << "\\n";
-    }
-
-    // Highlight: which token does "sat" (index 2) attend to most?
-    size_t query_idx = 2;
-    auto max_it = std::max_element(attention[query_idx].begin(),
-                                    attention[query_idx].end());
-    size_t max_key = std::distance(attention[query_idx].begin(), max_it);
-    std::cout << "\\n'" << tokens[query_idx] << "' attends most to '"
-              << tokens[max_key] << "' (weight: " << *max_it << ")\\n";
-
-    return 0;
-}`,
     },
   ],
 
@@ -541,6 +406,37 @@ int main() {
     },
   ],
 
+  animations: [
+    {
+      title: "Generating one token",
+      steps: [
+        {
+          label: "Tokenise",
+          detail: "Text becomes integer ids via the learned vocabulary.",
+        },
+        {
+          label: "Embed",
+          detail: "Each id becomes a vector; positional information is added.",
+        },
+        {
+          label: "Attention",
+          detail: "Every token attends to every previous token, weighted by learned relevance. The causal mask blocks future positions.",
+        },
+        {
+          label: "Feed-forward",
+          detail: "Per-position transformation, with residual connections and normalisation, repeated across all layers.",
+        },
+        {
+          label: "Logits",
+          detail: "The final layer produces a score for every token in the vocabulary.",
+        },
+        {
+          label: "Sample",
+          detail: "Temperature and top_p shape the distribution; one token is chosen, appended, and the whole thing repeats.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Feature", "GPT-4", "BERT", "LLaMA 3", "Claude"],
     rows: [
@@ -580,6 +476,20 @@ int main() {
     "**Sampling strategies** control output quality: *temperature* scales logits before softmax, *top-k* limits candidates to the k most likely, *top-p* (nucleus) adapts the candidate set dynamically. For factual tasks use low temperature (`0.0-0.3`); for creative tasks use moderate temperature (`0.7-1.0`) with `top_p = 0.9`. **Repetition penalty** helps avoid degenerate loops.",
   ],
 
+  resources: [
+    {
+      label: "Attention Is All You Need — Vaswani et al., 2017",
+      kind: "paper",
+    },
+    {
+      label: "The Illustrated Transformer — Jay Alammar",
+      kind: "article",
+    },
+    {
+      label: "Anthropic documentation — prompt engineering and tool use",
+      kind: "docs",
+    },
+  ],
   glossary: [
     {
       term: "Transformer",

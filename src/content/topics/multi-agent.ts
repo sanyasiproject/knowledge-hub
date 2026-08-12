@@ -91,435 +91,73 @@ export const multiAgent: TopicContent = {
   ],
   code: [
     {
-      language: "cpp",
-      caption: "Supervisor pattern: a coordinator delegates to research and code agents in C++",
-      source: `// Supervisor pattern implementation in C++.
-// A coordinator decomposes tasks and delegates to specialist workers.
+      language: "typescript",
+      caption: "Orchestrator with short-lived sub-agents — context isolation, not an org chart",
+      source: `type SubAgentResult = { task: string; findings: string; sourcesUsed: string[] };
 
-#include <iostream>
-#include <string>
-#include <vector>
-#include <map>
-#include <functional>
-#include <memory>
+/**
+ * The genuine argument for multi-agent is CONTEXT ISOLATION: a sub-agent works
+ * in a fresh window on a self-contained task and returns only its conclusion,
+ * so the parent's context stays clean. Parallelism is the second reason.
+ *
+ * "Specialisation" is a weak third — one agent with clear instructions and the
+ * right tools usually matches several narrow ones, without the handoff losses.
+ */
+export async function research(question: string): Promise<string> {
+  // 1. Decompose — the orchestrator holds the whole picture.
+  const subTasks = await decompose(question);
 
-struct AgentState {
-    std::vector<std::string> messages;
-    std::string next_agent;
-    std::vector<std::string> task_plan;
-    std::map<std::string, std::string> results;
-};
-
-// Base agent interface
-class Agent {
-public:
-    virtual ~Agent() = default;
-    virtual void execute(AgentState& state) = 0;
-};
-
-// Supervisor: decomposes tasks, routes to workers, aggregates results
-class SupervisorAgent : public Agent {
-public:
-    void execute(AgentState& state) override {
-        if (state.task_plan.empty()) {
-            // First call: create the execution plan
-            state.task_plan = {"research", "code", "review"};
-            state.next_agent = "research";
-            state.messages.push_back("[Supervisor] Plan: research -> code -> review");
-            return;
-        }
-
-        // Check if all tasks are done
-        bool all_done = true;
-        std::string next_incomplete;
-        for (const auto& task : state.task_plan) {
-            if (state.results.find(task) == state.results.end()) {
-                all_done = false;
-                if (next_incomplete.empty()) next_incomplete = task;
-            }
-        }
-
-        if (all_done) {
-            state.next_agent = "done";
-            std::string summary = "[Supervisor] All tasks complete:\\n";
-            for (const auto& [k, v] : state.results)
-                summary += "  [" + k + "]: " + v + "\\n";
-            state.messages.push_back(summary);
-        } else {
-            state.next_agent = next_incomplete;
-        }
-    }
-};
-
-// Specialist: research agent
-class ResearchAgent : public Agent {
-public:
-    void execute(AgentState& state) override {
-        // In production: call LLM with research tools
-        state.results["research"] = "Found 3 relevant papers on agent coordination.";
-        state.next_agent = "supervisor";
-        state.messages.push_back("[Research] Research complete.");
-    }
-};
-
-// Specialist: code agent
-class CodeAgent : public Agent {
-public:
-    void execute(AgentState& state) override {
-        state.results["code"] = "Implemented solution with tests passing.";
-        state.next_agent = "supervisor";
-        state.messages.push_back("[Code] Code complete.");
-    }
-};
-
-// Specialist: review agent
-class ReviewAgent : public Agent {
-public:
-    void execute(AgentState& state) override {
-        state.results["review"] = "Review passed. No issues found.";
-        state.next_agent = "supervisor";
-        state.messages.push_back("[Review] Review complete.");
-    }
-};
-
-// State graph: routes execution based on next_agent
-class StateGraph {
-public:
-    void add_node(const std::string& name, std::shared_ptr<Agent> agent) {
-        agents_[name] = std::move(agent);
-    }
-
-    void run(AgentState& state, const std::string& entry_point, int max_steps = 20) {
-        state.next_agent = entry_point;
-        for (int step = 0; step < max_steps; ++step) {
-            if (state.next_agent == "done") break;
-            auto it = agents_.find(state.next_agent);
-            if (it == agents_.end()) {
-                std::cerr << "Unknown agent: " << state.next_agent << std::endl;
-                break;
-            }
-            it->second->execute(state);
-        }
-    }
-
-private:
-    std::map<std::string, std::shared_ptr<Agent>> agents_;
-};
-
-int main() {
-    StateGraph graph;
-    graph.add_node("supervisor", std::make_shared<SupervisorAgent>());
-    graph.add_node("research",   std::make_shared<ResearchAgent>());
-    graph.add_node("code",       std::make_shared<CodeAgent>());
-    graph.add_node("review",     std::make_shared<ReviewAgent>());
-
-    AgentState state;
-    state.messages.push_back("[User] Build a data pipeline");
-
-    graph.run(state, "supervisor");
-
-    std::cout << "=== Execution Log ===" << std::endl;
-    for (const auto& msg : state.messages)
-        std::cout << msg << std::endl;
-
-    return 0;
-}`
-    },
-    {
-      language: "cpp",
-      caption: "Agent-to-agent message passing with structured messages and a message bus in C++",
-      source: `// Thread-safe message bus for agent-to-agent communication in C++.
-// Uses condition variables for blocking receive and a shared log for tracing.
-
-#include <iostream>
-#include <string>
-#include <vector>
-#include <map>
-#include <queue>
-#include <mutex>
-#include <condition_variable>
-#include <thread>
-#include <functional>
-#include <memory>
-#include <chrono>
-#include <atomic>
-#include <sstream>
-
-enum class MessageType { TASK, RESULT, ERROR, QUERY };
-
-struct AgentMessage {
-    std::string sender;
-    std::string receiver;
-    MessageType msg_type;
-    std::string content;
-    std::string trace_id;
-};
-
-class MessageBus {
-public:
-    void register_agent(const std::string& agent_id) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        queues_[agent_id];  // default-construct the queue entry
-    }
-
-    void send(const AgentMessage& msg) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        log_.push_back(msg);
-        queues_[msg.receiver].push(msg);
-        cv_.notify_all();
-    }
-
-    AgentMessage receive(const std::string& agent_id,
-                         std::chrono::milliseconds timeout = std::chrono::milliseconds(5000)) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        cv_.wait_for(lock, timeout, [&] {
-            return !queues_[agent_id].empty();
+  // 2. Fan out. Each sub-agent gets a FRESH context: it never sees the
+  //    orchestrator's history, which is the point and also the cost.
+  const results = await Promise.all(
+    subTasks.map(async (task): Promise<SubAgentResult | null> => {
+      try {
+        return await runSubAgent(task, {
+          maxSteps: 6,                 // sub-agents get tight budgets
+          maxMs: 60_000,
+          tools: [searchTool, fetchTool],
         });
-        if (queues_[agent_id].empty())
-            throw std::runtime_error("Receive timeout for agent: " + agent_id);
-        auto msg = queues_[agent_id].front();
-        queues_[agent_id].pop();
-        return msg;
-    }
+      } catch (err) {
+        console.warn(\`sub-agent failed: \${task}\`, err);
+        return null;                   // one failure must not sink the run
+      }
+    })
+  );
 
-    std::vector<AgentMessage> get_trace(const std::string& trace_id) const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        std::vector<AgentMessage> result;
-        for (const auto& m : log_)
-            if (m.trace_id == trace_id) result.push_back(m);
-        return result;
-    }
+  const succeeded = results.filter((r): r is SubAgentResult => r !== null);
+  if (succeeded.length === 0) throw new Error("every sub-agent failed");
 
-private:
-    mutable std::mutex mutex_;
-    std::condition_variable cv_;
-    std::map<std::string, std::queue<AgentMessage>> queues_;
-    std::vector<AgentMessage> log_;
-};
+  // 3. Synthesise. Only conclusions come back, not the sub-agents' working.
+  const res = await client.messages.create({
+    model: "claude-sonnet-5",
+    max_tokens: 4096,
+    system: "Synthesise the findings into one answer. Note explicitly where findings conflict or where a sub-task returned nothing — do not paper over gaps.",
+    messages: [{
+      role: "user",
+      content: [
+        \`Question: \${question}\`,
+        "",
+        ...succeeded.map((r) => \`## \${r.task}\\n\${r.findings}\\nSources: \${r.sourcesUsed.join(", ")}\`),
+        succeeded.length < subTasks.length
+          ? \`\\nNote: \${subTasks.length - succeeded.length} sub-task(s) failed and are missing.\`
+          : "",
+      ].join("\\n"),
+    }],
+  });
 
-class BaseAgent {
-public:
-    BaseAgent(const std::string& id, MessageBus& bus)
-        : agent_id_(id), bus_(bus), running_(true) {
-        bus_.register_agent(id);
-    }
-    virtual ~BaseAgent() { stop(); }
+  const block = res.content.find((b) => b.type === "text");
+  return block?.type === "text" ? block.text : "";
+}
 
-    void start() {
-        thread_ = std::thread([this] {
-            while (running_) {
-                try {
-                    auto msg = bus_.receive(agent_id_);
-                    handle(msg);
-                } catch (...) { /* timeout, retry */ }
-            }
-        });
-    }
-
-    void stop() {
-        running_ = false;
-        if (thread_.joinable()) thread_.join();
-    }
-
-    void send(const std::string& receiver, MessageType type,
-              const std::string& content, const std::string& trace = "t001") {
-        bus_.send({agent_id_, receiver, type, content, trace});
-    }
-
-    virtual void handle(const AgentMessage& msg) = 0;
-
-protected:
-    std::string agent_id_;
-    MessageBus& bus_;
-    std::atomic<bool> running_;
-    std::thread thread_;
-};
-
-class ResearchAgent : public BaseAgent {
-public:
-    using BaseAgent::BaseAgent;
-    void handle(const AgentMessage& msg) override {
-        if (msg.msg_type == MessageType::TASK) {
-            std::string result = "Research findings for: " + msg.content;
-            send(msg.sender, MessageType::RESULT, result, msg.trace_id);
-        }
-    }
-};
-
-class CoderAgent : public BaseAgent {
-public:
-    using BaseAgent::BaseAgent;
-    void handle(const AgentMessage& msg) override {
-        if (msg.msg_type == MessageType::TASK) {
-            std::string result = "Code implementation for: " + msg.content;
-            send(msg.sender, MessageType::RESULT, result, msg.trace_id);
-        }
-    }
-};
-
-int main() {
-    MessageBus bus;
-    bus.register_agent("supervisor");
-
-    ResearchAgent researcher("researcher", bus);
-    CoderAgent coder("coder", bus);
-
-    researcher.start();
-    coder.start();
-
-    // Supervisor sends tasks
-    bus.send({"supervisor", "researcher", MessageType::TASK,
-              "Find auth best practices", "trace-001"});
-    bus.send({"supervisor", "coder", MessageType::TASK,
-              "Implement JWT handler", "trace-001"});
-
-    // Collect results
-    auto r1 = bus.receive("supervisor");
-    auto r2 = bus.receive("supervisor");
-    std::cout << "Got: " << r1.content << std::endl;
-    std::cout << "Got: " << r2.content << std::endl;
-
-    researcher.stop();
-    coder.stop();
-
-    return 0;
-}`
+// What this costs, stated honestly:
+// - Information is lost at every handoff — the parent gets a summary, not the
+//   evidence, and cannot ask a follow-up without re-running the sub-agent.
+// - Debugging spans N agents; without per-agent tracing it is guesswork.
+// - You pay for N model runs, and the slowest sub-agent sets the latency.
+//
+// So: use it when subtasks are genuinely separable AND their context is worth
+// discarding. Not because the problem resembles a team of people.`,
     },
-    {
-      language: "cpp",
-      caption: "Multi-agent pipeline team: research, write, and edit a technical report in C++",
-      source: `// Pipeline pattern: specialized agents process work sequentially.
-// Each agent transforms the output of the previous one.
-// Demonstrates the CrewAI-style role/goal/backstory pattern in C++.
-
-#include <iostream>
-#include <string>
-#include <vector>
-#include <functional>
-#include <memory>
-
-struct AgentConfig {
-    std::string role;
-    std::string goal;
-    std::string backstory;
-};
-
-struct TaskDef {
-    std::string description;
-    std::string expected_output;
-};
-
-// A pipeline agent processes input from the previous stage
-class PipelineAgent {
-public:
-    PipelineAgent(AgentConfig config, TaskDef task,
-                  std::function<std::string(const std::string&)> executor)
-        : config_(std::move(config)), task_(std::move(task)),
-          executor_(std::move(executor)) {}
-
-    std::string execute(const std::string& input) const {
-        std::cout << "[" << config_.role << "] Starting: "
-                  << task_.description.substr(0, 60) << "..." << std::endl;
-        std::string result = executor_(input);
-        std::cout << "[" << config_.role << "] Done. Output length: "
-                  << result.size() << " chars" << std::endl;
-        return result;
-    }
-
-    const std::string& role() const { return config_.role; }
-
-private:
-    AgentConfig config_;
-    TaskDef task_;
-    std::function<std::string(const std::string&)> executor_;
-};
-
-// Sequential pipeline: agents process in order, passing results forward
-class Pipeline {
-public:
-    void add_agent(std::shared_ptr<PipelineAgent> agent) {
-        agents_.push_back(std::move(agent));
-    }
-
-    std::string run(const std::string& initial_input) const {
-        std::string current = initial_input;
-        for (const auto& agent : agents_) {
-            current = agent->execute(current);
-        }
-        return current;
-    }
-
-private:
-    std::vector<std::shared_ptr<PipelineAgent>> agents_;
-};
-
-int main() {
-    // Define specialized agents with roles and tasks
-    auto researcher = std::make_shared<PipelineAgent>(
-        AgentConfig{
-            "Senior Research Analyst",
-            "Uncover cutting-edge developments in AI multi-agent systems",
-            "Expert AI researcher at a leading tech think tank."
-        },
-        TaskDef{
-            "Research the latest multi-agent orchestration patterns. "
-            "Cover supervisor, swarm, and hierarchical approaches.",
-            "A detailed research brief with findings and sources."
-        },
-        [](const std::string& input) -> std::string {
-            // In production: call LLM with research tools
-            return "RESEARCH BRIEF: Found supervisor, swarm, and hierarchical "
-                   "patterns in production. Key examples: CrewAI (supervisor), "
-                   "OpenAI Swarm (decentralized), AutoGen (hierarchical).";
-        }
-    );
-
-    auto writer = std::make_shared<PipelineAgent>(
-        AgentConfig{
-            "Technical Writer",
-            "Write a clear, engaging technical report based on research findings",
-            "Skilled writer who translates complex research into documents."
-        },
-        TaskDef{
-            "Write a 1500-word technical report with executive summary.",
-            "A well-structured technical report in markdown format."
-        },
-        [](const std::string& research) -> std::string {
-            return "# Multi-Agent Orchestration Patterns\\n\\n"
-                   "## Executive Summary\\n"
-                   "Based on research: " + research.substr(0, 100) + "...\\n\\n"
-                   "## Pattern Comparison\\n"
-                   "Three dominant patterns emerge: supervisor, swarm, hierarchical.";
-        }
-    );
-
-    auto editor = std::make_shared<PipelineAgent>(
-        AgentConfig{
-            "Senior Editor",
-            "Review and polish the report for accuracy and clarity",
-            "Meticulous editor with deep technical knowledge."
-        },
-        TaskDef{
-            "Review the technical report for accuracy and completeness.",
-            "A polished, publication-ready technical report."
-        },
-        [](const std::string& draft) -> std::string {
-            return "[REVIEWED] " + draft + "\\n\\n[Editor note: Verified accuracy.]";
-        }
-    );
-
-    // Assemble pipeline (sequential processing)
-    Pipeline crew;
-    crew.add_agent(researcher);
-    crew.add_agent(writer);
-    crew.add_agent(editor);
-
-    std::string result = crew.run("Topic: Multi-agent orchestration patterns");
-    std::cout << "\\n=== Final Output ===\\n" << result << std::endl;
-
-    return 0;
-}`
-    }
   ],
   diagrams: [
     {

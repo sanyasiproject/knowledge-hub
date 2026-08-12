@@ -141,6 +141,11 @@ Bounded context boundaries are not fixed at project inception. They evolve as do
       a: "A Shared Kernel is a small, jointly owned subset of the domain model that two contexts share directly -- changes require coordination between both teams. An ACL is a one-way translation layer where the downstream context converts upstream concepts into its own language with zero shared model. Shared Kernels create coupling and should be used sparingly for closely collaborating teams. ACLs provide isolation and are preferred when contexts are owned by different teams or evolve at different rates.",
     },
   ],
+  followUps: [
+    "How do you find a context boundary in an existing system?",
+    "What is an anti-corruption layer protecting you from?",
+    "Why can the same real-world thing be two different models in two contexts?",
+  ],
   mcqs: [
     {
       q: "What is the primary purpose of a bounded context in DDD?",
@@ -492,6 +497,37 @@ namespace SharedKernel {
     },
   ],
 
+  animations: [
+    {
+      title: "Finding a boundary in an existing system",
+      steps: [
+        {
+          label: "Look for language shifts",
+          detail: "Where the same word starts meaning something different, there's a boundary.",
+        },
+        {
+          label: "Look at change patterns",
+          detail: "Modules that always change together belong together; ones that never do are separable.",
+        },
+        {
+          label: "Look at ownership",
+          detail: "Who is asked when a rule changes? That's a strong signal of a context.",
+        },
+        {
+          label: "Draw the boundary",
+          detail: "Define what's inside, and what the context exposes.",
+        },
+        {
+          label: "Anti-corruption layer",
+          detail: "Translate at the edge, so another context's model — or a legacy system's — doesn't leak into yours.",
+        },
+        {
+          label: "Then, maybe, split",
+          detail: "A bounded context is a modelling boundary. It may or may not become a separate service.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Pattern",
@@ -578,6 +614,16 @@ namespace SharedKernel {
     "**Signs of wrong boundaries:** frequent cross-context changes for single features, conflicting entity meanings within one context, multiple teams colliding in the same context, or excessive integration overhead from over-splitting. Boundaries should be **refactored** (split, merge, or redefine) as domain understanding evolves.",
   ],
 
+  resources: [
+    {
+      label: "Domain-Driven Design — Eric Evans",
+      kind: "book",
+    },
+    {
+      label: "BoundedContext — Martin Fowler",
+      kind: "article",
+    },
+  ],
   glossary: [
     {
       term: "Bounded Context",

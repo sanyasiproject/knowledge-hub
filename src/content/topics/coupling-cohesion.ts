@@ -612,6 +612,12 @@ class InventoryService {
       a: "The Law of Demeter (LoD) states that a method should only call methods on: (1) its own object, (2) its parameters, (3) objects it creates, (4) its direct component objects. Violating LoD (e.g., order.getCustomer().getAddress().getCity()) creates transitive coupling: the caller is coupled not just to Order but to Customer and Address as well. A change to Address's API breaks the caller even though it never directly interacted with Address. Following LoD by providing order.getShippingCity() encapsulates the traversal and limits coupling to the immediate collaborator.",
     },
   ],
+  followUps: [
+    "How do you spot low cohesion in a code review, concretely?",
+    "Is zero coupling a goal? What would that even mean?",
+    "What does the Law of Demeter protect you from, and what does obeying it cost?",
+    "How do coupling and cohesion relate to the SOLID principles?",
+  ],
   mcqs: [
     {
       q: "Which type of coupling occurs when one module modifies the internal data of another module?",

@@ -47,6 +47,11 @@ export const linuxShell: TopicContent = {
       a: "`$()` and backticks both perform command substitution — replacing the expression with the command's stdout. `$()` is preferred because it nests cleanly (`$(echo $(date))`), handles quoting intuitively, and is visually unambiguous. Backticks require escaping for nesting (`` `echo \\`date\\`` ``), and the backtick character is easily confused with a single quote. POSIX and bash both support `$()`. There is no reason to use backticks in modern scripts.",
     },
   ],
+  followUps: [
+    "How would you find which process is holding a port?",
+    "What's the difference between `>` and `>>`, and between `2>&1` placements?",
+    "How do you make a script fail fast on any error?",
+  ],
   mcqs: [
     {
       q: "What does `2>&1` do in a bash command?",
@@ -358,6 +363,33 @@ awk '{code=\$9; bytes=\$10}
     },
   ],
 
+  animations: [
+    {
+      title: "Finding what's holding port 8080",
+      steps: [
+        {
+          label: "Who has the port",
+          detail: "`ss -ltnp | grep 8080` (or `lsof -i :8080`) shows the listening socket and its PID.",
+        },
+        {
+          label: "What is that process",
+          detail: "`ps -fp <pid>` gives the full command line and its parent.",
+        },
+        {
+          label: "What is it doing",
+          detail: "`strace -p <pid>` or `cat /proc/<pid>/status` shows syscalls and state.",
+        },
+        {
+          label: "What files does it hold",
+          detail: "`ls -l /proc/<pid>/fd` — useful when disk space isn't freed after a delete.",
+        },
+        {
+          label: "Stop it properly",
+          detail: "`kill` sends SIGTERM so it can shut down gracefully. `kill -9` is SIGKILL, untrappable, and skips cleanup.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Feature", "**Bash**", "**Zsh**", "**Fish**"],
     rows: [
@@ -399,6 +431,16 @@ awk '{code=\$9; bytes=\$10}
     "Use `shellcheck` religiously — it catches the **most common bash pitfalls**: unquoted variables subject to word splitting, useless use of `cat`, incorrect `test` syntax, deprecated backtick command substitution, and POSIX portability issues. Run it in CI pipelines with `shellcheck -x script.sh` (the `-x` flag follows sourced files). Combined with `set -euo pipefail`, `shellcheck` eliminates the majority of shell scripting bugs before they reach production.",
   ],
 
+  resources: [
+    {
+      label: "The Linux Command Line — William Shotts",
+      kind: "book",
+    },
+    {
+      label: "GNU Bash reference manual",
+      kind: "docs",
+    },
+  ],
   glossary: [
     { term: "Shell", definition: "A command-line interpreter that reads, parses, and executes commands, also serving as a scripting language." },
     { term: "Pipe", definition: "The `|` operator connecting stdout of one process to stdin of another, enabling command composition." },

@@ -39,6 +39,11 @@ export const awsStorage: TopicContent = {
     }
   ],
 
+  followUps: [
+    "S3, EBS, EFS — which for a shared upload directory, and why?",
+    "What consistency does S3 give you now, and what did it give you before 2020?",
+    "How do storage classes change the cost/retrieval trade-off?",
+  ],
   mcqs: [
     {
       q: "Which S3 storage class offers millisecond retrieval at the lowest cost for rarely accessed data?",

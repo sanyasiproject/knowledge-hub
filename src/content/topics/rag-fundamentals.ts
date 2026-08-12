@@ -99,6 +99,11 @@ Retrieval quality directly impacts generation quality. If irrelevant chunks are 
       a: "Hybrid search combines dense vector retrieval (semantic similarity) with sparse keyword retrieval (BM25). It is useful when queries may contain specific terms, acronyms, or identifiers that semantic search misses, or when semantic matches alone are insufficient. For example, searching for error code 'ERR-4521' benefits from exact keyword matching, while understanding that 'authentication failure' relates to 'login error' benefits from semantic search. Most production RAG systems use hybrid search.",
     },
   ],
+  followUps: [
+    "The answer is wrong — how do you tell whether retrieval or generation failed?",
+    "Why not just fine-tune on the documents instead?",
+    "How do you enforce per-user permissions on retrieved documents?",
+  ],
   mcqs: [
     {
       q: "In a RAG pipeline, when does retrieval happen?",
@@ -195,9 +200,56 @@ Deploying RAG to production requires rigorous **evaluation frameworks** and oper
 
   code: [
     {
+      language: "typescript",
+      caption: "Embedding helpers — normalisation, token-aware truncation, cosine similarity",
+      source: `import { encoding_for_model } from "tiktoken";
+
+const enc = encoding_for_model("text-embedding-3-small");
+
+/** Truncate by TOKENS, not characters — the model's limit is in tokens. */
+export function truncateToTokens(text: string, maxTokens = 8000): string {
+  const ids = enc.encode(text);
+  if (ids.length <= maxTokens) return text;
+  return new TextDecoder().decode(enc.decode(ids.slice(0, maxTokens)));
+}
+
+/** L2-normalise so cosine similarity reduces to a dot product. */
+export function normalise(v: number[]): number[] {
+  const mag = Math.hypot(...v);
+  return mag === 0 ? v : v.map((x) => x / mag);
+}
+
+/** Cosine similarity. On normalised vectors this is just the dot product. */
+export function cosine(a: number[], b: number[]): number {
+  if (a.length !== b.length) throw new Error("dimension mismatch");
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+  return dot;
+}
+
+export async function embedAll(texts: string[], batchSize = 96): Promise<number[][]> {
+  const out: number[][] = [];
+  for (let i = 0; i < texts.length; i += batchSize) {
+    const batch = texts.slice(i, i + batchSize).map((t) => truncateToTokens(t));
+    const res = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: batch,
+    });
+    out.push(...res.data.map((d) => normalise(d.embedding)));
+  }
+  return out;
+}
+
+// The rule that causes the most production bugs: index and query MUST use the
+// same model. Vectors from different models are not comparable — you get
+// plausible-looking similarity scores that mean nothing.
+//
+// Normalise once at index time, and cosine becomes a dot product, which is
+// what every vector store is optimised for.`,
+    },
+    {
       language: "javascript",
-      caption:
-        "Node.js/Express RAG pipeline with **MongoDB Atlas Vector Search** — handles document ingestion, embedding, and query-time retrieval",
+      caption: "Node.js/Express RAG pipeline with **MongoDB Atlas Vector Search** — handles document ingestion, embedding, and query-time retrieval",
       source: `const express = require("express");
 const { MongoClient } = require("mongodb");
 const { OpenAI } = require("openai");
@@ -329,128 +381,8 @@ Cite sources using [Source N] notation.\`,
 app.listen(3000, () => console.log("RAG server on :3000"));`,
     },
     {
-      language: "cpp",
-      caption:
-        "C++ embedding utilities with normalization, truncation, and cosine similarity for RAG indexing",
-      source: `/*
- * Embedding utilities for a RAG indexing pipeline.
- * Demonstrates vector normalization, Matryoshka truncation,
- * and cosine similarity ranking in pure C++.
- *
- * In production, embeddings are generated via an HTTP call to
- * an embedding API (OpenAI, Cohere, or a local model server).
- * This module handles the post-processing and similarity search.
- */
-
-#include <iostream>
-#include <vector>
-#include <string>
-#include <cmath>
-#include <algorithm>
-#include <numeric>
-#include <iomanip>
-
-using Embedding = std::vector<float>;
-using EmbeddingMatrix = std::vector<Embedding>;
-
-// L2-normalize a vector in place
-void normalize(Embedding& vec) {
-    float norm = 0.0f;
-    for (float v : vec) norm += v * v;
-    norm = std::sqrt(norm);
-    if (norm > 0.0f) {
-        for (float& v : vec) v /= norm;
-    }
-}
-
-// Matryoshka truncation: reduce dimensionality without retraining
-EmbeddingMatrix truncateEmbeddings(const EmbeddingMatrix& embeddings,
-                                   int truncateDim, bool renormalize = true) {
-    EmbeddingMatrix result;
-    result.reserve(embeddings.size());
-    for (const auto& emb : embeddings) {
-        int dim = std::min(truncateDim, static_cast<int>(emb.size()));
-        Embedding truncated(emb.begin(), emb.begin() + dim);
-        if (renormalize) normalize(truncated);
-        result.push_back(std::move(truncated));
-    }
-    return result;
-}
-
-// Cosine similarity (assumes normalized vectors, so dot product suffices)
-float cosineSimilarity(const Embedding& a, const Embedding& b) {
-    float dot = 0.0f;
-    for (size_t i = 0; i < a.size() && i < b.size(); ++i) {
-        dot += a[i] * b[i];
-    }
-    return dot;
-}
-
-// Compute similarity scores between a query and all documents
-std::vector<float> computeSimilarities(const Embedding& queryVec,
-                                       const EmbeddingMatrix& docVecs) {
-    std::vector<float> scores;
-    scores.reserve(docVecs.size());
-    for (const auto& doc : docVecs) {
-        scores.push_back(cosineSimilarity(queryVec, doc));
-    }
-    return scores;
-}
-
-// Rank documents by similarity score
-std::vector<std::pair<int, float>> rankByScore(const std::vector<float>& scores) {
-    std::vector<std::pair<int, float>> ranked;
-    for (int i = 0; i < static_cast<int>(scores.size()); ++i) {
-        ranked.push_back({i, scores[i]});
-    }
-    std::sort(ranked.begin(), ranked.end(),
-              [](auto& a, auto& b) { return a.second > b.second; });
-    return ranked;
-}
-
-int main() {
-    // Simulated embeddings (in production, these come from an embedding API)
-    std::vector<std::string> documents = {
-        "RAG retrieves relevant documents before generation.",
-        "Vector databases store embeddings for similarity search.",
-        "Chunking splits documents into smaller retrievable units.",
-        "Rerankers improve retrieval precision with cross-encoders.",
-    };
-
-    // Simulated 8-dimensional embeddings for demonstration
-    EmbeddingMatrix docEmbeddings = {
-        {0.8f, 0.3f, 0.5f, 0.1f, 0.9f, 0.2f, 0.4f, 0.7f},
-        {0.2f, 0.9f, 0.1f, 0.8f, 0.3f, 0.7f, 0.5f, 0.4f},
-        {0.5f, 0.5f, 0.7f, 0.3f, 0.6f, 0.4f, 0.8f, 0.2f},
-        {0.3f, 0.7f, 0.4f, 0.6f, 0.2f, 0.8f, 0.1f, 0.9f},
-    };
-    for (auto& emb : docEmbeddings) normalize(emb);
-
-    // Query embedding
-    Embedding queryEmb = {0.7f, 0.4f, 0.6f, 0.2f, 0.8f, 0.3f, 0.5f, 0.6f};
-    normalize(queryEmb);
-
-    // Truncation example (reduce to 4 dimensions)
-    auto truncated = truncateEmbeddings(docEmbeddings, 4);
-    std::cout << "Original dims: " << docEmbeddings[0].size()
-              << ", Truncated dims: " << truncated[0].size() << std::endl;
-
-    // Compute similarities and rank
-    auto scores = computeSimilarities(queryEmb, docEmbeddings);
-    auto ranked = rankByScore(scores);
-
-    std::cout << std::fixed << std::setprecision(4);
-    std::cout << "\\nRanked results:" << std::endl;
-    for (auto& [idx, score] : ranked) {
-        std::cout << "  [" << score << "] " << documents[idx] << std::endl;
-    }
-    return 0;
-}`,
-    },
-    {
       language: "javascript",
-      caption:
-        "MongoDB Atlas **vector search index** definition — required for the `$vectorSearch` aggregation stage",
+      caption: "MongoDB Atlas **vector search index** definition — required for the `$vectorSearch` aggregation stage",
       source: `// Create this index in MongoDB Atlas UI or via the Atlas Admin API.
 // Collection: "documents" in database "rag_demo"
 {
@@ -564,6 +496,37 @@ int main() {
     },
   ],
 
+  animations: [
+    {
+      title: "A question through the pipeline",
+      steps: [
+        {
+          label: "Question arrives",
+          detail: "'What's the refund window for enterprise customers?'",
+        },
+        {
+          label: "Rewrite if needed",
+          detail: "In a conversation, fold in context so the query stands alone.",
+        },
+        {
+          label: "Hybrid retrieve",
+          detail: "Dense vectors for meaning, BM25 for exact terms like 'enterprise'. Results fused by rank.",
+        },
+        {
+          label: "Rerank",
+          detail: "A cross-encoder scores each candidate against the question jointly, keeping the top few.",
+        },
+        {
+          label: "Assemble",
+          detail: "Chunks placed with the strongest at the start and end, each labelled with a citation id.",
+        },
+        {
+          label: "Generate and verify",
+          detail: "Answer only from context, with citations; then check the cited ids exist and support the claims.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",
@@ -655,6 +618,20 @@ int main() {
     `Evaluate RAG end-to-end with four dimensions: **context precision**, **context recall**, **faithfulness**, and **answer relevancy**. Maintain a *golden test set* of curated question-answer-source triples, automate evaluation with frameworks like **RAGAS**, and run regression tests on every pipeline change to catch retrieval quality drops early.`,
   ],
 
+  resources: [
+    {
+      label: "Retrieval-Augmented Generation for Knowledge-Intensive NLP — Lewis et al., 2020",
+      kind: "paper",
+    },
+    {
+      label: "LlamaIndex documentation",
+      kind: "docs",
+    },
+    {
+      label: "LangChain documentation — retrieval",
+      kind: "docs",
+    },
+  ],
   glossary: [
     {
       term: "RAG",

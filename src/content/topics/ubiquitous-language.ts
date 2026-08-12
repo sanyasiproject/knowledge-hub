@@ -121,6 +121,10 @@ The quality of ubiquitous language depends directly on the depth of collaboratio
       a: "Enforce naming conventions in code reviews: class names as domain nouns, method names as domain verbs, enums using domain terminology. Write tests that read like domain specifications. Use living documentation tools (Gherkin/Cucumber) to keep specs and code in sync. Involve domain experts in reviewing class and method names. When the language evolves, refactor the code to match -- renaming is not cosmetic, it is a correction of the model.",
     },
   ],
+  followUps: [
+    "What breaks when engineers and domain experts use the same word differently?",
+    "How does the language differ across bounded contexts, legitimately?",
+  ],
   mcqs: [
     {
       q: "What is the primary purpose of Ubiquitous Language in DDD?",
@@ -199,6 +203,16 @@ The quality of ubiquitous language depends directly on the depth of collaboratio
     {
       front: "Why avoid generic class names like Manager, Handler, Processor?",
       back: "These names carry no domain meaning. They prevent domain experts from understanding the code and allow developers to bypass the discipline of modeling the domain correctly. Use domain nouns (Policy, Claim, Order) and domain verbs (approve, underwrite, fulfill) instead.",
+    },
+  ],
+  resources: [
+    {
+      label: "Domain-Driven Design — Eric Evans",
+      kind: "book",
+    },
+    {
+      label: "Implementing Domain-Driven Design — Vaughn Vernon",
+      kind: "book",
     },
   ],
   glossary: [
@@ -503,6 +517,37 @@ tax + invoice"]
     DE->>Dev: If payment fails we release the reservation
     Dev->>Code: order.cancelPayment() calls inventory.release()
     DE->>Dev: Review - yes that matches our language`,
+    },
+  ],
+  animations: [
+    {
+      title: "One word, three meanings",
+      steps: [
+        {
+          label: "Sales says 'customer'",
+          detail: "Someone in the pipeline who may never have bought anything.",
+        },
+        {
+          label: "Billing says 'customer'",
+          detail: "An entity with a payment method and an invoice history.",
+        },
+        {
+          label: "Support says 'customer'",
+          detail: "Anyone with a login, including free users.",
+        },
+        {
+          label: "The bug",
+          detail: "A single `Customer` model tries to satisfy all three and satisfies none, accumulating nullable fields and conditional logic.",
+        },
+        {
+          label: "The fix",
+          detail: "Separate models per bounded context — `Lead`, `Account`, `User` — each precise inside its own boundary.",
+        },
+        {
+          label: "The discipline",
+          detail: "Code, conversation, and documentation use the same word for the same thing within a context.",
+        },
+      ],
     },
   ],
   comparison: {

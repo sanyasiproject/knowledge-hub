@@ -122,6 +122,12 @@ Implementation options:
       a: "Argon2 is memory-hard — it requires significant RAM per hash computation (configurable, e.g., 64MB). GPUs and ASICs have limited per-core memory, so they cannot efficiently parallelize Argon2 attacks the way they can parallelize bcrypt attacks. Argon2 also offers three tunable dimensions (memory, iterations, parallelism) versus bcrypt's single cost factor, allowing more precise security/performance tradeoffs. Argon2 won the Password Hashing Competition in 2015 and is recommended by OWASP. However, bcrypt remains a solid choice with decades of proven security.",
     },
   ],
+  followUps: [
+    "Why is a fast hash the wrong choice here, when speed is normally good?",
+    "What exactly does the salt prevent, and what does it not prevent?",
+    "How do you choose the work factor, and when do you need to raise it?",
+    "How would you migrate a database of SHA-256 password hashes to bcrypt without forcing a reset?",
+  ],
   mcqs: [
     {
       q: "Why should passwords be hashed rather than encrypted?",
@@ -195,6 +201,16 @@ Implementation options:
     {
       front: "Why should you increase the work factor over time?",
       back: "Hardware gets faster each year. A cost factor that takes 250ms today may only take 50ms in five years. Regularly increase the work factor to maintain the same resistance to brute-force. Rehash passwords at login time when they authenticate successfully.",
+    },
+  ],
+  resources: [
+    {
+      label: "OWASP Password Storage Cheat Sheet",
+      kind: "docs",
+    },
+    {
+      label: "Argon2 — RFC 9106",
+      kind: "docs",
     },
   ],
   glossary: [
@@ -412,6 +428,37 @@ async function verifyUser(password, storedPepperedHash) {
         A3 --> A4[Memory and CPU hard]
         A4 --> A5[Argon2id recommended variant]
     end`,
+    },
+  ],
+  animations: [
+    {
+      title: "Registration, login, and an attacker with the database",
+      steps: [
+        {
+          label: "Registration",
+          detail: "Password goes through Argon2id with a random salt and a tuned work factor. Hash and salt are stored; the password is not.",
+        },
+        {
+          label: "Login",
+          detail: "The submitted password is hashed with the stored salt and compared in constant time.",
+        },
+        {
+          label: "Database leaks",
+          detail: "The attacker has hashes and salts — no plaintext passwords.",
+        },
+        {
+          label: "Rainbow table attempt",
+          detail: "Fails: the salt means precomputed tables are useless, and identical passwords have different hashes.",
+        },
+        {
+          label: "Brute force attempt",
+          detail: "At ~200 ms per guess the attack is economically impractical. With SHA-256 it would be billions of guesses per second.",
+        },
+        {
+          label: "Raising the bar later",
+          detail: "Increase the work factor and re-hash on next successful login — no forced reset.",
+        },
+      ],
     },
   ],
   comparison: {

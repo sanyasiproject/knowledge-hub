@@ -401,6 +401,33 @@ function isNonBreakingChange(change: string): boolean {
     "**Implement date-based versioning a la Stripe:** Build an Express API that uses `date-based version headers` (e.g., `Api-Version: 2024-06-15`). Maintain a registry of version transforms keyed by date. The server should apply all transforms between the client's version date and the current date. Include an API key table that pins each key to a default version date.",
     "**Version-aware integration tests:** Write a test suite using `supertest` that validates the *same business scenario* (create user, fetch user, update user) against three API versions simultaneously. Each test should assert the correct **response shape** for its version and verify that `Deprecation` headers appear on old versions but not on the current one.",
   ],
+  animations: [
+    {
+      title: "Retiring v1 without breaking a partner",
+      steps: [
+        {
+          label: "Ship v2 alongside v1",
+          detail: "Both routed by URL prefix. No existing caller changes.",
+        },
+        {
+          label: "Announce deprecation",
+          detail: "Responses carry `Deprecation` and `Sunset` headers with the removal date.",
+        },
+        {
+          label: "Instrument usage",
+          detail: "Log calls per version per client, so you know exactly who would break.",
+        },
+        {
+          label: "Contact the remaining callers",
+          detail: "A handful of clients usually account for nearly all remaining v1 traffic.",
+        },
+        {
+          label: "Traffic reaches zero",
+          detail: "Only then remove v1 — the metric decides, not the calendar.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Strategy", "Visibility", "Caching", "REST Purity", "Migration Effort"],
     rows: [
@@ -436,6 +463,11 @@ function isNonBreakingChange(change: string): boolean {
       q: "Explain Stripe's approach to API versioning and why it is effective.",
       a: "Stripe uses date-based versions (e.g., 2023-10-16). Each API key is pinned to the version current at key creation time. Clients can override with the Stripe-Version header. Internally, each version change is implemented as a small, reversible transformation function. Requests pass through a chain of transformations between the client's version and the current version. This is effective because: (1) no code duplication — there is one current implementation, (2) old versions are maintained cheaply via transforms, (3) clients never break unexpectedly (pinned to their version), and (4) clients can upgrade incrementally by testing with a newer version header before committing.",
     },
+  ],
+  followUps: [
+    "Which changes can you make without a version bump?",
+    "How do you know when it's safe to delete v1?",
+    "URL versioning or header versioning — what does each cost you in caching and debugging?",
   ],
   mcqs: [
     {

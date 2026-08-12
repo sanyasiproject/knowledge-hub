@@ -43,6 +43,11 @@ export const linuxFilesystem: TopicContent = {
       a: "Journaling writes pending metadata (and optionally data) changes to a dedicated journal area before applying them to the main filesystem. If the system crashes mid-write, the journal is replayed on the next mount to bring the filesystem to a consistent state — this avoids a full fsck scan which can take hours on large volumes. ext4 supports three journaling modes: journal (safest, journals data too), ordered (default, journals metadata and forces data writes before metadata commit), and writeback (fastest, only journals metadata, data may be stale after crash).",
     },
   ],
+  followUps: [
+    "What is an inode, and what happens when you run out of them despite having free space?",
+    "Why does deleting a large file not free space while a process holds it open?",
+    "Hard link or symlink — what breaks with each?",
+  ],
   mcqs: [
     {
       q: "What does the execute (x) permission mean on a directory?",
@@ -340,6 +345,37 @@ lsof +D /mnt/data`
     BLK --> DISK`
     }
   ],
+  animations: [
+    {
+      title: "Deleted the file, disk still full",
+      steps: [
+        {
+          label: "Large log deleted",
+          detail: "`rm huge.log` returns immediately.",
+        },
+        {
+          label: "`df` unchanged",
+          detail: "Free space hasn't moved.",
+        },
+        {
+          label: "Why",
+          detail: "`rm` removes the directory entry. The inode and its blocks persist while any process holds the file open.",
+        },
+        {
+          label: "Find the holder",
+          detail: "`lsof | grep deleted` shows the process still holding it.",
+        },
+        {
+          label: "Free the space",
+          detail: "Restart or signal the process to reopen its log. Only then are the blocks released.",
+        },
+        {
+          label: "Doing it right",
+          detail: "Use `logrotate` with `copytruncate`, or have the process reopen on SIGHUP.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Feature", "ext4", "XFS", "Btrfs", "ZFS"],
     rows: [
@@ -376,6 +412,16 @@ lsof +D /mnt/data`
     "**Hard links** share the same inode and cannot cross filesystem boundaries or link directories. **Symbolic links** are separate files containing a path, can cross filesystems and link directories, but may **dangle** if the target is deleted. Use `ls -li` to distinguish them.",
     "The **VFS layer** provides a uniform `open()`/`read()`/`write()` interface across all filesystem types. It defines four core objects: `super_block` (mounted FS), `inode` (file metadata), `dentry` (name-to-inode cache), and `file` (open file descriptor). The **dentry cache** is critical for path resolution performance.",
     "Special permission bits: **setuid** (`4000`) runs process as file owner (e.g., `/usr/bin/passwd`); **setgid** (`2000`) runs as file group and on directories forces group inheritance; **sticky bit** (`1000`) on directories prevents users from deleting others' files (e.g., `/tmp`)."
+  ],
+  resources: [
+    {
+      label: "The Linux Programming Interface — Michael Kerrisk",
+      kind: "book",
+    },
+    {
+      label: "Filesystem Hierarchy Standard",
+      kind: "docs",
+    },
   ],
   glossary: [
     {

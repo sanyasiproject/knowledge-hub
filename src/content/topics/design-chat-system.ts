@@ -32,6 +32,11 @@ export const designChatSystem: TopicContent = {
       a: "Chat messages are a write-heavy, append-only workload with reads primarily by (chatId, time range). A wide-column store like Cassandra is ideal: partition key is chatId, clustering key is sequenceNumber. This gives fast sequential writes and efficient range scans for loading chat history. For small deployments, PostgreSQL with a (chatId, sequenceNumber) index works fine. Index recent messages in Redis for instant access to the latest N messages per chat. Archive old messages to cold storage after a retention period. For search across messages, use Elasticsearch with the message text indexed by chatId.",
     },
   ],
+  followUps: [
+    "How does a message reach a user connected to a different gateway node?",
+    "How do you order messages when client clocks disagree?",
+    "How do you deliver to a user who is offline?",
+  ],
   mcqs: [
     {
       q: "After the initial HTTP handshake, a WebSocket connection provides:",
@@ -645,6 +650,37 @@ private:
     U --> M`,
     },
   ],
+  animations: [
+    {
+      title: "Delivering a message across gateway nodes",
+      steps: [
+        {
+          label: "A connects",
+          detail: "WebSocket to gateway node 1. The registry records `A → node1` in Redis.",
+        },
+        {
+          label: "B connects",
+          detail: "To node 2. Registry records `B → node2`.",
+        },
+        {
+          label: "A sends to B",
+          detail: "Node 1 receives the message and persists it to the conversation store.",
+        },
+        {
+          label: "Look up B",
+          detail: "Registry says node 2.",
+        },
+        {
+          label: "Forward",
+          detail: "Node 1 publishes to node 2's channel; node 2 pushes down B's socket.",
+        },
+        {
+          label: "B is offline",
+          detail: "No entry in the registry — queue for later delivery and send a push notification instead.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",
@@ -724,6 +760,16 @@ private:
     "**Storage layer trade-offs**: use a *write-optimized store* (Cassandra, HBase) with partition key = `chatId` and clustering key = `seqNumber` for the message table. Cache the latest N messages per chat in **Redis** for sub-millisecond reads. Index in **Elasticsearch** for full-text search. Archive messages older than the retention period to **cold storage** (S3 + Parquet).",
     "**Presence is an eventually consistent system** — there is no need for strong consistency. A user appearing online for a few extra seconds after disconnecting is acceptable. Use *heartbeat + timeout* (not WebSocket close alone, since connections can drop silently). Debounce presence fan-out to avoid thundering-herd updates when many users connect/disconnect simultaneously.",
     "**End-to-end encryption** fundamentally changes the architecture: the server **cannot read, search, or moderate** message content. All indexing and search must happen *client-side*. Group key management adds complexity — key rotation on member join/leave, *Sender Keys* for efficient group encryption. E2EE trades server-side features for **privacy guarantees**.",
+  ],
+  resources: [
+    {
+      label: "System Design Interview — Alex Xu",
+      kind: "book",
+    },
+    {
+      label: "WebSocket Protocol — RFC 6455",
+      kind: "docs",
+    },
   ],
   glossary: [
     {

@@ -594,6 +594,12 @@ int main() {
     },
   ],
 
+  followUps: [
+    "What's the difference between a race condition and a data race?",
+    "Why is `counter++` not atomic, and what does compare-and-swap do about it?",
+    "Why do race conditions often disappear when you add logging?",
+    "How would you write a test that reliably catches this race?",
+  ],
   mcqs: [
     {
       q: "What is the output of two threads each incrementing a shared counter 100,000 times without synchronization?",

@@ -387,6 +387,37 @@ func main() {
     "**Implement retry with service config:** Configure a gRPC client in **Go** with a `service config` JSON that enables automatic retries for `UNAVAILABLE` status codes with *exponential backoff* (`initialBackoff: 0.1s`, `maxBackoff: 1s`, `maxAttempts: 3`). Write a flaky server that fails 50% of requests. Measure the client's observed success rate and verify it increases with retries enabled.",
     "**Compare gRPC vs REST performance:** Build the same API (create and list 1000 items) in both gRPC (protobuf) and REST (JSON over Express). Benchmark both with a load testing tool (`ghz` for gRPC, `autocannon` for REST). Compare **throughput** (RPS), *payload size* (protobuf vs JSON), and *p99 latency*. Document the results and explain why gRPC outperforms for this use case.",
   ],
+  animations: [
+    {
+      title: "A unary gRPC call, end to end",
+      steps: [
+        {
+          label: "Define the contract",
+          detail: "A `.proto` file declares the service, its methods, and the message shapes.",
+        },
+        {
+          label: "Generate code",
+          detail: "protoc emits a typed client and server stub in each language — no hand-written serialisation.",
+        },
+        {
+          label: "Client calls a method",
+          detail: "Looks like a local function call. Arguments are serialised to compact binary.",
+        },
+        {
+          label: "Transport",
+          detail: "Sent as an HTTP/2 stream over an existing connection — multiplexed alongside other calls, no new handshake.",
+        },
+        {
+          label: "Server handles it",
+          detail: "Deserialises, runs the method, serialises the response back over the same stream.",
+        },
+        {
+          label: "Schema evolution",
+          detail: "A field added by the server and unknown to the client is simply ignored, so both sides can deploy independently.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "gRPC", "REST", "GraphQL"],
     rows: [
@@ -421,6 +452,12 @@ func main() {
       q: "Why can't a standard L4 load balancer effectively distribute gRPC traffic?",
       a: "gRPC uses HTTP/2, which multiplexes many RPC calls over a single long-lived TCP connection. An L4 (TCP) load balancer assigns connections to backends, not individual requests. Once a connection is established to a backend, all RPCs on that connection go to the same backend. This leads to uneven load distribution. Solution: use an L7 (application-level) load balancer like Envoy that understands HTTP/2 framing, or use gRPC's built-in client-side load balancing.",
     },
+  ],
+  followUps: [
+    "Why can't a browser call gRPC directly, and what does grpc-web change?",
+    "How does protobuf handle a field added by one side and unknown to the other?",
+    "What does HTTP/2 multiplexing fix that HTTP/1.1 couldn't?",
+    "When would you still choose REST for an internal service?",
   ],
   mcqs: [
     {

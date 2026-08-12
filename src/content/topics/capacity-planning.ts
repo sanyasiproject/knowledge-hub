@@ -96,6 +96,11 @@ Reserved instances and savings plans reduce cost for baseline capacity; auto-sca
       a: "Auto-scaling addresses the variable portion of demand but has limitations that require planning: scaling speed (new instances need boot and warm-up time, creating a gap during sudden spikes), cloud quotas (instance limits, IP exhaustion), cost unpredictability (spike-driven bills can be enormous), and stateful components (databases and caches often cannot auto-scale horizontally). Capacity planning shifts from 'how many servers' to understanding scaling limits, ensuring sufficient headroom for scaling lag, planning stateful component capacity, and modeling costs across traffic scenarios.",
     },
   ],
+  followUps: [
+    "How do you size for peak rather than average, and what does headroom cost?",
+    "What signals tell you to scale before users notice?",
+    "How do you plan capacity for a launch with no historical data?",
+  ],
   mcqs: [
     {
       q: "Which type of load test is specifically designed to detect memory leaks?",
@@ -164,6 +169,16 @@ Reserved instances and savings plans reduce cost for baseline capacity; auto-sca
     {
       front: "What is the recommended auto-scaling strategy?",
       back: "Scale out aggressively (respond quickly to demand) and scale in conservatively (avoid flapping). Use reserved instances for baseline capacity and auto-scaling for the variable portion.",
+    },
+  ],
+  resources: [
+    {
+      label: "Site Reliability Engineering — Google",
+      kind: "book",
+    },
+    {
+      label: "The Site Reliability Workbook — Google",
+      kind: "book",
     },
   ],
   glossary: [
@@ -556,6 +571,37 @@ int main() {
     },
   ],
 
+  animations: [
+    {
+      title: "Sizing for a launch",
+      steps: [
+        {
+          label: "Estimate demand",
+          detail: "Expected users × actions per user per day → requests per day → average requests per second.",
+        },
+        {
+          label: "Apply a peak factor",
+          detail: "Traffic is not flat. Peak is typically 2–3× average, and a launch spike is worse.",
+        },
+        {
+          label: "Measure per-instance capacity",
+          detail: "Load test one instance to find where latency degrades — not where it errors.",
+        },
+        {
+          label: "Add headroom",
+          detail: "Target 60–70% utilisation at peak, because latency degrades sharply above that.",
+        },
+        {
+          label: "Check the dependencies",
+          detail: "The database connection pool or a third-party rate limit usually caps you before CPU does.",
+        },
+        {
+          label: "Plan the failure",
+          detail: "Autoscaling takes minutes. Decide what you shed or degrade in the meantime.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Tool",

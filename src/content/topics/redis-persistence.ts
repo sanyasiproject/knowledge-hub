@@ -324,6 +324,11 @@ DEBUG RELOAD     # Save + quit + reload (testing only)`,
       a: "Single-file AOF required an atomic rename to replace the old file — if the server crashed between writing the new AOF and renaming, data could be lost or corrupted. Multi-part AOF uses a manifest file that lists a base file and incremental files. The manifest is updated atomically. Old files are garbage-collected safely. This also enables incremental backups (ship individual incremental files) and reduces the rewrite's risk window.",
     },
   ],
+  followUps: [
+    "RDB or AOF — what exactly do you lose with each on a crash?",
+    "Why does the fork for an RDB snapshot cause a latency spike, and how large is it?",
+    "If Redis is your cache, does persistence matter at all?",
+  ],
   mcqs: [
     {
       q: "With appendfsync everysec, what is the maximum data loss on a crash?",

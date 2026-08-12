@@ -743,6 +743,37 @@ private:
         "A power-law distribution where the frequency of an item is inversely proportional to its rank. In typeahead, a small number of popular prefixes account for the majority of queries, making caching highly effective.",
     },
   ],
+  animations: [
+    {
+      title: "Suggestions as you type",
+      steps: [
+        {
+          label: "Prefix index",
+          detail: "A trie or an FST maps prefixes to top completions, precomputed with popularity weights.",
+        },
+        {
+          label: "Client debounces",
+          detail: "Waits for a short pause so it doesn't query on every keystroke.",
+        },
+        {
+          label: "Query",
+          detail: "Prefix sent; the service walks to that node and returns its precomputed top-k.",
+        },
+        {
+          label: "Cached",
+          detail: "Popular prefixes are cached at the edge — most traffic is a small set of prefixes.",
+        },
+        {
+          label: "Client-side too",
+          detail: "Results for 'ca' let the client filter locally for 'car' without a round trip.",
+        },
+        {
+          label: "Updating",
+          detail: "Popularity changes are applied to the index in batches, not per query.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Feature",

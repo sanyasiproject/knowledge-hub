@@ -318,6 +318,11 @@ async function callInternalAPI(endpoint: string) {
       a: "Token introspection (RFC 7662) lets a resource server ask the authorization server if a token is valid. It's used when access tokens are opaque (not JWTs) so the resource server can't verify them locally. The resource server sends the token to the introspection endpoint and gets back: active status, scope, client_id, username, expiration. For JWT access tokens, local verification is preferred because it avoids the network round-trip.",
     },
   ],
+  followUps: [
+    "What attack does PKCE prevent, and why did the implicit flow get deprecated?",
+    "Why is using an access token as proof of identity a mistake?",
+    "What breaks if you skip validating the `aud` claim?",
+  ],
   mcqs: [
     {
       q: "In the Authorization Code flow, why is the code exchanged for tokens instead of returning tokens directly?",

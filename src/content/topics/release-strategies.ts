@@ -47,6 +47,11 @@ export const releaseStrategies: TopicContent = {
       a: "Define success criteria — maximum error rate, latency P99 threshold, minimum request success rate. Use a progressive delivery controller (Flagger, Argo Rollouts) that queries your metrics backend (Prometheus, Datadog) after each traffic increment. If any metric breaches its threshold during the analysis window, the controller automatically routes 100% traffic back to the stable version and scales down the canary. Include alerting so the team knows a rollback occurred and can investigate the root cause.",
     },
   ],
+  followUps: [
+    "Why must old and new versions coexist during a rolling deploy?",
+    "What does a canary catch that staging doesn't?",
+    "How do feature flags separate deploy from release, and what debt do they create?",
+  ],
   mcqs: [
     {
       q: "In a blue-green deployment, what is the fastest way to roll back?",

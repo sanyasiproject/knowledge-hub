@@ -143,6 +143,11 @@ No single defense is sufficient. Layer multiple protections:
       a: "SameSite controls whether cookies are sent on cross-origin requests. With SameSite=Strict, the cookie is never sent on any cross-site request — even following a link from an external site to your app won't include the cookie. SameSite=Lax allows the cookie on top-level GET navigations (so links work) but blocks it on POST requests, form submissions from other sites, and embedded content (iframes, images). Since CSRF attacks rely on the browser automatically sending auth cookies with cross-origin form submissions or AJAX requests, SameSite=Lax or Strict prevents the attack at the browser level.",
     },
   ],
+  followUps: [
+    "Why is parameterisation categorically different from escaping?",
+    "How do you safely handle a user-supplied ORDER BY column, which can't be parameterised?",
+    "What's the equivalent risk in a NoSQL query, or in a template engine?",
+  ],
   mcqs: [
     {
       q: "Which type of SQL injection extracts data by observing differences in application behavior (e.g., true/false responses)?",
@@ -221,6 +226,16 @@ No single defense is sufficient. Layer multiple protections:
     {
       front: "What is the double submit cookie pattern for CSRF prevention?",
       back: "The server sets a random CSRF token as a cookie AND requires the same value in a request header/body. The server verifies both match. Attackers can trigger the cookie to be sent but cannot read it (due to same-origin policy) to include it in the request body.",
+    },
+  ],
+  resources: [
+    {
+      label: "OWASP SQL Injection Prevention Cheat Sheet",
+      kind: "docs",
+    },
+    {
+      label: "PortSwigger Web Security Academy — SQL injection",
+      kind: "docs",
     },
   ],
   glossary: [
@@ -461,6 +476,37 @@ int safePing(const std::string& host) {
     ORM --> PoLP[Least Privilege DB Account]
     PoLP --> Audit[Audit Logging]
     Audit --> DB[(Database)]`,
+    },
+  ],
+  animations: [
+    {
+      title: "Why concatenation breaks and parameterisation doesn't",
+      steps: [
+        {
+          label: "Concatenated query",
+          detail: "`\"SELECT * FROM users WHERE email = '\" + input + \"'\"`. The value becomes part of the query text.",
+        },
+        {
+          label: "Malicious input",
+          detail: "The user submits `' OR '1'='1`. The query now reads `... WHERE email = '' OR '1'='1'` — every row matches.",
+        },
+        {
+          label: "Why it worked",
+          detail: "The database parsed code and data together, so data was able to change the query's structure.",
+        },
+        {
+          label: "Parameterised query",
+          detail: "`SELECT * FROM users WHERE email = ?` is parsed first, with the structure fixed.",
+        },
+        {
+          label: "Value bound",
+          detail: "The input is supplied separately as data. Whatever it contains, it can never become syntax.",
+        },
+        {
+          label: "Defence in depth",
+          detail: "The app's database user has no DROP or schema rights, so a future gap is contained.",
+        },
+      ],
     },
   ],
   comparison: {

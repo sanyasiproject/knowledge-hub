@@ -600,6 +600,37 @@ private:
       definition: "A technique where multiple concurrent requests for the same resource are collapsed into a single backend fetch. All waiting callers receive the same response, preventing thundering herd on hot keys.",
     },
   ],
+  animations: [
+    {
+      title: "Posting and reading a timeline",
+      steps: [
+        {
+          label: "Tweet written",
+          detail: "Stored once, keyed by tweet id, in a write-optimised store.",
+        },
+        {
+          label: "Fan-out on write",
+          detail: "Tweet id pushed to followers' timeline lists in Redis, capped at a few hundred entries.",
+        },
+        {
+          label: "Celebrity exception",
+          detail: "Above a follower threshold, skip fan-out and merge at read time.",
+        },
+        {
+          label: "Home timeline read",
+          detail: "Fetch the precomputed id list, then hydrate tweet bodies from cache.",
+        },
+        {
+          label: "Ranking",
+          detail: "Applied after retrieval — a separate concern from getting the candidate set.",
+        },
+        {
+          label: "Search",
+          detail: "A separate inverted index updated asynchronously; never query the primary store for text search.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "Fan-out on Write", "Fan-out on Read", "Hybrid Approach"],
     rows: [

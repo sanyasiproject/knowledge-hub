@@ -122,6 +122,11 @@ Prerequisites: solid observability (metrics, logs, traces), on-call processes, a
       a: "A GameDay is a structured team exercise lasting 2-4 hours where a realistic outage scenario is simulated and the team practices full incident response: detection, communication, diagnosis, mitigation, and post-incident review. Unlike automated chaos experiments that test system resilience, GameDays also test human processes: do alerts fire? Does the on-call respond correctly? Are runbooks accurate? GameDays typically have a facilitator, a pre-planned scenario (unknown to participants), and a debrief session.",
     },
   ],
+  followUps: [
+    "What has to be in place before you're allowed to run a chaos experiment?",
+    "How do you define the blast radius and the abort condition?",
+    "What's the difference between a chaos experiment and just breaking things?",
+  ],
   mcqs: [
     {
       q: "What is the first step in a chaos engineering experiment?",
@@ -200,6 +205,16 @@ Prerequisites: solid observability (metrics, logs, traces), on-call processes, a
     {
       front: "Name four chaos engineering tools.",
       back: "Chaos Monkey (Netflix, instance termination), Gremlin (SaaS platform), Litmus Chaos (Kubernetes-native), Toxiproxy (network conditions), AWS Fault Injection Simulator.",
+    },
+  ],
+  resources: [
+    {
+      label: "Chaos Engineering — Rosenthal & Jones",
+      kind: "book",
+    },
+    {
+      label: "Principles of Chaos Engineering — principlesofchaos.org",
+      kind: "article",
     },
   ],
   glossary: [
@@ -631,6 +646,37 @@ validate_steady_state`,
     Level2 --> Level3 : resilience patterns validated
     Level3 --> Level4 : auto gamedays scheduled
     Level4 --> Level4 : ongoing feedback loop`,
+    },
+  ],
+  animations: [
+    {
+      title: "Running an experiment safely",
+      steps: [
+        {
+          label: "Prerequisites",
+          detail: "You need monitoring good enough to detect harm, and a rollback you've actually used.",
+        },
+        {
+          label: "State a hypothesis",
+          detail: "'If one replica of the payment service dies, error rate stays under 0.1%.' A prediction you can be wrong about.",
+        },
+        {
+          label: "Define blast radius",
+          detail: "One replica, one availability zone, 5% of traffic — and a hard abort condition.",
+        },
+        {
+          label: "Inject",
+          detail: "Kill the replica during working hours, with the team watching.",
+        },
+        {
+          label: "Observe",
+          detail: "Did the hypothesis hold? A failed hypothesis is the valuable outcome — it found a weakness before an incident did.",
+        },
+        {
+          label: "Fix, then repeat",
+          detail: "Address what broke, then widen the blast radius. Without a hypothesis and an abort, it isn't an experiment.",
+        },
+      ],
     },
   ],
   comparison: {

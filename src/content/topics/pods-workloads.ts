@@ -42,6 +42,11 @@ export const podsWorkloads: TopicContent = {
       a: "A DaemonSet guarantees exactly one pod per matching node and automatically adds pods when new nodes join the cluster. A Deployment with node affinity can schedule pods on specific nodes but does not guarantee one-per-node coverage or automatically react to new nodes. DaemonSets are the right choice for node-level agents like log collectors, monitoring exporters, and CNI plugins that must run on every node.",
     },
   ],
+  followUps: [
+    "When do you need a StatefulSet rather than a Deployment?",
+    "What is a sidecar for, and what does it cost?",
+    "Why is a bare Pod almost never what you want?",
+  ],
   mcqs: [
     {
       q: "What guarantees does a StatefulSet provide that a Deployment does not?",
@@ -318,6 +323,33 @@ kubectl create job test-job --from=cronjob/backup # Manual CronJob trigger`,
     Q4 -->|On-demand| Job[Job\nMigrations, batch processing]`,
     },
   ],
+  animations: [
+    {
+      title: "Deployment vs StatefulSet on a rolling update",
+      steps: [
+        {
+          label: "Deployment",
+          detail: "Pods are interchangeable, with random names and no stable identity.",
+        },
+        {
+          label: "Rolling update",
+          detail: "New Pods start, old ones terminate, in any order. A Pod's replacement is not 'the same' Pod.",
+        },
+        {
+          label: "StatefulSet",
+          detail: "Pods have stable ordinal names — `db-0`, `db-1` — and each keeps its own PersistentVolumeClaim.",
+        },
+        {
+          label: "Ordered rollout",
+          detail: "Updated in reverse ordinal order, one at a time, waiting for each to be ready.",
+        },
+        {
+          label: "Why it matters",
+          detail: "A database replica must reattach to its own data and keep its identity for peers to find it.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Controller", "Identity", "Scaling Order", "Storage", "Best For"],
     rows: [
@@ -349,6 +381,16 @@ kubectl create job test-job --from=cronjob/backup # Manual CronJob trigger`,
     "**StatefulSets** provide three guarantees: *stable network identity* (predictable names + headless Service DNS), *ordered deployment/scaling*, and *persistent per-pod storage* via `volumeClaimTemplates`.",
     "**DaemonSets** ensure *one Pod per matching node*. New nodes automatically get a Pod. Common for node-level agents: logging, monitoring, networking.",
     "**Init containers** run *sequentially before* main containers. Each must succeed (exit 0) before the next starts. They share Pod volumes but can use different images for setup tasks.",
+  ],
+  resources: [
+    {
+      label: "Kubernetes documentation — Workloads",
+      kind: "docs",
+    },
+    {
+      label: "Kubernetes Patterns — Ibryam & Huß",
+      kind: "book",
+    },
   ],
   glossary: [
     {

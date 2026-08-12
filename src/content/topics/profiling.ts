@@ -103,6 +103,11 @@ Best practices:
       a: "First, confirm the leak by monitoring heap usage over time — a sawtooth pattern with rising baseline indicates a leak. Take two heap snapshots separated by time using jmap or async-profiler, then compare them in Eclipse MAT or VisualVM to identify object types whose count or retained size is growing. Look at the GC roots retaining those objects to find the code path preventing collection. Common causes include unbounded caches, static collections that grow without eviction, event listeners not being deregistered, and ThreadLocal values not being cleaned up.",
     },
   ],
+  followUps: [
+    "Sampling or instrumenting — what does each distort?",
+    "How do you read a flame graph?",
+    "Why do you profile before optimising, even when you're sure you know the cause?",
+  ],
   mcqs: [
     {
       q: "What does the width of a box in a flame graph represent?",
@@ -176,6 +181,16 @@ Best practices:
     {
       front: "Name three continuous profiling tools.",
       back: "Pyroscope (open-source), Google Cloud Profiler (GCP SaaS), and Datadog Continuous Profiler (APM-integrated SaaS).",
+    },
+  ],
+  resources: [
+    {
+      label: "Systems Performance — Brendan Gregg",
+      kind: "book",
+    },
+    {
+      label: "Chrome DevTools documentation — Performance",
+      kind: "docs",
     },
   ],
   glossary: [
@@ -400,6 +415,37 @@ void process_data(const std::vector<int>& data) {
       Branch mispredictions
       Intel VTune
       perf stat`,
+    },
+  ],
+  animations: [
+    {
+      title: "Reading a flame graph",
+      steps: [
+        {
+          label: "Collect samples",
+          detail: "The profiler records the stack many times per second.",
+        },
+        {
+          label: "X axis is not time",
+          detail: "It's alphabetically-sorted aggregate samples. Width means total time in that frame.",
+        },
+        {
+          label: "Y axis is stack depth",
+          detail: "A frame sits on the one that called it.",
+        },
+        {
+          label: "Look for width",
+          detail: "The widest frames are where time goes. A wide plateau near the top is a leaf doing the actual work.",
+        },
+        {
+          label: "Ignore tall and thin",
+          detail: "Deep but narrow stacks are rare paths, however alarming they look.",
+        },
+        {
+          label: "Act",
+          detail: "Optimise the widest frame you control. Anything else is measurably not the bottleneck.",
+        },
+      ],
     },
   ],
   comparison: {

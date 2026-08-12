@@ -15,6 +15,37 @@ export const dockerNetworking: TopicContent = {
     "## Volumes and Bind Mounts\n\nDocker volumes are managed by the Docker daemon and stored in /var/lib/docker/volumes/ by default. They are the preferred mechanism for persistent data because Docker manages their lifecycle (create, inspect, remove), they work on both Linux and Windows, they can be shared among multiple containers, and volume drivers enable remote storage backends (NFS, cloud storage, distributed filesystems). Bind mounts map an arbitrary host path into the container using -v /host/path:/container/path. They provide direct file access between host and container (useful for development hot-reloading) but are less portable because they depend on the host's directory structure. tmpfs mounts store data in the host's memory only — data does not persist and is never written to disk, useful for sensitive data like secrets. Volume behavior on container creation: named volumes pre-populate from the image content at the mount point; bind mounts override the mount point entirely.",
     "## Port Mapping and Network Security\n\nPort publishing creates iptables rules in the DOCKER chain. -p 8080:80 creates a DNAT rule mapping host:8080 to container:80 for all interfaces (0.0.0.0). Binding to a specific interface (-p 127.0.0.1:8080:80) restricts access to localhost. Docker modifies iptables directly, which can bypass host firewall rules (ufw, firewalld) — a common security pitfall where docker -p effectively punches through the firewall. Mitigations include: binding to localhost where external access is not needed, using Docker's --iptables=false flag (then manually managing rules), or using network policies. Inter-container communication on the same bridge is unrestricted by default; the --icc=false flag on the Docker daemon disables it, requiring explicit --link or published ports. In production, use user-defined networks with proper segmentation rather than relying on default bridge behavior.",
   ],
+  animations: [
+    {
+      title: "Why `localhost` breaks inside a container",
+      steps: [
+        {
+          label: "Container starts",
+          detail: "It gets its own network namespace, with its own loopback interface.",
+        },
+        {
+          label: "App calls localhost:5432",
+          detail: "That resolves to the container's own loopback — not the host's.",
+        },
+        {
+          label: "Nothing there",
+          detail: "Connection refused, even though Postgres is running on the host.",
+        },
+        {
+          label: "Bridge network",
+          detail: "On a user-defined bridge, containers reach each other by service name — `postgres:5432`.",
+        },
+        {
+          label: "Reaching the host",
+          detail: "Use `host.docker.internal`, or run the dependency as another container on the same network.",
+        },
+        {
+          label: "`--network host`",
+          detail: "Shares the host's namespace, so localhost works — at the cost of all network isolation.",
+        },
+      ],
+    },
+  ],
   interviewQA: [
     {
       q: "What is the difference between the default bridge network and a user-defined bridge network?",
@@ -44,6 +75,11 @@ export const dockerNetworking: TopicContent = {
         "How do anonymous volumes differ from named volumes?",
       ],
     },
+  ],
+  followUps: [
+    "How do two containers on different hosts reach each other?",
+    "What does `--network host` give up?",
+    "Why does `localhost` inside a container not mean what people expect?",
   ],
   mcqs: [
     {
@@ -129,6 +165,12 @@ export const dockerNetworking: TopicContent = {
     {
       front: "Why might Docker bypass your host firewall?",
       back: "Docker inserts iptables rules in the DOCKER chain that execute before rules managed by ufw or firewalld. A published port (-p) is accessible externally even if the firewall is configured to block it.",
+    },
+  ],
+  resources: [
+    {
+      label: "Docker documentation — networking overview",
+      kind: "docs",
     },
   ],
   glossary: [

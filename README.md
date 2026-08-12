@@ -8,7 +8,7 @@ This is **not** a blog, an LMS, a docs site, or a roadmap. It is a structured kn
 
 Per the master spec's output requirements, this phase delivers:
 
-1. ✅ **Complete information architecture** — 59 domains, 82 categories, 272+ topics
+1. ✅ **Complete information architecture** — 59 domains, 85 categories, 298 topics
 2. ✅ **Navigation hierarchy** — collapsible sidebar + search, grouped by domain group
 3. ✅ **Category hierarchy** — every domain → categories → topics
 4. ✅ **Topic hierarchy** — every topic is a leaf with a full page
@@ -28,7 +28,8 @@ Content is authored incrementally on top of this structure without ever changing
 ```bash
 npm install
 npm run dev      # http://localhost:5173
-npm run build    # production build
+npm run check    # content consistency checks
+npm run build    # type-check + content check + production build
 ```
 
 ## How it's organized
@@ -99,9 +100,59 @@ sections, and register it in `src/content/index.ts`. No component changes needed
 - `operating-systems / processes-and-threads / processes-vs-threads`
 - `caching / caching-fundamentals / caching-basics` (includes an interactive animation)
 
+## Interview Prep — the last-minute layer
+
+`/interview` is a **separate content set** from the topic pages, built for the
+opposite situation: the interview is in a few hours and you cannot read the hub.
+
+- **21 areas**, weighted to software engineering and AI engineering, each with
+  must-know bullets, revision sheets, **decision tables** ("why X over Y"), a
+  question bank with model answers, pitfalls, and numbers worth memorising.
+- **301 questions**, each carrying what the interviewer is *actually testing*
+  and the confident-sounding wrong answer most candidates give.
+- **4 time-budgeted tracks** — Final 30 Minutes, 4-Hour Crash, 1-Day, 2-Day —
+  each an ordered checklist with a running clock showing how far into the plan
+  each block starts.
+- Every area has a **printable one-pager** view for revising on paper.
+- Questions cross-link back into the full hub topic for depth afterwards.
+
+```
+src/interview/
+├── types.ts       # Area, QA, Decision, Sheet, Track
+├── index.ts       # Registry + search + stats
+├── tracks.ts      # Time-budgeted revision plans
+└── areas/         # One file per area
+```
+
+Add an area: create `areas/<slug>.ts`, add one import and one entry in
+`index.ts`. Nav, search, stats, and the print view pick it up automatically.
+
+## No client-side storage
+
+The app persists **nothing** in the browser — no `localStorage`, `sessionStorage`,
+cookies, or IndexedDB. Nothing about your reading is recorded anywhere. The theme
+toggle applies for the session only and each load starts from your OS preference.
+
+`npm run check` enforces this: any use of a browser-storage API in application
+code fails the build. (Content files discuss these APIs as teaching material and
+are excluded.)
+
+## Consistency checking
+
+```bash
+npm run check      # also runs as part of npm run build
+```
+
+Type-checking proves the *shapes* are right; `scripts/check-content.mjs` proves
+the *cross-references* are — topics without content, content unreachable from
+the taxonomy, broken `related` slugs, tracks naming a non-existent area,
+duplicate ids, out-of-range MCQ answers, ragged comparison tables.
+
 ## Roadmap
 
 - **Phase 1 (done):** Information architecture + reusable rendering system.
-- **Phase 2:** Author content across topics, domain by domain.
-- **Phase 3:** Real diagrams/animations, spaced-repetition flashcards, MCQ scoring & progress.
-- **Later:** Coding Interview Preparation section (reserved placeholder in nav today).
+- **Phase 2 (done):** Content authored across all 298 topics.
+- **Phase 3 (done):** Interview Prep section with time-budgeted revision tracks.
+- **Phase 4:** Fill the remaining `followUps` (148 topics), `resources` (89),
+  and `animations` (122) — `npm run check` lists them as warnings.
+- **Later:** Richer diagrams and animations across the remaining topics.

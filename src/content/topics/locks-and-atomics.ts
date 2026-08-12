@@ -635,6 +635,12 @@ public class CASExamples {
     },
   ],
 
+  followUps: [
+    "When is a spinlock better than a mutex, and when is it much worse?",
+    "Why does a read-write lock sometimes perform worse than a plain mutex?",
+    "What is priority inversion and how does priority inheritance fix it?",
+    "Why must you never hold a lock across a network call?",
+  ],
   mcqs: [
     {
       q: "Which memory ordering provides the weakest guarantees in the C++ memory model?",

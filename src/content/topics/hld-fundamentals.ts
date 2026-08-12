@@ -483,6 +483,37 @@ app.use('/api/', limiter.middleware());`,
     G -- No --> K[Finalize Architecture]`,
     },
   ],
+  animations: [
+    {
+      title: "The first ten minutes",
+      steps: [
+        {
+          label: "Functional requirements",
+          detail: "Agree the three or four core features. Scope aggressively and say what's out.",
+        },
+        {
+          label: "Non-functional",
+          detail: "Scale, latency, consistency, availability. These decide the architecture; the features don't.",
+        },
+        {
+          label: "Estimate",
+          detail: "DAU → requests/sec → peak → storage per year. Round to powers of ten.",
+        },
+        {
+          label: "Draw the conclusion",
+          detail: "'That's ~300 GB/year and 500 req/s peak, so this fits one database with a read replica — I won't shard.'",
+        },
+        {
+          label: "API sketch",
+          detail: "A handful of endpoints. This forces precision about what the system does.",
+        },
+        {
+          label: "Now draw",
+          detail: "Only now does the box diagram mean anything, because every box is justified by something above.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "Monolith", "Microservices", "Serverless"],
     rows: [
@@ -539,6 +570,11 @@ app.use('/api/', limiter.middleware());`,
       q: "How do you design for high availability in a system?",
       a: "Deploy across multiple availability zones or regions. Use load balancers to distribute traffic and detect unhealthy instances. Replicate databases with automatic failover (primary-replica). Use redundant message queues and caches. Implement health checks and circuit breakers. Design for graceful degradation -- if a non-critical service fails, the core functionality continues. Define an availability target (e.g., 99.99%) and calculate the error budget to guide design decisions.",
     },
+  ],
+  followUps: [
+    "Where does your design break first as traffic grows tenfold?",
+    "What did you deliberately leave out, and why?",
+    "How do you decide what to scope out in the first five minutes?",
   ],
   mcqs: [
     {
@@ -618,6 +654,16 @@ app.use('/api/', limiter.middleware());`,
     {
       front: "Common HLD pitfalls",
       back: "1. Skipping requirements clarification. 2. Over-engineering for unrealistic scale. 3. Ignoring failure modes. 4. Designing data models before understanding access patterns. 5. Not quantifying NFRs with specific numbers.",
+    },
+  ],
+  resources: [
+    {
+      label: "System Design Interview — Alex Xu",
+      kind: "book",
+    },
+    {
+      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      kind: "book",
     },
   ],
   glossary: [

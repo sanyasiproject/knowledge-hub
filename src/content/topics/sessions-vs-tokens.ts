@@ -295,6 +295,11 @@ function hashToken(token: string): string {
       a: "A thin backend sits between the browser and the API. It handles OAuth flows, stores tokens server-side, and issues a session cookie to the browser. The browser never sees or stores tokens — it only has a session cookie. This combines the security of httpOnly cookies (no XSS exposure) with the benefits of token-based auth for the backend (stateless API verification). It's the recommended pattern for SPAs that use OAuth.",
     },
   ],
+  followUps: [
+    "How do you implement logout with a stateless JWT?",
+    "Why is `localStorage` the wrong place for a token?",
+    "What does a refresh token rotation scheme detect that a static one doesn't?",
+  ],
   mcqs: [
     {
       q: "A user stores a JWT in localStorage. Which attack vector is this vulnerable to?",

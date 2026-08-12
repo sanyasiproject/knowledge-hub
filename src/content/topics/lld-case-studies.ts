@@ -649,6 +649,37 @@ public:
     RuleEngine --> RateLimitRule : evaluates`,
     },
   ],
+  animations: [
+    {
+      title: "Two cars, one spot",
+      steps: [
+        {
+          label: "Naive flow",
+          detail: "Find first free spot → mark occupied → issue ticket.",
+        },
+        {
+          label: "Two entrances",
+          detail: "Both read the same free spot at the same moment.",
+        },
+        {
+          label: "Both write",
+          detail: "Both mark it occupied. Two tickets, one space, one very annoyed driver.",
+        },
+        {
+          label: "Fix A — atomic update",
+          detail: "`UPDATE spots SET status='taken' WHERE id=? AND status='free'`, then check rows affected. Exactly one wins.",
+        },
+        {
+          label: "Fix B — lock",
+          detail: "`SELECT ... FOR UPDATE` on the candidate spot inside the transaction.",
+        },
+        {
+          label: "Say it unprompted",
+          detail: "Naming the race before the interviewer does is most of the signal in this question.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "Token Bucket", "Sliding Window Log", "Sliding Window Counter", "Fixed Window"],
     rows: [
@@ -702,6 +733,11 @@ public:
       q: "What are the trade-offs between token bucket and sliding window for rate limiting?",
       a: "Token bucket allows bursts up to bucket capacity, which is good for APIs where occasional spikes are acceptable. It's simple to implement and memory-efficient (just a counter and timestamp). Sliding window log tracks exact timestamps of each request, giving precise rate limiting but using more memory (O(n) per client for n requests in the window). Sliding window counter is a hybrid: it divides time into sub-windows and interpolates, offering near-exact limiting with O(1) memory. Choose token bucket for simplicity and burst tolerance, sliding window counter for precision with reasonable memory.",
     },
+  ],
+  followUps: [
+    "How do you stop two entrances allocating the same parking spot?",
+    "How would you add a new pricing scheme without editing existing code?",
+    "Where would you put persistence in this design, and why not in the domain objects?",
   ],
   mcqs: [
     {
@@ -781,6 +817,16 @@ public:
     {
       front: "How do you handle vehicle-to-spot mapping in a parking lot?",
       back: "Define a compatibility matrix: Motorcycle fits Small/Medium/Large. Car fits Medium/Large. Truck/Bus fits Large only. Prefer the smallest compatible spot to maximize utilization. This can be encoded in the Vehicle subclass or in the allocation strategy.",
+    },
+  ],
+  resources: [
+    {
+      label: "Head First Design Patterns — Freeman & Robson",
+      kind: "book",
+    },
+    {
+      label: "Design Patterns — Gamma, Helm, Johnson & Vlissides",
+      kind: "book",
     },
   ],
   glossary: [

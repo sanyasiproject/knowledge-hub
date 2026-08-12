@@ -47,6 +47,11 @@ export const pipelines: TopicContent = {
       a: "Store secrets in the platform's built-in secret management (GitHub Secrets, GitLab CI Variables marked protected/masked, Jenkins Credentials). Never commit secrets to pipeline definition files. For more advanced needs, integrate with external secret managers (HashiCorp Vault, AWS Secrets Manager) and fetch secrets at runtime. Restrict secret access by environment — production secrets should not be available to feature branch builds. Audit secret access. Rotate secrets regularly and use short-lived credentials (OIDC federation with cloud providers) where possible.",
     },
   ],
+  followUps: [
+    "Why promote the same artefact rather than rebuild per environment?",
+    "How do you handle secrets in a pipeline without leaking them into logs?",
+    "What should happen when a deploy fails halfway?",
+  ],
   mcqs: [
     {
       q: "In GitHub Actions, which keyword defines dependencies between jobs?",

@@ -274,6 +274,12 @@ function buildWhereClause(filters: FilterParam[]): { sql: string; params: any[] 
       a: "No. COUNT(*) on large tables can be very expensive, especially with filters. Options include: omitting it entirely, using approximate counts (pg_class.reltuples in PostgreSQL), caching the count with a TTL, or computing it asynchronously. Only include it when the UX genuinely requires it (e.g., showing 'Page 3 of 47').",
     },
   ],
+  followUps: [
+    "Why is deep OFFSET pagination both slow AND incorrect under concurrent writes?",
+    "Why must a cursor encode a tiebreaker as well as the sort key?",
+    "How do you support 'jump to page 500' with keyset pagination?",
+    "Why is a total count often the slowest part of the response?",
+  ],
   mcqs: [
     {
       q: "Which pagination strategy is most resilient to concurrent inserts and deletes?",

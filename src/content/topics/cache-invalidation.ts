@@ -357,6 +357,12 @@ const topProducts = await xfetch(
       a: "They are closely related. Cache stampede is the general problem: a hot key expires and many requests flood the backend. The dog-pile effect specifically refers to when the recomputation is expensive (e.g., a 5-second aggregation query). Multiple concurrent requests all start the expensive computation, compounding the load. The distinction matters because cheap queries under stampede may cause brief latency spikes, while expensive queries under dog-pile can cause cascading failures.",
     },
   ],
+  followUps: [
+    "Describe the race where a reader repopulates a stale value after an invalidation.",
+    "Why is TTL-plus-invalidation better than either alone?",
+    "How do versioned cache keys sidestep invalidation entirely?",
+    "What's the worst failure mode: stale data, or a missed invalidation path?",
+  ],
   mcqs: [
     {
       q: "What is the primary advantage of versioned cache keys over explicit cache deletion?",

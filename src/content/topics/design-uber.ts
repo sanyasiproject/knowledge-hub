@@ -594,6 +594,37 @@ std::vector<MatchResult> greedy_match(
         "A library by Google that projects Earth's surface onto the six faces of a cube and uses Hilbert curves to define hierarchical cells. It provides uniform-area spatial indexing without the distortions of rectangular geohash grids.",
     },
   ],
+  animations: [
+    {
+      title: "Matching a rider to a driver",
+      steps: [
+        {
+          label: "Drivers report location",
+          detail: "Every few seconds, into a geospatial index (geohash or S2 cells) in memory.",
+        },
+        {
+          label: "Rider requests",
+          detail: "Their location maps to a cell.",
+        },
+        {
+          label: "Query neighbours",
+          detail: "Fetch drivers in that cell and adjacent ones — a bounded set, not a global scan.",
+        },
+        {
+          label: "Rank",
+          detail: "By ETA using road distance, not straight-line, plus driver rating and acceptance rate.",
+        },
+        {
+          label: "Offer and lock",
+          detail: "Offer to the best driver with a short timeout; the assignment must be atomic so no driver gets two rides.",
+        },
+        {
+          label: "Trip state",
+          detail: "A state machine — requested, accepted, started, completed — with location streamed for the duration.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",

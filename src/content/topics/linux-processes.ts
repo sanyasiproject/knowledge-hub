@@ -46,6 +46,11 @@ export const linuxProcesses: TopicContent = {
       a: "In interruptible sleep (S), the process is waiting for an event but will wake up if it receives a signal — it can be killed with SIGTERM or SIGKILL. In uninterruptible sleep (D), the process is waiting for a critical I/O operation (typically disk or NFS) and cannot be interrupted by any signal, including SIGKILL. This ensures data integrity during I/O but means a hung NFS mount can create unkillable processes. The TASK_KILLABLE state (added in Linux 2.6.25) is a middle ground that allows SIGKILL during otherwise uninterruptible waits.",
     },
   ],
+  followUps: [
+    "What does a zombie process mean, and who is at fault?",
+    "How do signals differ — what can't SIGKILL be trapped for?",
+    "How would you find what a hung process is waiting on?",
+  ],
   mcqs: [
     {
       q: "Which signal cannot be caught or ignored by a process?",
@@ -356,6 +361,37 @@ cat /sys/fs/cgroup/mygroup/pids.current
     CG --> SCHED`
     }
   ],
+  animations: [
+    {
+      title: "How a zombie appears",
+      steps: [
+        {
+          label: "Parent forks a child",
+          detail: "Child runs and does its work.",
+        },
+        {
+          label: "Child exits",
+          detail: "The kernel keeps a small entry holding its exit status — the child is now a zombie.",
+        },
+        {
+          label: "Parent should reap",
+          detail: "Calling `wait()` collects the status and removes the entry.",
+        },
+        {
+          label: "Parent doesn't",
+          detail: "The entry stays. Many of these exhaust the process table.",
+        },
+        {
+          label: "Whose bug",
+          detail: "The parent's — a zombie means the parent isn't reaping, not that the child misbehaved.",
+        },
+        {
+          label: "Parent dies",
+          detail: "Orphaned zombies are re-parented to init, which reaps them. This is why PID 1 in a container must reap.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "fork()", "vfork()", "clone()", "posix_spawn()"],
     rows: [
@@ -390,6 +426,16 @@ cat /sys/fs/cgroup/mygroup/pids.current
     "A **zombie** (Z state) is a process that has exited but whose parent has not called `wait()`. It consumes only a PID slot. Fix by: making the parent handle `SIGCHLD`, calling `waitpid()`, or killing the parent so **init** (PID 1) adopts and reaps the orphans.",
     "The **CFS scheduler** uses a red-black tree sorted by `vruntime`. The process with the lowest vruntime runs next. Nice values adjust weight: nice -20 gets ~80x more CPU than nice +19. Real-time policies (`SCHED_FIFO`, `SCHED_RR`, `SCHED_DEADLINE`) always preempt CFS tasks.",
     "**Namespaces** provide isolation (PID, NET, MNT, UTS, IPC, USER, CGROUP, TIME) and **cgroups** provide resource limits (CPU, memory, I/O, PIDs). Together they form the foundation of Linux containers. `unshare` creates namespaces; `nsenter` enters them; cgroup v2 uses a unified hierarchy."
+  ],
+  resources: [
+    {
+      label: "The Linux Programming Interface — Michael Kerrisk",
+      kind: "book",
+    },
+    {
+      label: "man7.org — Linux man pages",
+      kind: "docs",
+    },
   ],
   glossary: [
     {

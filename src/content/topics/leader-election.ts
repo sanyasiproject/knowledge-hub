@@ -76,6 +76,11 @@ The ring algorithm uses O(n) messages — more efficient than the bully algorith
       ],
     },
   ],
+  followUps: [
+    "What happens if two nodes both believe they are leader?",
+    "How does a lease with a fencing token prevent a stale leader from doing damage?",
+    "Why is 'just use ZooKeeper/etcd' usually the right answer?",
+  ],
   mcqs: [
     {
       q: "What is a fencing token?",
@@ -402,6 +407,37 @@ public:
     S-->>LA: REJECTED (33 < 34)`,
     },
   ],
+  animations: [
+    {
+      title: "A stale leader and the fence that stops it",
+      steps: [
+        {
+          label: "Node A holds the lease",
+          detail: "It is the leader and may write to shared storage.",
+        },
+        {
+          label: "A pauses",
+          detail: "A long GC pause or a network partition. A doesn't know anything is wrong.",
+        },
+        {
+          label: "Lease expires",
+          detail: "The cluster elects Node B as leader.",
+        },
+        {
+          label: "A wakes up",
+          detail: "Still believing it is leader, A issues a write.",
+        },
+        {
+          label: "Without fencing",
+          detail: "Storage accepts both writes. Two leaders have corrupted state — split brain.",
+        },
+        {
+          label: "With fencing tokens",
+          detail: "Each leadership term has an increasing token. Storage rejects A's write because it carries an older token than B's.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Algorithm", "Message Complexity", "Partition Tolerance", "Implementation Complexity", "Use Case"],
     rows: [
@@ -433,6 +469,16 @@ public:
     "**Fencing tokens** are necessary even with perfect election mechanisms because *process pauses* (GC, page faults, scheduling delays) can cause a leader to act after its lease has expired.",
     "**Raft's election restriction**: a candidate can only win if its log is *at least as up-to-date* as the majority -- this ensures the elected leader has all committed entries.",
     "The **herd effect** in ZooKeeper is avoided by having each candidate watch only the *next-lower* sequential znode, reducing notifications from `O(n)` to `O(1)` per failure event.",
+  ],
+  resources: [
+    {
+      label: "In Search of an Understandable Consensus Algorithm (Raft) — Ongaro & Ousterhout",
+      kind: "paper",
+    },
+    {
+      label: "The Chubby Lock Service — Mike Burrows, Google, 2006",
+      kind: "paper",
+    },
   ],
   glossary: [
     {

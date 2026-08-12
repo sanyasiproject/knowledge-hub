@@ -744,6 +744,37 @@ public:
         "A fixed-size circular buffer where the write pointer wraps around to the beginning after reaching the end. Used in audio streaming to maintain a bounded prefetch window of upcoming audio chunks for smooth playback.",
     },
   ],
+  animations: [
+    {
+      title: "Playing a track",
+      steps: [
+        {
+          label: "Client requests playback",
+          detail: "Auth checked, licensing region resolved.",
+        },
+        {
+          label: "Manifest returned",
+          detail: "Encoded variants at several bitrates, with URLs pointing at the CDN.",
+        },
+        {
+          label: "Prefetch",
+          detail: "The client fetches the first seconds immediately and buffers ahead — perceived instant start.",
+        },
+        {
+          label: "Next track predicted",
+          detail: "Prefetched during the current one, so transitions have no gap.",
+        },
+        {
+          label: "Offline",
+          detail: "Encrypted download with a licence that expires, requiring periodic revalidation.",
+        },
+        {
+          label: "Playback events",
+          detail: "Batched and sent asynchronously for royalties and recommendations — never blocking playback.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",

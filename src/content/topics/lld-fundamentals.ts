@@ -443,6 +443,37 @@ int main() {
       Testable and flexible`,
     },
   ],
+  animations: [
+    {
+      title: "From requirements to classes",
+      steps: [
+        {
+          label: "Clarify and scope",
+          detail: "State what's in and what's explicitly out. Most LLD failures are scope failures.",
+        },
+        {
+          label: "Nouns → candidate entities",
+          detail: "Vehicle, Spot, Ticket, Level. Resist making every noun a class.",
+        },
+        {
+          label: "Verbs → behaviours",
+          detail: "Park, unpark, calculate fee, find spot.",
+        },
+        {
+          label: "Interfaces before implementations",
+          detail: "`SpotAssignmentStrategy`, `FeeCalculator`. State the contracts.",
+        },
+        {
+          label: "Justify each relationship",
+          detail: "Composition by default. Every `extends` needs a reason and must satisfy Liskov.",
+        },
+        {
+          label: "Walk one use case",
+          detail: "Trace a car arriving through the whole design, then name the concurrency issue.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "Inheritance", "Composition", "Aggregation"],
     rows: [
@@ -499,6 +530,11 @@ int main() {
       q: "How do you apply the Open/Closed Principle in real code?",
       a: "The key is to identify the axis of change. If your system needs to support multiple notification channels (email, SMS, push), define a Notifier interface with a send() method. Each channel implements it. When a new channel arrives (Slack, WhatsApp), you add a new class implementing Notifier without modifying existing code. Common mechanisms: Strategy pattern (swap algorithms), Template Method (override specific steps), Decorator (layer on behavior), Plugin architecture (load extensions dynamically). The principle doesn't mean never modifying existing code; it means structuring code so that the most likely changes are additions rather than modifications.",
     },
+  ],
+  followUps: [
+    "How do you get from requirements to a class diagram without over-modelling?",
+    "Where does concurrency belong in an LLD answer?",
+    "What extension point would you name to demonstrate Open/Closed?",
   ],
   mcqs: [
     {
@@ -578,6 +614,16 @@ int main() {
     {
       front: "What are the key combined fragments in sequence diagrams?",
       back: "alt: if/else alternatives. opt: optional (if without else). loop: iteration with a guard condition. par: parallel execution. break: exit the enclosing interaction. ref: reference to another sequence diagram. critical: a critical section that must execute atomically.",
+    },
+  ],
+  resources: [
+    {
+      label: "Head First Design Patterns — Freeman & Robson",
+      kind: "book",
+    },
+    {
+      label: "Design Patterns — Gamma, Helm, Johnson & Vlissides",
+      kind: "book",
     },
   ],
   glossary: [

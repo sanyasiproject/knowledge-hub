@@ -14,6 +14,37 @@ export const systemDesignFramework: TopicContent = {
     "## Deep Dive Strategy\n\nThe interviewer will either ask you to deep dive into a specific component or let you choose. Pick components that are: (1) critical to the system's core requirements, (2) technically interesting, and (3) where you can demonstrate depth. For each component, discuss: the data model (schema, access patterns), the specific technology choice and why (PostgreSQL vs. Cassandra), scaling strategy (read replicas, sharding, partitioning), failure modes and mitigation (replication, fallbacks), and consistency/availability trade-offs. For example, in a URL shortener deep dive on the key generation service: discuss base62 encoding, pre-generated key ranges, distributed ID generation, and handling key collisions.",
     "## Wrap-Up and Trade-Offs\n\nIn the final minutes, summarize the design, acknowledge its limitations, and discuss how you would evolve it. Mention: single points of failure you would address, monitoring and alerting (what metrics would you watch?), how the system scales from 1M to 100M to 1B users, potential bottlenecks under extreme load, and operational concerns (deployment, rollback, data migration). This shows maturity and real-world engineering judgment. Never present your design as perfect; instead, show you understand the trade-offs you made and what you would prioritize with more time.",
   ],
+  animations: [
+    {
+      title: "Budgeting a 45-minute design interview",
+      steps: [
+        {
+          label: "0–5 Requirements",
+          detail: "Functional and non-functional. Agree scope out loud.",
+        },
+        {
+          label: "5–10 Estimation",
+          detail: "Scale numbers, and the conclusion each one implies.",
+        },
+        {
+          label: "10–15 API and data model",
+          detail: "Endpoints, entities, access patterns, then the datastore choice justified by them.",
+        },
+        {
+          label: "15–25 High-level design",
+          detail: "Happy path first: client → LB → service → cache → store, plus queues.",
+        },
+        {
+          label: "25–40 Deep dive",
+          detail: "The genuinely hard part — offer one if they don't pick.",
+        },
+        {
+          label: "40–45 Trade-offs",
+          detail: "Your own bottlenecks, single points of failure, and what changes at 10× scale.",
+        },
+      ],
+    },
+  ],
   interviewQA: [
     {
       q: "How do you decide whether to prioritize consistency or availability in a system design?",
@@ -31,6 +62,11 @@ export const systemDesignFramework: TopicContent = {
       q: "How do you approach a system you have never designed before?",
       a: "Start with first principles: (1) What is the core value the system provides? (2) What are the primary entities and their relationships? (3) What are the main read and write paths? (4) What is the expected scale? Then map to known building blocks: if it needs real-time updates, consider WebSockets or SSE. If it needs high write throughput, consider append-only logs or LSM-tree databases. If it needs full-text search, consider an inverted index. If it needs to process events asynchronously, consider a message queue. Every novel system is a combination of well-known patterns. Identify which patterns apply and compose them.",
     },
+  ],
+  followUps: [
+    "What questions would you ask before drawing anything?",
+    "How do you recover if your approach turns out wrong halfway through?",
+    "How do you decide which part to deep-dive on?",
   ],
   mcqs: [
     {
@@ -545,6 +581,16 @@ int main() {
     "Never say 'just use Kafka' or 'just add a cache.' Always explain **why** and **what trade-off you accept**.",
     "The 80/20 rule for caching: 20% of data serves 80% of requests. Use this to estimate cache memory requirements.",
     "Read/write ratio fundamentally shapes the architecture. >100:1 = aggressive caching. ~1:1 = write-optimized with sync replication.",
+  ],
+  resources: [
+    {
+      label: "System Design Interview — Alex Xu",
+      kind: "book",
+    },
+    {
+      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      kind: "book",
+    },
   ],
   glossary: [
     {

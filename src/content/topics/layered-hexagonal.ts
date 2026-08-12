@@ -121,6 +121,11 @@ src/
       a: "Both share the same fundamental principle: dependencies point inward, and the domain core has no knowledge of infrastructure. The key difference is that onion architecture explicitly defines concentric layers within the core -- domain model, domain services, and application services -- each with its own responsibility. Hexagonal architecture treats the core as a single unit and focuses on the boundary between the core and the outside world (ports and adapters). In practice, many teams combine both: hexagonal ports/adapters at the boundary with onion layering inside the core.",
     },
   ],
+  followUps: [
+    "Which direction do dependencies point in a hexagonal architecture, and why?",
+    "What does a port/adapter split let you test that a layered design doesn't?",
+    "When is this ceremony rather than value?",
+  ],
   mcqs: [
     {
       q: "In hexagonal architecture, what is a 'driven port'?",
@@ -473,6 +478,37 @@ public:
     },
   ],
 
+  animations: [
+    {
+      title: "Inverting the dependency on the database",
+      steps: [
+        {
+          label: "Layered",
+          detail: "Domain depends on the repository, which depends on the database driver. The arrow points outward, toward infrastructure.",
+        },
+        {
+          label: "Consequence",
+          detail: "You can't test the domain without a database, and swapping stores means changing domain code.",
+        },
+        {
+          label: "Define a port",
+          detail: "The domain declares the interface it needs — `OrderRepository` — in its own language.",
+        },
+        {
+          label: "Adapter implements it",
+          detail: "A Postgres adapter in the infrastructure layer implements that interface.",
+        },
+        {
+          label: "Arrow inverted",
+          detail: "Infrastructure now depends on the domain. The domain depends on nothing outside itself.",
+        },
+        {
+          label: "Payoff",
+          detail: "Unit tests use an in-memory adapter; changing the datastore is a new adapter, not a domain change.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "Layered (N-Tier)", "Hexagonal (Ports & Adapters)", "Clean Architecture", "Onion Architecture"],
     rows: [
@@ -560,6 +596,16 @@ public:
     "**Key pitfalls to avoid:** (1) *Port explosion* — too many fine-grained interfaces; group related operations into cohesive ports. (2) *Adapter leakage* — ORM annotations on domain entities let infrastructure invade the core. (3) *Skipping the composition root* — scattering \`new ConcreteAdapter()\` calls throughout the codebase defeats the purpose of dependency inversion.",
   ],
 
+  resources: [
+    {
+      label: "The Clean Architecture — Robert C. Martin",
+      kind: "article",
+    },
+    {
+      label: "Hexagonal Architecture — Alistair Cockburn",
+      kind: "article",
+    },
+  ],
   glossary: [
     {
       term: "Port",

@@ -708,6 +708,37 @@ public:
         "A sequence CRDT where each element has a unique ID (timestamp + replicaId) and a causal link to the element it was inserted after. Concurrent inserts at the same position are ordered deterministically by their IDs.",
     },
   ],
+  animations: [
+    {
+      title: "Two people typing at once",
+      steps: [
+        {
+          label: "Both edit",
+          detail: "A inserts at position 5; B inserts at position 3, concurrently.",
+        },
+        {
+          label: "Naive apply",
+          detail: "Applying A's edit after B's puts it in the wrong place — the documents diverge.",
+        },
+        {
+          label: "Operational transformation",
+          detail: "A's operation is transformed against B's so its intent is preserved at the new position.",
+        },
+        {
+          label: "Or CRDTs",
+          detail: "Each character gets a unique, ordered identifier, so concurrent inserts merge deterministically with no central transform.",
+        },
+        {
+          label: "Server relays",
+          detail: "Operations are broadcast to all connected clients over WebSocket, with a version vector to order them.",
+        },
+        {
+          label: "Persistence",
+          detail: "The document is stored as a log of operations plus periodic snapshots — which also gives history and undo.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",

@@ -430,6 +430,11 @@ result = foldr (xform (:)) [] [1, 2, 3, 4, 5]
     },
   ],
 
+  followUps: [
+    "Why does composition require each function to take exactly one argument, and how does currying fix that?",
+    "What happens to error handling and stack traces in a deeply composed pipeline?",
+    "How is composition different from method chaining on an object?",
+  ],
   mcqs: [
     {
       q: "What does compose(f, g)(x) evaluate to?",

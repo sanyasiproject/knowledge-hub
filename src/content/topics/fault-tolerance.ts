@@ -82,6 +82,12 @@ export const faultTolerance: TopicContent = {
       a: "Split-brain occurs when both the primary and standby believe they are the active node, typically during a network partition. Solutions include: (1) Fencing — use a shared resource (STONITH/power fencing, disk-based fencing) to forcibly shut down one node. (2) Quorum-based arbitration — a third node or quorum device breaks the tie, and only the side with quorum can be active. (3) Fencing tokens — a monotonically increasing token from a lock service; the storage layer rejects writes from nodes holding an older token. The key principle is that preventing split-brain requires an external authority or mechanism beyond the two nodes themselves.",
     },
   ],
+  followUps: [
+    "Why is a slow dependency more dangerous than a dead one?",
+    "What do you serve while a circuit breaker is open?",
+    "Why does retrying without jitter make an outage worse?",
+    "How do you find single points of failure in a design you wrote yourself?",
+  ],
   mcqs: [
     {
       q: "Which failure mode is the most difficult to tolerate?",
@@ -513,6 +519,37 @@ async function resilientCall<T>(fn: () => Promise<T>): Promise<T> {
     },
   ],
 
+  animations: [
+    {
+      title: "A slow dependency taking down a healthy service",
+      steps: [
+        {
+          label: "Normal",
+          detail: "Service A calls B in 50 ms. A's thread pool of 50 handles 1,000 requests per second comfortably.",
+        },
+        {
+          label: "B degrades",
+          detail: "B now takes 30 seconds. Not down — slow, so health checks still pass.",
+        },
+        {
+          label: "Threads fill",
+          detail: "With no timeout, A's threads all sit waiting on B. A stops serving anything, including endpoints that never touch B.",
+        },
+        {
+          label: "Cascade",
+          detail: "A's callers now time out too. One slow dependency has become a multi-service outage.",
+        },
+        {
+          label: "Timeout",
+          detail: "A 200 ms timeout frees the thread. A fails fast on B's endpoints and keeps serving everything else.",
+        },
+        {
+          label: "Circuit breaker",
+          detail: "After enough failures the breaker opens: calls fail instantly, B gets room to recover, and A serves a fallback.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Strategy",
@@ -591,6 +628,20 @@ async function resilientCall<T>(fn: () => Promise<T>): Promise<T> {
     "**RPO** (Recovery Point Objective) measures maximum tolerable *data loss*; **RTO** (Recovery Time Objective) measures maximum tolerable *downtime*. Synchronous replication achieves `RPO=0`; hot failover minimizes RTO. These two metrics drive the choice of replication and failover strategy.",
   ],
 
+  resources: [
+    {
+      label: "Release It! — Michael Nygard",
+      kind: "book",
+    },
+    {
+      label: "Site Reliability Engineering — Google",
+      kind: "book",
+    },
+    {
+      label: "resilience4j documentation",
+      kind: "docs",
+    },
+  ],
   glossary: [
     {
       term: "Fault Tolerance",

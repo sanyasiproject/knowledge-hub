@@ -109,6 +109,12 @@ Operations spanning multiple shards are the primary source of complexity:
       a: "Cross-shard transactions require distributed coordination like two-phase commit, which adds latency, introduces a coordinator as a failure point, and reduces throughput. Avoid them by co-locating related data on the same shard (shard orders and order items by the same key), denormalizing data to eliminate joins, and using saga patterns with compensating transactions where atomicity can be relaxed. For analytics requiring cross-shard data, replicate to a data warehouse rather than querying shards directly.",
     },
   ],
+  followUps: [
+    "How do you choose a shard key, and why is it nearly irreversible?",
+    "How do you rebalance without downtime?",
+    "What happens to a query that doesn't include the shard key?",
+    "How do you handle a tenant that's a thousand times bigger than the rest?",
+  ],
   mcqs: [
     {
       q: "What is the main disadvantage of hash-based sharding?",
@@ -461,6 +467,37 @@ sh.getBalancerState();`,
     },
   ],
 
+  animations: [
+    {
+      title: "Choosing a shard key, and the hot shard",
+      steps: [
+        {
+          label: "Shard by tenant id",
+          detail: "Seems natural — each customer's data stays together, so queries are single-shard.",
+        },
+        {
+          label: "Traffic arrives",
+          detail: "One enterprise customer is 1,000× the size of the median.",
+        },
+        {
+          label: "Hot shard",
+          detail: "That shard saturates while the rest idle. Cluster capacity is now the capacity of one node.",
+        },
+        {
+          label: "Can't just rekey",
+          detail: "Changing the shard key means migrating everything, live.",
+        },
+        {
+          label: "Mitigation",
+          detail: "Sub-shard large tenants on a secondary dimension, or give them dedicated infrastructure.",
+        },
+        {
+          label: "The lesson",
+          detail: "Examine the key's distribution — and its worst case — before committing. It's nearly irreversible.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",
@@ -539,6 +576,16 @@ sh.getBalancerState();`,
     "**Cross-shard operations** (scatter-gather queries, distributed transactions) are the primary source of complexity. Mitigate by co-locating related entities, denormalizing, and separating analytical workloads into a replicated read store (CQRS pattern).",
   ],
 
+  resources: [
+    {
+      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      kind: "book",
+    },
+    {
+      label: "Vitess documentation — sharding",
+      kind: "docs",
+    },
+  ],
   glossary: [
     {
       term: "Sharding",

@@ -386,6 +386,37 @@ await reportQueue.removeRepeatableByKey(repeatableJobs[0].key);`,
     "**Implement a cron job with distributed locking:** Set up a BullMQ repeatable job that runs every 5 minutes to aggregate daily statistics. Simulate running **three app instances** simultaneously and verify that only one instance schedules the cron job. Use Redis `SETNX` with a TTL to implement the distributed lock. Log which instance acquired the lock each cycle.",
     "**Design an idempotent job consumer:** Create a worker that processes `order.payment` jobs. Each job has an `orderId` and `amount`. Implement *idempotency* by checking a `processed_payments` table before processing. Use a **database transaction** to atomically insert the payment record and mark the job as processed. Test by enqueueing the same job twice and verifying only one payment is created.",
   ],
+  animations: [
+    {
+      title: "Enqueue, process, retry, dead-letter",
+      steps: [
+        {
+          label: "API accepts the work",
+          detail: "Validates input synchronously so bad requests still get a 400, enqueues a job, returns 202 with a job id.",
+        },
+        {
+          label: "Worker picks it up",
+          detail: "Message becomes invisible to other consumers for the visibility timeout.",
+        },
+        {
+          label: "Processing succeeds",
+          detail: "Worker acknowledges; the broker deletes the message. Result written where the client can poll for it.",
+        },
+        {
+          label: "Processing fails",
+          detail: "No acknowledgement, so the message reappears after the visibility timeout and is retried with exponential backoff.",
+        },
+        {
+          label: "Repeated failure",
+          detail: "After N attempts the message goes to the dead-letter queue with its error context, and an alert fires.",
+        },
+        {
+          label: "The timeout trap",
+          detail: "If processing takes longer than the visibility timeout, the message is redelivered while still being processed — hence idempotency.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Feature", "BullMQ (Node.js)", "Sidekiq (Ruby)", "Celery (Python)"],
     rows: [
@@ -426,6 +457,12 @@ await reportQueue.removeRepeatableByKey(repeatableJobs[0].key);`,
       q: "When should you use a background job vs. processing inline in the request?",
       a: "Use background jobs when: (1) the work takes more than a few hundred milliseconds (image processing, report generation), (2) the result is not needed immediately by the user (sending emails, webhooks), (3) the work can be retried independently (payment reconciliation), or (4) you need to rate-limit calls to an external service. Process inline when: the user needs an immediate response that depends on the result, or the operation is fast and simple enough that the overhead of enqueueing is not justified.",
     },
+  ],
+  followUps: [
+    "How do you make a job safe to run twice?",
+    "What happens to an in-flight job when you deploy?",
+    "How do you stop one poison message blocking the whole queue?",
+    "Where should the job's result go, and how does the caller find out it finished?",
   ],
   mcqs: [
     {

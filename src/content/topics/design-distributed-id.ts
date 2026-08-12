@@ -596,6 +596,37 @@ public:
         "A centralized service (often a database with AUTO_INCREMENT) that dispenses unique IDs. Flickr's pattern uses two ticket servers generating odd and even IDs for redundancy and doubled throughput.",
     },
   ],
+  animations: [
+    {
+      title: "Generating a sortable unique id without coordination",
+      steps: [
+        {
+          label: "Why not auto-increment",
+          detail: "It requires a single writer — the bottleneck you're trying to remove.",
+        },
+        {
+          label: "Why not UUIDv4",
+          detail: "Unique, but random, so it destroys index locality and sorts meaninglessly.",
+        },
+        {
+          label: "Snowflake layout",
+          detail: "41 bits timestamp, 10 bits machine id, 12 bits sequence within the millisecond.",
+        },
+        {
+          label: "Generation",
+          detail: "Each node produces ids locally with no network call at all.",
+        },
+        {
+          label: "Properties",
+          detail: "Roughly time-sortable, 4096 ids per node per millisecond, no coordination.",
+        },
+        {
+          label: "The failure mode",
+          detail: "A backwards clock adjustment can produce duplicates — so nodes refuse to issue ids until the clock catches up.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Feature",

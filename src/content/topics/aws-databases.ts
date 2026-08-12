@@ -43,6 +43,11 @@ export const awsDatabases: TopicContent = {
     }
   ],
 
+  followUps: [
+    "RDS or DynamoDB for a new service — what would decide it?",
+    "What does Aurora change about the storage layer?",
+    "How does DynamoDB's partition key choice cause throttling?",
+  ],
   mcqs: [
     {
       q: "How many copies of data does Aurora maintain across Availability Zones?",

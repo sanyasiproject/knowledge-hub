@@ -19,36 +19,70 @@ export const bigONotation: TopicContent = {
   ],
   code: [
     {
-      language: "cpp",
-      caption: "O(1) vs O(n) vs O(n²)",
-      source: `#include <vector>
-#include <string>
-
-// O(1) — constant: one operation regardless of n
-template <typename T>
-T first(const std::vector<T>& items) {
-    return items[0];
+      language: "typescript",
+      caption: "O(1) vs O(n) vs O(n²) — the same work at three growth rates",
+      source: `// O(1) — constant: one operation regardless of n
+function first<T>(items: T[]): T | undefined {
+  return items[0];
 }
 
-// O(n) — linear: work grows with n
-template <typename T>
-bool contains(const std::vector<T>& items, const T& target) {
-    for (const auto& x : items) {   // runs n times
-        if (x == target) return true;
-    }
-    return false;
+// O(n) — linear: work grows in step with n
+function contains<T>(items: T[], target: T): boolean {
+  for (const x of items) {        // runs n times
+    if (x === target) return true;
+  }
+  return false;
 }
 
-// O(n^2) — quadratic: nested loop over n
-template <typename T>
-bool has_duplicate(const std::vector<T>& items) {
-    for (size_t i = 0; i < items.size(); ++i) {           // n
-        for (size_t j = i + 1; j < items.size(); ++j) {   // n
-            if (items[i] == items[j]) return true;
-        }
+// O(n²) — quadratic: a nested loop over n
+function hasDuplicateSlow<T>(items: T[]): boolean {
+  for (let i = 0; i < items.length; i++) {          // n
+    for (let j = i + 1; j < items.length; j++) {    // n
+      if (items[i] === items[j]) return true;
     }
-    return false;
-}`,
+  }
+  return false;
+}
+
+// The same answer in O(n) time — we traded O(n) memory for it.
+function hasDuplicateFast<T>(items: T[]): boolean {
+  const seen = new Set<T>();
+  for (const x of items) {
+    if (seen.has(x)) return true; // Set lookup is O(1) average
+    seen.add(x);
+  }
+  return false;
+}
+
+// n = 10      -> quadratic does 100 comparisons
+// n = 100,000 -> quadratic does 10,000,000,000. This is the whole point.`,
+    },
+  ],
+  animations: [
+    {
+      title: "Comparing growth rates as n grows",
+      steps: [
+        {
+          label: "n = 10",
+          detail: "O(1) does 1 step, O(log n) ~3, O(n) 10, O(n log n) ~33, O(n²) 100. Everything looks fine at this size.",
+        },
+        {
+          label: "n = 1,000",
+          detail: "O(1) still 1, O(log n) ~10, O(n) 1,000, O(n log n) ~10,000, O(n²) 1,000,000. The quadratic is now 1000× the linear.",
+        },
+        {
+          label: "n = 1,000,000",
+          detail: "O(n) is a million steps — milliseconds. O(n²) is a trillion — hours. This is the gap Big-O exists to expose.",
+        },
+        {
+          label: "Constants dropped",
+          detail: "3n² + 5n + 9 → O(n²). At n = 1,000,000 the n² term is ~10¹² and the rest ~10⁶ — the lower terms are noise.",
+        },
+        {
+          label: "Why worst case",
+          detail: "An average-case win doesn't help when the adversarial input is the one that takes your service down.",
+        },
+      ],
     },
   ],
   comparison: {

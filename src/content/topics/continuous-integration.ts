@@ -44,6 +44,11 @@ export const continuousIntegration: TopicContent = {
       a: "Stop the line — fixing the build is the team's top priority. The developer whose commit broke the build should fix it within minutes, not hours. If a quick fix is not possible, revert the offending commit to restore green. Do not pile more commits on top of a broken build. Communicate the status to the team. After fixing, investigate whether the failure reveals a gap in local testing or a flaky test that needs attention. Track 'time to fix broken build' as a team health metric.",
     },
   ],
+  followUps: [
+    "Why must CI be blocking to be useful?",
+    "How do you keep the pipeline under ten minutes as the suite grows?",
+    "What belongs in CI versus in a pre-commit hook?",
+  ],
   mcqs: [
     {
       q: "According to CI best practices, how often should developers integrate their work?",

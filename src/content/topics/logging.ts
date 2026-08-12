@@ -72,6 +72,12 @@ Alternatives include **Grafana Loki** (stores labels, not full text — cheaper 
       a: "Use an allowlist approach: explicitly define which fields are safe to log rather than trying to block known sensitive patterns. Implement a logging middleware or wrapper that scrubs or masks fields like passwords, tokens, SSNs, and credit card numbers before they reach the appender. At the pipeline level, use Logstash filters or Fluent Bit processors to redact patterns that slip through. Regularly audit log output in staging environments and set up alerts for common PII patterns appearing in log indices.",
     },
   ],
+  followUps: [
+    "Why structured logs rather than formatted strings?",
+    "What must never appear in a log?",
+    "How does a correlation id flow across service boundaries?",
+    "How do you keep log volume from becoming the dominant cost?",
+  ],
   mcqs: [
     {
       q: "Which component in the ELK stack is responsible for parsing and enriching raw log events?",
@@ -140,6 +146,16 @@ Alternatives include **Grafana Loki** (stores labels, not full text — cheaper 
     {
       front: "What is the difference between WARN and ERROR log levels?",
       back: "WARN indicates unexpected but recoverable situations (e.g., retry succeeded). ERROR indicates failures requiring attention (e.g., unhandled exception, downstream timeout with no fallback).",
+    },
+  ],
+  resources: [
+    {
+      label: "OpenTelemetry documentation — logs",
+      kind: "docs",
+    },
+    {
+      label: "The Twelve-Factor App — Logs",
+      kind: "article",
     },
   ],
   glossary: [
@@ -586,6 +602,37 @@ int main() {
       durationMs
       statusCode
       httpMethod and path`,
+    },
+  ],
+  animations: [
+    {
+      title: "Tracing one user's request across services",
+      steps: [
+        {
+          label: "Request arrives",
+          detail: "The gateway generates a correlation id and attaches it to the request headers.",
+        },
+        {
+          label: "Propagated",
+          detail: "Every downstream call forwards the header; every log line includes the id as a field.",
+        },
+        {
+          label: "Async boundary",
+          detail: "The id is put into the message so the consumer's logs carry it too — otherwise the trail ends at the queue.",
+        },
+        {
+          label: "Something fails",
+          detail: "The user reports an error and gives you the id shown in the UI.",
+        },
+        {
+          label: "Query",
+          detail: "One filter across all services returns every line for that request, in order.",
+        },
+        {
+          label: "Without it",
+          detail: "You're correlating by timestamp across services with clock skew, in logs full of other users' traffic.",
+        },
+      ],
     },
   ],
   comparison: {

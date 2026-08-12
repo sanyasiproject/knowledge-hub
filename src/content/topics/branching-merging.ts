@@ -16,6 +16,37 @@ export const branchingMerging: TopicContent = {
     "## Branching Strategies: Git Flow\n\nGit Flow defines a structured branching model:\n- **main** — production-ready code; every commit is a release\n- **develop** — integration branch for features\n- **feature/** — branched from develop, merged back via PR\n- **release/** — branched from develop for release prep (version bumps, final fixes), merged to both main and develop\n- **hotfix/** — branched from main for urgent production fixes, merged to both main and develop\n\nPros: clear separation of concerns, supports parallel releases. Cons: complex, many long-lived branches, slow integration, merge overhead. Best suited for software with scheduled releases and multiple supported versions.",
     "## Branching Strategies: Trunk-Based Development\n\nTrunk-based development keeps the mainline (main/trunk) always releasable:\n- Developers commit directly to main or merge short-lived feature branches (< 2 days)\n- Feature flags hide incomplete work in production\n- Continuous integration runs on every push\n- Releases are cut from main via tags or release branches that live only for stabilization\n\nPros: fast integration, fewer merge conflicts, simpler branch model, enables continuous delivery. Cons: requires mature CI/CD, feature flags add complexity, discipline needed to keep main green. Favored by high-performing engineering organizations (Google, Meta) and aligns with DORA metrics research showing trunk-based correlates with elite delivery performance.",
   ],
+  animations: [
+    {
+      title: "Why a long-lived branch hurts",
+      steps: [
+        {
+          label: "Branch created",
+          detail: "Diverges from main. Zero conflicts on day one.",
+        },
+        {
+          label: "Two weeks pass",
+          detail: "Main receives 80 commits, some touching the same files.",
+        },
+        {
+          label: "Merge attempted",
+          detail: "Conflicts across many files, in code the author may not have written.",
+        },
+        {
+          label: "Compounding",
+          detail: "Resolving them requires understanding both sides' intent — and mistakes here silently reintroduce bugs.",
+        },
+        {
+          label: "Short-lived branches",
+          detail: "Merged within a day or two, conflicts are small and the context is fresh.",
+        },
+        {
+          label: "Feature flags",
+          detail: "Let you merge incomplete work safely, so the branch doesn't need to live long.",
+        },
+      ],
+    },
+  ],
   interviewQA: [
     {
       q: "What is the difference between a fast-forward merge and a three-way merge?",
@@ -42,6 +73,11 @@ export const branchingMerging: TopicContent = {
         "What is rerere and how does it help with repeated conflicts?",
       ],
     },
+  ],
+  followUps: [
+    "Trunk-based or GitFlow — what does team size and release cadence change?",
+    "How do you resolve a conflict you don't understand?",
+    "Why do long-lived branches make merges disproportionately painful?",
   ],
   mcqs: [
     {
@@ -127,6 +163,16 @@ export const branchingMerging: TopicContent = {
     {
       front: "What are DORA metrics?",
       back: "Deployment Frequency, Lead Time for Changes, Change Failure Rate, and Time to Restore Service. Research shows trunk-based development correlates with elite performance on these metrics.",
+    },
+  ],
+  resources: [
+    {
+      label: "Pro Git — Chacon & Straub (free online)",
+      kind: "book",
+    },
+    {
+      label: "Trunk Based Development — trunkbaseddevelopment.com",
+      kind: "article",
     },
   ],
   glossary: [

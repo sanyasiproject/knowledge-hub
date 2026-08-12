@@ -546,6 +546,37 @@ public:
     },
   ],
 
+  animations: [
+    {
+      title: "Guaranteeing a message isn't lost",
+      steps: [
+        {
+          label: "Producer sends",
+          detail: "Broker writes to an append-only log.",
+        },
+        {
+          label: "Replicate",
+          detail: "The write is copied to follower replicas.",
+        },
+        {
+          label: "Acknowledge",
+          detail: "With `acks=all` and `min.insync.replicas=2`, the producer is only told 'ok' once a quorum has it on disk.",
+        },
+        {
+          label: "Consumer reads",
+          detail: "Pulls from its committed offset.",
+        },
+        {
+          label: "Commit after processing",
+          detail: "Offset advanced only after the work succeeded — at-least-once.",
+        },
+        {
+          label: "Crash before commit",
+          detail: "The message is redelivered. Hence idempotent consumers; there is no exactly-once across the boundary.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Feature", "Apache Kafka", "RabbitMQ", "Amazon SQS", "Apache Pulsar"],
     rows: [

@@ -125,6 +125,11 @@ Where K' is the key (padded or hashed to block size), opad/ipad are fixed paddin
       a: "HMAC uses a symmetric shared secret — both the sender and verifier must know the same key. It provides integrity (message not tampered) and authentication (came from someone who knows the key), but not non-repudiation (you cannot prove which party produced it since both share the key). Digital signatures use asymmetric keys — the signer uses their private key, verifiers use the public key. This provides integrity, authentication, AND non-repudiation (only the private key holder could have signed). HMAC is faster and simpler; signatures are needed when you must prove exactly who signed something.",
     },
   ],
+  followUps: [
+    "When do you use symmetric versus asymmetric encryption, and why not just use asymmetric everywhere?",
+    "What does a MAC give you that encryption alone does not?",
+    "Why is 'don't roll your own crypto' about mode and nonce choices rather than the algorithm?",
+  ],
   mcqs: [
     {
       q: "Which AES block cipher mode provides both confidentiality and integrity (authenticated encryption)?",
@@ -451,6 +456,37 @@ int main() {
     },
   ],
 
+  animations: [
+    {
+      title: "Why TLS uses both kinds of cryptography",
+      steps: [
+        {
+          label: "Asymmetric is slow",
+          detail: "Public-key operations are orders of magnitude more expensive than symmetric ones — unusable for bulk data.",
+        },
+        {
+          label: "Symmetric needs a shared key",
+          detail: "Fast, but both sides must already have the same secret — which is the problem you started with.",
+        },
+        {
+          label: "Handshake",
+          detail: "Asymmetric crypto authenticates the server and establishes a shared secret over an untrusted network.",
+        },
+        {
+          label: "Session",
+          detail: "That shared secret keys a symmetric cipher for the actual data. Fast for the rest of the connection.",
+        },
+        {
+          label: "Integrity",
+          detail: "An authenticated cipher (AEAD) detects tampering — encryption alone would not.",
+        },
+        {
+          label: "Forward secrecy",
+          detail: "Ephemeral keys mean a later theft of the server's private key can't decrypt recorded past sessions.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Property",
@@ -541,6 +577,16 @@ int main() {
     "**Post-quantum awareness**: RSA and ECC are both *broken* by Shor's algorithm on a quantum computer. AES-256 retains ~128-bit security against Grover's algorithm (which halves effective key length). NIST has standardized post-quantum algorithms: **ML-KEM** (Kyber) for key exchange and **ML-DSA** (Dilithium) for signatures. Start planning migration for long-lived data.",
   ],
 
+  resources: [
+    {
+      label: "Cryptography Engineering — Ferguson, Schneier & Kohno",
+      kind: "book",
+    },
+    {
+      label: "Serious Cryptography — Jean-Philippe Aumasson",
+      kind: "book",
+    },
+  ],
   glossary: [
     {
       term: "AES (Advanced Encryption Standard)",

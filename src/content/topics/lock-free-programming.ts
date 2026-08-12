@@ -664,6 +664,12 @@ unsafe impl<T: Send> Sync for MpscQueue<T> {}
     },
   ],
 
+  followUps: [
+    "What is the ABA problem and how do you defend against it?",
+    "Lock-free vs wait-free — what's the actual guarantee difference?",
+    "Why can a lock-free algorithm perform worse than a locking one under high contention?",
+    "Why is 'use a library' usually the correct answer here?",
+  ],
   mcqs: [
     {
       q: "Which progress guarantee does the Treiber stack provide?",

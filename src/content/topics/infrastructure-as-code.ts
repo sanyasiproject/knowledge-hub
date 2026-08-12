@@ -46,6 +46,12 @@ export const infrastructureAsCode: TopicContent = {
       a: "Drift occurs when actual infrastructure diverges from the declared state — someone made a manual change via the console, another tool modified a resource, or an auto-scaling event changed instance counts. Terraform detects drift during `plan` by refreshing state from the cloud. CloudFormation has an explicit drift detection feature. To handle drift, either update the IaC config to match reality (if the change was intentional) or re-apply the IaC to correct the infrastructure back to the declared state.",
     },
   ],
+  followUps: [
+    "What happens if two engineers apply at the same time?",
+    "How do you handle a resource someone changed manually in the console?",
+    "Why does the state file need protecting as carefully as a secret?",
+    "How do you structure modules so staging can't touch production?",
+  ],
   mcqs: [
     {
       q: "Which Terraform command shows the difference between desired and actual infrastructure without making changes?",

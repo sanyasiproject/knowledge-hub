@@ -103,6 +103,11 @@ Self-consistency is compute-intensive (N forward passes) but consistently improv
       a: "Standard CoT is purely internal reasoning with no external interaction. ReAct adds an action step where the model calls external tools (search, APIs, databases) and incorporates the results into its reasoning. This grounds the model's answers in real data rather than relying solely on training knowledge, making it more accurate for knowledge-intensive and real-time information tasks.",
     },
   ],
+  followUps: [
+    "When does chain-of-thought help, and when is it wasted tokens?",
+    "How many few-shot examples before you get diminishing returns?",
+    "Why does example ordering change the output?",
+  ],
   mcqs: [
     {
       q: "What is the key insight behind self-consistency?",
@@ -192,150 +197,75 @@ Self-consistency is compute-intensive (N forward passes) but consistently improv
   ],
   code: [
     {
-      language: "cpp",
-      caption: "**Few-shot prompting** with balanced examples for a classification task",
-      source: `#include <iostream>
-#include <string>
-#include <curl/curl.h>
-#include <nlohmann/json.hpp>
+      language: "typescript",
+      caption: "Few-shot prompting — examples do the work that instructions cannot",
+      source: `type Example = { input: string; output: string };
 
-using json = nlohmann::json;
+// Balanced across classes, and deliberately including the boundary cases.
+// If every example is a clear positive, the model learns "say positive".
+const EXAMPLES: Example[] = [
+  { input: "Crashes every time I export a PDF.", output: "bug" },
+  { input: "Could you add dark mode?", output: "feature_request" },
+  { input: "How do I reset my password?", output: "question" },
+  { input: "Export is slow AND the icon is wrong.", output: "bug" }, // multi-issue -> pick primary
+  { input: "Love the new dashboard!", output: "feedback" },
+];
 
-// Callback for libcurl to capture response data
-size_t writeCallback(char* ptr, size_t size, size_t nmemb, std::string* data) {
-    data->append(ptr, size * nmemb);
-    return size * nmemb;
+function buildPrompt(ticket: string): string {
+  const shots = EXAMPLES.map(
+    (e) => \`Ticket: \${e.input}\\nCategory: \${e.output}\`
+  ).join("\\n\\n");
+
+  return \`Classify the ticket into exactly one of:
+bug | feature_request | question | feedback
+
+\${shots}
+
+Ticket: \${ticket}
+Category:\`;
 }
 
-std::string callAnthropicAPI(const std::string& prompt, int maxTokens = 20) {
-    CURL* curl = curl_easy_init();
-    std::string response;
-
-    json body = {
-        {"model", "claude-sonnet-4-20250514"},
-        {"max_tokens", maxTokens},
-        {"messages", {{
-            {"role", "user"},
-            {"content", prompt}
-        }}}
-    };
-
-    struct curl_slist* headers = nullptr;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    headers = curl_slist_append(headers, "x-api-key: YOUR_API_KEY");
-    headers = curl_slist_append(headers, "anthropic-version: 2023-06-01");
-
-    curl_easy_setopt(curl, CURLOPT_URL, "https://api.anthropic.com/v1/messages");
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    std::string bodyStr = body.dump();
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, bodyStr.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-
-    curl_easy_perform(curl);
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-    return response;
-}
-
-int main() {
-    // Few-shot examples demonstrate the classification pattern
-    std::string fewShotPrompt = R"(Classify the customer feedback as POSITIVE, NEGATIVE, or NEUTRAL.
-
-## Examples
-
-Feedback: "The delivery was incredibly fast and the packaging was perfect!"
-Classification: POSITIVE
-
-Feedback: "The product works fine, nothing special to report."
-Classification: NEUTRAL
-
-Feedback: "Waited 3 weeks for delivery and the item arrived damaged."
-Classification: NEGATIVE
-
-Feedback: "Great features but the price is a bit steep for what you get."
-Classification: NEUTRAL
-
-## Task
-Now classify the following feedback:
-
-Feedback: "Love the product quality but customer support was unhelpful."
-Classification:)";
-
-    std::string response = callAnthropicAPI(fewShotPrompt);
-    auto parsed = json::parse(response);
-    std::cout << parsed["content"][0]["text"].get<std::string>() << std::endl;
-    // NEUTRAL
-    return 0;
-}`,
+// Notes that matter more than the code:
+// - Order affects output. Models weight later examples more, so do not put all
+//   of one class at the end.
+// - 3-5 examples usually captures most of the gain; 20 mostly costs tokens.
+// - The examples define the output format, which is why the answer arrives as
+//   a bare label rather than a sentence — no parsing instructions needed.`,
     },
     {
-      language: "cpp",
-      caption: "**Chain-of-thought** prompting with explicit reasoning steps and a structured output",
-      source: `#include <iostream>
-#include <string>
-#include <curl/curl.h>
-#include <nlohmann/json.hpp>
+      language: "typescript",
+      caption: "Chain-of-thought — and when it is wasted tokens",
+      source: `// WITH reasoning: multi-step work where intermediate results matter.
+const COT = \`A customer on the £40/month Team plan upgrades to Business (£90)
+on day 12 of a 30-day billing cycle. What is the prorated charge today?
 
-using json = nlohmann::json;
+Think step by step:
+1. Days remaining in the cycle.
+2. Unused credit from the old plan.
+3. Cost of the new plan for those days.
+4. Net charge.
 
-size_t writeCallback(char* ptr, size_t size, size_t nmemb, std::string* data) {
-    data->append(ptr, size * nmemb);
-    return size * nmemb;
-}
+Then give the final figure on its own line as: ANSWER: <amount>\`;
 
-int main() {
-    std::string cotPrompt = R"(Solve the following problem step by step.
-Show your reasoning clearly, then give the final answer.
+// The structured "ANSWER:" line matters: it gives you something to parse
+// without regexing prose, and it survives the model's reasoning changing shape.
 
-## Problem
-A company has 150 employees. 40% work remotely, and of those,
-25% are in engineering. Of the non-remote employees, 60% are
-in engineering. How many total engineers does the company have?
+// WITHOUT reasoning: classification gains nothing and costs latency.
+const DIRECT = \`Classify the sentiment as positive, negative, or neutral.
+Reply with one word.
 
-## Format
-Think through this step by step:
-1. Calculate the number of remote employees
-2. Calculate remote engineers
-3. Calculate non-remote employees
-4. Calculate non-remote engineers
-5. Sum total engineers
+Review: "Shipping was quick but the fabric feels cheap."\`;
 
-Then state: **Final Answer: [number]**)";
-
-    CURL* curl = curl_easy_init();
-    std::string response;
-
-    json body = {
-        {"model", "claude-sonnet-4-20250514"},
-        {"max_tokens", 512},
-        {"messages", {{
-            {"role", "user"},
-            {"content", cotPrompt}
-        }}}
-    };
-
-    struct curl_slist* headers = nullptr;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    headers = curl_slist_append(headers, "x-api-key: YOUR_API_KEY");
-    headers = curl_slist_append(headers, "anthropic-version: 2023-06-01");
-
-    curl_easy_setopt(curl, CURLOPT_URL, "https://api.anthropic.com/v1/messages");
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    std::string bodyStr = body.dump();
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, bodyStr.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-
-    curl_easy_perform(curl);
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-
-    auto parsed = json::parse(response);
-    std::cout << parsed["content"][0]["text"].get<std::string>() << std::endl;
-    // Step-by-step reasoning followed by: Final Answer: 69
-    return 0;
-}`,
+// Where chain-of-thought helps:
+//   arithmetic, multi-constraint scheduling, debugging, anything where an
+//   intermediate value feeds the next step.
+// Where it does not:
+//   classification, extraction, lookup, formatting — you pay tokens and
+//   latency for accuracy you already had.
+//
+// On reasoning models: they do this internally. Telling them to "think step by
+// step" is redundant and can make the output worse by constraining a process
+// that was already running.`,
     },
     {
       language: "javascript",
@@ -461,6 +391,37 @@ console.log(result);
       Most expensive technique`,
     },
   ],
+  animations: [
+    {
+      title: "When chain-of-thought earns its tokens",
+      steps: [
+        {
+          label: "Direct prompt",
+          detail: "'What's 17% of 340, minus 12?' Answered in one shot; often wrong on multi-step arithmetic.",
+        },
+        {
+          label: "Add reasoning",
+          detail: "'Work through it step by step.' The model produces intermediate steps and gets it right more often.",
+        },
+        {
+          label: "Why it helps",
+          detail: "Each generated token conditions the next, so intermediate results become available to later steps instead of having to be produced in one leap.",
+        },
+        {
+          label: "Where it doesn't",
+          detail: "Classification, extraction, and lookup gain nothing — you pay tokens and latency for no accuracy.",
+        },
+        {
+          label: "Reasoning models",
+          detail: "Newer models do this internally; prompting them to think step by step is redundant and sometimes harmful.",
+        },
+        {
+          label: "Better still",
+          detail: "For arithmetic specifically, give it a calculator tool rather than asking it to reason.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Technique", "When to Use", "Accuracy Gain", "Cost Increase", "Key Limitation"],
     rows: [
@@ -493,6 +454,16 @@ console.log(result);
     "**ReAct** (Reasoning + Acting) interleaves Thought, Action, and Observation to give models access to **external tools and data**. It is the foundation of modern AI agent frameworks and outperforms pure CoT on knowledge-intensive tasks.",
     "**Self-consistency** improves on CoT by sampling N independent reasoning paths and selecting the **majority vote** answer. Costs N x compute but consistently improves accuracy. Combine with early stopping for efficiency.",
     "**Key tradeoff**: simpler techniques (zero-shot, few-shot) are faster and cheaper; advanced techniques (CoT, self-consistency, ReAct) improve accuracy but increase latency and cost. Choose based on *task complexity* and *accuracy requirements*.",
+  ],
+  resources: [
+    {
+      label: "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models — Wei et al., 2022",
+      kind: "paper",
+    },
+    {
+      label: "ReAct: Synergizing Reasoning and Acting in Language Models — Yao et al., 2022",
+      kind: "paper",
+    },
   ],
   glossary: [
     {

@@ -46,6 +46,11 @@ export const gitops: TopicContent = {
       a: "ApplicationSet is an ArgoCD controller that generates Application resources from templates. It enables managing hundreds of applications across multiple clusters from a single definition. Generators include Git (create an app per directory in a repo), Cluster (create an app per registered cluster), List (explicit list of targets), and Matrix/Merge (combine generators). This is essential for platform teams managing multi-cluster, multi-tenant environments — instead of maintaining hundreds of Application YAMLs, a single ApplicationSet template scales automatically.",
     },
   ],
+  followUps: [
+    "What does GitOps give you that a push-based pipeline doesn't?",
+    "How does drift get detected and corrected?",
+    "How do you handle a secret in a Git-based workflow?",
+  ],
   mcqs: [
     {
       q: "What is the primary difference between push-based deployment and GitOps?",

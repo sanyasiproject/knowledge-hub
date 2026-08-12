@@ -95,421 +95,86 @@ export const retrievalStrategies: TopicContent = {
   ],
   code: [
     {
-      language: "cpp",
-      caption: "Dense retrieval with OpenAI embeddings and pgvector",
-      source: `#include <string>
-#include <vector>
-#include <map>
-#include <sstream>
-#include <pqxx/pqxx>
-#include <nlohmann/json.hpp>
-#include <httplib.h>  // cpp-httplib for HTTP requests
+      language: "typescript",
+      caption: "Hybrid retrieval — dense and sparse fused with Reciprocal Rank Fusion",
+      source: `type Hit = { id: string; text: string };
 
-using json = nlohmann::json;
+/**
+ * RRF merges ranked lists by POSITION, not score. That matters because a
+ * cosine similarity of 0.83 and a BM25 score of 14.2 are not comparable, and
+ * any attempt to normalise them needs per-corpus tuning that then rots.
+ *
+ * score(d) = sum over lists of 1 / (k + rank(d)),  k = 60 by convention.
+ */
+export function reciprocalRankFusion(lists: Hit[][], k = 60): Hit[] {
+  const scores = new Map<string, number>();
+  const byId = new Map<string, Hit>();
 
-struct Document {
-    int id;
-    std::string content;
-    json metadata;
-    double similarity;
-};
+  for (const list of lists) {
+    list.forEach((hit, rank) => {
+      byId.set(hit.id, hit);
+      scores.set(hit.id, (scores.get(hit.id) ?? 0) + 1 / (k + rank + 1));
+    });
+  }
 
-// Generate an embedding vector for the given text via the OpenAI API.
-std::vector<float> get_embedding(
-    const std::string& text,
-    const std::string& api_key,
-    const std::string& model = "text-embedding-3-large"
-) {
-    httplib::SSLClient client("api.openai.com");
-    json request_body = {
-        {"input", {text}},
-        {"model", model}
-    };
-    httplib::Headers headers = {
-        {"Authorization", "Bearer " + api_key},
-        {"Content-Type", "application/json"}
-    };
-    auto res = client.Post("/v1/embeddings", headers,
-                           request_body.dump(), "application/json");
-    auto response = json::parse(res->body);
-    return response["data"][0]["embedding"].get<std::vector<float>>();
+  return [...scores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => byId.get(id)!)
+    .filter(Boolean);
 }
 
-// Set up pgvector extension and create documents table.
-void create_pgvector_table(pqxx::connection& conn) {
-    pqxx::work txn(conn);
-    txn.exec("CREATE EXTENSION IF NOT EXISTS vector;");
-    txn.exec(R"SQL(
-        CREATE TABLE IF NOT EXISTS documents (
-            id SERIAL PRIMARY KEY,
-            content TEXT NOT NULL,
-            metadata JSONB DEFAULT '{}',
-            embedding vector(3072)
-        );
-    )SQL");
-    txn.exec(R"SQL(
-        CREATE INDEX IF NOT EXISTS documents_embedding_idx
-        ON documents USING hnsw (embedding vector_cosine_ops)
-        WITH (m = 16, ef_construction = 200);
-    )SQL");
-    txn.commit();
+export async function hybridSearch(query: string, limit = 50): Promise<Hit[]> {
+  // Run both in parallel — they are independent and latency is additive otherwise.
+  const [dense, sparse] = await Promise.all([
+    vectorSearch(query, limit),   // finds paraphrase: "cancel plan" -> "subscription termination"
+    keywordSearch(query, limit),  // finds literals: ERR_4021, SKU-9912, a person's name
+  ]);
+  return reciprocalRankFusion([dense, sparse]).slice(0, limit);
 }
 
-// Convert a float vector to a pgvector-compatible string "[0.1,0.2,...]".
-std::string vector_to_pgvector(const std::vector<float>& vec) {
-    std::ostringstream oss;
-    oss << "[";
-    for (size_t i = 0; i < vec.size(); ++i) {
-        if (i > 0) oss << ",";
-        oss << vec[i];
-    }
-    oss << "]";
-    return oss.str();
-}
-
-// Embed and store documents in pgvector.
-void index_documents(
-    pqxx::connection& conn,
-    const std::string& api_key,
-    const std::vector<std::map<std::string, std::string>>& documents
-) {
-    pqxx::work txn(conn);
-    for (const auto& doc : documents) {
-        auto embedding = get_embedding(doc.at("content"), api_key);
-        std::string emb_str = vector_to_pgvector(embedding);
-        std::string meta = doc.count("metadata") ? doc.at("metadata") : "{}";
-        txn.exec_params(
-            "INSERT INTO documents (content, metadata, embedding) "
-            "VALUES ($1, $2::jsonb, $3::vector)",
-            doc.at("content"), meta, emb_str
-        );
-    }
-    txn.commit();
-}
-
-// Retrieve top_k most similar documents using cosine similarity.
-std::vector<Document> dense_search(
-    pqxx::connection& conn,
-    const std::string& query,
-    const std::string& api_key,
-    int top_k = 10
-) {
-    auto query_embedding = get_embedding(query, api_key);
-    std::string emb_str = vector_to_pgvector(query_embedding);
-
-    pqxx::work txn(conn);
-    auto result = txn.exec_params(R"SQL(
-        SELECT id, content, metadata,
-               1 - (embedding <=> $1::vector) AS similarity
-        FROM documents
-        ORDER BY embedding <=> $1::vector
-        LIMIT $2;
-    )SQL", emb_str, top_k);
-
-    std::vector<Document> results;
-    for (const auto& row : result) {
-        results.push_back({
-            row["id"].as<int>(),
-            row["content"].as<std::string>(),
-            json::parse(row["metadata"].as<std::string>()),
-            row["similarity"].as<double>()
-        });
-    }
-    return results;
-}`,
+// Why both: embeddings smear rare literal tokens into a semantic neighbourhood,
+// so searching an exact error code returns documents about errors in general.
+// BM25 nails those and misses every paraphrase. The failure modes are opposite,
+// which is exactly why the combination beats either.`,
     },
     {
-      language: "cpp",
-      caption: "BM25 sparse retrieval with Elasticsearch",
-      source: `#include <string>
-#include <vector>
-#include <map>
-#include <nlohmann/json.hpp>
-#include <httplib.h>  // cpp-httplib for Elasticsearch REST API
+      language: "typescript",
+      caption: "Rerank the top candidates with a cross-encoder",
+      source: `/**
+ * Retrieval uses a BI-encoder: query and document are embedded independently,
+ * so document vectors can be precomputed and searched fast — but the document
+ * was represented without knowing the question.
+ *
+ * A reranker is a CROSS-encoder: it reads the pair together with full
+ * attention. Far more accurate, far too slow to run over a whole corpus.
+ * So: retrieve wide and cheap, then rerank narrow and expensive.
+ */
+export async function retrieveAndRerank(query: string, topK = 5): Promise<Hit[]> {
+  const candidates = await hybridSearch(query, 50);
+  if (candidates.length === 0) return [];
 
-using json = nlohmann::json;
+  const res = await cohere.rerank({
+    model: "rerank-english-v3.0",
+    query,
+    documents: candidates.map((c) => c.text),
+    topN: topK,
+  });
 
-const std::string ES_HOST = "localhost";
-const int ES_PORT = 9200;
-const std::string INDEX_NAME = "documents";
+  const reranked = res.results.map((r) => ({
+    ...candidates[r.index],
+    relevance: r.relevanceScore,
+  }));
 
-struct BM25Result {
-    std::string id;
-    std::string content;
-    json metadata;
-    double score;
-};
-
-// Create an Elasticsearch index optimized for BM25 retrieval.
-void create_bm25_index() {
-    httplib::Client client(ES_HOST, ES_PORT);
-
-    json body = {
-        {"settings", {
-            {"analysis", {
-                {"analyzer", {
-                    {"custom_analyzer", {
-                        {"type", "custom"},
-                        {"tokenizer", "standard"},
-                        {"filter", {"lowercase", "stop", "snowball"}}
-                    }}
-                }}
-            }},
-            {"similarity", {
-                {"custom_bm25", {
-                    {"type", "BM25"},
-                    {"k1", 1.2},   // term frequency saturation
-                    {"b", 0.75}    // document length normalization
-                }}
-            }}
-        }},
-        {"mappings", {
-            {"properties", {
-                {"content", {
-                    {"type", "text"},
-                    {"analyzer", "custom_analyzer"},
-                    {"similarity", "custom_bm25"}
-                }},
-                {"metadata", {
-                    {"type", "object"},
-                    {"enabled", true}
-                }}
-            }}
-        }}
-    };
-
-    client.Put("/" + INDEX_NAME, body.dump(), "application/json");
+  // A retrieval gate: if nothing clears the bar, say so rather than handing the
+  // model weak context and inviting it to invent an answer.
+  const GATE = 0.3; // calibrate on your own eval set, not on intuition
+  return reranked.filter((r) => r.relevance >= GATE);
 }
 
-// Bulk index documents into Elasticsearch.
-void index_documents_bm25(
-    const std::vector<std::map<std::string, std::string>>& documents
-) {
-    httplib::Client client(ES_HOST, ES_PORT);
-
-    std::string bulk_body;
-    for (size_t i = 0; i < documents.size(); ++i) {
-        json action = {{"index", {{"_index", INDEX_NAME}, {"_id", std::to_string(i)}}}};
-        json doc = {
-            {"content", documents[i].at("content")},
-            {"metadata", documents[i].count("metadata")
-                ? json::parse(documents[i].at("metadata"))
-                : json::object()}
-        };
-        bulk_body += action.dump() + "\\n" + doc.dump() + "\\n";
-    }
-
-    client.Post("/_bulk?refresh=true", bulk_body, "application/x-ndjson");
-}
-
-// Search documents using BM25 ranking.
-std::vector<BM25Result> bm25_search(
-    const std::string& query,
-    int top_k = 10
-) {
-    httplib::Client client(ES_HOST, ES_PORT);
-
-    json search_body = {
-        {"query", {
-            {"match", {
-                {"content", {
-                    {"query", query},
-                    {"operator", "or"}
-                }}
-            }}
-        }},
-        {"size", top_k}
-    };
-
-    auto res = client.Post(
-        "/" + INDEX_NAME + "/_search",
-        search_body.dump(), "application/json"
-    );
-    auto response = json::parse(res->body);
-
-    std::vector<BM25Result> results;
-    for (const auto& hit : response["hits"]["hits"]) {
-        results.push_back({
-            hit["_id"].get<std::string>(),
-            hit["_source"]["content"].get<std::string>(),
-            hit["_source"].value("metadata", json::object()),
-            hit["_score"].get<double>()
-        });
-    }
-    return results;
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "Hybrid retrieval with Reciprocal Rank Fusion (RRF)",
-      source: `#include <string>
-#include <vector>
-#include <map>
-#include <algorithm>
-#include <nlohmann/json.hpp>
-#include <pqxx/pqxx>
-
-using json = nlohmann::json;
-
-struct FusedResult {
-    std::string id;
-    std::string content;
-    json metadata;
-    double rrf_score;
-};
-
-struct RankedDoc {
-    std::string id;
-    std::string content;
-    json metadata;
-};
-
-// Fuse multiple ranked result lists using Reciprocal Rank Fusion.
-// Each vector in ranked_lists contains documents with at least an id.
-// Returns a single fused ranked list sorted by RRF score (descending).
-std::vector<FusedResult> reciprocal_rank_fusion(
-    const std::vector<std::vector<RankedDoc>>& ranked_lists,
-    int k = 60
-) {
-    std::map<std::string, double> rrf_scores;
-    std::map<std::string, RankedDoc> doc_map;
-
-    for (const auto& ranked_list : ranked_lists) {
-        for (size_t rank = 0; rank < ranked_list.size(); ++rank) {
-            const auto& doc = ranked_list[rank];
-            rrf_scores[doc.id] += 1.0 / (k + static_cast<int>(rank) + 1);
-            doc_map[doc.id] = doc;  // keep the latest doc data
-        }
-    }
-
-    std::vector<FusedResult> fused;
-    fused.reserve(rrf_scores.size());
-    for (const auto& [doc_id, score] : rrf_scores) {
-        const auto& doc = doc_map[doc_id];
-        fused.push_back({doc.id, doc.content, doc.metadata, score});
-    }
-
-    std::sort(fused.begin(), fused.end(),
-        [](const FusedResult& a, const FusedResult& b) {
-            return a.rrf_score > b.rrf_score;
-        });
-
-    return fused;
-}
-
-// Run hybrid retrieval: dense (pgvector) + sparse (Elasticsearch),
-// fuse with RRF, return top results.
-std::vector<FusedResult> hybrid_search(
-    pqxx::connection& conn,
-    const std::string& api_key,
-    const std::string& query,
-    int dense_top_k = 50,
-    int sparse_top_k = 50,
-    int final_top_k = 10
-) {
-    // Stage 1: retrieve from both systems
-    auto dense_results = dense_search(conn, query, api_key, dense_top_k);
-    auto sparse_results = bm25_search(query, sparse_top_k);
-
-    // Convert to RankedDoc for fusion
-    std::vector<RankedDoc> dense_docs, sparse_docs;
-    for (const auto& d : dense_results)
-        dense_docs.push_back({std::to_string(d.id), d.content, d.metadata});
-    for (const auto& s : sparse_results)
-        sparse_docs.push_back({s.id, s.content, s.metadata});
-
-    // Stage 2: fuse with RRF
-    auto fused = reciprocal_rank_fusion({dense_docs, sparse_docs});
-
-    if (static_cast<int>(fused.size()) > final_top_k)
-        fused.resize(final_top_k);
-    return fused;
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "Re-ranking with Cohere Rerank API",
-      source: `#include <string>
-#include <vector>
-#include <algorithm>
-#include <nlohmann/json.hpp>
-#include <httplib.h>  // cpp-httplib for Cohere REST API
-
-using json = nlohmann::json;
-
-struct RerankedDocument {
-    std::string id;
-    std::string content;
-    json metadata;
-    double rerank_score;
-};
-
-// Re-rank candidate documents using Cohere's cross-encoder model.
-// Filters out documents below the relevance threshold.
-std::vector<RerankedDocument> rerank_results(
-    const std::string& api_key,
-    const std::string& query,
-    const std::vector<FusedResult>& documents,
-    int top_n = 5,
-    const std::string& model = "rerank-v3.5",
-    double relevance_threshold = 0.3
-) {
-    if (documents.empty()) return {};
-
-    // Build document text list for the API request
-    json doc_texts = json::array();
-    for (const auto& doc : documents) {
-        doc_texts.push_back(doc.content);
-    }
-
-    json request_body = {
-        {"query", query},
-        {"documents", doc_texts},
-        {"top_n", std::min(top_n, static_cast<int>(documents.size()))},
-        {"model", model}
-    };
-
-    httplib::SSLClient client("api.cohere.com");
-    httplib::Headers headers = {
-        {"Authorization", "Bearer " + api_key},
-        {"Content-Type", "application/json"}
-    };
-
-    auto res = client.Post("/v2/rerank", headers,
-                           request_body.dump(), "application/json");
-    auto response = json::parse(res->body);
-
-    std::vector<RerankedDocument> reranked;
-    for (const auto& result : response["results"]) {
-        double score = result["relevance_score"].get<double>();
-        if (score >= relevance_threshold) {
-            int idx = result["index"].get<int>();
-            const auto& doc = documents[idx];
-            reranked.push_back({doc.id, doc.content, doc.metadata, score});
-        }
-    }
-    return reranked;
-}
-
-// Full retrieval pipeline: hybrid search -> re-rank -> return top results.
-std::vector<RerankedDocument> full_rag_retrieval_pipeline(
-    pqxx::connection& conn,
-    const std::string& openai_api_key,
-    const std::string& cohere_api_key,
-    const std::string& query,
-    int hybrid_top_k = 50,
-    int rerank_top_n = 5
-) {
-    // Stage 1: Hybrid retrieval (dense + sparse + RRF)
-    auto candidates = hybrid_search(conn, openai_api_key, query,
-                                    50, 50, hybrid_top_k);
-
-    // Stage 2: Re-rank with cross-encoder
-    auto reranked = rerank_results(cohere_api_key, query, candidates,
-                                   rerank_top_n);
-
-    return reranked;
-}`,
+// This closes the similarity-vs-relevance gap: a passage on the same topic as
+// the question scores high on cosine whether or not it contains the answer.
+// Only a cross-encoder can tell those apart — which is why reranking is
+// usually the single biggest quality win per unit of effort in RAG.`,
     },
   ],
   diagrams: [

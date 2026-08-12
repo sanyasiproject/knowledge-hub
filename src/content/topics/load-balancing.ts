@@ -94,6 +94,11 @@ Best practice: use both active and passive checks. The health endpoint should re
       a: "The health endpoint should check readiness (can the service actually handle requests), not just liveness (is the process running). It should verify critical dependencies like database connectivity and cache availability, but with timeouts to avoid blocking. However, be careful with deep checks: if a shared dependency like the database goes down, marking all instances unhealthy removes all backends. Consider returning degraded status instead. The endpoint should respond quickly (under 200ms) and not consume significant resources. Use separate liveness and readiness probes in Kubernetes.",
     },
   ],
+  followUps: [
+    "Round-robin or least-connections — when does the difference matter?",
+    "What does connection draining prevent during a deploy?",
+    "Why are sticky sessions a smell, and when are they unavoidable?",
+  ],
   mcqs: [
     {
       q: "Which load balancing algorithm is best suited for a caching proxy layer?",
@@ -508,6 +513,33 @@ int main() {
     },
   ],
 
+  animations: [
+    {
+      title: "Draining a node during a deploy",
+      steps: [
+        {
+          label: "Deploy starts",
+          detail: "The instance is told to shut down.",
+        },
+        {
+          label: "Readiness fails first",
+          detail: "The instance marks itself unready, so the load balancer stops sending new requests.",
+        },
+        {
+          label: "Connections drain",
+          detail: "In-flight requests are allowed to finish, up to a grace period.",
+        },
+        {
+          label: "Process exits",
+          detail: "Pools closed, resources released, no requests dropped.",
+        },
+        {
+          label: "Without draining",
+          detail: "The process exits immediately and every in-flight request becomes a 502 — visible on every deploy.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",
@@ -606,6 +638,16 @@ int main() {
     `**Operational settings matter**: Key tuning parameters are \`connection limits\` per backend (prevent overwhelming), \`timeouts\` (connect, read, idle — too short causes drops, too long wastes resources), \`retry policy\` (which errors trigger retry, max attempts), and \`drain timeout\` (must exceed longest request duration). These settings are where *theory meets production reliability*.`,
   ],
 
+  resources: [
+    {
+      label: "NGINX documentation — load balancing",
+      kind: "docs",
+    },
+    {
+      label: "Envoy proxy documentation",
+      kind: "docs",
+    },
+  ],
   glossary: [
     {
       term: "L4 Load Balancer",

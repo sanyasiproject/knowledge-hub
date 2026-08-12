@@ -478,6 +478,37 @@ public:
     { term: "Unlisted Paste", definition: "A paste accessible only via its direct URL — not indexed in search or public listings. Security depends on the unguessability of the URL (random base62 key), not authentication." },
     { term: "Thundering Herd", definition: "A scenario where many concurrent requests simultaneously discover a cache miss and all attempt to fetch from the origin, potentially overwhelming the backend. Solved by request coalescing." },
   ],
+  animations: [
+    {
+      title: "Store and expire a paste",
+      steps: [
+        {
+          label: "POST content",
+          detail: "Text plus an optional expiry and visibility.",
+        },
+        {
+          label: "Generate a key",
+          detail: "Random and long enough that unlisted pastes aren't guessable.",
+        },
+        {
+          label: "Store the body",
+          detail: "In object storage, not the database — the row holds metadata and a pointer.",
+        },
+        {
+          label: "Read",
+          detail: "Metadata from the database (cached), body from object storage or the CDN.",
+        },
+        {
+          label: "Expiry",
+          detail: "A TTL on the metadata; a background job removes expired bodies.",
+        },
+        {
+          label: "Why split storage",
+          detail: "Bodies are large, immutable, and served often — exactly what object storage plus a CDN is for.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "KGS (Pre-generated Keys)", "Auto-increment + Base62", "UUID/GUID", "Hash-based (MD5/SHA)"],
     rows: [

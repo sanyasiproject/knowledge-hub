@@ -45,6 +45,12 @@ export const metrics: TopicContent = {
       a: "Label cardinality is the number of unique label value combinations for a metric. Each unique combination creates a separate time series. High-cardinality labels like user_id, request_id, or IP address create millions of series, overwhelming Prometheus's TSDB with memory and storage requirements. This leads to slow queries, increased scrape times, and potential OOM crashes. Best practice: keep labels to bounded sets (HTTP method, status code, endpoint) and move high-cardinality data to logs or tracing systems.",
     },
   ],
+  followUps: [
+    "Why report percentiles rather than averages?",
+    "What's the difference between a counter, a gauge, and a histogram?",
+    "Why does high-cardinality labelling break a metrics system?",
+    "What should page a human versus just be a dashboard?",
+  ],
   mcqs: [
     {
       q: "Which metric type should be used for tracking the total number of HTTP requests?",
@@ -129,6 +135,16 @@ export const metrics: TopicContent = {
     {
       front: "What is a recording rule in Prometheus?",
       back: "A precomputed PromQL expression stored as a new time series. Used to speed up frequently queried or expensive expressions like histogram quantiles.",
+    },
+  ],
+  resources: [
+    {
+      label: "Site Reliability Engineering — Google",
+      kind: "book",
+    },
+    {
+      label: "Prometheus documentation — instrumentation best practices",
+      kind: "docs",
     },
   ],
   glossary: [
@@ -454,6 +470,37 @@ int main() {
     G -->|Yes| I{"Need exact\nquantiles?"}
     I -->|Yes| J["Summary\npre-computed quantiles client-side\ne.g. request_duration_seconds summary"]
     I -->|No| K["Histogram\nbuckets server-side quantile approximation\ne.g. request_duration_seconds histogram"]`,
+    },
+  ],
+  animations: [
+    {
+      title: "Why an average hides the outage",
+      steps: [
+        {
+          label: "1,000 requests",
+          detail: "990 take 50 ms. 10 take 5 seconds.",
+        },
+        {
+          label: "Average",
+          detail: "~100 ms. The dashboard looks healthy.",
+        },
+        {
+          label: "p99",
+          detail: "5 seconds. One in a hundred users is having an unusable experience.",
+        },
+        {
+          label: "At scale",
+          detail: "A million requests a day means 10,000 people affected — and they're the ones who contact support.",
+        },
+        {
+          label: "Which to alert on",
+          detail: "Percentiles against an SLO, not averages.",
+        },
+        {
+          label: "Cardinality warning",
+          detail: "Labelling metrics by user id creates a time series per user and takes down the metrics system instead.",
+        },
+      ],
     },
   ],
   comparison: {

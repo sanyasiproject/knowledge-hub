@@ -507,6 +507,12 @@ yield to loop"]
       a: "Use OS threads or virtual threads when: the workload is CPU-bound and needs true parallelism, the team prefers sequential code, or the ecosystem uses blocking APIs (Java with JDBC, Python with most libraries). Use async when: the workload is heavily I/O-bound with thousands of concurrent connections (web servers, proxies, chat), memory per connection must be minimal, or the ecosystem is async-native (Node.js, Rust with Tokio). In practice, most production systems use both: an async I/O layer for connection handling with a thread pool for CPU-intensive work or legacy blocking code. Virtual threads (Go, Loom) increasingly blur the line by offering thread-like syntax with async-like efficiency.",
     },
   ],
+  followUps: [
+    "Why does thread-per-connection stop scaling, and at roughly what point?",
+    "What happens when you make one blocking call inside an event loop?",
+    "How do goroutines get the ergonomics of threads with the scaling of async?",
+    "How would you call a blocking library from async code without stalling the loop?",
+  ],
   mcqs: [
     {
       q: "What is the primary advantage of green threads over OS threads?",

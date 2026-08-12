@@ -1,11 +1,8 @@
 import { Link } from "react-router-dom";
 import { LEARNING_PATHS } from "../data/learningPaths";
-import { useProgress } from "../hooks/useProgress";
 import { Card } from "../components/ui/primitives";
 
 export function LearningPaths() {
-  const { isRead } = useProgress();
-
   return (
     <div className="mx-auto max-w-5xl">
       <header className="mb-8">
@@ -17,8 +14,6 @@ export function LearningPaths() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         {LEARNING_PATHS.map((path) => {
-          const readCount = path.topics.filter((slug) => isRead(slug)).length;
-          const pct = Math.round((readCount / path.topics.length) * 100);
           return (
             <Link key={path.slug} to={`/paths/${path.slug}`}>
               <Card hover className="h-full">
@@ -27,17 +22,9 @@ export function LearningPaths() {
                   <h2 className="text-lg font-bold text-slate-900 dark:text-white">{path.title}</h2>
                 </div>
                 <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">{path.description}</p>
-                <div className="flex items-center gap-3">
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-                    <div
-                      className="h-full rounded-full bg-brand-500 transition-all"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <span className="text-xs font-medium tabular-nums text-slate-500">
-                    {readCount}/{path.topics.length} topics
-                  </span>
-                </div>
+                <span className="text-xs font-medium tabular-nums text-slate-500">
+                  {path.topics.length} topics
+                </span>
               </Card>
             </Link>
           );

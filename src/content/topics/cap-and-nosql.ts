@@ -381,6 +381,12 @@ private:
       ],
     },
   ],
+  followUps: [
+    "What does PACELC add that CAP leaves out?",
+    "Where does a Postgres primary with synchronous replicas sit on this spectrum?",
+    "Why is 'CA' not a real choice for a distributed system?",
+    "Which of your data actually needs strong consistency, and which doesn't?",
+  ],
   mcqs: [
     {
       q: "In the CAP theorem, what does Partition tolerance mean?",

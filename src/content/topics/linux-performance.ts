@@ -41,6 +41,11 @@ export const linuxPerformance: TopicContent = {
       a: "iowait (%wa) represents CPU time spent idle while waiting for I/O to complete. High iowait means the CPU has work to do but is blocked on disk or network I/O. To drill down: (1) iostat -xz 1 to identify which device has high await (latency) or %util, (2) iotop to find which process generates the most I/O, (3) check if the I/O pattern is random or sequential (random I/O is much slower on spinning disks), (4) look for swap activity (vmstat si/so) which indicates memory pressure causing disk thrashing.",
     },
   ],
+  followUps: [
+    "A server is slow — what are the first four commands you run?",
+    "What does high load average with low CPU usage tell you?",
+    "How do you tell whether you're I/O-bound or CPU-bound?",
+  ],
   mcqs: [
     {
       q: "What does a load average of 2.0 mean on a single-core system?",
@@ -400,6 +405,37 @@ sudo bpftrace -e '
     Note over Eng: Root cause: Java process<br/>with memory leak causing<br/>swap thrashing and disk saturation`
     }
   ],
+  animations: [
+    {
+      title: "A first-60-seconds triage",
+      steps: [
+        {
+          label: "`uptime`",
+          detail: "Load average. High load with low CPU means blocking on I/O or locks.",
+        },
+        {
+          label: "`vmstat 1`",
+          detail: "Run queue, blocked processes, swap activity. Any swapping is a red flag.",
+        },
+        {
+          label: "`top` / `htop`",
+          detail: "Which process, and whether it's user or system CPU.",
+        },
+        {
+          label: "`iostat -xz 1`",
+          detail: "Device utilisation and await. High await means the disk is the bottleneck.",
+        },
+        {
+          label: "`ss -s` and `sar -n DEV`",
+          detail: "Connection counts and network throughput.",
+        },
+        {
+          label: "Narrowed",
+          detail: "You now know whether it's CPU, memory, disk, or network before changing anything.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Tool", "What It Measures", "Overhead", "Best For", "Key Flags"],
     rows: [
@@ -434,6 +470,16 @@ sudo bpftrace -e '
     "`perf` uses **hardware performance counters** with sampling-based profiling at <5% overhead, making it safe for production. `strace` intercepts *every* syscall via `ptrace` with 10-100x overhead -- use it for debugging, not monitoring. **eBPF** (via bpftrace/BCC) offers <1% overhead tracing of arbitrary kernel and user-space functions.",
     "The **page cache** uses free RAM to buffer file I/O -- this is *normal* and beneficial. The `available` column in `free -m` shows reclaimable memory. Active **swapping** (`vmstat si/so > 0`) indicates real memory pressure. Tune `vm.swappiness` (lower = prefer evicting cache, higher = prefer swapping anonymous pages).",
     "**Flame graphs** visualize profiled stack traces: x-axis width = *cumulative sample count* (time spent), y-axis = call depth. The widest bars are the hottest code paths. Generated from `perf record -g` output via Brendan Gregg's `stackcollapse-perf.pl | flamegraph.pl` pipeline."
+  ],
+  resources: [
+    {
+      label: "Systems Performance — Brendan Gregg",
+      kind: "book",
+    },
+    {
+      label: "BPF Performance Tools — Brendan Gregg",
+      kind: "book",
+    },
   ],
   glossary: [
     {

@@ -459,6 +459,37 @@ public:
     { term: "Spider Trap", definition: "A URL structure that generates an infinite or near-infinite number of pages, such as calendar pages with incrementing dates or URLs with session IDs, wasting crawler resources." },
     { term: "Consistent Hashing", definition: "A hashing scheme that maps domains to crawler workers such that adding or removing workers only reassigns a small fraction of domains, minimizing disruption to politeness state." },
   ],
+  animations: [
+    {
+      title: "Crawling politely at scale",
+      steps: [
+        {
+          label: "Seed frontier",
+          detail: "A prioritised queue of URLs to fetch.",
+        },
+        {
+          label: "Politeness",
+          detail: "Partition the frontier by domain so one worker owns a domain and can respect its rate limit and robots.txt.",
+        },
+        {
+          label: "Fetch and parse",
+          detail: "Extract content and outbound links.",
+        },
+        {
+          label: "Deduplicate",
+          detail: "URL normalisation plus a content hash — many URLs serve identical pages.",
+        },
+        {
+          label: "Enqueue new links",
+          detail: "Bounded by depth and domain limits so one site can't dominate the frontier.",
+        },
+        {
+          label: "Recrawl",
+          detail: "Scheduled by observed change frequency — news hourly, static pages monthly.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "Breadth-First Crawl", "Best-First (Priority) Crawl", "Focused Crawl", "Incremental Re-crawl"],
     rows: [

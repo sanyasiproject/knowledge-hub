@@ -423,6 +423,12 @@ async function parallelCompute(): Promise<void> {
     },
   ],
 
+  followUps: [
+    "Is Node.js concurrent, parallel, or both — and why?",
+    "Can you have parallelism without concurrency?",
+    "Why does a GIL prevent parallelism but not concurrency?",
+    "How does Amdahl's law limit what parallelism can buy you?",
+  ],
   mcqs: [
     {
       q: "A program runs on a single-core CPU and uses async/await to handle multiple network requests simultaneously. This is an example of:",

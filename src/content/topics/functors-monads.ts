@@ -567,6 +567,11 @@ buildUser().then(console.log); // { name: "Alice", age: 30 }`,
     },
   ],
 
+  followUps: [
+    "Give a concrete monad you have already used without calling it one.",
+    "Why is `Promise` almost but not quite a monad?",
+    "What problem does the monad laws' associativity requirement actually prevent?",
+  ],
   mcqs: [
     {
       q: "Which of the following is the correct statement of the functor identity law?",

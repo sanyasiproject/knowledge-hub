@@ -391,6 +391,11 @@ Slots 10923-16383]
       a: "No. Lua scripts in Redis Cluster can only access keys that belong to the same hash slot. If a script references keys in different slots, Redis returns a CROSSSLOT error. You must use hash tags to ensure all keys accessed by a script map to the same slot. For example, use {order:1}:items and {order:1}:total so both hash on 'order:1'.",
     },
   ],
+  followUps: [
+    "Why must multi-key operations share a hash tag?",
+    "What happens to in-flight writes during a failover?",
+    "How does resharding move slots without downtime?",
+  ],
   mcqs: [
     {
       q: "How many hash slots does Redis Cluster use?",

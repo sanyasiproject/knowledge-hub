@@ -550,6 +550,37 @@ private:
     CHUNK_DEL -->|"Ref count = 0"| RECLAIM["Reclaim Disk Space"]`,
     },
   ],
+  animations: [
+    {
+      title: "Storing an object durably",
+      steps: [
+        {
+          label: "PUT received",
+          detail: "Object split into chunks.",
+        },
+        {
+          label: "Erasure coded",
+          detail: "Split into k data and m parity fragments — any k of k+m reconstruct the object, cheaper than full replication.",
+        },
+        {
+          label: "Distributed",
+          detail: "Fragments placed across failure domains — different racks, different availability zones.",
+        },
+        {
+          label: "Metadata written",
+          detail: "A separate, strongly-consistent index maps the key to its fragment locations.",
+        },
+        {
+          label: "Acknowledged",
+          detail: "Only once enough fragments are durably written.",
+        },
+        {
+          label: "Disk fails",
+          detail: "Missing fragments are rebuilt from the survivors in the background; the object was never unavailable.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",

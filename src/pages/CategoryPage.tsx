@@ -4,7 +4,7 @@ import { CATEGORY_STRUCTURE } from "../data/categoryStructure";
 import { getContent } from "../content";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { Card, LevelBadge } from "../components/ui/primitives";
-import { ProgressBadge, ContentCompletenessBadge } from "../components/ui/ProgressBadge";
+import { ContentCompletenessBadge } from "../components/ui/ProgressBadge";
 import { NotFound } from "./NotFound";
 
 /** Count how many of the standard content sections are populated for a topic. */
@@ -59,7 +59,6 @@ export function CategoryPage() {
               <Link key={t.slug} to={`/topic/${domain.slug}/${category.slug}/${t.slug}`}>
                 <Card hover className="h-full">
                   <div className="mb-1 flex items-center gap-2">
-                    <ProgressBadge topicSlug={t.slug} />
                     <h3 className="font-semibold text-slate-900 dark:text-white">{t.title}</h3>
                     <div className="ml-auto">
                       <LevelBadge level={t.level} />

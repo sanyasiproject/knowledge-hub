@@ -45,6 +45,11 @@ export const k8sNetworking: TopicContent = {
       a: "The Gateway API is a newer, more expressive API for managing traffic routing. It separates concerns into GatewayClass (infrastructure provider), Gateway (cluster operator configures listeners), and HTTPRoute (application developer defines routing rules). This role-oriented model is more flexible than Ingress, supports TCP/UDP routing (not just HTTP), weighted traffic splitting for canary deployments, and header-based matching without relying on controller-specific annotations.",
     },
   ],
+  followUps: [
+    "How does a Service actually route to a Pod — what does kube-proxy do?",
+    "ClusterIP, NodePort, LoadBalancer, Ingress — when each?",
+    "How does a NetworkPolicy change the default allow-all?",
+  ],
   mcqs: [
     {
       q: "Which Service type provisions a cloud load balancer?",
@@ -348,6 +353,37 @@ kubectl run curlpod --rm -it --image=curlimages/curl --restart=Never -- \\
     HR -->|routes to| SVC2["canary-svc 10%"]`,
     },
   ],
+  animations: [
+    {
+      title: "How a Service reaches a Pod",
+      steps: [
+        {
+          label: "Pods get IPs",
+          detail: "Every Pod has a cluster-routable IP. Pod IPs change constantly as Pods are replaced.",
+        },
+        {
+          label: "Service created",
+          detail: "A stable ClusterIP and DNS name, with a label selector.",
+        },
+        {
+          label: "Endpoints tracked",
+          detail: "The controller keeps an EndpointSlice of Pod IPs currently matching the selector and passing readiness.",
+        },
+        {
+          label: "kube-proxy programs rules",
+          detail: "iptables or IPVS rules on every node rewrite traffic for the ClusterIP to one of the endpoint IPs.",
+        },
+        {
+          label: "Request routed",
+          detail: "A call to `my-service` resolves via cluster DNS and is load-balanced to a ready Pod.",
+        },
+        {
+          label: "Readiness matters",
+          detail: "A Pod failing its readiness probe is removed from the endpoints, so it stops receiving traffic without being restarted.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Feature", "Flannel", "Calico", "Cilium", "Weave"],
     rows: [
@@ -382,6 +418,12 @@ kubectl run curlpod --rm -it --image=curlimages/curl --restart=Never -- \\
     "**CoreDNS** resolves `<svc>.<ns>.svc.cluster.local` to ClusterIPs. **Headless Services** (`clusterIP: None`) return individual Pod IPs. **StatefulSet** pods get unique DNS entries via `<pod>.<headless-svc>.<ns>.svc.cluster.local`.",
     "**NetworkPolicies** are *additive*, pod-level firewalls. Once a policy selects a pod, unmatched traffic in that direction is *denied*. Implement zero-trust with a default-deny policy + explicit allow rules. The CNI must support them (*Calico* and *Cilium* do; *Flannel* alone does not).",
     "**Gateway API** (GA in K8s 1.31) replaces Ingress with a *role-oriented model*: `GatewayClass` (infra provider), `Gateway` (operator), `HTTPRoute` (developer). Supports *traffic splitting*, *header matching*, *cross-namespace routing* via `ReferenceGrant`, and extensibility via *policy attachment*.",
+  ],
+  resources: [
+    {
+      label: "Kubernetes documentation — Services, Load Balancing, Networking",
+      kind: "docs",
+    },
   ],
   glossary: [
     {

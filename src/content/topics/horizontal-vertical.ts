@@ -114,6 +114,11 @@ In practice, most systems use a hybrid approach:
       a: "Application servers are stateless and easy to scale horizontally, but the database holds state and must maintain consistency. Adding app servers increases database connection pressure and query load. Sharding the database adds significant complexity (cross-shard queries, resharding, distributed transactions). Read replicas help with read-heavy workloads but do not solve write bottlenecks. This is why teams vertically scale the database as long as possible and invest heavily in caching to reduce database load before resorting to sharding.",
     },
   ],
+  followUps: [
+    "When is vertical scaling genuinely the cheaper answer?",
+    "What has to be true of your service before horizontal scaling works?",
+    "Where does state get in the way, and where do you put it instead?",
+  ],
   mcqs: [
     {
       q: "What is the primary disadvantage of vertical scaling?",
@@ -527,6 +532,37 @@ spec:
     },
   ],
 
+  animations: [
+    {
+      title: "Making a service horizontally scalable",
+      steps: [
+        {
+          label: "Start: one instance",
+          detail: "Sessions in memory, a local cache, scheduled jobs in-process, files on local disk.",
+        },
+        {
+          label: "Add a second instance",
+          detail: "Users get logged out at random — their session lives on the other instance.",
+        },
+        {
+          label: "Externalise sessions",
+          detail: "Move to Redis. Any instance can now serve any request.",
+        },
+        {
+          label: "Externalise the cache",
+          detail: "Or accept per-instance inconsistency deliberately, and bound it.",
+        },
+        {
+          label: "Fix the jobs",
+          detail: "A scheduled job now runs twice. Move it to a queue with a single consumer, or use a distributed lock.",
+        },
+        {
+          label: "Fix file storage",
+          detail: "Local disk becomes object storage. The instance is now genuinely disposable — which is the actual goal.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Dimension",
@@ -612,6 +648,16 @@ spec:
     "**Key interview points**: (1) Statelessness is the prerequisite for horizontal scaling. (2) Amdahl's Law limits parallel speedup. (3) The database is the hardest component to scale horizontally. (4) Auto-scaling should use application-level metrics (p99 latency, queue depth), not just CPU. (5) Graceful shutdown and health checks are mandatory for instance disposability.",
   ],
 
+  resources: [
+    {
+      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      kind: "book",
+    },
+    {
+      label: "System Design Interview — Alex Xu",
+      kind: "book",
+    },
+  ],
   glossary: [
     {
       term: "Vertical Scaling (Scale-Up)",

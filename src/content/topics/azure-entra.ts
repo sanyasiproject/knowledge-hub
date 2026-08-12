@@ -45,6 +45,11 @@ export const azureEntra: TopicContent = {
       a: "PIM implements just-in-time privileged access, replacing permanent (standing) admin role assignments with time-limited, on-demand activations. Instead of a user permanently holding Global Administrator, they activate the role for a defined period (e.g., 4 hours) with MFA verification and optional approval workflows. PIM provides audit trails of all activations, access reviews to periodically recertify role assignments, and alerts for suspicious activation patterns. This reduces the attack surface by minimizing the time and number of accounts with privileged access, aligning with the least-privilege principle. PIM covers both Entra ID directory roles and Azure resource RBAC roles.",
     },
   ],
+  followUps: [
+    "How does Entra ID differ from a plain OAuth provider?",
+    "What is conditional access and what problem does it solve?",
+    "How do you handle identity across a hybrid on-prem and cloud estate?",
+  ],
   mcqs: [
     {
       q: "Which authentication protocol does Entra ID use for modern web application single sign-on?",
@@ -134,6 +139,12 @@ export const azureEntra: TopicContent = {
     {
       front: "What is an access review in Entra ID?",
       back: "A periodic review process where designated reviewers certify whether users, groups, or service principals still need their role assignments or group memberships. Unreviewd or denied assignments are automatically removed.",
+    },
+  ],
+  resources: [
+    {
+      label: "Microsoft Learn — Microsoft Entra ID documentation",
+      kind: "docs",
     },
   ],
   glossary: [
@@ -303,6 +314,33 @@ export const azureEntra: TopicContent = {
       Password Hash Sync
       Pass-through Auth
       Federation`,
+    },
+  ],
+  animations: [
+    {
+      title: "A conditional access decision",
+      steps: [
+        {
+          label: "Sign-in attempt",
+          detail: "User authenticates with username and password.",
+        },
+        {
+          label: "Signals gathered",
+          detail: "Device compliance, location, IP reputation, sign-in risk score, application being accessed.",
+        },
+        {
+          label: "Policy evaluated",
+          detail: "Rules combine those signals: e.g. 'from an unmanaged device, require MFA'.",
+        },
+        {
+          label: "Grant with conditions",
+          detail: "Access granted after a second factor, or session limited to browser-only with no download.",
+        },
+        {
+          label: "Block",
+          detail: "High-risk sign-in from an unexpected country is denied outright.",
+        },
+      ],
     },
   ],
   comparison: {

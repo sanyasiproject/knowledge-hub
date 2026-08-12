@@ -657,6 +657,37 @@ public:
     { term: "Redis Lua Script", definition: "A script executed atomically within Redis's single-threaded event loop. Used for complex operations (check-and-set, multi-key transactions) that must not be interleaved with other commands." },
     { term: "Overselling", definition: "The failure mode where more tickets are sold than seats available, typically caused by race conditions in the seat reservation logic. Prevented by atomic locking and database uniqueness constraints." },
   ],
+  animations: [
+    {
+      title: "Selling the last seat once",
+      steps: [
+        {
+          label: "High contention",
+          detail: "Ten thousand people want the same 500 seats the moment sales open.",
+        },
+        {
+          label: "Queue at the door",
+          detail: "A virtual waiting room admits users at a controlled rate, so the system is never asked to do the impossible.",
+        },
+        {
+          label: "Seat held, not sold",
+          detail: "Selecting a seat takes a short-lived hold — a row lock or a Redis key with a TTL.",
+        },
+        {
+          label: "Checkout window",
+          detail: "The user has a few minutes. The hold prevents anyone else selecting it.",
+        },
+        {
+          label: "Hold expires",
+          detail: "If they abandon, the seat returns to the pool automatically — no manual cleanup.",
+        },
+        {
+          label: "Purchase",
+          detail: "An atomic conditional update converts the hold to a sale. Exactly one buyer can win.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "Optimistic Locking", "Pessimistic Locking (SELECT FOR UPDATE)", "Redis Lua Atomic Lock", "Distributed Lock (Redlock)"],
     rows: [

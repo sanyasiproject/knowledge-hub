@@ -47,6 +47,11 @@ export const k8sArchitecture: TopicContent = {
       ],
     },
   ],
+  followUps: [
+    "What happens, step by step, when you `kubectl apply` a Deployment?",
+    "What is the reconciliation loop and why is declarative state the core idea?",
+    "What breaks when etcd is unavailable?",
+  ],
   mcqs: [
     {
       q: "Which component is the ONLY one that communicates directly with etcd?",
@@ -386,6 +391,37 @@ roleRef:
         Self-healing reconciliation`,
     },
   ],
+  animations: [
+    {
+      title: "What happens on `kubectl apply`",
+      steps: [
+        {
+          label: "API server",
+          detail: "Authenticates, authorises, validates the manifest, and persists the desired state in etcd.",
+        },
+        {
+          label: "Deployment controller",
+          detail: "Notices a Deployment with no matching ReplicaSet and creates one.",
+        },
+        {
+          label: "ReplicaSet controller",
+          detail: "Sees 3 replicas desired, 0 existing, and creates 3 Pod objects — unscheduled.",
+        },
+        {
+          label: "Scheduler",
+          detail: "Picks a node for each Pod based on resource requests, affinity, and taints, and records the binding.",
+        },
+        {
+          label: "Kubelet",
+          detail: "On each node, sees a Pod bound to it, pulls images, and starts containers via the container runtime.",
+        },
+        {
+          label: "Reconciliation continues",
+          detail: "Kill a Pod and the loop notices reality no longer matches desired state, and creates another. Nothing is imperative.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",
@@ -451,6 +487,16 @@ roleRef:
     "The **scheduler** uses a two-phase approach: **filtering** eliminates nodes that cannot run the pod (resource constraints, taints, affinity rules, topology constraints), then **scoring** ranks remaining nodes by factors like resource balance and data locality. The scheduler only *binds* the pod to a node — **kubelet** is responsible for actually starting it.",
     "**etcd** uses the *Raft consensus* algorithm and requires a **quorum** (majority) to accept writes. In a 5-node cluster, 2 nodes can fail without data loss. If quorum is lost, the API server cannot persist changes — existing workloads keep running but no *new scheduling or self-healing* occurs.",
     "The **Operator pattern** extends Kubernetes by encoding domain-specific operational knowledge into *custom controllers* that watch **CRDs** (Custom Resource Definitions). This turns Kubernetes from a fixed container orchestrator into an **extensible platform** for managing any stateful application lifecycle."
+  ],
+  resources: [
+    {
+      label: "Kubernetes documentation — Concepts",
+      kind: "docs",
+    },
+    {
+      label: "Kubernetes Up & Running — Burns, Beda & Hightower",
+      kind: "book",
+    },
   ],
   glossary: [
     {

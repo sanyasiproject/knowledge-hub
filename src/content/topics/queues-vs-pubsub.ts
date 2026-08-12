@@ -488,6 +488,11 @@ async function consumeQueue(queueUrl: string) {
     },
   ],
 
+  followUps: [
+    "What breaks when you scale a fanout subscriber horizontally?",
+    "How does a Kafka consumer group give you both semantics from one topic?",
+    "When does the same event need to be both queued and broadcast?",
+  ],
   mcqs: [
     {
       q: "In Kafka, what determines the maximum number of active consumers within a single consumer group?",

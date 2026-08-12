@@ -58,6 +58,11 @@ DLX is configured on the queue via the \`x-dead-letter-exchange\` argument (and 
       a: "RabbitMQ lacks built-in deduplication. With at-least-once delivery, a consumer may process a message and crash before acking — the broker redelivers it, causing duplicate processing. Exactly-once requires coordinating the message ack and the business operation atomically, which crosses system boundaries. The practical solution is at-least-once delivery with idempotent consumers — using unique message IDs and checking a deduplication store before processing.",
     },
   ],
+  followUps: [
+    "What do you need for a message to survive a broker restart — and what's still not guaranteed?",
+    "How do you distinguish a transient failure from a poison message?",
+    "What does an unmonitored dead-letter queue actually give you?",
+  ],
   mcqs: [
     {
       q: "What does the broker send when it cannot handle a message in publisher confirm mode?",
@@ -124,6 +129,16 @@ DLX is configured on the queue via the \`x-dead-letter-exchange\` argument (and 
     {
       front: "What is a poison message?",
       back: "A message that repeatedly causes consumer failures — each redelivery attempt fails, creating an infinite retry loop. Handle by tracking delivery count in headers and routing to a parking lot queue after N attempts via DLX.",
+    },
+  ],
+  resources: [
+    {
+      label: "RabbitMQ documentation — reliability guide",
+      kind: "docs",
+    },
+    {
+      label: "RabbitMQ documentation — publisher confirms",
+      kind: "docs",
     },
   ],
   glossary: [
@@ -440,6 +455,37 @@ x-dead-letter-exchange=dlx)]
     P[Producer] --> N1
     C1[Consumer] --> N1
     N1 -->|promote on failure| N2`,
+    },
+  ],
+  animations: [
+    {
+      title: "What it takes for a message to survive",
+      steps: [
+        {
+          label: "Durable exchange and queue",
+          detail: "Declared durable, so their definitions survive a restart.",
+        },
+        {
+          label: "Persistent message",
+          detail: "Marked persistent so the body is written to disk, not just held in memory.",
+        },
+        {
+          label: "Publisher confirm",
+          detail: "The broker acknowledges the publish. Without this, the publisher can't know it arrived.",
+        },
+        {
+          label: "Manual consumer ack",
+          detail: "Acknowledge after processing, never before — otherwise a crash loses the work.",
+        },
+        {
+          label: "Still not guaranteed",
+          detail: "A single-node broker losing its disk loses messages. Quorum queues replicate across nodes.",
+        },
+        {
+          label: "Retry and DLQ",
+          detail: "Failed messages retry with backoff, then dead-letter with their error context, and the DLQ is alerted on.",
+        },
+      ],
     },
   ],
   comparison: {

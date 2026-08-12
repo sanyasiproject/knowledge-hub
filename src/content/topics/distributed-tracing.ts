@@ -88,6 +88,11 @@ In practice, most teams combine head-based sampling (e.g., 5%) with tail-based r
       a: "Start with auto-instrumentation: add OpenTelemetry SDK with auto-instrumentation libraries for your frameworks (Express, Spring, gRPC). This captures spans at HTTP and database boundaries with zero code changes. Deploy an OTel Collector to receive, batch, and export spans to a backend like Jaeger. Then incrementally add manual spans for business-critical operations. Propagate context through message queues by injecting trace headers into message metadata. Finally, embed traceId in all log entries to enable log-trace correlation.",
     },
   ],
+  followUps: [
+    "What does a trace show you that logs and metrics can't?",
+    "How does context propagate across an async boundary or a queue?",
+    "Why do you sample, and what does head-based sampling miss?",
+  ],
   mcqs: [
     {
       q: "What does the W3C traceparent header contain?",
@@ -161,6 +166,16 @@ In practice, most teams combine head-based sampling (e.g., 5%) with tail-based r
     {
       front: "What is head-based vs tail-based sampling?",
       back: "Head-based decides at trace start (simple, but drops interesting traces randomly). Tail-based decides after completion (captures anomalies, but requires buffering full traces in the Collector).",
+    },
+  ],
+  resources: [
+    {
+      label: "OpenTelemetry documentation",
+      kind: "docs",
+    },
+    {
+      label: "Dapper, a Large-Scale Distributed Systems Tracing Infrastructure — Google, 2010",
+      kind: "paper",
     },
   ],
   glossary: [
@@ -447,6 +462,37 @@ void handleInventoryCheck(const std::string& productId) {
     H -->|Drop| I["Discard trace"]
     G --> J["Export to backend"]`,
       caption: "Combined head and tail sampling: low head rate controls volume, tail rules ensure errors and slow traces are always retained.",
+    },
+  ],
+  animations: [
+    {
+      title: "Finding where the 800 ms went",
+      steps: [
+        {
+          label: "Symptom",
+          detail: "The endpoint's p95 is 800 ms. Metrics say the service itself is fast.",
+        },
+        {
+          label: "Trace opened",
+          detail: "One request, shown as nested spans across every service it touched.",
+        },
+        {
+          label: "Gateway → API",
+          detail: "5 ms.",
+        },
+        {
+          label: "API → auth service",
+          detail: "12 ms.",
+        },
+        {
+          label: "API → search service",
+          detail: "740 ms — and inside it, 700 ms in a single database query.",
+        },
+        {
+          label: "Found",
+          detail: "The slow endpoint was three hops away, in code nobody looking at the first service would have examined.",
+        },
+      ],
     },
   ],
   comparison: {

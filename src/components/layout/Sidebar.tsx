@@ -12,6 +12,26 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <nav className="thin-scroll h-full overflow-y-auto px-3 py-4">
+      {/* Pinned above the taxonomy: this is the destination when time is short. */}
+      <NavLink
+        to="/interview"
+        onClick={onNavigate}
+        className={({ isActive }) =>
+          cx(
+            "mb-4 flex items-center gap-2 rounded-lg border px-2.5 py-2 text-sm font-semibold transition",
+            isActive
+              ? "border-brand-300 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-900/30 dark:text-brand-200"
+              : "border-slate-200 text-slate-700 hover:border-brand-300 hover:bg-brand-50/60 dark:border-slate-800 dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-900/20"
+          )
+        }
+      >
+        <span aria-hidden className="text-base leading-none">🎯</span>
+        <span className="flex-1">Interview Prep</span>
+        <span className="rounded-full bg-brand-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-700 dark:bg-brand-900/50 dark:text-brand-200">
+          Cram
+        </span>
+      </NavLink>
+
       <div className="space-y-4">
         {groups.map((g) => (
           <SidebarGroup

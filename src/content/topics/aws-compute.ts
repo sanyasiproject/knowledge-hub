@@ -43,6 +43,11 @@ export const awsCompute: TopicContent = {
     }
   ],
 
+  followUps: [
+    "EC2, ECS, Lambda — what actually decides between them?",
+    "What is a Lambda cold start and when does it matter?",
+    "Why does Lambda's 15-minute limit shape architecture?",
+  ],
   mcqs: [
     {
       q: "Which EC2 instance family is best for a CPU-intensive batch processing workload?",

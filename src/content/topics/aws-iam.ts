@@ -43,6 +43,11 @@ export const awsIam: TopicContent = {
     }
   ],
 
+  followUps: [
+    "How do you debug 'access denied' when the policy looks correct?",
+    "Why prefer assumed roles over long-lived access keys?",
+    "What does a resource policy do that an identity policy can't?",
+  ],
   mcqs: [
     {
       q: "An IAM policy has an explicit Allow on s3:* and another policy has an explicit Deny on s3:DeleteObject. What happens when the user tries to delete an S3 object?",

@@ -302,6 +302,12 @@ improved"]`,
       a: "Tombstones are markers that indicate a deletion. Because SSTables are immutable, data cannot be removed in place — a tombstone is written instead. During reads, tombstones must be scanned to ensure deleted data is not returned, causing read latency if they accumulate. Tombstones are purged during compaction only after gc_grace_seconds (default 10 days) to ensure all replicas have seen the delete. Workloads with frequent deletes or short TTLs can accumulate millions of tombstones, degrading read performance. Monitoring and tuning gc_grace_seconds, using appropriate compaction strategies, and avoiding anti-patterns like queue-like data models help manage this.",
     },
   ],
+  followUps: [
+    "Why does the partition key determine almost everything about performance here?",
+    "What happens when one partition becomes hot, and how do you fix it?",
+    "Why can't you query efficiently on a column that isn't part of the key?",
+    "How do tombstones affect read performance after heavy deletion?",
+  ],
   mcqs: [
     {
       q: "In Cassandra, what determines which node stores a particular row?",

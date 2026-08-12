@@ -704,6 +704,37 @@ public:
         "A CDN cache server deployed at the network edge, often physically inside an ISP's data center. Serves cached content directly to nearby users with minimal latency and without traversing inter-network peering links, handling the majority of traffic for popular content.",
     },
   ],
+  animations: [
+    {
+      title: "Upload to playback",
+      steps: [
+        {
+          label: "Upload",
+          detail: "Presigned URL straight to object storage; resumable for large files.",
+        },
+        {
+          label: "Transcode",
+          detail: "A queue fans out jobs producing multiple resolutions and bitrates, segmented for adaptive streaming.",
+        },
+        {
+          label: "Store segments",
+          detail: "Written back to object storage with a manifest (HLS/DASH).",
+        },
+        {
+          label: "Distribute",
+          detail: "Segments pushed to the CDN — this is where nearly all the bytes are served from.",
+        },
+        {
+          label: "Playback",
+          detail: "Player fetches the manifest, then segments, switching bitrate as bandwidth changes.",
+        },
+        {
+          label: "Metadata",
+          detail: "Views and likes are separate, high-write, eventually-consistent counters — never a synchronous update on playback.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",

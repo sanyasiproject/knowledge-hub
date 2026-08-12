@@ -343,6 +343,37 @@ NGINX\`,
 }`,
     },
   ],
+  animations: [
+    {
+      title: "Who patches what, layer by layer",
+      steps: [
+        {
+          label: "On-premises",
+          detail: "You own everything: building, hardware, network, OS, runtime, application, data.",
+        },
+        {
+          label: "IaaS",
+          detail: "Provider owns hardware and virtualisation. You still patch the OS, the runtime, and the app.",
+        },
+        {
+          label: "PaaS",
+          detail: "Provider owns the OS and runtime too. You bring code and data — and lose control of runtime versions.",
+        },
+        {
+          label: "SaaS",
+          detail: "Provider owns everything but your data and access configuration.",
+        },
+        {
+          label: "The trade",
+          detail: "Each step up removes operational burden and removes control. Neither direction is free.",
+        },
+        {
+          label: "What never moves",
+          detail: "Your data and who can reach it are always yours — that's why bucket misconfigurations are always the customer's fault.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "IaaS", "PaaS", "FaaS/Serverless", "SaaS"],
     rows: [
@@ -380,6 +411,11 @@ NGINX\`,
     }
   ],
 
+  followUps: [
+    "Where does a managed database like RDS sit, and who patches what?",
+    "Why does more abstraction mean less control, and when does that bite?",
+    "How does the model you choose change your on-call burden?",
+  ],
   mcqs: [
     {
       q: "In which service model does the customer manage the operating system?",

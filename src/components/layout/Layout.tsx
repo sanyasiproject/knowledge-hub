@@ -5,16 +5,19 @@ import { allTopics, hubStats, searchTopics, topicPath } from "../../data/taxonom
 import type { SearchHit } from "../../data/taxonomy";
 import { LevelBadge } from "../ui/primitives";
 
+/**
+ * Theme state, held in memory only.
+ *
+ * The app deliberately persists nothing to the browser, so the toggle applies
+ * for the session and each load starts from the OS preference.
+ */
 function useTheme() {
   const [dark, setDark] = useState(() => {
     if (typeof window === "undefined") return false;
-    const saved = localStorage.getItem("hub-theme");
-    if (saved) return saved === "dark";
     return window.matchMedia("(prefers-color-scheme: dark)").matches;
   });
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
-    localStorage.setItem("hub-theme", dark ? "dark" : "light");
   }, [dark]);
   return { dark, toggle: () => setDark((d) => !d) };
 }
@@ -198,18 +201,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <SearchTrigger onClick={() => setSearchOpen(true)} />
         </div>
         <Link
+          to="/interview"
+          className="hidden rounded-lg px-2.5 py-1.5 text-sm font-semibold text-brand-600 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-900/30 sm:inline-block"
+          title="Interview Prep — last-minute revision"
+        >
+          Interview
+        </Link>
+        <Link
           to="/paths"
           className="hidden rounded-lg px-2.5 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200 sm:inline-block"
           title="Learning Paths"
         >
           Paths
-        </Link>
-        <Link
-          to="/bookmarks"
-          className="hidden rounded-lg px-2.5 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200 sm:inline-block"
-          title="Bookmarks"
-        >
-          &#9734;
         </Link>
         <button
           onClick={() => {

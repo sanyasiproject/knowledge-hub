@@ -662,6 +662,37 @@ public:
         "A reinforcement learning approach used by Netflix for personalized artwork selection. The algorithm balances exploring new thumbnail images (to learn which performs best) with exploiting known good images (to maximize engagement), adapting selections based on user context features.",
     },
   ],
+  animations: [
+    {
+      title: "Starting playback",
+      steps: [
+        {
+          label: "Browse",
+          detail: "Metadata and personalised rows served from a low-latency store; recommendations precomputed offline.",
+        },
+        {
+          label: "Play pressed",
+          detail: "Client requests a playback manifest and a licence for DRM.",
+        },
+        {
+          label: "Nearest cache chosen",
+          detail: "Open Connect appliances sit inside ISPs — the content is often one hop away.",
+        },
+        {
+          label: "Adaptive streaming",
+          detail: "Client starts at a conservative bitrate and steps up as it measures throughput.",
+        },
+        {
+          label: "Buffer management",
+          detail: "It keeps reading ahead; a dip in bandwidth drops quality rather than stalling.",
+        },
+        {
+          label: "Why pre-positioned",
+          detail: "Popular titles are pushed to edge caches ahead of demand, so the origin serves almost nothing.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",

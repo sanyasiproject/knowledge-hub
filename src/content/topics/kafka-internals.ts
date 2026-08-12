@@ -365,6 +365,11 @@ producer.close();`,
       a: "KRaft (Kafka Raft, KIP-500) replaces ZooKeeper with an embedded Raft-based consensus protocol for metadata management. A quorum of controller brokers manages cluster metadata in an internal __cluster_metadata topic. Benefits: eliminates a separate ZooKeeper cluster to deploy and monitor, enables faster controller failover, supports millions of partitions (versus ~200K with ZK), and simplifies the architecture. KRaft became production-ready in Kafka 3.3 and is the default in Kafka 4.0. ZooKeeper support is being removed.",
     },
   ],
+  followUps: [
+    "What does `acks=all` plus `min.insync.replicas` actually guarantee?",
+    "How does the page cache make Kafka fast, and what happens when it's cold?",
+    "What is a compacted topic for, and what can't you do with one?",
+  ],
   mcqs: [
     {
       q: "What is the high-water mark in Kafka replication?",

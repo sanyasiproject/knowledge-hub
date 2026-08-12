@@ -32,6 +32,11 @@ export const classDesign: TopicContent = {
       a: "A good constructor fully initializes the object into a valid state. It should validate all inputs and throw exceptions for invalid arguments. It should not perform heavy I/O or computation (use factory methods for that). Keep parameter count low (3-4 max); use the Builder pattern for more. Avoid doing work that creates side effects (like registering the object in a global registry). For optional parameters, use telescoping constructors, builders, or a configuration object. The result of calling `new` should be an object that is immediately usable and internally consistent.",
     },
   ],
+  followUps: [
+    "What does a nine-parameter constructor tell you?",
+    "How do you decide between an interface and an abstract class here?",
+    "When is a data class with no behaviour a smell?",
+  ],
   mcqs: [
     {
       q: "Which of the following is NOT a requirement for making a class immutable?",
@@ -110,6 +115,16 @@ export const classDesign: TopicContent = {
     {
       front: "What makes a good method name?",
       back: "Use verbs for actions (calculateTotal, sendNotification), 'is/has/can' for boolean queries (isEmpty, hasPermission), 'get/find' for retrievals. Be specific: processPayment() over handle(). Be consistent: if you use 'get' for synchronous and 'fetch' for async, stick with it throughout.",
+    },
+  ],
+  resources: [
+    {
+      label: "Clean Code — Robert C. Martin",
+      kind: "book",
+    },
+    {
+      label: "Refactoring — Martin Fowler",
+      kind: "book",
     },
   ],
   glossary: [
@@ -422,6 +437,37 @@ private:
     Svc->>Repo: query()
     Repo-->>Svc: result
     Svc-->>Ctrl: response`,
+    },
+  ],
+  animations: [
+    {
+      title: "What a growing constructor is telling you",
+      steps: [
+        {
+          label: "Three dependencies",
+          detail: "Repository, logger, clock. Reasonable.",
+        },
+        {
+          label: "Six",
+          detail: "Plus an email sender, a payment client, and a feature-flag service. Still compiles.",
+        },
+        {
+          label: "Nine",
+          detail: "The tests need nine mocks before asserting anything.",
+        },
+        {
+          label: "The signal",
+          detail: "This isn't a DI problem. The class has nine reasons to change — it's doing several jobs.",
+        },
+        {
+          label: "Split by responsibility",
+          detail: "Orchestration in one place, persistence in another, notification in a third.",
+        },
+        {
+          label: "Result",
+          detail: "Each has two or three dependencies and a testable, statable purpose.",
+        },
+      ],
     },
   ],
   comparison: {

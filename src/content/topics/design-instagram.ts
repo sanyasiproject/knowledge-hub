@@ -590,6 +590,37 @@ public:
         "A storage scheme where data is organized into partitions based on creation time (e.g., hourly buckets). Enables efficient bulk deletion of expired data by dropping entire partitions rather than scanning and deleting individual items.",
     },
   ],
+  animations: [
+    {
+      title: "Upload and serve a photo",
+      steps: [
+        {
+          label: "Client requests an upload URL",
+          detail: "API returns a presigned URL. Image bytes never pass through your servers.",
+        },
+        {
+          label: "Direct upload",
+          detail: "Client PUTs to object storage.",
+        },
+        {
+          label: "Notify",
+          detail: "Client tells the API the upload completed; a metadata row is written.",
+        },
+        {
+          label: "Async processing",
+          detail: "A queue triggers thumbnail generation at several sizes, plus moderation checks.",
+        },
+        {
+          label: "Serve",
+          detail: "Images via CDN, keyed by immutable content hash so they cache forever.",
+        },
+        {
+          label: "Feed",
+          detail: "Metadata only — the feed returns ids and URLs; the heavy bytes come from the CDN.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",

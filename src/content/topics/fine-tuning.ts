@@ -98,6 +98,12 @@ A common pattern is to start with prompting, move to RAG if context is needed, a
       a: "LLMs already have strong pretrained capabilities. Fine-tuning primarily teaches the model a new format, style, or specialized behavior rather than new knowledge from scratch. A small number of well-crafted, correctly labeled examples (1k-10k) effectively steers the model. Noisy or low-quality data can teach bad patterns and degrade performance. Quality examples also reduce the risk of overfitting since fewer epochs are needed.",
     },
   ],
+  followUps: [
+    "What does fine-tuning teach well, and what does it teach badly?",
+    "What does QLoRA add on top of LoRA?",
+    "How do you serve many adapters over one base model?",
+    "How do you know fine-tuning helped rather than just changed things?",
+  ],
   mcqs: [
     {
       q: "In LoRA, what does the rank (r) control?",
@@ -178,6 +184,20 @@ A common pattern is to start with prompting, move to RAG if context is needed, a
       back: "When few-shot prompting achieves acceptable results, the task changes frequently, or you lack sufficient quality training data.",
     },
   ],
+  resources: [
+    {
+      label: "LoRA: Low-Rank Adaptation of Large Language Models — Hu et al., 2021",
+      kind: "paper",
+    },
+    {
+      label: "QLoRA: Efficient Finetuning of Quantized LLMs — Dettmers et al., 2023",
+      kind: "paper",
+    },
+    {
+      label: "Hugging Face PEFT documentation",
+      kind: "docs",
+    },
+  ],
   glossary: [
     {
       term: "Full Fine-Tuning",
@@ -239,300 +259,49 @@ During the **forward pass**, the output is computed as \`h = W0 * x + (alpha / r
 
   code: [
     {
-      language: "cpp",
-      caption: "LoRA fine-tuning concept with LibTorch (PyTorch C++ API)",
-      source: `#include <torch/torch.h>
-#include <iostream>
-#include <string>
-#include <vector>
+      language: "python",
+      caption: "LoRA — train ~1% of the parameters, ship a small adapter",
+      source: `from peft import LoraConfig, get_peft_model
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-// LoRA adapter layer: W_new = W_frozen + (alpha/r) * B @ A
-struct LoRALinearImpl : torch::nn::Module {
-    LoRALinearImpl(int64_t in_features, int64_t out_features,
-                   int64_t rank = 16, double alpha = 32.0,
-                   double dropout = 0.05)
-        : rank_(rank), scale_(alpha / rank),
-          frozen_(register_module("frozen",
-              torch::nn::Linear(in_features, out_features))),
-          lora_A_(register_parameter("lora_A",
-              torch::randn({rank, in_features}) * 0.01)),
-          lora_B_(register_parameter("lora_B",
-              torch::zeros({out_features, rank}))),
-          dropout_(register_module("dropout",
-              torch::nn::Dropout(dropout)))
-    {
-        // Freeze the original weight -- no gradient updates
-        frozen_->weight.set_requires_grad(false);
-        if (frozen_->bias.defined())
-            frozen_->bias.set_requires_grad(false);
-    }
+model_id = "meta-llama/Llama-3.1-8B-Instruct"
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+base = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype="bfloat16", device_map="auto")
 
-    torch::Tensor forward(torch::Tensor x) {
-        auto base_out = frozen_->forward(x);
-        // LoRA path: x -> A -> B -> scale
-        auto lora_out = dropout_->forward(x);
-        lora_out = torch::matmul(lora_out, lora_A_.t());  // (batch, rank)
-        lora_out = torch::matmul(lora_out, lora_B_.t());  // (batch, out)
-        return base_out + scale_ * lora_out;
-    }
+config = LoraConfig(
+    r=16,                 # rank: capacity of the update. 8-32 covers most tasks.
+    lora_alpha=32,        # scaling; alpha/r ≈ 2 is a common starting point
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM",
+    # Which matrices get adapters. Attention projections are the usual choice;
+    # adding the MLP layers raises capacity and cost.
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+)
 
-    int64_t rank_;
-    double scale_;
-    torch::nn::Linear frozen_{nullptr};
-    torch::Tensor lora_A_, lora_B_;
-    torch::nn::Dropout dropout_{nullptr};
-};
-TORCH_MODULE(LoRALinear);
+model = get_peft_model(base, config)
+model.print_trainable_parameters()
+# trainable params: 20,971,520 || all params: 8,051,232,768 || trainable%: 0.26
 
-void print_trainable_parameters(const torch::nn::Module& model) {
-    int64_t total = 0, trainable = 0;
-    for (const auto& p : model.parameters()) {
-        total += p.numel();
-        if (p.requires_grad()) trainable += p.numel();
-    }
-    std::cout << "trainable params: " << trainable
-              << " || all params: " << total
-              << " || " << (100.0 * trainable / total) << "%\\n";
-}
+# The base weights are FROZEN and unchanged. Training updates only the injected
+# low-rank matrices, on the observation that the update needed to adapt a model
+# to one task is itself low-rank.
+#
+# What this buys operationally, which matters as much as the training saving:
+#   - The adapter is tens of MB, not tens of GB.
+#   - One base model in memory can serve many adapters, swapped per customer
+#     or per task.
+#   - Rolling back is unloading the adapter; the base was never touched.
+#
+# QLoRA extends this by quantising the frozen base to 4-bit, which is what makes
+# fine-tuning a model this size feasible on a single GPU.
 
-// Example training loop sketch
-void train_lora() {
-    auto device = torch::kCUDA;
-    // Replace a frozen linear with a LoRA-augmented version
-    LoRALinear layer(4096, 4096, /*rank=*/16, /*alpha=*/32.0);
-    layer->to(device);
+model.save_pretrained("./adapters/support-tone")   # just the adapter
 
-    print_trainable_parameters(*layer);
-    // Only lora_A and lora_B are trainable (~131K params vs 16.7M frozen)
-
-    torch::optim::AdamW optimizer(
-        layer->parameters(), torch::optim::AdamWOptions(2e-4));
-
-    // Training loop (simplified)
-    for (int epoch = 0; epoch < 3; ++epoch) {
-        auto input = torch::randn({4, 2048, 4096}, device);
-        auto target = torch::randn({4, 2048, 4096}, device);
-        auto output = layer->forward(input);
-        auto loss = torch::mse_loss(output, target);
-        optimizer.zero_grad();
-        loss.backward();
-        optimizer.step();
-        std::cout << "Epoch " << epoch << " loss: "
-                  << loss.item<float>() << "\\n";
-    }
-
-    // Save only the LoRA adapter weights (~small file)
-    torch::save({layer->lora_A_, layer->lora_B_},
-                "lora-adapter.pt");
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "QLoRA concept with 4-bit quantization and LoRA adapters in LibTorch",
-      source: `#include <torch/torch.h>
-#include <iostream>
-#include <cstdint>
-
-// Simulated NF4 quantization: pack fp16 weights into 4-bit representation
-struct QuantizedLinearImpl : torch::nn::Module {
-    QuantizedLinearImpl(int64_t in_features, int64_t out_features)
-        : in_(in_features), out_(out_features)
-    {
-        // Store quantized weights as uint8 (two 4-bit values per byte)
-        int64_t packed_size = (in_features * out_features + 1) / 2;
-        quantized_weight_ = register_buffer(
-            "quantized_weight", torch::zeros({packed_size}, torch::kUInt8));
-        // Quantization scale and zero-point per group (group_size=64)
-        int64_t n_groups = (in_features * out_features + 63) / 64;
-        scales_ = register_buffer(
-            "scales", torch::ones({n_groups}, torch::kBFloat16));
-        // Double quantization: quantize the scales themselves
-        meta_scales_ = register_buffer(
-            "meta_scales", torch::ones({(n_groups + 255) / 256}, torch::kFloat32));
-    }
-
-    // Dequantize on-the-fly during forward pass
-    torch::Tensor forward(torch::Tensor x) {
-        // In practice: dequantize 4-bit -> bf16, compute matmul
-        // Simplified: return a placeholder showing the concept
-        auto weight = dequantize();
-        return torch::matmul(x, weight.t());
-    }
-
-    torch::Tensor dequantize() {
-        // Reconstruct fp16 weights from 4-bit storage + scales
-        // (implementation omitted -- uses NF4 lookup table)
-        return torch::zeros({out_, in_}, torch::kBFloat16);
-    }
-
-    int64_t in_, out_;
-    torch::Tensor quantized_weight_, scales_, meta_scales_;
-};
-TORCH_MODULE(QuantizedLinear);
-
-// QLoRA: frozen 4-bit base + trainable LoRA adapters in full precision
-struct QLoRALinearImpl : torch::nn::Module {
-    QLoRALinearImpl(int64_t in_f, int64_t out_f,
-                    int64_t rank = 64, double alpha = 128.0)
-        : scale_(alpha / rank),
-          base_(register_module("base", QuantizedLinear(in_f, out_f))),
-          lora_A_(register_parameter("lora_A",
-              torch::randn({rank, in_f}) * 0.01)),
-          lora_B_(register_parameter("lora_B",
-              torch::zeros({out_f, rank})))
-    {
-        // Freeze all base parameters -- only LoRA trains
-        for (auto& p : base_->parameters())
-            p.set_requires_grad(false);
-        for (auto& b : base_->buffers())
-            b.set_requires_grad(false);
-    }
-
-    torch::Tensor forward(torch::Tensor x) {
-        auto base_out = base_->forward(x);             // 4-bit path
-        auto lora_out = torch::matmul(x, lora_A_.t()); // full precision
-        lora_out = torch::matmul(lora_out, lora_B_.t());
-        return base_out + scale_ * lora_out;
-    }
-
-    double scale_;
-    QuantizedLinear base_{nullptr};
-    torch::Tensor lora_A_, lora_B_;
-};
-TORCH_MODULE(QLoRALinear);
-
-// Training sketch
-void train_qlora() {
-    // 70B model in 4-bit fits ~35GB; LoRA adapters add ~200MB
-    QLoRALinear layer(4096, 4096, /*rank=*/64, /*alpha=*/128.0);
-
-    // Only lora_A and lora_B require gradients
-    std::vector<torch::Tensor> trainable;
-    for (auto& p : layer->parameters())
-        if (p.requires_grad()) trainable.push_back(p);
-
-    // Use AdamW with gradient checkpointing for memory savings
-    torch::optim::AdamW optimizer(trainable,
-        torch::optim::AdamWOptions(1e-4));
-
-    std::cout << "Trainable LoRA params: "
-              << trainable[0].numel() + trainable[1].numel() << "\\n";
-
-    // Save adapter only -- 4-bit base model is NOT saved
-    // torch::save({layer->lora_A_, layer->lora_B_},
-    //             "qlora-adapter.pt");
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "Data preparation: formatting examples into ChatML and Alpaca formats",
-      source: `#include <iostream>
-#include <fstream>
-#include <string>
-#include <vector>
-#include <stdexcept>
-#include <nlohmann/json.hpp>
-
-using json = nlohmann::json;
-
-struct RawExample {
-    std::string instruction;
-    std::string input;   // optional
-    std::string output;
-};
-
-// Format a single example in Alpaca/Stanford format
-//   ### Instruction: ...
-//   ### Input: ... (optional)
-//   ### Response: ...
-json format_alpaca(const std::string& instruction,
-                   const std::string& input_text,
-                   const std::string& output) {
-    std::string text;
-    text += "### Instruction:\\n" + instruction + "\\n\\n";
-    if (!input_text.empty())
-        text += "### Input:\\n" + input_text + "\\n\\n";
-    text += "### Response:\\n" + output;
-    return {{"text", text}};
-}
-
-// Format a single example in ChatML format
-//   <|im_start|>system\\n...\\n<|im_end|>
-//   <|im_start|>user\\n...\\n<|im_end|>
-//   <|im_start|>assistant\\n...\\n<|im_end|>
-json format_chatml(const std::string& system_prompt,
-                   const std::string& user_message,
-                   const std::string& assistant_response) {
-    std::string text;
-    text += "<|im_start|>system\\n" + system_prompt + "<|im_end|>\\n";
-    text += "<|im_start|>user\\n" + user_message + "<|im_end|>\\n";
-    text += "<|im_start|>assistant\\n" + assistant_response + "<|im_end|>";
-    return {{"text", text}};
-}
-
-// Convert raw examples to fine-tuning format and save as JSONL
-void prepare_dataset(
-    const std::vector<RawExample>& raw_data,
-    const std::string& output_path,
-    const std::string& fmt = "chatml",
-    const std::string& system_prompt = "You are a helpful assistant.")
-{
-    std::vector<json> formatted;
-    int skipped = 0;
-
-    for (const auto& ex : raw_data) {
-        // Validate required fields
-        if (ex.instruction.empty() || ex.output.empty()) {
-            ++skipped;
-            continue;
-        }
-
-        json entry;
-        if (fmt == "alpaca") {
-            entry = format_alpaca(ex.instruction, ex.input, ex.output);
-        } else if (fmt == "chatml") {
-            std::string user_msg = ex.instruction;
-            if (!ex.input.empty())
-                user_msg += "\\n\\nContext: " + ex.input;
-            entry = format_chatml(system_prompt, user_msg, ex.output);
-        } else {
-            throw std::invalid_argument(
-                "Unknown format: " + fmt + ". Use 'chatml' or 'alpaca'.");
-        }
-        formatted.push_back(entry);
-    }
-
-    // Write as JSONL
-    std::ofstream out(output_path);
-    for (const auto& entry : formatted)
-        out << entry.dump() << "\\n";
-
-    std::cout << "Wrote " << formatted.size()
-              << " examples to " << output_path << "\\n";
-    if (skipped)
-        std::cout << "Skipped " << skipped
-                  << " examples with missing fields\\n";
-}
-
-int main() {
-    std::vector<RawExample> raw_examples = {
-        {"Summarize the following article.",
-         "The Federal Reserve raised interest rates by 25 basis points...",
-         "The Fed increased rates by 0.25%, signaling continued inflation concerns."},
-        {"Write a C++ function to reverse a string.",
-         "",
-         "std::string reverse(std::string s) {\\n"
-         "    std::reverse(s.begin(), s.end());\\n"
-         "    return s;\\n}"},
-        {"Classify the sentiment of this review.",
-         "The product arrived damaged and customer service was unhelpful.",
-         "Negative"},
-    };
-
-    prepare_dataset(raw_examples, "train_chatml.jsonl", "chatml");
-    prepare_dataset(raw_examples, "train_alpaca.jsonl", "alpaca");
-    return 0;
-}`,
+# When NOT to reach for this: fine-tuning teaches FORM — tone, format, house
+# style, consistent structured output. It does not reliably teach FACTS. Facts
+# that change belong in retrieval, where they can be updated, permission-
+# filtered, and cited.`,
     },
   ],
 
@@ -624,6 +393,37 @@ int main() {
     },
   ],
 
+  animations: [
+    {
+      title: "LoRA training and serving",
+      steps: [
+        {
+          label: "Freeze the base",
+          detail: "All of the original model's weights are held fixed.",
+        },
+        {
+          label: "Inject adapters",
+          detail: "Small low-rank matrices are added alongside chosen weight matrices — often under 1% of parameters.",
+        },
+        {
+          label: "Train",
+          detail: "Only the adapters receive gradients, so memory and compute drop dramatically.",
+        },
+        {
+          label: "Result",
+          detail: "An adapter file of tens of megabytes, not a full model copy.",
+        },
+        {
+          label: "Serve",
+          detail: "One base model in memory, adapters swapped per task or per customer.",
+        },
+        {
+          label: "Roll back",
+          detail: "Unload the adapter. The base model was never modified.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Method", "Trainable Params", "Memory Required", "Quality", "Use Case"],
     rows: [

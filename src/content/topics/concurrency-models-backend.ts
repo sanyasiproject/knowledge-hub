@@ -258,6 +258,29 @@ get(Pid) ->
     "**Compare Java virtual threads vs platform threads:** Write a Java 21 program that creates 100,000 tasks each performing a `Thread.sleep(1000)` (simulating I/O). Run once with `Executors.newFixedThreadPool(200)` (platform threads) and once with `Executors.newVirtualThreadPerTaskExecutor()` (virtual threads). Compare *memory usage*, total completion time, and *thread count* (via `ManagementFactory.getThreadMXBean()`).",
     "**Implement cooperative scheduling visualization:** Build a Node.js program that simulates three tasks running on a single-threaded event loop. Each task logs when it starts, yields (via `setImmediate`), and resumes. Visualize the interleaving in the console output. Then add a CPU-bound task that does NOT yield and observe how it **starves** the other tasks. Document the impact and the fix using `worker_threads`.",
   ],
+  animations: [
+    {
+      title: "One slow request under three models",
+      steps: [
+        {
+          label: "Thread-per-request",
+          detail: "Request A blocks on a 2 s database call. Its thread sleeps; other threads keep serving. Cost: ~1 MB of stack per concurrent request.",
+        },
+        {
+          label: "Event loop",
+          detail: "Request A awaits the database; the loop immediately serves B, C, D. One thread, thousands of connections — until someone makes a blocking call.",
+        },
+        {
+          label: "Blocking call on the loop",
+          detail: "A 2 s synchronous computation stalls every in-flight request on that process. p99 spikes across all endpoints at once.",
+        },
+        {
+          label: "Worker offload",
+          detail: "The CPU work moves to a worker thread or a queue. The loop stays responsive; the slow work completes elsewhere.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "Node.js", "Java (Loom)", "Go", "Erlang/BEAM"],
     rows: [
@@ -297,6 +320,11 @@ get(Pid) ->
       q: "What is the actor model, and why is Erlang's implementation considered particularly robust?",
       a: "The actor model treats actors as the primitive unit of computation. Each actor has a mailbox, processes messages one at a time, and communicates only via asynchronous message passing — there is no shared mutable state. Erlang's BEAM VM is purpose-built for this: processes are preemptively scheduled (no single process can starve others), each process has its own garbage collector (no stop-the-world GC pauses), and OTP's supervision trees provide automatic fault recovery. The 'let it crash' philosophy means processes are expected to fail, and supervisors handle restart logic, leading to systems with 99.9999999% uptime (nine nines, as in the AXD301 ATM switch).",
     },
+  ],
+  followUps: [
+    "Which model would you choose for 50,000 idle WebSocket connections, and why?",
+    "What breaks when you move from one process to four?",
+    "How do you pick a thread pool size, and why isn't bigger better?",
   ],
   mcqs: [
     {

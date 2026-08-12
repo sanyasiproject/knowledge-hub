@@ -525,6 +525,12 @@ int main() {
       a: "An oracle property compares the output of your implementation against a known-correct reference (the oracle) for all generated inputs. For example, testing an optimized sorting algorithm against a simple insertion sort, or testing a compiled query against the same query interpreted. It is applicable whenever a simpler, trusted implementation exists -- even if it is too slow for production, it can serve as a test oracle. The oracle can also be a previous version of the same code or a specification-derived implementation.",
     },
   ],
+  followUps: [
+    "How do you choose a property that's actually worth asserting?",
+    "What is shrinking, and why does it matter more than the generation?",
+    "Give an example where property-based testing found something example-based testing would never have.",
+    "How do you keep a property-based test deterministic enough to debug?",
+  ],
   mcqs: [
     {
       q: "What is the primary purpose of shrinking in property-based testing?",

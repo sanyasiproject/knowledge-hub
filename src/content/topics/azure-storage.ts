@@ -45,6 +45,10 @@ export const azureStorage: TopicContent = {
       a: "Performance depends on the disk tier and size. For Premium SSD, IOPS and throughput scale with disk size (e.g., P30 = 5,000 IOPS, P80 = 20,000 IOPS). The VM size also imposes an IOPS cap — the effective performance is the minimum of the disk limit and the VM limit. Disk bursting (credit-based for smaller disks, on-demand for larger) allows temporary performance spikes. Ultra Disks decouple IOPS and throughput from disk size — you independently provision capacity, IOPS (up to 160,000), and throughput (up to 4,000 MB/s). Host caching (ReadOnly or ReadWrite) on Premium SSD further improves read performance by using the VM's local SSD as cache.",
     },
   ],
+  followUps: [
+    "Which tier for backups you might never read, and what's the retrieval cost?",
+    "How does Blob storage differ from S3 in ways that matter to your code?",
+  ],
   mcqs: [
     {
       q: "What is the minimum retention period for the Azure Blob Storage Archive tier?",
@@ -107,6 +111,12 @@ export const azureStorage: TopicContent = {
     {
       front: "What is disk bursting in Azure Managed Disks?",
       back: "A capability that allows Standard SSD and Premium SSD disks to temporarily exceed their provisioned IOPS and throughput limits. Credit-based bursting accumulates burst credits during low usage; on-demand bursting is available for larger disks.",
+    },
+  ],
+  resources: [
+    {
+      label: "Microsoft Learn — Azure Storage documentation",
+      kind: "docs",
     },
   ],
   glossary: [
@@ -345,6 +355,33 @@ az network private-endpoint dns-zone-group create \\
     B -->|"Access triggers recall"| A
     A -->|"Snapshot created"| E["Snapshot"]
     E -->|"90 days since creation"| D`,
+    },
+  ],
+  animations: [
+    {
+      title: "Choosing a blob access tier",
+      steps: [
+        {
+          label: "Hot",
+          detail: "Highest storage cost, lowest access cost. For data read frequently.",
+        },
+        {
+          label: "Cool",
+          detail: "Cheaper storage, higher access cost, 30-day minimum. For monthly-ish access.",
+        },
+        {
+          label: "Cold",
+          detail: "Cheaper still, 90-day minimum. For rarely-read data you still need quickly.",
+        },
+        {
+          label: "Archive",
+          detail: "Cheapest storage, but data is offline — rehydration takes hours.",
+        },
+        {
+          label: "The trap",
+          detail: "Reading archive data often costs more than hot storage would have. Tier on actual access patterns, not on age alone.",
+        },
+      ],
     },
   ],
   comparison: {

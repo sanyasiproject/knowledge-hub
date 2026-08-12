@@ -54,6 +54,11 @@ CQRS adds architectural complexity and is not appropriate for simple CRUD applic
       a: "Yes. CQRS and event sourcing are complementary but independent. Without event sourcing, the write side uses a traditional database. Changes are propagated to read models via: application-level domain events published to a message broker, change data capture (CDC) from the write database, or an outbox pattern. The read models are still separate, denormalized projections updated from these change events. This is simpler than full event sourcing and still provides the scaling and optimization benefits.",
     },
   ],
+  followUps: [
+    "Does CQRS require event sourcing? Does event sourcing require CQRS?",
+    "How does the user experience the lag between write and read models?",
+    "When is CQRS clearly over-engineering?",
+  ],
   mcqs: [
     {
       q: "In CQRS, what should a command return?",
@@ -660,6 +665,37 @@ int main() {
     },
   ],
 
+  animations: [
+    {
+      title: "Splitting the write and read models",
+      steps: [
+        {
+          label: "Single model",
+          detail: "One `Order` entity serves both a complex checkout write path and a dashboard that joins six tables.",
+        },
+        {
+          label: "The strain",
+          detail: "Normalising for correct writes makes reads slow; denormalising for fast reads makes writes fragile.",
+        },
+        {
+          label: "Split the models",
+          detail: "The write side accepts commands and enforces invariants. The read side is a separate, denormalised projection shaped for the queries.",
+        },
+        {
+          label: "Propagate",
+          detail: "The write side publishes events; a projector updates the read model.",
+        },
+        {
+          label: "Lag appears",
+          detail: "The user submits a change and the dashboard briefly shows the old value — the read model is eventually consistent.",
+        },
+        {
+          label: "Handle it in the UI",
+          detail: "Show the optimistic result, or read the user's own recent writes from the write side. Pretending the lag doesn't exist is what makes CQRS feel broken.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",
@@ -744,6 +780,16 @@ int main() {
     "**Key Implementation Details**: Projection handlers must be **idempotent** (same event processed twice produces same result). Read models are *disposable and rebuildable*. The **outbox relay** must handle crashes gracefully — use `last-processed-offset` tracking. Monitor *projection lag* and *dead-letter queues* in production.",
   ],
 
+  resources: [
+    {
+      label: "CQRS — Martin Fowler",
+      kind: "article",
+    },
+    {
+      label: "CQRS Documents — Greg Young",
+      kind: "article",
+    },
+  ],
   glossary: [
     {
       term: "CQRS",

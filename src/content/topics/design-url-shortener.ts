@@ -32,6 +32,11 @@ export const designUrlShortener: TopicContent = {
       a: "Use an async pipeline. On each redirect, the app server publishes a lightweight click event (shortKey, timestamp, IP, user-agent, referrer) to Kafka. The redirect returns immediately without waiting for the event to be processed. A separate analytics consumer reads from Kafka, enriches events (geo-lookup from IP, device parsing from user-agent), and writes aggregated data to a data warehouse or time-series database. Users query analytics through a separate API that reads from the warehouse. This decouples the latency-critical redirect from the data-intensive analytics processing.",
     },
   ],
+  followUps: [
+    "How do you generate codes without a central counter becoming a bottleneck?",
+    "Why does the 301 vs 302 choice change your analytics story?",
+    "How do you handle custom aliases and collisions?",
+  ],
   mcqs: [
     {
       q: "How many unique URLs can a 7-character base62 key represent?",
@@ -417,6 +422,37 @@ async function resolveURL(shortKey, dbLookup) {
     KAFKA --> DW`,
     },
   ],
+  animations: [
+    {
+      title: "Create and redirect",
+      steps: [
+        {
+          label: "POST /shorten",
+          detail: "Long URL in. Validate it, then obtain a unique id.",
+        },
+        {
+          label: "Generate a code",
+          detail: "A distributed counter encoded base62 — 7 characters gives ~3.5 trillion codes and no collisions.",
+        },
+        {
+          label: "Store",
+          detail: "code → long URL. A tiny row; a key-value store or an indexed table both work.",
+        },
+        {
+          label: "GET /{code}",
+          detail: "Look up in cache first. Access follows a power law, so the hit rate is very high.",
+        },
+        {
+          label: "Redirect",
+          detail: "302 if you need per-click analytics; 301 if you don't and want browsers to stop asking.",
+        },
+        {
+          label: "Analytics",
+          detail: "Publish a click event to a queue. Never write to the database on the redirect path.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",
@@ -491,6 +527,16 @@ async function resolveURL(shortKey, dbLookup) {
     "The **KGS pattern** is the preferred key generation approach in interviews. It *eliminates collision checking at write time*, works seamlessly in distributed environments via batch allocation, and tolerates server failures gracefully. Mention the `unused_keys` / `used_keys` table split and the atomic batch claim operation.",
     "For the **analytics pipeline**, always describe an *asynchronous design*: redirect returns immediately, click event is published to **Kafka**, consumed by a separate service, and aggregated into a **data warehouse**. This *decouples latency-critical redirects from data-intensive analytics*. Never block the redirect on analytics writes.",
     "**Common follow-up topics** to prepare: custom aliases (uniqueness check + reserved word blocklist), URL expiration (lazy + active deletion), rate limiting (token bucket per user/IP in Redis), abuse prevention (blocklist of malicious destinations, link preview/scanning), and **multi-region deployment** (key partitioning by region prefix, GeoDNS routing, async cross-region replication).",
+  ],
+  resources: [
+    {
+      label: "System Design Interview — Alex Xu",
+      kind: "book",
+    },
+    {
+      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      kind: "book",
+    },
   ],
   glossary: [
     {

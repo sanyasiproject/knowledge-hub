@@ -327,6 +327,11 @@ async function getViewCount(productId: string): Promise<number> {
       a: "Denormalization duplicates data across documents to avoid joins or multiple reads. For example, storing an author's name on every blog post instead of looking it up from a users collection. It is dangerous when the duplicated data changes frequently (you must update every copy), when consistency is critical (missed updates create stale data), or when storage cost matters (high-cardinality duplication). It is safe when duplicated data is immutable or near-immutable (country names, product SKUs) and reads vastly outnumber writes.",
     },
   ],
+  followUps: [
+    "Why do you design the access patterns before the schema here, and not after?",
+    "What happens when a new access pattern arrives that the key design doesn't serve?",
+    "How do you model a many-to-many relationship without joins?",
+  ],
   mcqs: [
     {
       q: "In MongoDB, which pattern is best for a one-to-squillions relationship like log entries per server?",

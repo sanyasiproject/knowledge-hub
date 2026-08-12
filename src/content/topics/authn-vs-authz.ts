@@ -268,6 +268,11 @@ async function loginWithMFA(email: string, password: string, totpCode?: string) 
       a: "Authentication should happen at the API gateway — one place to verify tokens, enforce MFA, and reject unauthenticated requests. The gateway passes the verified identity (user ID, roles) to downstream services via headers or a propagated token. Authorization should happen within each service, because each service understands its own resources and permission model. The gateway might do coarse-grained authz (is the user active?), but fine-grained checks (can this user edit THIS document?) must happen in the service that owns the resource.",
     },
   ],
+  followUps: [
+    "401 or 403 for an expired token, and why does the distinction matter to the client?",
+    "When should you return 404 instead of 403?",
+    "Where should the object-level ownership check live so it can't be forgotten?",
+  ],
   mcqs: [
     {
       q: "Which combination represents true multi-factor authentication?",

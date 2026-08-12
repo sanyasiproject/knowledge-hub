@@ -6,8 +6,6 @@ import { getContent } from "../content";
 import { renderSection } from "../components/content/sections";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { Card, LevelBadge, Pill, Placeholder } from "../components/ui/primitives";
-import { useTopicProgress } from "../hooks/useProgress";
-import { useBookmarks } from "../hooks/useBookmarks";
 import { NotFound } from "./NotFound";
 
 /* ------------------------------------------------------------------ */
@@ -161,11 +159,6 @@ export function TopicPage() {
 
   const content = getContent(topicSlug) ?? {};
 
-  // Progress tracking — auto-marks as read after 30s
-  const { read } = useTopicProgress(topicSlug);
-  const { isBookmarked, toggleBookmark } = useBookmarks();
-  const bookmarked = isBookmarked(topicSlug);
-
   const sectionIds = TOPIC_SECTIONS.map((s) => s.id);
   const activeId = useScrollSpy(sectionIds);
 
@@ -193,25 +186,9 @@ export function TopicPage() {
           <header className="mb-8 border-b border-slate-200 pb-6 dark:border-slate-800">
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <LevelBadge level={topic.level} />
-              {read && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                  <svg className="h-3 w-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 6l3 3 5-5" /></svg>
-                  Read
-                </span>
-              )}
               {topic.tags?.map((t) => (
                 <Pill key={t}>#{t}</Pill>
               ))}
-              <button
-                onClick={() => toggleBookmark(topicSlug)}
-                className={`ml-auto rounded-lg p-1.5 text-lg transition hover:bg-slate-100 dark:hover:bg-slate-800 ${
-                  bookmarked ? "text-amber-500" : "text-slate-400 hover:text-amber-400"
-                }`}
-                aria-label={bookmarked ? "Remove bookmark" : "Bookmark this topic"}
-                title={bookmarked ? "Remove bookmark" : "Bookmark this topic"}
-              >
-                {bookmarked ? "★" : "☆"}
-              </button>
             </div>
             <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white sm:text-4xl">{topic.title}</h1>
             <p className="mt-2 max-w-3xl text-lg text-slate-600 dark:text-slate-300">{topic.summary}</p>

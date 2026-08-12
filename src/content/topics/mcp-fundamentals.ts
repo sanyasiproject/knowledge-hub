@@ -92,6 +92,65 @@ export const mcpFundamentals: TopicContent = {
   code: [
     {
       language: "typescript",
+      caption: "A minimal MCP server over stdio",
+      source: `import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+
+const server = new McpServer({ name: "orders", version: "1.0.0" });
+
+// A TOOL is model-invoked: the model decides to call it.
+server.tool(
+  "get_order",
+  "Fetch one order by its exact ID (format ORD-12345). " +
+    "To search by customer email, use search_orders instead.",
+  { order_id: z.string().regex(/^ORD-\\d+$/) },
+  async ({ order_id }) => {
+    const order = await db.orders.findById(order_id);
+    return {
+      content: [{ type: "text", text: JSON.stringify(order ?? { error: "not found" }) }],
+    };
+  }
+);
+
+// A RESOURCE is application-controlled: the host decides what to put in context.
+server.resource(
+  "order-schema",
+  "schema://orders",
+  async () => ({
+    contents: [{ uri: "schema://orders", text: await fs.readFile("schema.sql", "utf8") }],
+  })
+);
+
+// A PROMPT is user-selected: it appears as a command in the host's UI.
+server.prompt(
+  "investigate-order",
+  { order_id: z.string() },
+  ({ order_id }) => ({
+    messages: [{
+      role: "user",
+      content: { type: "text", text: \`Investigate order \${order_id}: fetch it, check its payment and shipment status, and summarise anything unusual.\` },
+    }],
+  })
+);
+
+await server.connect(new StdioServerTransport());
+
+// The point of the protocol is collapsing N×M into N+M: before MCP, every
+// application that wanted a model to reach your issue tracker wrote its own
+// integration. Write one server and any MCP-compatible host can use it.
+//
+// The three primitives differ by WHO initiates:
+//   tool     -> the model
+//   resource -> the host application
+//   prompt   -> the user
+//
+// Security: the host mediates and should require consent before invoking a
+// tool. Installing a third-party server is like installing a plugin — it sees
+// whatever the host sends it, so provenance matters.`,
+    },
+    {
+      language: "typescript",
       caption: "Creating a simple MCP server with the TypeScript SDK",
       source: `import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -138,107 +197,6 @@ server.resource("config", "config://app", async (uri) => ({
 // Start the server with stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);`,
-    },
-    {
-      language: "cpp",
-      caption: "Creating a simple MCP server in C++ with stdio JSON-RPC transport",
-      source: `// A minimal MCP server in C++ that exposes file-reading tools.
-// Communicates via stdin/stdout using JSON-RPC 2.0 messages.
-
-#include <iostream>
-#include <fstream>
-#include <sstream>
-#include <string>
-#include <filesystem>
-#include <nlohmann/json.hpp>
-
-using json = nlohmann::json;
-namespace fs = std::filesystem;
-
-// Tool handlers
-json handle_read_file(const json& args) {
-    std::string path = args.at("path").get<std::string>();
-    std::ifstream file(path);
-    if (!file.is_open()) {
-        return {{"isError", true},
-                {"content", {{{"type", "text"}, {"text", "File not found: " + path}}}}};
-    }
-    std::ostringstream ss;
-    ss << file.rdbuf();
-    return {{"content", {{{"type", "text"}, {"text", ss.str()}}}}};
-}
-
-json handle_list_directory(const json& args) {
-    std::string path = args.at("path").get<std::string>();
-    json files = json::array();
-    for (const auto& entry : fs::directory_iterator(path)) {
-        files.push_back(entry.path().filename().string());
-    }
-    return {{"content", {{{"type", "text"}, {"text", files.dump(2)}}}}};
-}
-
-// Process a single JSON-RPC request
-json handle_request(const json& req) {
-    std::string method = req.at("method").get<std::string>();
-    json id = req.contains("id") ? req["id"] : json(nullptr);
-
-    if (method == "initialize") {
-        return {{"jsonrpc", "2.0"}, {"id", id}, {"result", {
-            {"protocolVersion", "2025-03-26"},
-            {"capabilities", {{"tools", {{"listChanged", false}}}}},
-            {"serverInfo", {{"name", "file-reader-cpp"}, {"version", "1.0.0"}}}
-        }}};
-    }
-
-    if (method == "tools/list") {
-        json tools = json::array({
-            {{"name", "read_file"},
-             {"description", "Read the contents of a file at the given path"},
-             {"inputSchema", {{"type", "object"},
-                              {"properties", {{"path", {{"type", "string"}}}}},
-                              {"required", {"path"}}}}},
-            {{"name", "list_directory"},
-             {"description", "List all files in a directory"},
-             {"inputSchema", {{"type", "object"},
-                              {"properties", {{"path", {{"type", "string"}}}}},
-                              {"required", {"path"}}}}}
-        });
-        return {{"jsonrpc", "2.0"}, {"id", id}, {"result", {{"tools", tools}}}};
-    }
-
-    if (method == "tools/call") {
-        std::string name = req["params"]["name"].get<std::string>();
-        json args = req["params"]["arguments"];
-        json result;
-        if (name == "read_file") result = handle_read_file(args);
-        else if (name == "list_directory") result = handle_list_directory(args);
-        else return {{"jsonrpc", "2.0"}, {"id", id},
-                     {"error", {{"code", -32601}, {"message", "Unknown tool: " + name}}}};
-        return {{"jsonrpc", "2.0"}, {"id", id}, {"result", result}};
-    }
-
-    // Notifications (no id) are silently acknowledged
-    if (id.is_null()) return json();
-
-    return {{"jsonrpc", "2.0"}, {"id", id},
-            {"error", {{"code", -32601}, {"message", "Method not found"}}}};
-}
-
-int main() {
-    // stdio transport: read JSON-RPC messages line by line from stdin
-    std::string line;
-    while (std::getline(std::cin, line)) {
-        if (line.empty()) continue;
-        json req = json::parse(line, nullptr, false);
-        if (req.is_discarded()) continue;
-
-        json response = handle_request(req);
-        if (!response.is_null()) {
-            std::cout << response.dump() << std::endl;
-        }
-    }
-    return 0;
-}`,
     },
     {
       language: "json",

@@ -588,6 +588,37 @@ private:
         "Load balancing across multiple data centers, typically via DNS or Anycast BGP routing. Directs users to the nearest healthy data center based on geography, latency, and health.",
     },
   ],
+  animations: [
+    {
+      title: "Health checking and failover",
+      steps: [
+        {
+          label: "Steady state",
+          detail: "Requests distributed across four healthy backends.",
+        },
+        {
+          label: "Backend 3 degrades",
+          detail: "It starts returning 500s.",
+        },
+        {
+          label: "Health check fails",
+          detail: "After N consecutive failures it is marked unhealthy.",
+        },
+        {
+          label: "Removed",
+          detail: "Traffic redistributes across the remaining three.",
+        },
+        {
+          label: "Recovery probe",
+          detail: "Health checks continue; after M consecutive successes it returns to the pool.",
+        },
+        {
+          label: "Why hysteresis",
+          detail: "Removing on one failure and restoring on one success makes a flapping backend oscillate, which is worse than either state.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Feature",

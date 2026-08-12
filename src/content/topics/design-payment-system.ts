@@ -570,6 +570,37 @@ public:
     { term: "Tokenization", definition: "Replacing sensitive card data with a non-sensitive equivalent (token) that can be stored and transmitted safely. The payment provider maintains the token-to-card mapping in their PCI-compliant vault." },
     { term: "Chargeback", definition: "A forced reversal of a payment initiated by the customer's bank. The merchant is debited the disputed amount plus a fee. High chargeback rates (>1%) trigger card network penalties." },
   ],
+  animations: [
+    {
+      title: "Charging once, provably",
+      steps: [
+        {
+          label: "Client requests payment",
+          detail: "Sends an idempotency key generated for this attempt.",
+        },
+        {
+          label: "Record intent",
+          detail: "A payment row is written as `pending` in the same transaction that stores the key.",
+        },
+        {
+          label: "Call the processor",
+          detail: "With the same idempotency key, so the processor also deduplicates.",
+        },
+        {
+          label: "Timeout",
+          detail: "The response is lost. Status is unknown — the most important case to handle.",
+        },
+        {
+          label: "Reconcile",
+          detail: "Never assume failure. Query the processor by the key, or wait for the webhook, and settle the row accordingly.",
+        },
+        {
+          label: "Ledger",
+          detail: "Record double-entry rows, append-only. Never mutate a financial record; correct it with a compensating entry.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "Direct Card Processing", "Payment Gateway (Stripe/Adyen)", "Bank Transfer (ACH/SEPA)", "Digital Wallet (PayPal/Apple Pay)"],
     rows: [

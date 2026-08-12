@@ -136,6 +136,11 @@ Short-lived certificates (90 days) encourage automation and limit the exposure w
       a: "Certificate pinning is most valuable for mobile apps and API clients communicating with known backends — it prevents MITM attacks even with a compromised CA. Risks include lockout if the pinned key is lost or rotated without updating the pin, which in mobile apps means shipping an app update. Best practices: pin the intermediate CA's public key (survives leaf renewal), always include a backup pin, have a key rotation plan, and set reasonable pin expiry. Avoid pinning in browsers (HPKP was deprecated due to lockout risks and abuse potential).",
     },
   ],
+  followUps: [
+    "What exactly does a certificate prove, and what does it not prove?",
+    "How does the chain of trust terminate, and what happens if a root is compromised?",
+    "How does revocation work, and why is it considered weak in practice?",
+  ],
   mcqs: [
     {
       q: "Why are root CA private keys kept offline in HSMs?",
@@ -209,6 +214,16 @@ Short-lived certificates (90 days) encourage automation and limit the exposure w
     {
       front: "What is HPKP and why was it deprecated?",
       back: "HTTP Public Key Pinning was a browser mechanism to pin certificate keys via HTTP headers. Deprecated because configuration mistakes caused permanent site lockout, and it could be abused by attackers who gained temporary control of headers.",
+    },
+  ],
+  resources: [
+    {
+      label: "Bulletproof TLS and PKI — Ivan Ristić",
+      kind: "book",
+    },
+    {
+      label: "Let's Encrypt documentation — how it works",
+      kind: "docs",
     },
   ],
   glossary: [
@@ -454,6 +469,37 @@ makeSecureRequest("api.example.com", "/v1/data")
     CA-->>Client: 8. Signed X.509 certificate + chain
 
     Note over Client,CA: Certificate valid for 90 days.<br/>Renew automatically before expiry.`,
+    },
+  ],
+  animations: [
+    {
+      title: "Verifying a certificate chain",
+      steps: [
+        {
+          label: "Server presents its chain",
+          detail: "Leaf certificate for the domain, plus any intermediates.",
+        },
+        {
+          label: "Check the leaf",
+          detail: "Does the hostname match? Is it within its validity dates? Is the key usage correct?",
+        },
+        {
+          label: "Walk up",
+          detail: "The leaf's signature is verified using the intermediate's public key.",
+        },
+        {
+          label: "Reach a root",
+          detail: "The intermediate is verified against a root certificate already in the client's trust store.",
+        },
+        {
+          label: "Trust established",
+          detail: "Trust flows down from a root the client already trusted — nothing in the chain was trusted on its own say-so.",
+        },
+        {
+          label: "Any break fails",
+          detail: "A wrong hostname, an expired certificate, or an unknown root aborts the connection before data flows.",
+        },
+      ],
     },
   ],
   comparison: {

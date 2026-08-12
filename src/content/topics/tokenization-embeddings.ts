@@ -78,6 +78,11 @@ Word embeddings (Word2Vec, GloVe) are static -- each word has one vector regardl
       a: "The token IDs will not correspond to the embeddings the model learned. A token ID that meant 'hello' in the correct tokenizer might map to a completely different subword in the wrong one. The model's output will be nonsensical. Always use the tokenizer that was paired with the model during training.",
     },
   ],
+  followUps: [
+    "Why do code and non-English text cost more tokens?",
+    "Can you compare embeddings from two different models?",
+    "Why isn't high cosine similarity the same as relevance?",
+  ],
   mcqs: [
     {
       q: "What does BPE start with before any merges?",
@@ -158,6 +163,16 @@ Word embeddings (Word2Vec, GloVe) are static -- each word has one vector regardl
       back: "256 to 4096 dimensions, balancing representational capacity against storage and compute costs.",
     },
   ],
+  resources: [
+    {
+      label: "Neural Machine Translation of Rare Words with Subword Units (BPE) — Sennrich et al., 2016",
+      kind: "paper",
+    },
+    {
+      label: "SentencePiece — Kudo & Richardson, 2018",
+      kind: "paper",
+    },
+  ],
   glossary: [
     {
       term: "BPE (Byte Pair Encoding)",
@@ -217,325 +232,91 @@ During **fine-tuning**, the geometry of the embedding space undergoes *targeted 
   ],
   code: [
     {
-      language: "cpp",
-      caption: "BPE tokenization from scratch -- training and encoding",
-      source: `#include <iostream>
-#include <string>
-#include <vector>
-#include <map>
-#include <algorithm>
-#include <sstream>
+      language: "typescript",
+      caption: "Byte-pair encoding — learning a vocabulary by merging frequent pairs",
+      source: `type Vocab = Map<string, number>;
 
-// === Simple BPE Tokenizer Implementation ===
+/**
+ * BPE starts from characters and repeatedly merges the most frequent adjacent
+ * pair. Common words end up as one token; rare ones stay split. That is why
+ * "the" costs one token and a surname costs four.
+ */
+export function trainBPE(corpus: string[], numMerges: number) {
+  // Each word as a list of symbols, with a marker for word-end.
+  let words = corpus.flatMap((line) => line.split(/\\s+/)).filter(Boolean)
+    .map((w) => [...w, "</w>"]);
 
-using Token = std::string;
-using Pair = std::pair<Token, Token>;
+  const merges: [string, string][] = [];
 
-struct BPETokenizer {
-    std::vector<Pair> merges;          // ordered merge rules
-    std::map<Token, int> vocab;        // token -> id
-
-    // Train BPE on a corpus: learn merge rules
-    void train(const std::vector<std::string>& corpus, int num_merges) {
-        // Initialize: split each word into characters
-        std::vector<std::vector<Token>> words;
-        std::map<int, int> word_freq;
-        for (size_t i = 0; i < corpus.size(); ++i) {
-            std::vector<Token> chars;
-            for (char c : corpus[i]) chars.push_back(std::string(1, c));
-            words.push_back(chars);
-            word_freq[i] = 1;
-        }
-
-        for (int step = 0; step < num_merges; ++step) {
-            // Count adjacent pairs across all words
-            std::map<Pair, int> pair_counts;
-            for (size_t w = 0; w < words.size(); ++w) {
-                for (size_t i = 0; i + 1 < words[w].size(); ++i) {
-                    pair_counts[{words[w][i], words[w][i+1]}] += word_freq[w];
-                }
-            }
-            if (pair_counts.empty()) break;
-
-            // Find most frequent pair
-            auto best = std::max_element(pair_counts.begin(), pair_counts.end(),
-                [](const auto& a, const auto& b) { return a.second < b.second; });
-            Pair top_pair = best->first;
-            Token merged = top_pair.first + top_pair.second;
-            merges.push_back(top_pair);
-
-            // Apply merge to all words
-            for (auto& word : words) {
-                for (size_t i = 0; i + 1 < word.size(); ) {
-                    if (word[i] == top_pair.first && word[i+1] == top_pair.second) {
-                        word[i] = merged;
-                        word.erase(word.begin() + i + 1);
-                    } else { ++i; }
-                }
-            }
-        }
-
-        // Build vocabulary
-        int id = 0;
-        for (int c = 0; c < 256; ++c) vocab[std::string(1, (char)c)] = id++;
-        for (const auto& [p1, p2] : merges) vocab[p1 + p2] = id++;
+  for (let step = 0; step < numMerges; step++) {
+    // Count adjacent pairs across the whole corpus.
+    const pairs = new Map<string, number>();
+    for (const symbols of words) {
+      for (let i = 0; i < symbols.length - 1; i++) {
+        const key = \`\${symbols[i]} \${symbols[i + 1]}\`;
+        pairs.set(key, (pairs.get(key) ?? 0) + 1);
+      }
     }
+    if (pairs.size === 0) break;
 
-    // Encode a string using learned merges
-    std::vector<int> encode(const std::string& text) const {
-        std::vector<Token> tokens;
-        for (char c : text) tokens.push_back(std::string(1, c));
+    const [best] = [...pairs.entries()].sort((a, b) => b[1] - a[1])[0];
+    const [left, right] = best.split(" ");
+    merges.push([left, right]);
 
-        // Apply merges in order
-        for (const auto& [p1, p2] : merges) {
-            for (size_t i = 0; i + 1 < tokens.size(); ) {
-                if (tokens[i] == p1 && tokens[i+1] == p2) {
-                    tokens[i] = p1 + p2;
-                    tokens.erase(tokens.begin() + i + 1);
-                } else { ++i; }
-            }
+    // Apply the merge everywhere.
+    words = words.map((symbols) => {
+      const out: string[] = [];
+      for (let i = 0; i < symbols.length; i++) {
+        if (symbols[i] === left && symbols[i + 1] === right) {
+          out.push(left + right);
+          i++;
+        } else {
+          out.push(symbols[i]);
         }
+      }
+      return out;
+    });
+  }
 
-        std::vector<int> ids;
-        for (const auto& t : tokens) {
-            auto it = vocab.find(t);
-            ids.push_back(it != vocab.end() ? it->second : -1);
-        }
-        return ids;
-    }
-};
+  return merges;
+}
 
-int main() {
-    BPETokenizer bpe;
-    std::vector<std::string> corpus = {"low", "lower", "lowest", "low", "low"};
-    bpe.train(corpus, 10);
-
-    std::cout << "Merge rules learned:\\n";
-    for (const auto& [a, b] : bpe.merges)
-        std::cout << "  " << a << " + " << b << " -> " << a + b << "\\n";
-
-    auto ids = bpe.encode("lowest");
-    std::cout << "\\nToken IDs for 'lowest': ";
-    for (int id : ids) std::cout << id << " ";
-    std::cout << "\\nVocab size: " << bpe.vocab.size() << "\\n";
-}`,
+// The consequence that shows up in production:
+// English prose is ~1.3 tokens per word. Code, JSON, and non-Latin scripts are
+// far worse, because their character sequences were rarer in training and so
+// never got merged into single tokens. Estimating tokens as words can be off
+// by 2-3x — always count with the real tokeniser before sizing a context.
+//
+// It also explains why models cannot count letters: the model never sees
+// characters, only these merged symbols.`,
     },
     {
-      language: "cpp",
-      caption: "Computing and comparing embeddings with cosine similarity",
-      source: `#include <iostream>
-#include <vector>
-#include <string>
-#include <cmath>
-#include <iomanip>
-#include <numeric>
+      language: "typescript",
+      caption: "Similarity is not relevance — why reranking exists",
+      source: `const query = "What is the refund window for enterprise customers?";
 
-// === Embedding Operations (vectors assumed pre-computed) ===
+const passages = [
+  "Enterprise refunds are handled by the account management team.",   // topical, no answer
+  "Customers on any plan may request a refund within 30 days.",       // answers it
+  "Our enterprise tier includes priority support and an SLA.",        // topical, no answer
+];
 
-using Embedding = std::vector<double>;
+const [q, ...docs] = await embedAll([query, ...passages]);
+const scored = passages.map((text, i) => ({ text, score: cosine(q, docs[i]) }));
 
-double dot_product(const Embedding& a, const Embedding& b) {
-    return std::inner_product(a.begin(), a.end(), b.begin(), 0.0);
-}
+// Typical outcome: the two "enterprise" passages score HIGHER than the one
+// that actually contains the answer, because they share more vocabulary with
+// the question. Embeddings measure topical closeness, not whether the passage
+// answers anything.
+scored.sort((a, b) => b.score - a.score);
 
-double norm(const Embedding& v) {
-    return std::sqrt(dot_product(v, v));
-}
-
-double cosine_similarity(const Embedding& a, const Embedding& b) {
-    double d = dot_product(a, b);
-    double na = norm(a), nb = norm(b);
-    return (na > 0 && nb > 0) ? d / (na * nb) : 0.0;
-}
-
-void normalize(Embedding& v) {
-    double n = norm(v);
-    if (n > 0) for (auto& x : v) x /= n;
-}
-
-int main() {
-    // Simulated 4-dimensional embeddings (in practice, 384-3072 dims)
-    // Pre-computed from a sentence embedding model
-    std::vector<std::string> sentences = {
-        "The cat sat on the mat.",
-        "A kitten was resting on the rug.",
-        "Stock prices surged after the earnings report.",
-        "The feline lounged on the carpet.",
-    };
-
-    std::vector<Embedding> embeddings = {
-        {0.8, 0.5, 0.1, 0.2},   // cat/mat
-        {0.75, 0.55, 0.05, 0.25}, // kitten/rug
-        {0.1, 0.05, 0.9, 0.8},  // stocks
-        {0.78, 0.52, 0.08, 0.22}, // feline/carpet
-    };
-
-    // L2-normalize embeddings
-    for (auto& emb : embeddings) normalize(emb);
-
-    std::cout << "Embedding dimension: " << embeddings[0].size() << "\\n";
-    std::cout << "Vector norm (should be ~1.0): "
-              << std::fixed << std::setprecision(4) << norm(embeddings[0]) << "\\n";
-
-    // Compute pairwise cosine similarity matrix
-    // For normalized vectors, cosine similarity = dot product
-    size_t n = sentences.size();
-    std::vector<std::vector<double>> sim_matrix(n, std::vector<double>(n));
-
-    for (size_t i = 0; i < n; ++i)
-        for (size_t j = 0; j < n; ++j)
-            sim_matrix[i][j] = dot_product(embeddings[i], embeddings[j]);
-
-    std::cout << "\\nPairwise Cosine Similarity Matrix:\\n";
-    for (size_t i = 0; i < n; ++i)
-        std::cout << "  [" << i << "] " << sentences[i].substr(0, 50) << "\\n";
-
-    std::cout << "\\n";
-    for (size_t i = 0; i < n; ++i) {
-        std::cout << "  [" << i << "]";
-        for (size_t j = 0; j < n; ++j)
-            std::cout << " " << std::setprecision(3) << sim_matrix[i][j];
-        std::cout << "\\n";
-    }
-
-    // Find the most similar pair (excluding self-similarity)
-    double best_score = -2.0;
-    size_t best_i = 0, best_j = 0;
-    for (size_t i = 0; i < n; ++i)
-        for (size_t j = i + 1; j < n; ++j)
-            if (sim_matrix[i][j] > best_score) {
-                best_score = sim_matrix[i][j];
-                best_i = i; best_j = j;
-            }
-
-    std::cout << "\\nMost similar pair (score=" << best_score << "):\\n";
-    std::cout << "  [" << best_i << "] " << sentences[best_i] << "\\n";
-    std::cout << "  [" << best_j << "] " << sentences[best_j] << "\\n";
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "Dimensionality reduction with PCA for embedding visualization",
-      source: `#include <iostream>
-#include <vector>
-#include <string>
-#include <cmath>
-#include <numeric>
-#include <iomanip>
-#include <algorithm>
-#include <fstream>
-
-// === Simple PCA-based Dimensionality Reduction for Embeddings ===
-
-using Embedding = std::vector<double>;
-
-Embedding subtract(const Embedding& a, const Embedding& b) {
-    Embedding r(a.size());
-    for (size_t i = 0; i < a.size(); ++i) r[i] = a[i] - b[i];
-    return r;
-}
-
-double dot(const Embedding& a, const Embedding& b) {
-    return std::inner_product(a.begin(), a.end(), b.begin(), 0.0);
-}
-
-Embedding mean_embedding(const std::vector<Embedding>& embeddings) {
-    size_t dim = embeddings[0].size();
-    Embedding m(dim, 0.0);
-    for (const auto& e : embeddings)
-        for (size_t i = 0; i < dim; ++i) m[i] += e[i];
-    for (auto& v : m) v /= embeddings.size();
-    return m;
-}
-
-// Power iteration to find the dominant eigenvector of the covariance matrix
-Embedding power_iteration(const std::vector<Embedding>& centered, int iters = 100) {
-    size_t dim = centered[0].size();
-    Embedding v(dim, 1.0);  // initial guess
-    for (int it = 0; it < iters; ++it) {
-        Embedding new_v(dim, 0.0);
-        for (const auto& x : centered) {
-            double d = dot(x, v);
-            for (size_t i = 0; i < dim; ++i) new_v[i] += d * x[i];
-        }
-        double norm = std::sqrt(dot(new_v, new_v));
-        for (auto& val : new_v) val /= norm;
-        v = new_v;
-    }
-    return v;
-}
-
-struct Point2D { double x, y; std::string label; int index; };
-
-int main() {
-    // Simulated 8-dimensional embeddings for sentences in 3 clusters
-    std::vector<std::string> labels = {
-        "animal","animal","animal","animal",
-        "tech","tech","tech","tech",
-        "food","food","food","food"
-    };
-
-    // Pre-computed embeddings (simulated, 8-dim)
-    std::vector<Embedding> embeddings = {
-        {0.9, 0.8, 0.1, 0.2, 0.05, 0.1, 0.7, 0.6},  // animal cluster
-        {0.85, 0.75, 0.15, 0.18, 0.08, 0.12, 0.72, 0.58},
-        {0.88, 0.82, 0.12, 0.22, 0.06, 0.09, 0.68, 0.62},
-        {0.92, 0.78, 0.11, 0.19, 0.07, 0.11, 0.71, 0.59},
-        {0.1, 0.15, 0.9, 0.85, 0.8, 0.75, 0.1, 0.12},  // tech cluster
-        {0.12, 0.18, 0.88, 0.82, 0.78, 0.72, 0.08, 0.15},
-        {0.08, 0.12, 0.92, 0.88, 0.82, 0.78, 0.12, 0.1},
-        {0.11, 0.14, 0.87, 0.84, 0.79, 0.74, 0.09, 0.13},
-        {0.4, 0.45, 0.3, 0.35, 0.2, 0.9, 0.85, 0.1},  // food cluster
-        {0.42, 0.48, 0.28, 0.32, 0.22, 0.88, 0.82, 0.12},
-        {0.38, 0.43, 0.32, 0.38, 0.18, 0.92, 0.87, 0.08},
-        {0.41, 0.46, 0.29, 0.34, 0.21, 0.89, 0.84, 0.11},
-    };
-
-    std::cout << "Original embedding dimensions: " << embeddings[0].size() << "\\n";
-
-    // Center the data
-    Embedding m = mean_embedding(embeddings);
-    std::vector<Embedding> centered;
-    for (const auto& e : embeddings) centered.push_back(subtract(e, m));
-
-    // Find first principal component via power iteration
-    Embedding pc1 = power_iteration(centered);
-
-    // Deflate and find second principal component
-    std::vector<Embedding> deflated = centered;
-    for (auto& x : deflated) {
-        double proj = dot(x, pc1);
-        for (size_t i = 0; i < x.size(); ++i) x[i] -= proj * pc1[i];
-    }
-    Embedding pc2 = power_iteration(deflated);
-
-    // Project embeddings onto 2D
-    std::vector<Point2D> points;
-    for (size_t i = 0; i < embeddings.size(); ++i) {
-        points.push_back({
-            dot(centered[i], pc1),
-            dot(centered[i], pc2),
-            labels[i],
-            static_cast<int>(i)
-        });
-    }
-
-    // Output projected 2D coordinates by cluster
-    std::cout << "\\nPCA Projection to 2D:\\n";
-    for (const auto& p : points) {
-        std::cout << "  [" << std::setw(2) << p.index << "] "
-                  << std::setw(8) << p.label << " -> ("
-                  << std::fixed << std::setprecision(3) << p.x << ", "
-                  << p.y << ")\\n";
-    }
-
-    // Write to CSV for external plotting
-    std::ofstream csv("embedding_pca.csv");
-    csv << "index,label,x,y\\n";
-    for (const auto& p : points)
-        csv << p.index << "," << p.label << "," << p.x << "," << p.y << "\\n";
-    std::cout << "\\nProjection saved to embedding_pca.csv\\n";
-}`,
+// This is exactly the gap a cross-encoder reranker closes: it reads the
+// question and the passage TOGETHER and judges relevance, rather than
+// comparing two independently-produced vectors.
+//
+// It is also why a fixed similarity threshold is a bad relevance filter — the
+// right cutoff varies per query and per corpus, and a confident-looking 0.85
+// can be a non-answer.`,
     },
   ],
   diagrams: [
@@ -618,6 +399,37 @@ sentence-transformers"]
     DV2 --> CS
     DV3 --> CS
     CS --> Top["Top-K Results"]`,
+    },
+  ],
+  animations: [
+    {
+      title: "Why the model can't count letters",
+      steps: [
+        {
+          label: "The question",
+          detail: "'How many r's in strawberry?'",
+        },
+        {
+          label: "Tokenisation",
+          detail: "The word splits into a few sub-word tokens — perhaps 'str', 'aw', 'berry'.",
+        },
+        {
+          label: "What the model sees",
+          detail: "Three integer ids. Not a sequence of characters.",
+        },
+        {
+          label: "The task",
+          detail: "Counting a character requires access to characters the model was never given.",
+        },
+        {
+          label: "Why it still often answers",
+          detail: "It has seen text discussing spelling, so it pattern-matches — which is why it's confidently wrong rather than silent.",
+        },
+        {
+          label: "The fix",
+          detail: "Give it a tool. This is a computation problem, not a knowledge problem.",
+        },
+      ],
     },
   ],
   comparison: {

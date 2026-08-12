@@ -58,6 +58,11 @@ In practice, most systems are tunable. Cassandra's consistency levels (ONE, QUOR
       a: "CAP says during a Partition, choose between Availability and Consistency. PACELC adds: Else (no partition), choose between Latency and Consistency. This captures the reality that even in normal operation, stronger consistency requires more coordination, which increases latency. For example, DynamoDB: during partition, it chooses A over C (AP system); in normal operation, it offers both eventually consistent reads (low latency) and strongly consistent reads (higher latency, choose C over L).",
     },
   ],
+  followUps: [
+    "How would you implement read-your-own-writes without making the whole system strongly consistent?",
+    "Which of your data genuinely needs linearizability?",
+    "Where does eventual consistency become visible and confusing to a user?",
+  ],
   mcqs: [
     {
       q: "Which consistency model guarantees that causally related operations are seen in order, but allows concurrent operations to be observed in any order?",
@@ -124,6 +129,16 @@ In practice, most systems are tunable. Cassandra's consistency levels (ONE, QUOR
     {
       front: "How does Cassandra handle the consistency spectrum?",
       back: "Tunable per-query via consistency levels: ONE (eventual, fast), QUORUM (strong if R+W > N), ALL (strongest but lowest availability). Each query independently trades consistency for latency/availability.",
+    },
+  ],
+  resources: [
+    {
+      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      kind: "book",
+    },
+    {
+      label: "Jepsen — consistency model analyses",
+      kind: "article",
     },
   ],
   glossary: [
@@ -508,6 +523,37 @@ int main() {
     AP --> Cassandra["Cassandra - tunable consistency"]
     AP --> DynamoDB["DynamoDB - eventual default"]
     AP --> CouchDB["CouchDB - multi-master MVCC"]`,
+    },
+  ],
+  animations: [
+    {
+      title: "The same read under three models",
+      steps: [
+        {
+          label: "Write lands on the primary",
+          detail: "User updates their display name.",
+        },
+        {
+          label: "Strong consistency",
+          detail: "Every subsequent read anywhere returns the new name — at the cost of coordination latency.",
+        },
+        {
+          label: "Eventual consistency",
+          detail: "A read hitting a lagging replica returns the old name. It converges in milliseconds to seconds.",
+        },
+        {
+          label: "Why it matters here",
+          detail: "The user sees their own profile still showing the old name and thinks the save failed.",
+        },
+        {
+          label: "Read-your-own-writes",
+          detail: "Route that user's reads to the primary for a short window. Everyone else can read replicas.",
+        },
+        {
+          label: "The lesson",
+          detail: "Choose per data type, not per system. Most data tolerates lag; a small subset does not.",
+        },
+      ],
     },
   ],
   comparison: {

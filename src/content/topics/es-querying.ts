@@ -431,6 +431,11 @@ DELETE /_pit
     }
   ],
 
+  followUps: [
+    "When do you use `filter` context instead of `query` context, and what does it buy?",
+    "Why is deep pagination expensive here, and what replaces it?",
+    "How does a `bool` query combine must, should, and must_not scoring?",
+  ],
   mcqs: [
     {
       q: "Which bool clause should you use for a date range filter that should NOT affect relevance scoring?",

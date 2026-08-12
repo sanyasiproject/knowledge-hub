@@ -32,6 +32,11 @@ export const mlBasics: TopicContent = {
       a: "Training learns model parameters from data: it's compute-intensive (hours to weeks on GPUs), done offline, and tolerant of high latency. Inference uses the trained model to make predictions: it must be fast (milliseconds), runs in production, and must handle concurrent requests. This matters for system design because: training requires GPU clusters, large storage for datasets, and experiment tracking. Inference requires model serving infrastructure (TensorFlow Serving, TorchServe), low-latency networking, model caching, batching for throughput, and A/B testing for model rollout. The training pipeline and inference pipeline have very different scaling, latency, and reliability requirements.",
     },
   ],
+  followUps: [
+    "When is machine learning the wrong tool for this problem?",
+    "What baseline would you build first, and why does it matter?",
+    "How do learning curves tell you whether you have a bias or a variance problem?",
+  ],
   mcqs: [
     {
       q: "A model achieves 98% accuracy on training data but only 60% on test data. This is an example of:",
@@ -112,6 +117,16 @@ export const mlBasics: TopicContent = {
       back: "If 99% of samples are negative, always predicting negative gives 99% accuracy but catches zero positives. Use precision (correct positive predictions / total positive predictions), recall (correct positive predictions / total actual positives), and F1 (harmonic mean) instead.",
     },
   ],
+  resources: [
+    {
+      label: "An Introduction to Statistical Learning — James, Witten, Hastie & Tibshirani",
+      kind: "book",
+    },
+    {
+      label: "Hands-On Machine Learning — Aurélien Géron",
+      kind: "book",
+    },
+  ],
   glossary: [
     {
       term: "Supervised Learning",
@@ -164,322 +179,90 @@ Ensemble methods combine multiple *weak learners* to produce a **strong learner*
   ],
   code: [
     {
-      language: "cpp",
-      caption: "ML training pipeline in C++: data split, scaling, training, and evaluation",
-      source: `// Demonstrates a simple ML training pipeline in C++:
-// data generation, train/test split, feature scaling, and evaluation metrics.
+      language: "python",
+      caption: "Gradient descent from scratch — what fitting actually does",
+      source: `import numpy as np
 
-#include <iostream>
-#include <vector>
-#include <random>
-#include <algorithm>
-#include <numeric>
-#include <cmath>
-#include <iomanip>
+def fit_linear(X: np.ndarray, y: np.ndarray, lr: float = 0.01, epochs: int = 1000):
+    """Least-squares linear regression by gradient descent.
 
-struct Dataset {
-    std::vector<std::vector<double>> X;
-    std::vector<int> y;
-};
+    X: (n_samples, n_features), y: (n_samples,)
+    """
+    n, d = X.shape
+    w = np.zeros(d)
+    b = 0.0
+    history = []
 
-// Split dataset into train/test by ratio
-std::pair<Dataset, Dataset> train_test_split(
-    const Dataset& data, double test_ratio, unsigned seed = 42)
-{
-    size_t n = data.X.size();
-    std::vector<size_t> indices(n);
-    std::iota(indices.begin(), indices.end(), 0);
-    std::mt19937 rng(seed);
-    std::shuffle(indices.begin(), indices.end(), rng);
+    for epoch in range(epochs):
+        y_hat = X @ w + b
+        error = y_hat - y
 
-    size_t test_size = static_cast<size_t>(n * test_ratio);
-    Dataset train, test;
-    for (size_t i = 0; i < n; ++i) {
-        if (i < n - test_size) {
-            train.X.push_back(data.X[indices[i]]);
-            train.y.push_back(data.y[indices[i]]);
-        } else {
-            test.X.push_back(data.X[indices[i]]);
-            test.y.push_back(data.y[indices[i]]);
-        }
-    }
-    return {train, test};
-}
+        # Mean squared error. Squaring punishes large misses disproportionately,
+        # which is a modelling choice, not a neutral default.
+        loss = np.mean(error ** 2)
+        history.append(loss)
 
-// StandardScaler: compute mean/std from train, apply to both
-struct Scaler {
-    std::vector<double> mean, stddev;
+        # Gradients: the direction of steepest increase, so we step against them.
+        grad_w = (2 / n) * (X.T @ error)
+        grad_b = (2 / n) * np.sum(error)
 
-    void fit(const std::vector<std::vector<double>>& X) {
-        size_t n = X.size(), d = X[0].size();
-        mean.assign(d, 0.0);
-        stddev.assign(d, 0.0);
-        for (const auto& row : X)
-            for (size_t j = 0; j < d; ++j) mean[j] += row[j];
-        for (auto& m : mean) m /= n;
-        for (const auto& row : X)
-            for (size_t j = 0; j < d; ++j)
-                stddev[j] += (row[j] - mean[j]) * (row[j] - mean[j]);
-        for (auto& s : stddev) s = std::sqrt(s / n);
-    }
+        w -= lr * grad_w
+        b -= lr * grad_b
 
-    void transform(std::vector<std::vector<double>>& X) const {
-        for (auto& row : X)
-            for (size_t j = 0; j < row.size(); ++j)
-                row[j] = (stddev[j] > 1e-8) ? (row[j] - mean[j]) / stddev[j] : 0.0;
-    }
-};
+        # Divergence shows up as a growing loss — almost always the learning
+        # rate being too high, not a bug in the gradients.
+        if epoch > 0 and loss > history[-2] * 10:
+            raise RuntimeError(f"diverged at epoch {epoch}; lower the learning rate")
 
-// Simple nearest-centroid classifier for demonstration
-struct NearestCentroidClassifier {
-    std::vector<std::vector<double>> centroids;  // one per class
-    int num_classes = 2;
+    return w, b, history
 
-    void fit(const std::vector<std::vector<double>>& X, const std::vector<int>& y) {
-        size_t d = X[0].size();
-        centroids.assign(num_classes, std::vector<double>(d, 0.0));
-        std::vector<int> counts(num_classes, 0);
-        for (size_t i = 0; i < X.size(); ++i) {
-            for (size_t j = 0; j < d; ++j)
-                centroids[y[i]][j] += X[i][j];
-            counts[y[i]]++;
-        }
-        for (int c = 0; c < num_classes; ++c)
-            for (size_t j = 0; j < d; ++j)
-                centroids[c][j] /= counts[c];
-    }
 
-    int predict_one(const std::vector<double>& x) const {
-        int best = 0;
-        double best_dist = 1e18;
-        for (int c = 0; c < num_classes; ++c) {
-            double dist = 0;
-            for (size_t j = 0; j < x.size(); ++j)
-                dist += (x[j] - centroids[c][j]) * (x[j] - centroids[c][j]);
-            if (dist < best_dist) { best_dist = dist; best = c; }
-        }
-        return best;
-    }
-
-    std::vector<int> predict(const std::vector<std::vector<double>>& X) const {
-        std::vector<int> preds;
-        preds.reserve(X.size());
-        for (const auto& x : X) preds.push_back(predict_one(x));
-        return preds;
-    }
-};
-
-double accuracy(const std::vector<int>& y_true, const std::vector<int>& y_pred) {
-    int correct = 0;
-    for (size_t i = 0; i < y_true.size(); ++i)
-        if (y_true[i] == y_pred[i]) ++correct;
-    return static_cast<double>(correct) / y_true.size();
-}
-
-int main() {
-    // Generate synthetic data: y = 1 if X[0] + X[1] > 0
-    std::mt19937 rng(42);
-    std::normal_distribution<double> dist(0.0, 1.0);
-    Dataset data;
-    for (int i = 0; i < 1000; ++i) {
-        std::vector<double> row(10);
-        for (auto& v : row) v = dist(rng);
-        data.X.push_back(row);
-        data.y.push_back((row[0] + row[1] > 0) ? 1 : 0);
-    }
-
-    // Split 80/20
-    auto [train, test] = train_test_split(data, 0.2);
-
-    // Scale features
-    Scaler scaler;
-    scaler.fit(train.X);
-    scaler.transform(train.X);
-    scaler.transform(test.X);
-
-    // Train and evaluate
-    NearestCentroidClassifier model;
-    model.fit(train.X, train.y);
-    auto y_pred = model.predict(test.X);
-
-    std::cout << "Accuracy: " << std::fixed << std::setprecision(4)
-              << accuracy(test.y, y_pred) << std::endl;
-
-    return 0;
-}`,
+# Feature scaling is not optional here. With one feature in [0, 1] and another
+# in [0, 100000], a single learning rate cannot suit both: it either diverges on
+# the large feature or crawls on the small one. Tree models are invariant to
+# monotonic transforms and genuinely do not need this; gradient-based ones do.
+#
+# Fit the scaler on the TRAINING FOLD ONLY. Fitting it on the full dataset
+# before splitting leaks test statistics into training — the most common cause
+# of offline results that collapse in production.`,
     },
     {
-      language: "cpp",
-      caption: "Gradient descent from scratch for linear regression in C++",
-      source: `// Linear regression via gradient descent in C++.
-// Minimizes MSE loss: L = (1/n) * sum((y - Xw - b)^2)
+      language: "python",
+      caption: "The baseline-first workflow — and where leakage hides",
+      source: `from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.dummy import DummyClassifier
+from sklearn.metrics import classification_report
 
-#include <iostream>
-#include <vector>
-#include <cmath>
-#include <random>
-#include <iomanip>
-#include <numeric>
+# 1. SPLIT FIRST. Everything after this point must only ever see X_train.
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, stratify=y, random_state=42   # stratify: keep class balance
+)
 
-using Vec = std::vector<double>;
-using Mat = std::vector<Vec>;
+# 2. Establish the bar before doing anything clever. A surprising amount of
+#    "improvement" disappears against a well-chosen baseline.
+dummy = DummyClassifier(strategy="most_frequent").fit(X_train, y_train)
+print("baseline:", classification_report(y_test, dummy.predict(X_test)))
 
-struct GDResult {
-    Vec weights;
-    double bias;
-    Vec losses;
-};
+# 3. Put preprocessing INSIDE the pipeline. This is the structural fix for
+#    leakage: the scaler is fitted per training fold during cross-validation,
+#    never on data the model is about to be evaluated on.
+model = Pipeline([
+    ("scale", StandardScaler()),
+    ("clf", LogisticRegression(max_iter=1000, class_weight="balanced")),
+]).fit(X_train, y_train)
 
-GDResult gradient_descent(const Mat& X, const Vec& y,
-                           double learning_rate = 0.01, int epochs = 1000)
-{
-    int n_samples = static_cast<int>(X.size());
-    int n_features = static_cast<int>(X[0].size());
+print("model:", classification_report(y_test, model.predict(X_test)))
 
-    Vec weights(n_features, 0.0);
-    double bias = 0.0;
-    Vec losses;
-    losses.reserve(epochs);
-
-    for (int epoch = 0; epoch < epochs; ++epoch) {
-        // Forward pass: y_pred = X @ weights + bias
-        Vec y_pred(n_samples);
-        for (int i = 0; i < n_samples; ++i) {
-            double dot = bias;
-            for (int j = 0; j < n_features; ++j)
-                dot += X[i][j] * weights[j];
-            y_pred[i] = dot;
-        }
-
-        // Compute MSE loss
-        double loss = 0.0;
-        for (int i = 0; i < n_samples; ++i) {
-            double diff = y[i] - y_pred[i];
-            loss += diff * diff;
-        }
-        loss /= n_samples;
-        losses.push_back(loss);
-
-        // Compute gradients: dw = -(2/n) * X^T @ (y - y_pred)
-        Vec dw(n_features, 0.0);
-        double db = 0.0;
-        for (int i = 0; i < n_samples; ++i) {
-            double residual = y[i] - y_pred[i];
-            for (int j = 0; j < n_features; ++j)
-                dw[j] -= (2.0 / n_samples) * X[i][j] * residual;
-            db -= (2.0 / n_samples) * residual;
-        }
-
-        // Update parameters
-        for (int j = 0; j < n_features; ++j)
-            weights[j] -= learning_rate * dw[j];
-        bias -= learning_rate * db;
-
-        if (epoch % 100 == 0) {
-            std::cout << "Epoch " << epoch << ", Loss: "
-                      << std::fixed << std::setprecision(6) << loss << std::endl;
-        }
-    }
-
-    return {weights, bias, losses};
-}
-
-int main() {
-    // Generate synthetic data: y = 2*x0 - 1.5*x1 + 0.5*x2 + 3.0 + noise
-    std::mt19937 rng(42);
-    std::normal_distribution<double> normal(0.0, 1.0);
-    std::normal_distribution<double> noise(0.0, 0.1);
-
-    int n = 200, d = 3;
-    Vec true_weights = {2.0, -1.5, 0.5};
-    double true_bias = 3.0;
-
-    Mat X(n, Vec(d));
-    Vec y(n);
-    for (int i = 0; i < n; ++i) {
-        double target = true_bias;
-        for (int j = 0; j < d; ++j) {
-            X[i][j] = normal(rng);
-            target += true_weights[j] * X[i][j];
-        }
-        y[i] = target + noise(rng);
-    }
-
-    // Train
-    auto result = gradient_descent(X, y, 0.01, 1000);
-
-    // Report
-    std::cout << "\\nLearned weights: [";
-    for (size_t j = 0; j < result.weights.size(); ++j)
-        std::cout << (j ? ", " : "") << std::setprecision(4) << result.weights[j];
-    std::cout << "]" << std::endl;
-    std::cout << "Learned bias: " << std::setprecision(4) << result.bias << std::endl;
-    std::cout << "True weights: [2.0, -1.5, 0.5], True bias: 3.0" << std::endl;
-
-    return 0;
-}`,
-    },
-    {
-      language: "cpp",
-      caption: "Simple linear model inference in C++: loading weights and computing prediction",
-      source: `#include <iostream>
-#include <vector>
-#include <fstream>
-#include <sstream>
-#include <numeric>
-
-struct LinearModel {
-    std::vector<double> weights;
-    double bias;
-
-    // Load weights from a simple text file
-    // Format: bias on first line, then one weight per line
-    bool loadWeights(const std::string& filepath) {
-        std::ifstream file(filepath);
-        if (!file.is_open()) {
-            std::cerr << "Error: cannot open " << filepath << std::endl;
-            return false;
-        }
-        file >> bias;
-        double w;
-        while (file >> w) {
-            weights.push_back(w);
-        }
-        return !weights.empty();
-    }
-
-    // Compute prediction: y = dot(weights, features) + bias
-    double predict(const std::vector<double>& features) const {
-        if (features.size() != weights.size()) {
-            throw std::runtime_error("Feature size mismatch");
-        }
-        double result = bias;
-        for (size_t i = 0; i < weights.size(); ++i) {
-            result += weights[i] * features[i];
-        }
-        return result;
-    }
-};
-
-int main() {
-    LinearModel model;
-
-    // Load trained weights from file
-    if (!model.loadWeights("model_weights.txt")) {
-        std::cerr << "Failed to load model weights." << std::endl;
-        return 1;
-    }
-
-    std::cout << "Model loaded: " << model.weights.size()
-              << " features, bias = " << model.bias << std::endl;
-
-    // Example inference with input features
-    std::vector<double> input = {1.5, -0.3, 2.1, 0.7};
-    double prediction = model.predict(input);
-    std::cout << "Prediction: " << prediction << std::endl;
-
-    return 0;
-}`,
+# The test set is used ONCE, at the end. Every time you look at it and then
+# change something, you have leaked information into your reported number and
+# it becomes optimistic.
+#
+# Python rather than TypeScript here deliberately: scikit-learn, numpy, and the
+# whole training ecosystem are Python. Writing a training loop in TypeScript
+# would be as misleading as writing it in C++.`,
     },
   ],
   diagrams: [
@@ -540,6 +323,37 @@ int main() {
       Bagging reduces variance
       Boosting reduces bias
       Stacking combines both`,
+    },
+  ],
+  animations: [
+    {
+      title: "Diagnosing with a learning curve",
+      steps: [
+        {
+          label: "Plot both",
+          detail: "Training error and validation error against training set size or epochs.",
+        },
+        {
+          label: "Both high, close together",
+          detail: "High bias — the model is too simple. More data will not help.",
+        },
+        {
+          label: "Fix bias",
+          detail: "More expressive model, better features, less regularisation.",
+        },
+        {
+          label: "Training low, validation high",
+          detail: "High variance — it's memorising. The gap is the overfit.",
+        },
+        {
+          label: "Fix variance",
+          detail: "More data, regularisation, dropout, early stopping, or a simpler model.",
+        },
+        {
+          label: "Why plot first",
+          detail: "Without it, you're changing hyperparameters at random and calling the result tuning.",
+        },
+      ],
     },
   ],
   comparison: {

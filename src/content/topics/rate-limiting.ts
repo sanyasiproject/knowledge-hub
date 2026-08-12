@@ -281,6 +281,12 @@ Shared State)]
       a: "Check: (1) Are multiple clients sharing the same API key or IP? NAT or proxies can make many clients appear as one. (2) Is the client retrying failed requests aggressively, creating a retry storm? (3) Is the rate limit key correct — per-user vs per-IP vs per-API-key? (4) Check the server logs for the actual request timestamps and counts. (5) Ensure the client is reading and respecting the Retry-After header.",
     },
   ],
+  followUps: [
+    "Why does a fixed window allow a burst of double the limit?",
+    "Token bucket or sliding window — which matches what you actually want from an API?",
+    "What happens if the Redis holding your counters is unavailable — fail open or closed?",
+    "Why do in-process counters break the moment you run more than one instance?",
+  ],
   mcqs: [
     {
       q: "What problem does the sliding window counter solve compared to fixed window?",

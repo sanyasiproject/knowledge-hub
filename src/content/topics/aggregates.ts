@@ -195,6 +195,11 @@ class Order {
       a: "Use domain events. When one aggregate changes state, it records a domain event. After the transaction commits, the event is published and other aggregates react in their own transactions. Use the Outbox pattern for reliable publishing: store events in a table within the same transaction, then publish asynchronously. This maintains eventual consistency between aggregates without coupling them in a single transaction, which would create contention and scalability issues.",
     },
   ],
+  followUps: [
+    "Why should a transaction touch only one aggregate?",
+    "How do you enforce an invariant that spans two aggregates?",
+    "What does the aggregate root actually protect?",
+  ],
   mcqs: [
     {
       q: "Which statement about aggregate roots is correct?",
@@ -273,6 +278,16 @@ class Order {
     {
       front: "Domain events pattern for aggregate coordination",
       back: "Aggregate performs state change and records event internally. After transaction commits, events are published. Other aggregates react in their own transactions. Consumers must be idempotent (at-least-once delivery).",
+    },
+  ],
+  resources: [
+    {
+      label: "Effective Aggregate Design — Vaughn Vernon",
+      kind: "article",
+    },
+    {
+      label: "Domain-Driven Design — Eric Evans",
+      kind: "book",
     },
   ],
   glossary: [
@@ -739,6 +754,37 @@ private:
     Bounded Context
       Ubiquitous Language
       Context Map`,
+    },
+  ],
+  animations: [
+    {
+      title: "Why the transaction boundary is the aggregate",
+      steps: [
+        {
+          label: "Order and its lines",
+          detail: "The invariant 'total equals the sum of the lines' must always hold.",
+        },
+        {
+          label: "Order is the root",
+          detail: "All changes to lines go through the Order, which enforces the invariant in one place.",
+        },
+        {
+          label: "One transaction, one aggregate",
+          detail: "Modify one aggregate per transaction, so its invariants are consistent atomically.",
+        },
+        {
+          label: "Crossing aggregates",
+          detail: "Order needs to affect Inventory — a different aggregate with its own invariants.",
+        },
+        {
+          label: "Don't span them",
+          detail: "A transaction covering both creates lock contention and couples their lifecycles.",
+        },
+        {
+          label: "Use an event",
+          detail: "Order publishes `OrderPlaced`; Inventory reacts. Consistency between aggregates is eventual, by design.",
+        },
+      ],
     },
   ],
   comparison: {

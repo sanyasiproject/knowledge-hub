@@ -783,6 +783,37 @@ public:
         "A stability pattern that monitors failures to a downstream service and, after exceeding a threshold, short-circuits requests to a fallback instead of overwhelming the failing service.",
     },
   ],
+  animations: [
+    {
+      title: "Checkout without overselling",
+      steps: [
+        {
+          label: "Cart",
+          detail: "Held per user; not a reservation — stock is not held while browsing.",
+        },
+        {
+          label: "Checkout begins",
+          detail: "Availability re-checked, because it may have changed since the item was added.",
+        },
+        {
+          label: "Reserve atomically",
+          detail: "`UPDATE inventory SET qty = qty - 1 WHERE sku = ? AND qty > 0`, with the affected row count checked.",
+        },
+        {
+          label: "Payment",
+          detail: "Charged with an idempotency key, so a retry can't double-charge.",
+        },
+        {
+          label: "Payment fails",
+          detail: "Compensate by releasing the reservation — a saga, since payment and inventory are separate services.",
+        },
+        {
+          label: "Order placed",
+          detail: "An `OrderPlaced` event fans out to fulfilment, email, and analytics.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",

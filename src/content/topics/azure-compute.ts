@@ -46,6 +46,11 @@ export const azureCompute: TopicContent = {
       a: "Deployment slots are live instances of your app with their own hostnames. You deploy the new version to a staging slot, run smoke tests against it, then perform a swap operation. The swap works by changing the routing rules at the load balancer level — the staging slot's content becomes the production slot and vice versa. Because both slots are already warmed up and running, there is no cold-start delay during the swap. Slot-specific settings (like connection strings marked as 'slot setting') stay with the slot and do not swap, allowing different configurations per environment. If the new version has issues, you can swap back instantly to restore the previous version.",
     },
   ],
+  followUps: [
+    "How do Azure's compute options map onto the AWS ones you know?",
+    "When is AKS the wrong answer for a small team?",
+    "What does the App Service abstraction hide, and when does that hurt?",
+  ],
   mcqs: [
     {
       q: "Which Azure VM series is optimized for memory-intensive workloads such as in-memory databases?",
@@ -376,6 +381,33 @@ kubectl get nodes -o wide`,
   Q3 -->|"No"| SV["**Single VM**<br/>with Premium SSD<br/>99.9% SLA"]`,
     },
   ],
+  animations: [
+    {
+      title: "Choosing an Azure compute service",
+      steps: [
+        {
+          label: "Need full OS control?",
+          detail: "Virtual Machines. You patch and scale it.",
+        },
+        {
+          label: "Just a web app?",
+          detail: "App Service. Managed runtime, easy deploy slots — at the cost of runtime version control.",
+        },
+        {
+          label: "Event-driven, short-lived?",
+          detail: "Functions. Scales to zero; cold starts and execution limits apply.",
+        },
+        {
+          label: "Containers, simple?",
+          detail: "Container Apps — managed, scales to zero, no cluster to run.",
+        },
+        {
+          label: "Containers, full control?",
+          detail: "AKS. Maximum flexibility, and a real operational commitment.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Feature",
@@ -464,6 +496,16 @@ kubectl get nodes -o wide`,
     "**Azure Functions** hosting plans differ in key ways: *Consumption* scales from zero and bills per-execution but has **cold starts**; *Premium* maintains **pre-warmed instances** with VNET support; *Dedicated* runs on an App Service Plan with **always-on** capability. **Durable Functions** enable stateful orchestrations with automatic checkpointing.",
     "**AKS** manages the *control plane* for free (API server, etcd, scheduler); you pay only for **worker node VMs**. Use **Azure CNI** for direct pod-to-VNET communication (more IP consumption) or **Azure CNI Overlay** for IP-efficient pod networking. **Workload Identity** replaces AAD Pod Identity for secure, secretless access to Azure resources.",
     "**Cost optimization** levers: *Reserved Instances* (up to **72% savings**), *Savings Plans* (flexible across VM families), *Spot VMs* (up to **90% discount**, evictable), *Azure Hybrid Benefit* (reuse on-prem licenses for **40% savings**), and *auto-shutdown schedules* for dev/test workloads.",
+  ],
+  resources: [
+    {
+      label: "Microsoft Learn — Azure compute services",
+      kind: "docs",
+    },
+    {
+      label: "Azure Architecture Center",
+      kind: "docs",
+    },
   ],
   glossary: [
     {

@@ -450,6 +450,11 @@ PUT /articles
     }
   ],
 
+  followUps: [
+    "Why is an inverted index fast for search but useless for range queries on a value?",
+    "What does the analyser do at index time versus query time, and what breaks if they differ?",
+    "How does TF-IDF differ from BM25, and why did BM25 win?",
+  ],
   mcqs: [
     {
       q: "In the Elasticsearch analysis pipeline, what is the correct order of processing?",

@@ -424,6 +424,11 @@ object SupervisedAccount {
     }
   ],
 
+  followUps: [
+    "How does the actor model avoid locks entirely?",
+    "What happens when an actor's mailbox grows faster than it can process — where's the backpressure?",
+    "Why is supervision (let it crash) a design choice rather than an admission of defeat?",
+  ],
   mcqs: [
     {
       q: "In the Actor Model, what are the three fundamental actions an actor can take upon receiving a message?",

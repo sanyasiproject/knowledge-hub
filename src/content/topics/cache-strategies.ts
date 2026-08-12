@@ -370,6 +370,11 @@ async function warmCache(): Promise<void> {
       a: "Three strategies: (1) Replay recent access logs to identify hot keys, load their values from the DB in batches, and populate the cache before routing traffic. (2) If the cache supports snapshots (Redis RDB/AOF), restore from a recent snapshot. (3) Use a canary deployment where a single instance takes traffic first, warming the shared cache before the full fleet rolls out. The key is to do this before the old cache is evicted and the new instances start serving requests, otherwise you get a thundering herd on the database.",
     },
   ],
+  followUps: [
+    "Why is cache-aside the default rather than write-through?",
+    "What data would you be willing to lose to use write-behind?",
+    "How does the eviction policy interact with your access pattern — when does LRU lose to LFU?",
+  ],
   mcqs: [
     {
       q: "In cache-aside, when does the cache get populated?",

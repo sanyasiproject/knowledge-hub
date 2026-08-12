@@ -46,6 +46,10 @@ export const gcpData: TopicContent = {
       a: "Native mode is the full-featured Firestore with real-time listeners (clients subscribe to document changes), offline support (local cache with automatic sync), mobile/web SDKs, composite indexes, and strong consistency for all reads. Datastore mode is backward-compatible with the legacy Cloud Datastore API — it supports the Datastore client libraries and data model but does not provide real-time listeners or offline caching. A project can only use one mode and cannot switch after creation. Choose Native mode for new applications, especially mobile/web apps needing real-time sync. Choose Datastore mode for existing Datastore applications or server-side-only workloads that use the Datastore API.",
     },
   ],
+  followUps: [
+    "When is BigQuery the wrong tool despite being fast?",
+    "How does its pricing model change how you write queries?",
+  ],
   mcqs: [
     {
       q: "Which BigQuery feature allows training ML models directly using SQL?",
@@ -135,6 +139,12 @@ export const gcpData: TopicContent = {
     {
       front: "What is Cloud SQL Auth Proxy?",
       back: "A client-side proxy that establishes encrypted, IAM-authenticated connections to Cloud SQL instances, eliminating the need for SSL certificate management, IP allowlisting, or authorized networks configuration.",
+    },
+  ],
+  resources: [
+    {
+      label: "Google Cloud documentation — BigQuery",
+      kind: "docs",
     },
   ],
   glossary: [
@@ -358,6 +368,33 @@ cbt ls
         TT[Atomic Clock and GPS]
     end
     Spanserver --> TrueTime`,
+    },
+  ],
+  animations: [
+    {
+      title: "How a BigQuery query is billed",
+      steps: [
+        {
+          label: "Query submitted",
+          detail: "`SELECT * FROM events WHERE date = '2026-01-01'`.",
+        },
+        {
+          label: "Columnar storage",
+          detail: "BigQuery reads only the columns referenced — but `SELECT *` references all of them.",
+        },
+        {
+          label: "Bytes scanned",
+          detail: "On-demand pricing charges for bytes scanned, not rows returned or time taken.",
+        },
+        {
+          label: "Partition pruning",
+          detail: "If the table is partitioned by date, only that partition is scanned — often a 100× reduction.",
+        },
+        {
+          label: "The lesson",
+          detail: "Naming columns explicitly and partitioning correctly are cost decisions, not style preferences.",
+        },
+      ],
     },
   ],
   comparison: {

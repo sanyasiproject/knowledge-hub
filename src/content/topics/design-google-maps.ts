@@ -545,6 +545,37 @@ public:
         "A map tile format that encodes geographic features (roads, buildings, labels) as geometric primitives in a binary format (typically Protocol Buffers) rather than pre-rendered pixel images. The client renders the geometry using GPU shaders, enabling smooth zoom, rotation, and style changes.",
     },
   ],
+  animations: [
+    {
+      title: "Computing a route",
+      steps: [
+        {
+          label: "Road network as a graph",
+          detail: "Intersections are nodes, road segments are edges weighted by traversal time.",
+        },
+        {
+          label: "Naive Dijkstra",
+          detail: "Correct, but exploring a continent-scale graph per request is far too slow.",
+        },
+        {
+          label: "Precompute hierarchy",
+          detail: "Contraction hierarchies precompute shortcuts so long routes skip local detail.",
+        },
+        {
+          label: "Bidirectional search",
+          detail: "Search from both ends and meet in the middle, cutting explored nodes dramatically.",
+        },
+        {
+          label: "Live traffic",
+          detail: "Edge weights updated from aggregated device speeds, so the same query returns different routes by time of day.",
+        },
+        {
+          label: "Serve",
+          detail: "Tiles and routes are cached aggressively at the edge; the hard computation happens rarely.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Aspect",

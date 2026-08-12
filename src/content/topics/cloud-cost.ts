@@ -43,6 +43,11 @@ export const cloudCost: TopicContent = {
     }
   ],
 
+  followUps: [
+    "Where does spend usually hide — what's the first thing you'd check?",
+    "Why is egress the line item that surprises people?",
+    "When do reserved or committed-use discounts become a trap?",
+  ],
   mcqs: [
     {
       q: "Which AWS purchasing option provides the largest discount for compute?",

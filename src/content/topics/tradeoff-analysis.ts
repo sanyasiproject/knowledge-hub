@@ -140,6 +140,37 @@ Use Kafka for all inter-service event communication.
 **In interviews:**
 Always articulate trade-offs explicitly. Saying "I chose X because of Y, accepting the trade-off of Z" demonstrates mature engineering judgment. There are no universally correct answers in system design -- only context-appropriate ones.`,
   ],
+  animations: [
+    {
+      title: "Making a trade-off explicit",
+      steps: [
+        {
+          label: "Name the decision",
+          detail: "Cache user profiles in Redis, or read from Postgres every time.",
+        },
+        {
+          label: "What you gain",
+          detail: "p95 read latency from 40 ms to 1 ms; database load down ~90%.",
+        },
+        {
+          label: "What you give up",
+          detail: "Up to 60 s of staleness; a new dependency; a stampede risk on hot keys.",
+        },
+        {
+          label: "Under what condition would you choose differently",
+          detail: "If profiles were edited constantly, or if stale permissions were a security issue.",
+        },
+        {
+          label: "Mitigations",
+          detail: "Explicit invalidation on write, jittered TTLs, single-flight repopulation.",
+        },
+        {
+          label: "Write it down",
+          detail: "An undocumented trade-off gets re-litigated every six months by someone who doesn't know it was a choice.",
+        },
+      ],
+    },
+  ],
   interviewQA: [
     {
       q: "Explain the CAP theorem and how it applies to real system design.",
@@ -157,6 +188,11 @@ Always articulate trade-offs explicitly. Saying "I chose X because of Y, accepti
       q: "How do you communicate trade-offs in a system design interview?",
       a: "State the decision, the reasoning, and what you are explicitly giving up. For example: 'I am choosing DynamoDB over PostgreSQL because the access pattern is key-value lookups at 50K QPS with no cross-entity queries. The trade-off is giving up flexible querying and ACID transactions across items, which is acceptable because our domain does not require them.' This shows you understand both sides and made a deliberate, context-appropriate choice rather than defaulting to a technology you are comfortable with.",
     },
+  ],
+  followUps: [
+    "Name a trade-off you made here and the condition under which you'd choose differently.",
+    "How do you present a trade-off to a non-technical stakeholder?",
+    "What's the cost of deferring a decision versus making it now?",
   ],
   mcqs: [
     {
@@ -645,6 +681,16 @@ no joins needed| Denorm["OLAP and analytics"]`,
     "Operational complexity is a hidden but critical trade-off. A system the team cannot operate reliably is worse than a simpler but maintainable one.",
     "Use Architecture Decision Records (ADRs) to document decisions, rationale, trade-offs, and revisit conditions. Institutional memory prevents repeated debates.",
     "In interviews, never present a choice as universally correct. Always state what you are giving up and why that is acceptable in the given context.",
+  ],
+  resources: [
+    {
+      label: "Software Architecture: The Hard Parts — Ford, Richards et al.",
+      kind: "book",
+    },
+    {
+      label: "Fundamentals of Software Architecture — Richards & Ford",
+      kind: "book",
+    },
   ],
   glossary: [
     {

@@ -315,6 +315,11 @@ await pipeline(source, processor, sink);`,
       a: "Common strategies: (1) Bounded buffer with drop policy -- when full, drop the oldest item, the newest item, or reject the incoming item. (2) Unbounded buffer -- absorbs all excess but risks OOM. (3) Windowed buffer -- aggregate items by time window or count before emitting. (4) Spillover to disk -- write excess to a file or embedded database when memory buffer fills. (5) Sample/throttle -- periodically emit only the latest item, discarding intermediates. The choice depends on whether data loss is acceptable and latency requirements.",
     },
   ],
+  followUps: [
+    "Why is an unbounded buffer worse than rejecting work?",
+    "Why is oldest-message age a better alert than queue depth?",
+    "When is load shedding the right answer rather than scaling up?",
+  ],
   mcqs: [
     {
       q: "In Kafka, what is the primary mechanism for consumer backpressure?",

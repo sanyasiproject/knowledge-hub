@@ -64,6 +64,11 @@ This decoupling enables independent deployment, scaling, and evolution of servic
       a: "Notification events (minimal data, just IDs) keep events small and reduce schema coupling — consumers call back to the producer for details. Downsides: increases query load on the producer, introduces runtime coupling (consumer cannot process if producer is down), and adds latency. Event-carried state transfer includes all data consumers need, eliminating callbacks and enabling full temporal decoupling. Downsides: larger messages, stronger schema coupling (consumers depend on the event structure), and potential data staleness if the source changes between events.",
     },
   ],
+  followUps: [
+    "How do you debug a flow that spans five services and a broker?",
+    "What's the difference between an event and a command, and why does it matter to coupling?",
+    "How do you evolve an event schema when producers and consumers deploy independently?",
+  ],
   mcqs: [
     {
       q: "Which naming convention correctly distinguishes events from commands?",
@@ -130,6 +135,20 @@ This decoupling enables independent deployment, scaling, and evolution of servic
     {
       front: "What is the hybrid choreography-orchestration approach?",
       back: "Use choreography across bounded contexts (services react to each other's events independently) and orchestration within a bounded context (a coordinator manages multi-step workflows involving internal services).",
+    },
+  ],
+  resources: [
+    {
+      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      kind: "book",
+    },
+    {
+      label: "Building Event-Driven Microservices — Adam Bellemare",
+      kind: "book",
+    },
+    {
+      label: "martinfowler.com — architecture and pattern articles",
+      kind: "article",
     },
   ],
   glossary: [
@@ -404,6 +423,37 @@ setupChoreography().catch(console.error);`,
     I --> J["Alert on-call team"]
     F --> K["Publish downstream events"]`,
       caption: "At-least-once delivery requires idempotent consumers; failed events after retry exhaustion go to DLQ for manual inspection.",
+    },
+  ],
+  animations: [
+    {
+      title: "An order event fanning out",
+      steps: [
+        {
+          label: "Order service commits",
+          detail: "Writes the order row and, in the same transaction, an outbox row describing `OrderPlaced`.",
+        },
+        {
+          label: "Relay publishes",
+          detail: "A separate process reads the outbox and publishes to the broker — so the event can't be lost or fabricated.",
+        },
+        {
+          label: "Three consumers react",
+          detail: "Inventory reserves stock, email sends a confirmation, analytics records the event. None knows the others exist.",
+        },
+        {
+          label: "Adding a fourth",
+          detail: "A fraud service subscribes. No change to the order service — that's the coupling benefit.",
+        },
+        {
+          label: "A consumer is down",
+          detail: "Its messages queue up and are processed when it recovers. The order still completed.",
+        },
+        {
+          label: "The cost",
+          detail: "Debugging now spans four services and a broker, so correlation ids and tracing stop being optional.",
+        },
+      ],
     },
   ],
   comparison: {

@@ -98,6 +98,37 @@ Implications for system design:
 - **Batching**: group multiple items into a single operation (batch writes, bulk API calls).
 - **Backpressure**: reject or queue excess requests rather than letting the system collapse.`,
   ],
+  animations: [
+    {
+      title: "Why latency explodes near full utilisation",
+      steps: [
+        {
+          label: "50% utilisation",
+          detail: "Requests rarely queue. Latency ≈ service time.",
+        },
+        {
+          label: "70%",
+          detail: "Queueing begins. Latency roughly doubles.",
+        },
+        {
+          label: "90%",
+          detail: "Queue wait dominates. Latency is around 10× service time.",
+        },
+        {
+          label: "95%+",
+          detail: "Small bursts cause queues that don't drain. Latency becomes unbounded.",
+        },
+        {
+          label: "Why",
+          detail: "Arrivals are random, not evenly spaced — so a system at 95% average utilisation is regularly momentarily over capacity.",
+        },
+        {
+          label: "The implication",
+          detail: "Headroom isn't waste. Running at 60–70% is what buys predictable latency.",
+        },
+      ],
+    },
+  ],
   interviewQA: [
     {
       q: "Why is average latency a misleading metric, and what should you use instead?",
@@ -115,6 +146,11 @@ Implications for system design:
       q: "What are hedged requests and when should you use them?",
       a: "Hedged requests send the same request to multiple replicas simultaneously and use the first response, canceling the rest. This dramatically reduces tail latency because the probability of all replicas being slow is much lower than one being slow. Use them for read-only, idempotent operations where tail latency matters (e.g., serving search results). The trade-off is increased backend load, so apply them selectively to the most latency-sensitive paths.",
     },
+  ],
+  followUps: [
+    "Why can improving throughput make latency worse?",
+    "What does queueing theory say happens as utilisation approaches 100%?",
+    "Why is p99 latency often driven by something other than the average path?",
   ],
   mcqs: [
     {
@@ -584,6 +620,16 @@ int main() {
     "Key throughput techniques: **horizontal scaling**, **batching**, **backpressure**, and eliminating serial bottlenecks (Amdahl's Law).",
   ],
 
+  resources: [
+    {
+      label: "Site Reliability Engineering — Google",
+      kind: "book",
+    },
+    {
+      label: "Latency Numbers Every Programmer Should Know — Jeff Dean",
+      kind: "article",
+    },
+  ],
   glossary: [
     {
       term: "Latency",

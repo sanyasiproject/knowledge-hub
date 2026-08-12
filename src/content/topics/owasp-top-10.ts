@@ -99,6 +99,11 @@ Prevention: sanitize and validate all client-supplied URLs, enforce allow-lists 
       a: "IDOR occurs when an application exposes internal object references (database IDs, filenames) in URLs or parameters, and fails to verify that the requesting user is authorized to access that specific object. For example, changing /api/invoices/1234 to /api/invoices/1235 to access another user's invoice. Prevention: always verify object ownership/authorization server-side, use indirect references (mapping user-visible IDs to internal ones), implement per-object access control checks in a reusable middleware layer, and avoid exposing sequential or predictable identifiers.",
     },
   ],
+  followUps: [
+    "Which of these would you expect to actually find in a typical codebase, and why that one?",
+    "Why has broken access control stayed at the top of the list?",
+    "How would you test for IDOR systematically rather than by guessing ids?",
+  ],
   mcqs: [
     {
       q: "Which vulnerability is ranked A01 (most critical) in the OWASP Top 10 2021?",
@@ -491,6 +496,37 @@ app.post("/api/transfer", (req: Request, res: Response) => {
     end`,
     },
   ],
+  animations: [
+    {
+      title: "Broken access control, found in 30 seconds",
+      steps: [
+        {
+          label: "Log in as user A",
+          detail: "Open your own invoice: `GET /api/invoices/1041`. Works, as expected.",
+        },
+        {
+          label: "Change the id",
+          detail: "Request `GET /api/invoices/1040`. The route requires authentication, and you are authenticated.",
+        },
+        {
+          label: "The gap",
+          detail: "The handler checked *who* you are but never checked *whether this invoice is yours*.",
+        },
+        {
+          label: "Result",
+          detail: "Another customer's invoice is returned. No exploit tooling required.",
+        },
+        {
+          label: "Wrong fix",
+          detail: "Switch to UUIDs. Enumeration gets harder; authorisation is still absent.",
+        },
+        {
+          label: "Right fix",
+          detail: "Scope the query by the caller: `WHERE id = ? AND org_id = ?`, enforced in a shared layer so no endpoint can forget.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "OWASP Category",
@@ -606,6 +642,20 @@ app.post("/api/transfer", (req: Request, res: Response) => {
     `Key **security headers** to memorize: \`Content-Security-Policy\` (prevents XSS — A03), \`Strict-Transport-Security\` (enforces HTTPS — A02), \`X-Frame-Options\` (prevents clickjacking — A01), \`X-Content-Type-Options\` (prevents MIME sniffing — A05), and \`Referrer-Policy\` (controls information leakage — A02). These are low-cost, high-impact controls that address multiple OWASP categories simultaneously.`,
 
     `For **cloud-native applications**, pay special attention to: *SSRF* (A10) targeting cloud metadata endpoints — use \`IMDSv2\` and block \`169.254.169.254\`; **Security Misconfiguration** (A05) in IaC templates — scan Terraform/CloudFormation with tools like \`tfsec\` or \`checkov\`; *Vulnerable Components* (A06) in container images — scan with \`Trivy\` or \`Grype\`; and **Logging Failures** (A09) — centralize logs in a *SIEM* with automated alerting on authentication anomalies and access control violations.`,
+  ],
+  resources: [
+    {
+      label: "OWASP Top 10 project",
+      kind: "docs",
+    },
+    {
+      label: "OWASP Cheat Sheet Series",
+      kind: "docs",
+    },
+    {
+      label: "PortSwigger Web Security Academy",
+      kind: "docs",
+    },
   ],
   glossary: [
     {

@@ -108,6 +108,11 @@ The error budget policy is the cultural mechanism that makes SLOs actionable. Wi
       a: "System metrics like CPU utilization or queue depth are indirect proxies that do not always correlate with user-perceived quality. A server at 90% CPU might be serving requests perfectly; a server at 10% CPU might be returning stale data. User-centric SLIs (success rate, latency at the edge) directly measure what matters. This also aligns engineering priorities with business outcomes: improving an SLI that users do not notice is wasted effort.",
     },
   ],
+  followUps: [
+    "What's the practical difference between an SLI, an SLO, and an SLA?",
+    "How does an error budget change what the team is allowed to do?",
+    "Why is 100% availability the wrong target?",
+  ],
   mcqs: [
     {
       q: "If an SLO targets 99.9% availability over 30 days, what is the error budget in minutes?",
@@ -449,6 +454,37 @@ console.log(
     Team->>Team: Investigate during business hours`,
     },
   ],
+  animations: [
+    {
+      title: "How an error budget changes a decision",
+      steps: [
+        {
+          label: "SLI",
+          detail: "The measurement: fraction of requests served successfully under 300 ms.",
+        },
+        {
+          label: "SLO",
+          detail: "The target: 99.9% over 30 days — an internal commitment.",
+        },
+        {
+          label: "Error budget",
+          detail: "0.1% of 30 days is ~43 minutes of allowed failure.",
+        },
+        {
+          label: "Incident costs 10 minutes",
+          detail: "33 minutes of budget remain. Risky launches are still fine.",
+        },
+        {
+          label: "Budget exhausted",
+          detail: "The policy triggers: feature work pauses, reliability work takes priority. The decision is pre-agreed, not argued during an incident.",
+        },
+        {
+          label: "SLA",
+          detail: "The external, contractual promise — always looser than the SLO, so you notice before the customer does.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Aspect", "**SLI** (Indicator)", "**SLO** (Objective)", "**SLA** (Agreement)"],
     rows: [
@@ -483,6 +519,20 @@ console.log(
     "**Burn rate alerting** replaces naive threshold alerts. Instead of alerting when error rate > X%, alert when the *rate of budget consumption* exceeds a sustainable pace. The **multi-window approach** (short + long windows) eliminates both *false positives* (from transient spikes caught by the long window) and *slow detection* (caught by the short window).",
     "**Measurement point matters**: an SLI measured inside the application server *misses* failures caused by the load balancer, network, or DNS. Always prefer measuring at the **closest point to the user** — typically the *edge proxy* or *load balancer* — and supplement with *client-side RUM* for true end-to-end visibility.",
     "**SLOs are a social contract**, not just a technical metric. They only work when backed by an **error budget policy** with *executive sponsorship*. Without organizational commitment, SLOs become dashboards that everyone ignores. The quarterly review process keeps SLOs calibrated to *actual user expectations*.",
+  ],
+  resources: [
+    {
+      label: "Site Reliability Engineering — Google",
+      kind: "book",
+    },
+    {
+      label: "The Site Reliability Workbook — Google",
+      kind: "book",
+    },
+    {
+      label: "Implementing Service Level Objectives — Alex Hidalgo",
+      kind: "book",
+    },
   ],
   glossary: [
     {

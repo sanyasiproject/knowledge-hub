@@ -447,6 +447,11 @@ with ack]
       a: "Instead of storing every request timestamp (sorted set approach, O(n) memory), maintain two fixed window counters. The effective count is: previous_window_count * (1 - elapsed_fraction) + current_window_count. For example, if we are 40% through the current minute, the estimate is prev_count * 0.6 + current_count. This uses O(1) memory per user and closely approximates a true sliding window. Cloudflare uses this approach at scale.",
     },
   ],
+  followUps: [
+    "What's wrong with `SETNX` as a distributed lock, and what does Redlock add?",
+    "How would you implement a delayed job queue with a sorted set?",
+    "Why is a Redis-based lock never safe enough for correctness-critical work?",
+  ],
   mcqs: [
     {
       q: "What Redis command is used to acquire a distributed lock?",

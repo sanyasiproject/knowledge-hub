@@ -451,6 +451,12 @@ ackermann m n = ackermann (m - 1) (ackermann m (n - 1))`
     }
   ],
 
+  followUps: [
+    "How deep can this recurse before the stack overflows, and how would you find out?",
+    "Convert this recursion to an iterative version with an explicit stack.",
+    "Why can't you rely on tail-call optimisation in Python or JavaScript?",
+    "When does memoisation turn an exponential recursion into a polynomial one, and when does it not help at all?",
+  ],
   mcqs: [
     {
       q: "What is the time complexity of naive recursive Fibonacci fib(n)?",

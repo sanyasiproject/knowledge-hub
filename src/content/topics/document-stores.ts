@@ -360,6 +360,12 @@ const resumed = db.orders.watch(pipeline, {
       a: "CouchDB stores all conflicting revisions in a revision tree. It deterministically picks a 'winner' using a consistent algorithm (longest revision path, then lexicographic comparison of revision hashes) so all replicas agree on the same winner without coordination. The losing revisions remain accessible. Applications are responsible for conflict resolution: they can read all conflicting revisions via the ?conflicts=true parameter and merge them into a new revision. This design prioritizes availability and partition tolerance over immediate consistency.",
     },
   ],
+  followUps: [
+    "When does embedding a subdocument beat referencing it, and what breaks when the embedded array grows unbounded?",
+    "How do you keep denormalised copies consistent after an update?",
+    "What query would be trivial in SQL and painful here?",
+    "How do transactions work across documents, and what do they cost?",
+  ],
   mcqs: [
     {
       q: "What is the maximum document size in MongoDB?",

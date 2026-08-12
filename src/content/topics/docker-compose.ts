@@ -42,6 +42,10 @@ export const dockerCompose: TopicContent = {
       a: "Profiles let you tag services with a profile name. Services without a profile always start with `docker compose up`, while services with a profile only start when you pass `--profile <name>`. This keeps the default stack minimal -- you might have a `debug` profile for pgAdmin and a `monitoring` profile for Prometheus. Multiple profiles can be activated at once, and the `COMPOSE_PROFILES` environment variable can set defaults per developer.",
     },
   ],
+  followUps: [
+    "Where does Compose stop being appropriate?",
+    "How do you handle service startup order and readiness?",
+  ],
   mcqs: [
     {
       q: "What does `depends_on` with `condition: service_healthy` guarantee?",
@@ -389,6 +393,33 @@ CMD ["nginx", "-g", "daemon off;"]`,
       caption: "Container health states control when dependent services start; Compose blocks dependents until the dependency is Healthy.",
     },
   ],
+  animations: [
+    {
+      title: "Startup order and why `depends_on` isn't enough",
+      steps: [
+        {
+          label: "Compose starts services",
+          detail: "`depends_on` controls start order — the database container starts before the app.",
+        },
+        {
+          label: "Started ≠ ready",
+          detail: "The container is running, but Postgres is still initialising and not accepting connections.",
+        },
+        {
+          label: "App crashes",
+          detail: "It connects on boot, fails, and exits.",
+        },
+        {
+          label: "Healthchecks",
+          detail: "Define a healthcheck on the database and `depends_on: condition: service_healthy`.",
+        },
+        {
+          label: "Better still",
+          detail: "Make the app retry its connection with backoff. It must survive the database restarting later anyway.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Feature",
@@ -480,6 +511,12 @@ CMD ["nginx", "-g", "daemon off;"]`,
     "**Compose Watch** (v2.22+) replaces fragile bind-mount workflows with three explicit actions: `sync` copies files without restart (hot reload), `rebuild` rebuilds the image and recreates the container (dependency changes), and `sync+restart` copies files then restarts the process (config changes). Override files (`compose.override.yaml`) layer development settings on top of a production-like base.",
     "**Secrets** should be mounted via the `secrets` top-level key into `/run/secrets/` rather than passed as environment variables, which leak into logs and process listings. Similarly, **configs** inject read-only configuration files without baking them into the image.",
     "For orchestration beyond a single host, **Docker Swarm** extends Compose with `deploy` keys for replicas and rolling updates, while **Kubernetes** provides auto-scaling, advanced networking (CNI, NetworkPolicies), and a rich ecosystem of operators — but with significantly higher complexity. Choose Compose for *development and small deployments*, Swarm for *simple multi-host needs*, and Kubernetes for *production-scale microservices*.",
+  ],
+  resources: [
+    {
+      label: "Docker Compose documentation",
+      kind: "docs",
+    },
   ],
   glossary: [
     {

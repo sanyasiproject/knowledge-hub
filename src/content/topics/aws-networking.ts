@@ -43,6 +43,11 @@ export const awsNetworking: TopicContent = {
     }
   ],
 
+  followUps: [
+    "Why does a private subnet still need a NAT gateway, and what does it cost?",
+    "Security group or NACL — what's the practical difference?",
+    "How does a VPC endpoint change both cost and security?",
+  ],
   mcqs: [
     {
       q: "What makes a subnet 'public' in AWS?",
@@ -533,6 +538,37 @@ aws ec2 create-flow-logs \\
     }
   ],
 
+  animations: [
+    {
+      title: "A request from a private subnet to the internet",
+      steps: [
+        {
+          label: "Instance in a private subnet",
+          detail: "No public IP, and the route table has no internet gateway route — nothing inbound can reach it.",
+        },
+        {
+          label: "Outbound needed",
+          detail: "It has to call an external API.",
+        },
+        {
+          label: "Route to NAT",
+          detail: "The private subnet's route table sends 0.0.0.0/0 to a NAT gateway in a public subnet.",
+        },
+        {
+          label: "NAT translates",
+          detail: "The NAT gateway rewrites the source to its own public IP and forwards via the internet gateway.",
+        },
+        {
+          label: "Return path",
+          detail: "Responses come back to the NAT, which maps them to the originating instance. Unsolicited inbound has nowhere to go.",
+        },
+        {
+          label: "The bill",
+          detail: "NAT gateways charge per hour and per GB processed. A VPC endpoint keeps AWS-service traffic off the NAT entirely.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: ["Feature", "Security Group", "Network ACL", "AWS WAF"],
     rows: [
@@ -572,6 +608,16 @@ aws ec2 create-flow-logs \\
     "**Cost Awareness:** The three biggest networking cost traps are: (1) **NAT Gateway data processing** — use VPC endpoints for AWS services. (2) **Cross-AZ data transfer** at $0.01/GB each way — deploy AZ-aware services and co-locate tightly coupled components. (3) **CloudFront invalidations** — use *versioned file names* (`app.v2.js`) instead of invalidating paths, which costs $0.005 per path after the first 1,000/month."
   ],
 
+  resources: [
+    {
+      label: "AWS VPC documentation",
+      kind: "docs",
+    },
+    {
+      label: "AWS Well-Architected Framework",
+      kind: "docs",
+    },
+  ],
   glossary: [
     { term: "VPC", definition: "Virtual Private Cloud — logically isolated virtual network in AWS with configurable IP ranges, subnets, routing, and security controls." },
     { term: "Subnet", definition: "A range of IP addresses within a VPC, existing in a single AZ. Public subnets route to the internet; private subnets do not." },

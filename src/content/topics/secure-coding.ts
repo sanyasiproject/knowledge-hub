@@ -133,6 +133,11 @@ Each layer assumes the previous one might fail. This is the core mindset of secu
       a: "Sensitive data (passwords, tokens, credit cards, PII) should never appear in logs. Use masking or redaction — log only the last 4 digits of a card number, replace email bodies with a hash or identifier. For request logging, filter or redact sensitive headers (Authorization, Cookie) and body fields. Implement structured logging with field-level classification so sensitive fields are automatically redacted. Store logs in append-only, access-controlled storage separate from the application. Ensure log aggregation services and dashboards also respect data classification policies.",
     },
   ],
+  followUps: [
+    "What does 'fail securely' mean concretely in an authorisation check?",
+    "Why is an allowlist almost always better than a blocklist?",
+    "Where are the trust boundaries in a typical web application?",
+  ],
   mcqs: [
     {
       q: "Which input validation approach is most secure?",
@@ -211,6 +216,20 @@ Each layer assumes the previous one might fail. This is the core mindset of secu
     {
       front: "Name three things that should always be logged for security.",
       back: "1) Authentication events (successes and failures with timestamps and IPs), 2) Authorization failures (who tried to access what), 3) Input validation failures (potential attack probing). Never log credentials or PII.",
+    },
+  ],
+  resources: [
+    {
+      label: "OWASP Cheat Sheet Series",
+      kind: "docs",
+    },
+    {
+      label: "OWASP Application Security Verification Standard (ASVS)",
+      kind: "docs",
+    },
+    {
+      label: "Threat Modeling: Designing for Security — Adam Shostack",
+      kind: "book",
     },
   ],
   glossary: [
@@ -479,6 +498,37 @@ void processData() {
     Release -->|Signed artifacts - SBOM| Deploy[Deploy]
     Deploy -->|Runtime monitoring - WAF| Monitor[Monitor]
     Monitor -->|Incident response| Plan`,
+    },
+  ],
+  animations: [
+    {
+      title: "Where validation belongs",
+      steps: [
+        {
+          label: "Untrusted input arrives",
+          detail: "Body, query, params, headers, and anything from another service.",
+        },
+        {
+          label: "Validate at the boundary",
+          detail: "Parse against a schema; reject unknown fields on writes so mass assignment can't set `role` or `price`.",
+        },
+        {
+          label: "Now it's typed",
+          detail: "Past this point the rest of the code can rely on the shape — validation is not repeated everywhere.",
+        },
+        {
+          label: "Authorise the object",
+          detail: "Not just the route: does this caller own this specific resource?",
+        },
+        {
+          label: "Encode on output",
+          detail: "Escape for the context it lands in — HTML, attribute, JS, URL each differ.",
+        },
+        {
+          label: "Fail securely",
+          detail: "On any error, deny. A check that throws must not fall through to allow.",
+        },
+      ],
     },
   ],
   comparison: {

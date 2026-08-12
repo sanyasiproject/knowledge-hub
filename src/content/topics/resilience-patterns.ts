@@ -111,6 +111,11 @@ The order matters: the circuit breaker wraps retries (not the other way around),
       a: "From outermost to innermost: Bulkhead (resource isolation) wraps Circuit Breaker (fail fast when down) wraps Retry with Backoff (handle transient failures) wraps Timeout (prevent indefinite blocking). The Fallback is triggered when the circuit breaker rejects or when all retries are exhausted. The circuit breaker must wrap retries so that retry failures count toward the circuit breaker threshold; otherwise, retries would mask the failure rate.",
     },
   ],
+  followUps: [
+    "Why does a circuit breaker need a timeout to work at all?",
+    "What is a bulkhead protecting you from?",
+    "How do you choose a fallback that isn't worse than failing?",
+  ],
   mcqs: [
     {
       q: "What triggers a circuit breaker to move from Closed to Open?",
@@ -570,6 +575,37 @@ function createResilientCall<T>(
     },
   ],
 
+  animations: [
+    {
+      title: "The circuit breaker's three states",
+      steps: [
+        {
+          label: "Closed",
+          detail: "Calls pass through normally. Failures are counted in a rolling window.",
+        },
+        {
+          label: "Threshold crossed",
+          detail: "Failure rate exceeds the limit — say 50% over 20 calls.",
+        },
+        {
+          label: "Open",
+          detail: "Calls fail immediately without touching the dependency. Threads are freed; the dependency gets room to recover.",
+        },
+        {
+          label: "After a cooldown",
+          detail: "The breaker moves to half-open and allows a limited number of trial calls.",
+        },
+        {
+          label: "Trial succeeds",
+          detail: "Closed again, traffic resumes.",
+        },
+        {
+          label: "Trial fails",
+          detail: "Back to open for another cooldown. Without this the breaker would flap and re-hammer a recovering service.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Pattern",
@@ -649,6 +685,20 @@ function createResilientCall<T>(
     "**Fallbacks must be tested regularly** — an untested fallback may itself be broken when needed. Use *chaos engineering* to deliberately fail dependencies and verify fallback behavior under realistic conditions.",
   ],
 
+  resources: [
+    {
+      label: "Release It! — Michael Nygard",
+      kind: "book",
+    },
+    {
+      label: "CircuitBreaker — Martin Fowler",
+      kind: "article",
+    },
+    {
+      label: "resilience4j documentation",
+      kind: "docs",
+    },
+  ],
   glossary: [
     {
       term: "Circuit Breaker",

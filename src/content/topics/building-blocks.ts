@@ -14,6 +14,41 @@ export const buildingBlocks: TopicContent = {
     "## Message Queues and Event Streaming\n\nMessage queues enable asynchronous communication between services. A **producer** sends messages to a queue; a **consumer** reads and processes them independently. Benefits: decoupling (producer doesn't know about consumers), load leveling (queue absorbs traffic spikes), fault tolerance (messages persist if consumers are down), scalability (add more consumers to increase throughput). **RabbitMQ**: traditional message broker with exchanges, queues, and routing keys. Supports complex routing patterns (fanout, topic, direct). Messages are removed after acknowledgment. **Apache Kafka**: distributed commit log. Messages are appended to partitioned topics and retained for a configurable period. Consumers track their offset, enabling replay. Excellent for event streaming, log aggregation, and high-throughput pipelines. **SQS**: AWS managed queue with standard (at-least-once, best-effort ordering) and FIFO (exactly-once, strict ordering) modes. Choose based on: throughput needs (Kafka >> RabbitMQ), ordering guarantees, replay requirements, and operational complexity.",
     "## Databases as Building Blocks\n\nDifferent database types serve different access patterns. **Relational (PostgreSQL, MySQL)**: ACID transactions, joins, strong consistency. Use for structured data with relationships. **Document (MongoDB, DynamoDB)**: flexible schemas, nested objects, horizontal scaling. Use for semi-structured data, catalogs, user profiles. **Key-Value (Redis, DynamoDB)**: sub-millisecond lookups by key. Use for caching, sessions, feature flags. **Wide-Column (Cassandra, HBase)**: high write throughput, time-series data, distributed by design. **Graph (Neo4j)**: relationships are first-class. Use for social networks, recommendations, fraud detection. **Search (Elasticsearch)**: inverted index for full-text search and analytics. In system design, you often combine multiple databases: PostgreSQL for the core data model, Redis for caching, Elasticsearch for search, and Kafka + a data warehouse for analytics. This is the polyglot persistence pattern.",
   ],
+  animations: [
+    {
+      title: "Adding components as load grows",
+      steps: [
+        {
+          label: "One server",
+          detail: "App and database on one box. Fine to a few hundred users.",
+        },
+        {
+          label: "Split the database",
+          detail: "Separate host, so they scale and fail independently.",
+        },
+        {
+          label: "Add a load balancer",
+          detail: "Multiple stateless app instances behind it. Sessions move to Redis.",
+        },
+        {
+          label: "Add a cache",
+          detail: "Hot reads served from Redis; database load drops sharply.",
+        },
+        {
+          label: "Add a CDN",
+          detail: "Static assets served at the edge, cutting both latency and origin traffic.",
+        },
+        {
+          label: "Add a queue",
+          detail: "Slow work moves off the request path, absorbing spikes and third-party slowness.",
+        },
+        {
+          label: "Then, only if forced",
+          detail: "Read replicas, then partitioning, then sharding.",
+        },
+      ],
+    },
+  ],
   interviewQA: [
     {
       q: "When would you choose a Layer 4 load balancer over a Layer 7?",
@@ -31,6 +66,10 @@ export const buildingBlocks: TopicContent = {
       q: "How do you decide which database type to use in a system design?",
       a: "Start with the access patterns: (1) If you need ACID transactions and joins across related entities, use relational (PostgreSQL). (2) If the schema varies per record or you need to store nested objects, use document (MongoDB). (3) If you need sub-millisecond key lookups for caching or sessions, use key-value (Redis). (4) If you have massive write throughput or time-series data, use wide-column (Cassandra). (5) If relationships are the primary query dimension (friends-of-friends, shortest path), use graph (Neo4j). (6) If you need full-text search, use a search engine (Elasticsearch). Most systems use 2-3 database types. The primary data store is usually relational, with Redis for caching and possibly Elasticsearch for search.",
     },
+  ],
+  followUps: [
+    "Which building block would you remove first if cost mattered more than latency?",
+    "What does adding a queue buy you, and what does it cost in debuggability?",
   ],
   mcqs: [
     {
@@ -105,6 +144,16 @@ export const buildingBlocks: TopicContent = {
     {
       front: "When would you use a wide-column database?",
       back: "For high write throughput, time-series data, and distributed workloads. Examples: Cassandra, HBase. Good for: IoT sensor data, activity logs, messaging at scale. Trade-off: limited query flexibility compared to relational databases.",
+    },
+  ],
+  resources: [
+    {
+      label: "System Design Interview — Alex Xu",
+      kind: "book",
+    },
+    {
+      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      kind: "book",
     },
   ],
   glossary: [

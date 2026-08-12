@@ -116,6 +116,11 @@ Serverless naturally aligns with event-driven architecture. Functions react to e
       a: "Choose containers when: your workloads run longer than FaaS limits (15 min on Lambda), you need persistent connections (WebSocket servers), you have predictable steady-state traffic where reserved capacity is cheaper, you require specific runtime environments or OS-level customization, or your team already has strong Kubernetes expertise. Serverless excels for event-driven, spiky, or low-traffic workloads where you want zero operational overhead.",
     },
   ],
+  followUps: [
+    "What does a cold start cost, and how do you reduce it?",
+    "Why is vendor lock-in more real here than elsewhere?",
+    "How do you handle a database connection pool from a function that scales to hundreds of instances?",
+  ],
   mcqs: [
     {
       q: "What is the primary billing model for FaaS platforms?",
@@ -520,6 +525,37 @@ module.exports.handler = middy(baseHandler)
       Stateful applications`,
     },
   ],
+  animations: [
+    {
+      title: "A cold start, and the database problem",
+      steps: [
+        {
+          label: "No traffic",
+          detail: "Zero instances, zero cost.",
+        },
+        {
+          label: "First request",
+          detail: "The platform provisions an environment, downloads the code, initialises the runtime, then runs your handler — the cold start.",
+        },
+        {
+          label: "Warm",
+          detail: "Subsequent requests reuse the environment. Only the handler body runs.",
+        },
+        {
+          label: "Spike",
+          detail: "100 concurrent requests means up to 100 environments, each cold.",
+        },
+        {
+          label: "Each opens a connection",
+          detail: "The database's 100-connection limit is exhausted by a single spike.",
+        },
+        {
+          label: "Fix",
+          detail: "A connection proxy (RDS Proxy / PgBouncer), or a data API that doesn't hold connections. Init code outside the handler so warm invocations reuse it.",
+        },
+      ],
+    },
+  ],
   comparison: {
     columns: [
       "Dimension",
@@ -605,6 +641,16 @@ module.exports.handler = middy(baseHandler)
     "**Idempotency is non-negotiable** in serverless because FaaS platforms guarantee *at-least-once* delivery, not *exactly-once*. Every handler must produce the same result whether invoked once or multiple times. Use conditional database writes keyed on an idempotency token from the event payload.",
     "**Vendor lock-in** exists on a spectrum: function *compute code* is highly portable, *managed databases* (DynamoDB, Firestore) require schema redesign to migrate, and *orchestration services* (Step Functions, EventBridge rules) create the deepest coupling. Mitigate with hexagonal architecture -- isolate cloud-specific code behind adapter interfaces so the core domain logic remains portable.",
     "**Lambda vs. ECS vs. EC2** decision framework: choose Lambda for *event-driven, spiky, short-lived* workloads; ECS Fargate for *containerized microservices, long-running processes, and steady traffic*; EC2 for *GPU workloads, legacy applications, and full OS control*. Lambda costs less at low-to-moderate traffic but becomes more expensive than containers at sustained high volume (calculate the break-even point for your workload).",
+  ],
+  resources: [
+    {
+      label: "AWS Lambda documentation — best practices",
+      kind: "docs",
+    },
+    {
+      label: "Serverless Architectures — Martin Fowler / Mike Roberts",
+      kind: "article",
+    },
   ],
   glossary: [
     {
