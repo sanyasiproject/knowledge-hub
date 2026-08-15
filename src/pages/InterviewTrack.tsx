@@ -5,6 +5,7 @@ import { SCOPE_LABEL, getTrack, resolvedBlocks, trackMinutes } from "../intervie
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { Pill } from "../components/ui/primitives";
 import { NotFound } from "./NotFound";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 function formatMinutes(m: number): string {
   if (m < 60) return `${m} min`;
@@ -30,6 +31,7 @@ function cumulative(minutes: number[]): number[] {
 export function InterviewTrack() {
   const { trackSlug } = useParams();
   const track = trackSlug ? getTrack(trackSlug) : undefined;
+  usePageTitle(track?.title);
 
   const blocks = useMemo(() => (track ? resolvedBlocks(track) : []), [track]);
   const offsets = useMemo(() => cumulative(blocks.map((b) => b.minutes)), [blocks]);

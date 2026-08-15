@@ -354,7 +354,7 @@ printDescription x = putStrLn (describe x)
     { label: "On Understanding Types, Data Abstraction, and Polymorphism (Cardelli & Wegner)", kind: "paper", note: "Classic taxonomy of polymorphism: universal (parametric, inclusion) and ad-hoc (overloading, coercion)." },
     { label: "Rust Book: Traits", kind: "docs", note: "Covers trait definitions, implementations, generics, trait objects, and static vs dynamic dispatch." },
     { label: "Effective Java, Item 52: Refer to objects by their interfaces (Bloch)", kind: "book", note: "Explains why programming to interfaces enables polymorphism and flexibility." },
-    { label: "Haskell Wiki: Type classes", kind: "docs", note: "Comprehensive guide to Haskell's type class system and how it implements ad-hoc polymorphism." },
+    { label: "Haskell Wiki: Type classes", url: "https://wiki.haskell.org/", kind: "docs", note: "Comprehensive guide to Haskell's type class system and how it implements ad-hoc polymorphism." },
     { label: "Julia Documentation: Methods and Multiple Dispatch", kind: "docs", note: "How Julia's multiple dispatch system works and why it is central to the language's design." },
   ],
   glossary: [

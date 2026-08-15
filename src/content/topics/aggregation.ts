@@ -265,8 +265,8 @@ GROUP BY dept_id;`
     "AGG(*) FILTER (WHERE cond) — conditional aggregate",
   ],
   resources: [
-    { label: "PostgreSQL Documentation — Aggregate Functions", kind: "docs", note: "Complete list of built-in aggregates and their behavior." },
-    { label: "PostgreSQL Documentation — GROUPING SETS, CUBE, ROLLUP", kind: "docs", note: "Multi-level aggregation features." },
+    { label: "PostgreSQL Documentation — Aggregate Functions", url: "https://www.postgresql.org/docs/current/", kind: "docs", note: "Complete list of built-in aggregates and their behavior." },
+    { label: "PostgreSQL Documentation — GROUPING SETS, CUBE, ROLLUP", url: "https://www.postgresql.org/docs/current/", kind: "docs", note: "Multi-level aggregation features." },
     { label: "Modern SQL — FILTER clause", kind: "article", note: "Explanation of the SQL standard FILTER clause for conditional aggregation." },
     { label: "SQL Cookbook — Anthony Molinaro", kind: "book", note: "Practical aggregation recipes." },
   ],

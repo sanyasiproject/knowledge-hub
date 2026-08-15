@@ -1,5 +1,5 @@
+import type { Frequency, Level, Status } from "../../data/schema";
 import type { ReactNode } from "react";
-import type { Level, Status } from "../../data/schema";
 
 /** Small utility to join class names. */
 export function cx(...parts: (string | false | null | undefined)[]) {
@@ -18,6 +18,38 @@ export function LevelBadge({ level }: { level: Level }) {
   return (
     <span className={cx("inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold", LEVEL_STYLES[level])}>
       {level}
+    </span>
+  );
+}
+
+const FREQUENCY_STYLES: Record<Frequency, { cls: string; dots: number }> = {
+  "Very High": { cls: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300", dots: 3 },
+  High: { cls: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300", dots: 2 },
+  Medium: { cls: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300", dots: 1 },
+  Low: { cls: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400", dots: 0 },
+};
+
+/**
+ * How often the topic is asked. Rendered with filled dots so the ranking is
+ * readable at a glance without parsing the words.
+ */
+export function FrequencyBadge({ frequency }: { frequency?: Frequency }) {
+  if (!frequency) return null;
+  const { cls, dots } = FREQUENCY_STYLES[frequency];
+  return (
+    <span
+      className={cx("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold", cls)}
+      title={`${frequency} interview frequency`}
+    >
+      <span aria-hidden className="flex gap-0.5">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className={cx("h-1.5 w-1.5 rounded-full", i < dots ? "bg-current" : "bg-current opacity-25")}
+          />
+        ))}
+      </span>
+      {frequency}
     </span>
   );
 }

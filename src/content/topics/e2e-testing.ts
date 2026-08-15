@@ -635,12 +635,12 @@ TEST_F(SearchTest, EmptySearchShowsNoResults) {
   ],
   resources: [
     {
-      label: "Playwright Documentation",
+      label: "Playwright Documentation", url: "https://playwright.dev/docs/intro",
       kind: "docs",
       note: "Official Playwright docs covering installation, selectors, auto-waiting, network interception, visual comparison, and CI configuration.",
     },
     {
-      label: "Cypress Documentation",
+      label: "Cypress Documentation", url: "https://docs.cypress.io/",
       kind: "docs",
       note: "Complete Cypress reference including best practices, custom commands, network stubbing, and component testing.",
     },

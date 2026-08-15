@@ -534,7 +534,7 @@ void calculateShipping_afterLoD() {
       note: "The academic origin of the Law of Demeter with formal definitions, research papers, and the Demeter/Java tools for automated enforcement."
     },
     {
-      label: "Refactoring: Improving the Design of Existing Code by Martin Fowler",
+      label: "Refactoring: Improving the Design of Existing Code by Martin Fowler", url: "https://martinfowler.com/",
       kind: "book",
       note: "Describes the 'Middle Man' and 'Message Chains' code smells, which are the over-application and under-application of LoD respectively."
     }

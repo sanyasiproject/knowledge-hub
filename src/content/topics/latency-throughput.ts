@@ -622,11 +622,11 @@ int main() {
 
   resources: [
     {
-      label: "Site Reliability Engineering — Google",
+      label: "Site Reliability Engineering — Google", url: "https://sre.google/sre-book/table-of-contents/",
       kind: "book",
     },
     {
-      label: "Latency Numbers Every Programmer Should Know — Jeff Dean",
+      label: "Latency Numbers Every Programmer Should Know — Jeff Dean", url: "https://colin-scott.github.io/personal_website/research/interactive_latency.html",
       kind: "article",
     },
   ],

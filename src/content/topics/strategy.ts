@@ -670,7 +670,7 @@ Strategy
       note: "Opens with Strategy using a duck simulator example, demonstrating composition over inheritance for flying and quacking behaviors.",
     },
     {
-      label: "Refactoring Guru - Strategy Pattern",
+      label: "Refactoring Guru - Strategy Pattern", url: "https://refactoring.guru/",
       kind: "article",
       note: "Visual guide with UML, real-world analogy (transportation to airport), and code in multiple languages.",
     },

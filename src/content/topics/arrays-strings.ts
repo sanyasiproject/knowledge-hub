@@ -311,9 +311,9 @@ int main() {
     "Rabin-Karp: hash = (hash − old·base^(m−1)) · base + new, mod p",
   ],
   resources: [
-    { label: "LeetCode Array/String problem set", kind: "docs", note: "Curated problems sorted by pattern: two-pointer, sliding window, prefix sum, in-place." },
+    { label: "LeetCode Array/String problem set", url: "https://leetcode.com/", kind: "docs", note: "Curated problems sorted by pattern: two-pointer, sliding window, prefix sum, in-place." },
     { label: "CLRS Chapter 32 — String Matching", kind: "book", note: "Rigorous treatment of naive, Rabin-Karp, KMP, and finite-automaton matchers." },
-    { label: "Neetcode Sliding Window playlist", kind: "video", note: "Step-by-step video walkthroughs of the most common sliding window interview problems." },
+    { label: "Neetcode Sliding Window playlist", url: "https://neetcode.io/", kind: "video", note: "Step-by-step video walkthroughs of the most common sliding window interview problems." },
     { label: "CP-Algorithms: String Processing", kind: "article", note: "KMP, Z-algorithm, suffix array, Aho-Corasick, and more with clean C++ implementations." },
     { label: "Python TimeComplexity wiki", kind: "docs", note: "Official CPython time complexity for list, dict, set operations — essential for interview complexity analysis." },
   ],

@@ -888,7 +888,7 @@ int main() {
   ],
 
   resources: [
-    { label: "On the Criteria To Be Used in Decomposing Systems into Modules (Parnas, 1972)", kind: "paper", note: "Foundational paper on information hiding and modular decomposition that underlies abstraction in software" },
+    { label: "On the Criteria To Be Used in Decomposing Systems into Modules (Parnas, 1972)", url: "https://www.win.tue.nl/~wstomv/edu/2ip30/references/criteria_for_modularization.pdf", kind: "paper", note: "Foundational paper on information hiding and modular decomposition that underlies abstraction in software" },
     { label: "The Law of Leaky Abstractions - Joel Spolsky", kind: "article", note: "The original article defining leaky abstractions with practical examples" },
     { label: "Abstraction, Specification, and Object-Oriented Design (Liskov & Guttag)", kind: "book", note: "Definitive text on ADTs, abstraction functions, and representation invariants by the creator of CLU" },
     { label: "Design Patterns: Elements of Reusable Object-Oriented Software (GoF)", kind: "book", note: "Classic patterns (Strategy, Template Method, Observer) are all abstraction techniques" },

@@ -668,7 +668,7 @@ int main() {
       note: "Lecture covering heap operations, build-heap analysis, and heapsort with clear visualizations.",
     },
     {
-      label: "Visualgo - Binary Heap Visualization",
+      label: "Visualgo - Binary Heap Visualization", url: "https://visualgo.net/",
       kind: "article",
       note: "Interactive visualization of heap insert, extract, and build-heap operations.",
     },

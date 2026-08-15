@@ -692,7 +692,7 @@ int main() {
       kind: "paper",
     },
     {
-      label: "Microservices Patterns — Chris Richardson",
+      label: "Microservices Patterns — Chris Richardson", url: "https://microservices.io/patterns/index.html",
       kind: "book",
     },
   ],

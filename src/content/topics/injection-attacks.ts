@@ -230,7 +230,7 @@ No single defense is sufficient. Layer multiple protections:
   ],
   resources: [
     {
-      label: "OWASP SQL Injection Prevention Cheat Sheet",
+      label: "OWASP SQL Injection Prevention Cheat Sheet", url: "https://owasp.org/",
       kind: "docs",
     },
     {

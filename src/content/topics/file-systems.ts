@@ -709,7 +709,7 @@ int main(int argc, char* argv[]) {
   ],
   resources: [
     {
-      label: "Operating Systems: Three Easy Pieces (OSTEP) -- File Systems chapters",
+      label: "Operating Systems: Three Easy Pieces (OSTEP) -- File Systems chapters", url: "https://pages.cs.wisc.edu/~remzi/OSTEP/",
       kind: "book",
       note: "Free online textbook with excellent coverage of file system implementation, crash consistency, journaling, and log-structured file systems.",
     },

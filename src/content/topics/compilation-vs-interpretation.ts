@@ -513,7 +513,7 @@ fn main() {
   ],
   resources: [
     { label: "Compilers: Principles, Techniques, and Tools (Dragon Book) by Aho, Lam, Sethi, Ullman", kind: "book", note: "The classic compiler textbook covering lexing, parsing, optimization, and code generation. Graduate-level but foundational." },
-    { label: "Crafting Interpreters by Robert Nystrom", kind: "book", note: "Practical guide to building two interpreters (tree-walk in Java, bytecode VM in C) for the Lox language. Free online." },
+    { label: "Crafting Interpreters by Robert Nystrom", url: "https://craftinginterpreters.com/", kind: "book", note: "Practical guide to building two interpreters (tree-walk in Java, bytecode VM in C) for the Lox language. Free online." },
     { label: "LLVM Language Reference Manual", kind: "docs", note: "Official documentation for LLVM IR syntax, semantics, and optimization passes." },
     { label: "The Java Virtual Machine Specification", kind: "docs", note: "Formal specification of JVM bytecode, class file format, and execution semantics. Essential for understanding JVM internals." },
     { label: "V8 Blog", kind: "article", note: "Technical blog posts from the V8 team explaining Ignition, TurboFan, optimization strategies, and performance characteristics of JavaScript compilation." },

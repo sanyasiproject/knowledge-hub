@@ -201,7 +201,7 @@ Always use the same embedding model for indexing and querying. Mismatched models
   ],
   resources: [
     {
-      label: "Anthropic engineering — Contextual Retrieval",
+      label: "Anthropic engineering — Contextual Retrieval", url: "https://docs.anthropic.com/",
       kind: "article",
     },
     {

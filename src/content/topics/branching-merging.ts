@@ -167,11 +167,11 @@ export const branchingMerging: TopicContent = {
   ],
   resources: [
     {
-      label: "Pro Git — Chacon & Straub (free online)",
+      label: "Pro Git — Chacon & Straub (free online)", url: "https://git-scm.com/book",
       kind: "book",
     },
     {
-      label: "Trunk Based Development — trunkbaseddevelopment.com",
+      label: "Trunk Based Development — trunkbaseddevelopment.com", url: "https://trunkbaseddevelopment.com/",
       kind: "article",
     },
   ],

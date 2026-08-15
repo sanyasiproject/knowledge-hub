@@ -277,11 +277,11 @@ Daily data transfer:
   ],
   resources: [
     {
-      label: "Latency Numbers Every Programmer Should Know — Jeff Dean",
+      label: "Latency Numbers Every Programmer Should Know — Jeff Dean", url: "https://colin-scott.github.io/personal_website/research/interactive_latency.html",
       kind: "article",
     },
     {
-      label: "System Design Interview — Alex Xu",
+      label: "System Design Interview — Alex Xu", url: "https://bytebytego.com/",
       kind: "book",
     },
   ],

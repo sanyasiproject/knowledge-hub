@@ -367,7 +367,7 @@ export const publicIp = server.publicIp;`
 
   resources: [
     { label: "NIST Definition of Cloud Computing (SP 800-145)", kind: "docs", note: "The authoritative definition establishing the five characteristics, three service models, and four deployment models." },
-    { label: "AWS Well-Architected Framework", kind: "docs", note: "Best practices across six pillars: operational excellence, security, reliability, performance, cost optimization, and sustainability." },
+    { label: "AWS Well-Architected Framework", url: "https://aws.amazon.com/architecture/well-architected/", kind: "docs", note: "Best practices across six pillars: operational excellence, security, reliability, performance, cost optimization, and sustainability." },
     { label: "The Phoenix Project by Gene Kim, Kevin Behr, George Spafford", kind: "book", note: "A novel about IT transformation that illustrates the cultural and organizational shifts needed for cloud adoption." },
     { label: "Cloud Native Patterns by Cornelia Davis (Manning)", kind: "book", note: "Deep dive into patterns for building cloud-native applications including redundancy, configuration, and lifecycle management." }
   ],

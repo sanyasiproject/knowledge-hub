@@ -346,7 +346,7 @@ function buildWhereClause(filters: FilterParam[]): { sql: string; params: any[] 
     "Relay spec: { edges: [{node, cursor}], pageInfo: {hasNextPage, endCursor, ...} }",
   ],
   resources: [
-    { label: "Use The Index, Luke — Pagination Done the Right Way", kind: "article", note: "Deep dive into keyset pagination with SQL examples and index design." },
+    { label: "Use The Index, Luke — Pagination Done the Right Way", url: "https://use-the-index-luke.com/", kind: "article", note: "Deep dive into keyset pagination with SQL examples and index design." },
     { label: "Relay Cursor Connections Specification", kind: "docs", note: "The GraphQL standard for cursor-based pagination." },
     { label: "Pagination: You're (Probably) Doing It Wrong", kind: "article", note: "Slack engineering blog on why they moved from offset to cursor-based pagination." },
   ],

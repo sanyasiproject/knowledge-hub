@@ -650,11 +650,11 @@ spec:
 
   resources: [
     {
-      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      label: "Designing Data-Intensive Applications — Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
     },
     {
-      label: "System Design Interview — Alex Xu",
+      label: "System Design Interview — Alex Xu", url: "https://bytebytego.com/",
       kind: "book",
     },
   ],

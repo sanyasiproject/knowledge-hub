@@ -249,7 +249,7 @@ CREATE TABLE sections (
   resources: [
     { label: "Database System Concepts — Silberschatz, Korth, Sudarshan, Ch. 7", kind: "book", note: "Formal treatment of normalization and functional dependencies." },
     { label: "The Normal Forms — Wikipedia", kind: "article", note: "Good visual reference for the normal form hierarchy." },
-    { label: "Designing Data-Intensive Applications — Martin Kleppmann", kind: "book", note: "Practical perspective on when normalization helps and when it hurts." },
+    { label: "Designing Data-Intensive Applications — Martin Kleppmann", url: "https://dataintensive.net/", kind: "book", note: "Practical perspective on when normalization helps and when it hurts." },
   ],
   glossary: [
     { term: "Functional dependency", definition: "A constraint X -> Y meaning that identical X values always have identical Y values." },

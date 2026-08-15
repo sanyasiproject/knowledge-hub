@@ -406,7 +406,7 @@ ORDER BY betweenness DESC`
     { label: "Neo4j Documentation", kind: "docs", note: "Official reference for Cypher, administration, clustering, and the Graph Data Science library." },
     { label: "Graph Databases (O'Reilly, by Robinson, Webber, Eifrem)", kind: "book", note: "Foundational book on graph database concepts, data modeling, and Neo4j by its creators." },
     { label: "Neo4j GraphAcademy (free courses)", kind: "video", note: "Interactive courses on Cypher, data modeling, graph algorithms, and Neo4j administration." },
-    { label: "Designing Data-Intensive Applications — Ch. 2", kind: "book", note: "Martin Kleppmann compares document, relational, and graph models with trade-off analysis." },
+    { label: "Designing Data-Intensive Applications — Ch. 2", url: "https://dataintensive.net/", kind: "book", note: "Martin Kleppmann compares document, relational, and graph models with trade-off analysis." },
     { label: "The Neo4j Graph Data Science library", kind: "repo", note: "Open-source library providing production-ready graph algorithms for Neo4j." },
     { label: "Pregel: A System for Large-Scale Graph Processing (Google, 2010)", kind: "paper", note: "Foundational paper on vertex-centric graph computation, influencing graph analytics in all modern graph databases." },
   ],

@@ -11,6 +11,8 @@ export const designRateLimiter: TopicContent = {
     "## Rate Limiting Algorithms\n\n**Fixed Window Counter**: divide time into fixed windows (e.g., 1-minute intervals). Count requests per window. If count exceeds the limit, reject. Simple but has the boundary burst problem: a client can send the limit at the end of one window and the limit at the start of the next, getting 2x the rate in a short span. **Sliding Window Log**: store the timestamp of every request. To check the limit, count timestamps within the last window. Remove expired timestamps. Perfectly accurate but O(n) memory per client. **Sliding Window Counter**: a hybrid. Track counts in fixed sub-windows and compute a weighted count: `count = prev_window_count * overlap_fraction + current_window_count`. Near-perfect accuracy with O(1) memory per client. **Token Bucket**: a bucket holds up to `maxTokens`. Tokens are added at `refillRate` per second. Each request takes one token. If empty, reject. Allows bursts up to bucket size. **Leaky Bucket**: requests enter a queue (bucket) and are processed at a fixed rate. If the queue is full, new requests are dropped. Smooths output to a constant rate, no bursts.",
     "## Token Bucket Deep Dive\n\nState per client: `tokens` (current count) and `lastRefillTimestamp`. On each request: (1) Calculate elapsed time since last refill. (2) Add `elapsed * refillRate` tokens, capped at `maxTokens`. (3) If `tokens >= 1`, allow request and decrement. Else reject. This lazy refill approach avoids running a background timer. Parameters: `maxTokens` controls burst size, `refillRate` controls sustained throughput. Example: maxTokens=10, refillRate=2/sec allows a burst of 10 requests instantly, then 2/sec sustained. In a distributed system, store the bucket state in Redis. Use a Lua script for atomic check-refill-decrement to prevent race conditions between concurrent requests.",
     "## Sliding Window Counter Deep Dive\n\nDivide time into fixed windows of duration W. Track the request count for the current and previous windows. When a request arrives at time t within the current window: `weighted_count = prev_count * ((W - elapsed_in_current) / W) + current_count`. If `weighted_count < limit`, allow and increment current_count. This approximates the true sliding window with very low error. Example: limit=100/minute. Previous minute had 80 requests. Current minute is 40 seconds in with 30 requests. Weighted count = 80 * (20/60) + 30 = 26.67 + 30 = 56.67. Under limit, allow. Memory: O(1) per client (just two counters and a window timestamp). Error rate is typically < 1% in practice.",
+    "## Capacity Estimation\n\nSize the limiter before designing it — interviewers expect the arithmetic. **State per client (token bucket)**: `tokens` (8-byte double) + `last_refill_ts` (8-byte integer) = 16 bytes of payload; with the Redis key string (~24 bytes for `rl:user:{id}`) and hash overhead, budget **~40 bytes per tracked key** as a working figure, ~100 bytes fully loaded. **Memory**: 1M active API keys × 40B ≈ **40 MB**; even at 100M keys × 100B ≈ 10 GB, which still fits a small Redis cluster — memory is rarely the bottleneck. Compare the sliding window log: 1M keys × 100 timestamps/window × 8B = **800 MB**, a 50× penalty versus two counters (16 MB), which is why the log is reserved for low-volume, high-value limits like login attempts. **QPS overhead**: every check that reaches Redis is one Lua `EVAL` (~1 command). At 10,000 req/s cluster-wide that is 10k Redis ops/s — comfortable for a single node that sustains ~100k ops/s. At 1M req/s you must shard Redis by client key (hash slot on the key gives per-client locality for free) and add a local cache. **Local-cache hit ratio**: if 90% of decisions are served by in-process token buckets that sync deltas to Redis every 100 ms, Redis load drops from 1M to 100k ops/s — a 10× reduction for roughly ±(sync interval × rate) accuracy error. **Latency budget**: local check < 0.1 ms; in-region Redis round-trip 0.5–1 ms. Key insight: the limiter's added p99 latency must stay well under the ~1% of total request latency it is worth — if a 100 ms API call spends 5 ms on rate limiting, the design is wrong.",
+    "## Choosing an Algorithm — With Numbers\n\nPut concrete numbers on the four algorithms to compare them honestly. Assume a limit of 100 req/min. **Fixed window**: one counter (8B) per client, but the boundary burst lets a client send 100 requests at 0:59 and 100 more at 1:01 — **200 requests in 2 seconds**, a 2× violation. **Sliding window log**: stores every timestamp; at the limit that is 100 × 8B = 800B per client, and a hostile client hammering rejected requests can force even more work — perfect accuracy, worst memory. **Sliding window counter**: two counters + a window timestamp ≈ 24B per client, error typically **< 1%** (Cloudflare measured 0.003% of requests wrongly allowed across 400M requests) — the default general-purpose choice. **Token bucket**: 16B per client, allows a configurable burst; with maxTokens=100, refillRate=1.67/s you get the same 100/min sustained rate plus the ability to absorb a 100-request spike — pick it when bursts are a feature, not a bug. **Leaky bucket**: memory is O(queue depth) and it adds queueing latency; use it when the *downstream* needs a perfectly smooth arrival rate (e.g., writing to a fragile legacy system), not for user-facing API limits.",
     "## Distributed Rate Limiting\n\nIn a multi-server deployment, each server sees only a fraction of a client's requests. Options: (1) **Local rate limiting**: each server enforces its own limit. If you have N servers and want a global limit of L, set each server's limit to L/N. Simple but inaccurate when traffic is unevenly distributed. (2) **Centralized rate limiting**: all servers check a shared store (Redis). Accurate but adds a network round-trip to every request. Use Redis with Lua scripts for atomic operations. (3) **Hybrid**: local rate limiter as a first pass (fast, approximate), with periodic sync to a central store for accuracy. **Redis Lua script for token bucket**: `EVAL` a script that reads the bucket, computes refill, checks and decrements atomically. This avoids race conditions between multiple servers checking the same client's bucket concurrently.",
     "## Production Considerations\n\n**Response headers**: include `X-RateLimit-Limit` (max requests), `X-RateLimit-Remaining` (requests left), `X-RateLimit-Reset` (when the window resets), and `Retry-After` (seconds until the client can retry). **Multiple rate limits**: apply different limits at different granularities (100/min per user, 10000/min per API key, 50000/min global). Check all applicable limits; reject if any is exceeded. **Rate limit by**: IP address (for unauthenticated traffic), user ID (for authenticated), API key, or a combination. **Graceful degradation**: instead of hard rejection (429), consider throttling (slowing responses), queueing (processing later), or degraded responses (cached/simplified data). **Monitoring**: track rate limit hits, rejection rates per client, and latency added by the limiter. Alert on sudden spikes in rejections (potential attack or misconfiguration).",
   ],
@@ -31,11 +33,23 @@ export const designRateLimiter: TopicContent = {
       q: "How do you handle rate limiting for different tiers of users?",
       a: "Define rate limit rules per tier: free users get 100 req/min, premium get 1000, enterprise get 10000. Store the mapping in a configuration store. When a request arrives: (1) Extract the user/API key from the request. (2) Look up their tier and corresponding limits. (3) Apply the limits using the chosen algorithm. For multiple dimensions: apply per-user, per-endpoint, and global limits independently. A request must pass all applicable limits. Store limits in a rules engine that supports dynamic updates so you can change limits without redeploying.",
     },
+    {
+      q: "Redis goes down. Does your rate limiter fail open or fail closed?",
+      a: "Neither extreme, per-rule. Fail-open (allow everything) preserves availability but drops protection exactly when the outage may itself be load-induced; fail-closed (reject everything) turns a Redis blip into a full API outage. Production answer: degrade to local-only enforcement with conservative limits — each of N gateway nodes enforces global_limit/N or a static safety cap — behind a circuit breaker with a short (~5 ms) Redis timeout so the limiter adds no tail latency during the outage. Make the policy per-rule: public read endpoints fail open, while login and payment endpoints fail closed because failing open there invites credential stuffing and fraud. Emit a degraded-mode metric so operators know accuracy is reduced.",
+    },
+    {
+      q: "How do you enforce a global rate limit across multiple regions?",
+      a: "Avoid a single global Redis on the request path — cross-region round-trips add 50–150 ms per request. Two practical patterns: (1) Per-region budgets: split the global limit by expected traffic share (1000/min global → 500 us-east, 300 eu-west, 200 ap-south), enforce locally, and have a background controller rebalance the split every few seconds from observed usage. (2) Async sync: enforce against local counters and gossip deltas (or CRDT counters) between regions; over-admission is bounded by sync_interval × rate. The framing that scores points: rate limits are policy, not invariants — a few percent of temporary over-admission is acceptable. Truly hard quotas (billing, contractual) should be reconciled asynchronously from usage logs, not enforced synchronously on the hot path.",
+    },
   ],
   followUps: [
     "Why does a fixed window allow a 2× burst at the boundary?",
     "Fail open or fail closed when the counter store is down?",
     "How do you rate limit fairly across tenants of very different sizes?",
+    "Estimate Redis memory for 10M active API keys with token-bucket state.",
+    "How much accuracy do you lose with a local cache that syncs to Redis every 100 ms?",
+    "Where should the limiter live: API gateway, Envoy sidecar, or in-service middleware?",
+    "How do you prevent a synchronized retry storm when thousands of clients share the same Retry-After?",
   ],
   mcqs: [
     {
@@ -116,11 +130,26 @@ export const designRateLimiter: TopicContent = {
       front: "What is the difference between local and global rate limiting?",
       back: "Local: each server enforces its own limit (limit/N per server). Fast but inaccurate if traffic is unevenly distributed. Global: all servers check a centralized store (Redis). Accurate but adds latency. Hybrid: local fast path with periodic global sync.",
     },
+    {
+      front: "Estimate Redis memory for 1M rate-limited API keys (token bucket).",
+      back: "Per key: 16B payload (tokens double + last_refill timestamp) + key string + hash overhead ≈ 40–100B. 1M keys × 40B ≈ 40 MB. Memory is rarely the bottleneck — Redis ops/s is (one Lua EVAL per check, ~100k ops/s per node), so shard by client key and add a local cache at high QPS.",
+    },
+    {
+      front: "Fail open or fail closed when the limiter's store is down?",
+      back: "Per-rule policy, not global. Fail open = allow all (availability, but unprotected during load-induced outages). Fail closed = reject all (protection, but Redis blip becomes API outage). Best: degrade to conservative local-only limits (limit/N per node) behind a circuit breaker with a short Redis timeout. Security-sensitive routes (login, payments) fail closed; public reads fail open.",
+    },
+    {
+      front: "How do you rate limit across multiple regions?",
+      back: "Do not put a global Redis on the request path (50–150 ms cross-region RTT). Use per-region budgets (split the global limit by traffic share, rebalance periodically) or async delta sync between regional counters (over-admission bounded by sync_interval × rate). Rate limits are policy, not invariants — small temporary over-admission is acceptable; reconcile hard billing quotas asynchronously.",
+    },
   ],
   deepDive: [
     "**Rate limiting** is far more than a simple counter — it is a critical component of any production-grade distributed system. At its core, a rate limiter must make a **sub-millisecond decision** on every incoming request: *allow* or *reject*. This decision depends on the **algorithm chosen**, the **granularity of tracking** (per IP, per user, per API key, per endpoint), and the **storage backend** used to maintain state. In high-throughput systems handling millions of requests per second, the rate limiter itself must not become a bottleneck. This means the algorithm must operate in **O(1) time and space** per check, and the storage layer must support **atomic read-modify-write** operations. The *Token Bucket* algorithm achieves this with a **lazy refill** strategy: rather than running a background timer to add tokens, it calculates how many tokens *should have been added* since the last request, using `elapsed_time * refill_rate`. This makes each check a simple arithmetic operation with two state variables (`tokens` and `last_refill_ts`), stored per client. The *Sliding Window Counter* similarly achieves O(1) by maintaining just two counters per window and computing a **weighted approximation** of the true sliding count.",
     "In a **distributed microservices architecture**, rate limiting introduces the challenge of **shared mutable state** across multiple server instances. A naive approach — each server maintaining its own local counter — fails because traffic is rarely evenly distributed across nodes. Consider a system with 4 servers and a global limit of 1000 req/min: setting each server to 250 req/min means a client whose requests all hit the same server gets only 250, while one with evenly distributed traffic gets the full 1000. The standard solution is a **centralized store like Redis**. The key insight is that the *check-and-update* operation must be **atomic**. Redis provides this through **Lua scripting**: a Lua script executes on the Redis server in a single, uninterruptible step. For the token bucket algorithm, the Lua script reads the current `tokens` and `last_refill_ts`, calculates the refill, checks if tokens are available, decrements if so, writes back the updated state, and returns the result — all *atomically*. Without this atomicity, a **TOCTOU race condition** occurs: two servers read the same token count (say, 1), both decide to allow, and both decrement, resulting in a **negative token count** and exceeding the rate limit.",
     "**Advanced production patterns** go beyond basic allow/reject. **Multi-tier rate limiting** applies different limits at different scopes simultaneously: per-user (100 req/min), per-API-key (10,000 req/min), and global (1,000,000 req/min). A request must pass *all* applicable tiers. This is implemented as a **chain of rate limiters**, each checking its own scope. **Adaptive rate limiting** dynamically adjusts limits based on system health: when CPU usage exceeds 80% or p99 latency spikes, the limiter *tightens* automatically, shedding load before the system degrades. **Graceful degradation** strategies include *throttling* (adding artificial delay via `setTimeout` or `sleep` rather than rejecting), *queueing* (buffering requests in a queue for later processing), and *degraded responses* (returning cached or simplified data). The **`Retry-After`** header is essential for client-side cooperation: it tells clients *exactly* when to retry, preventing thundering herd retries. Finally, **rate limit observability** is critical — tracking metrics like `rate_limit_hits_total`, `rate_limit_rejections_total`, and `rate_limit_latency_seconds` enables alerting on potential attacks or misconfigurations.",
+    "**Failure-mode design** is where rate limiter designs are won or lost in interviews. When Redis is unreachable, you must choose **fail-open** (allow all requests) or **fail-closed** (reject all). Fail-open preserves availability but removes protection exactly when an outage may be caused by overload; fail-closed preserves protection but converts a Redis blip into a full API outage. The mature answer is *neither extreme*: fail over to **local-only limiting with conservative limits** (e.g., each of N nodes enforces `global_limit / N`, or a tighter static safety limit), short-circuit Redis calls with a **circuit breaker** and a hard timeout (~5 ms) so the limiter never adds tail latency during the outage, and emit a distinct metric (`rate_limit_degraded_mode`) so operators know accuracy is reduced. Common mistake: treating fail-open as the universally correct answer — for a login endpoint or a payment API, failing open invites credential-stuffing and fraud, so security-sensitive routes should fail closed while read-only public routes fail open. The failure policy should be **per-rule configuration**, not a global constant.",
+    "**Multi-region rate limiting** forces a choice between accuracy and latency. A single global Redis gives exact global limits but adds a cross-region round-trip (50–150 ms) to every request — unacceptable. The two practical patterns: (1) **Per-region budgets**: split the global limit across regions by expected traffic share (e.g., 1000 req/min global → 500 us-east, 300 eu-west, 200 ap-south), enforce locally in each region, and let a background controller rebalance the split every few seconds based on observed usage. A client routed to one region gets exact enforcement; a client spraying requests across regions can briefly exceed the global limit by the size of the unspent budgets. (2) **Async global sync**: each region enforces against a local replica of the counter and gossips deltas (or uses CRDT-style counters) to converge; over-admission is bounded by `sync_interval × aggregate_rate`. Key insight: rate limits are *policy*, not *invariants* — a few percent of temporary over-admission is almost always acceptable, so per-region budgets with rebalancing is the standard production answer. Reserve strongly consistent global enforcement for hard quotas with billing or contractual meaning, and enforce those asynchronously against usage logs instead of on the request path.",
+    "**Client-facing contract**: the response headers are part of the design, not an afterthought. On *every* response include `X-RateLimit-Limit` (the ceiling for the current window), `X-RateLimit-Remaining` (what is left), and `X-RateLimit-Reset` (Unix timestamp when the window resets); on 429s add `Retry-After` (seconds). The IETF draft standardizes these as `RateLimit-Limit` / `RateLimit-Remaining` / `RateLimit-Reset` — mention both families in an interview. Well-designed headers turn clients into cooperators: SDKs read `Retry-After` and back off with jitter instead of hammering. Warning: a precise `Retry-After` sent to thousands of throttled clients simultaneously schedules a **synchronized thundering herd** at the reset moment — either add server-side jitter to the advertised retry time or document that clients must add their own. Also decide what a 429 body contains (machine-readable error code, the violated limit's scope) and whether unauthenticated attackers should receive detailed limit information at all; some teams deliberately return coarse headers to unauthenticated traffic to avoid teaching attackers the exact probing budget.",
   ],
   code: [
     {
@@ -351,24 +380,39 @@ export { rateLimiter };`,
     {
       title: "Rate Limiter Architecture",
       kind: "architecture",
-      caption: "Rate limiter sits between clients and backend services. It uses Redis for distributed atomic state and returns 429 to blocked clients.",
+      caption:
+        "Layered view: clients hit the gateway layer where the limiter lives (as gateway plugin, Envoy sidecar, or middleware). A local token-bucket cache handles the fast path; a shared Redis cluster running Lua scripts is the source of truth. The Config service pushes per-client and per-endpoint rules; Monitoring watches 429 rates. Allowed requests flow to services; rejected ones get 429 with Retry-After. Steps 1-5 trace the allowed request path; R1 marks the rejected path.",
       mermaid: `graph TB
-    C1["Client A"]
-    C2["Client B"]
-    GW["API Gateway"]
-    RL["Rate Limiter Middleware"]
-    REDIS["Redis - Token Buckets"]
-    LB["Load Balancer"]
-    S1["Service Instance 1"]
-    S2["Service Instance 2"]
-    C1 --> GW
+    subgraph CLIENTS["Clients"]
+        C1["Mobile App"]
+        C2["Web Client"]
+        C3["Partner API"]
+    end
+    subgraph EDGE["Gateway Layer - where the limiter sits"]
+        GW["API Gateway / Envoy sidecar / middleware"]
+        RL["Rate Limiter Core<br/>local token buckets - fast path"]
+    end
+    subgraph STATE["Shared Limiter State"]
+        REDIS["Redis Cluster<br/>Lua scripts - atomic check and decrement"]
+    end
+    subgraph BACKEND["Backend Services"]
+        S1["Service A"]
+        S2["Service B"]
+    end
+    CFG["Config Service<br/>rules per client and endpoint"]
+    MON["Monitoring<br/>429 rate, added latency, alerts"]
+    C1 -->|"1. request"| GW
     C2 --> GW
-    GW --> RL
-    RL --> REDIS
-    RL -->|Allowed| LB
-    RL -->|429 Too Many Requests| C1
-    LB --> S1
-    LB --> S2`,
+    C3 --> GW
+    GW -->|"2. check limit"| RL
+    RL -->|"3. cache miss or near limit"| REDIS
+    REDIS -->|"4. allow or deny + remaining"| RL
+    RL -->|"5. allowed - 2xx"| S1
+    RL -->|"5. allowed - 2xx"| S2
+    RL -.->|"R1. rejected - 429 + Retry-After"| C1
+    CFG -.->|"push rule updates"| RL
+    RL -.->|"metrics: hits, rejections"| MON
+    REDIS -.->|"memory and ops metrics"| MON`,
     },
     {
       title: "Token Bucket Algorithm Flow",
@@ -535,6 +579,9 @@ export { rateLimiter };`,
     "**HTTP 429 response headers**: Always include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` (Unix timestamp), and `Retry-After` (seconds). These are essential for well-behaved clients.",
     "**Rule of thumb for distributed limiting**: Use *local* rate limiting (limit/N per node) only when traffic is evenly distributed. Use *centralized* Redis when accuracy matters. Use *hybrid* (local fast path + periodic Redis sync) for ultra-low-latency requirements.",
     "**Key design decisions checklist**: (1) Algorithm choice based on burst tolerance, (2) Scope — per IP, user, API key, or endpoint, (3) Storage — in-memory vs Redis vs hybrid, (4) Failure mode — fail open vs fail closed, (5) Response — hard reject (429) vs throttle vs degrade.",
+    "**Capacity numbers to quote**: token-bucket state ≈ 16B payload, **~40B/key** with Redis overhead → 1M keys ≈ 40 MB. One Lua `EVAL` per check; a Redis node sustains ~100k ops/s. A 90% local-cache hit ratio cuts Redis load 10×. Sliding window log at 100 req/min ≈ 800B/key — **50×** the counter's footprint.",
+    "**Failure modes**: fail-open = availability, fail-closed = protection; production answer is **degrade to local limits (limit/N per node)** behind a circuit breaker with a ~5 ms Redis timeout. Make the policy per-rule: login/payments fail closed, public reads fail open.",
+    "**Multi-region**: never put a global store on the request path. Use **per-region budgets** (split the global limit by traffic share, rebalance in the background) or async counter sync (over-admission ≤ sync_interval × rate). Hard billing quotas reconcile asynchronously from usage logs.",
   ],
   revisionNotes: [
     "**Core algorithms**: *Fixed Window* is simplest but has the **boundary burst problem**. *Sliding Window Counter* solves it with a **weighted approximation** using O(1) memory. *Token Bucket* allows **controlled bursts** (burst size = `maxTokens`, sustained rate = `refillRate`). *Leaky Bucket* produces **smooth, constant-rate output** via a FIFO queue. *Sliding Window Log* is **perfectly accurate** but uses O(n) memory per client.",
@@ -542,14 +589,16 @@ export { rateLimiter };`,
     "**Production essentials**: Return proper **HTTP 429** with `Retry-After` header. Implement **multi-tier limits** (per-user, per-key, global) as a chain — request must pass *all* tiers. Support **graceful degradation**: fail open (allow on Redis failure) for availability-critical services, fail closed (reject) for security-critical ones. Monitor `rejection_rate` and alert on anomalies.",
     "**Trade-off matrix**: Token Bucket trades burst allowance for slightly more complex tuning (two params). Sliding Window Counter trades ~1% accuracy for O(1) memory. Centralized (Redis) rate limiting trades an extra network round-trip (~1ms) for global accuracy. Local-only limiting trades accuracy for zero added latency. Choose based on your system's **primary constraint**: accuracy, latency, or simplicity.",
     "**Interview talking points**: Rate limiter placement (API Gateway vs middleware vs per-service). Why Lua scripts in Redis (atomicity without distributed locks). How to handle rate limit key extraction (IP for unauthenticated, user ID for authenticated, composite keys for fine-grained control). Adaptive limiting with AIMD. The relationship between rate limiting and **circuit breakers** (rate limiting prevents overload *from clients*; circuit breakers prevent cascading failures *between services*).",
+    "**Capacity math**: state per token bucket = `tokens` (8B) + `last_refill_ts` (8B) ≈ **40B/key with Redis overhead** → 1M active keys ≈ 40 MB, 100M ≈ 10 GB. Sliding window log at 100 req/min costs ~800B/key (**50× more**). Every check reaching Redis is one Lua `EVAL`; one node handles ~100k ops/s, so at 1M req/s shard by client key and use a **local cache** (90% hit ratio → 10× less Redis load, accuracy error bounded by sync interval × rate). Limiter latency budget: local < 0.1 ms, in-region Redis 0.5–1 ms.",
+    "**Failure and geography**: on store outage, degrade to **conservative local limits behind a circuit breaker** — fail closed for security-sensitive routes, fail open for public reads, configured per rule. Across regions, prefer **per-region budgets** with background rebalancing over a synchronous global store; treat rate limits as *policy* (small over-admission OK) and reconcile hard quotas asynchronously.",
   ],
   resources: [
     {
-      label: "System Design Interview — Alex Xu",
+      label: "System Design Interview — Alex Xu", url: "https://bytebytego.com/",
       kind: "book",
     },
     {
-      label: "Stripe engineering — Scaling your API with rate limiters",
+      label: "Stripe engineering — Scaling your API with rate limiters", url: "https://docs.stripe.com/api",
       kind: "article",
     },
   ],

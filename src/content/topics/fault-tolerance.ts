@@ -634,11 +634,11 @@ async function resilientCall<T>(fn: () => Promise<T>): Promise<T> {
       kind: "book",
     },
     {
-      label: "Site Reliability Engineering — Google",
+      label: "Site Reliability Engineering — Google", url: "https://sre.google/sre-book/table-of-contents/",
       kind: "book",
     },
     {
-      label: "resilience4j documentation",
+      label: "resilience4j documentation", url: "https://resilience4j.readme.io/",
       kind: "docs",
     },
   ],

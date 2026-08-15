@@ -595,8 +595,8 @@ val testDb = new Database {
     "All pure functions are idempotent. Not all idempotent operations are pure.",
   ],
   resources: [
-    { label: "Professor Frisby's Mostly Adequate Guide to Functional Programming", kind: "book", note: "Free online book covering pure functions, referential transparency, and functional composition in JavaScript." },
-    { label: "Haskell Wiki — IO Inside", kind: "docs", note: "Deep explanation of how Haskell's IO monad works and why all Haskell functions are technically pure." },
+    { label: "Professor Frisby's Mostly Adequate Guide to Functional Programming", url: "https://mostly-adequate.gitbook.io/mostly-adequate-guide", kind: "book", note: "Free online book covering pure functions, referential transparency, and functional composition in JavaScript." },
+    { label: "Haskell Wiki — IO Inside", url: "https://wiki.haskell.org/", kind: "docs", note: "Deep explanation of how Haskell's IO monad works and why all Haskell functions are technically pure." },
     { label: "Gary Bernhardt — Boundaries (talk)", kind: "video", note: "The definitive talk on functional core / imperative shell architecture. Explains how to structure code for testability." },
     { label: "ZIO Documentation", kind: "docs", note: "Scala effect system that tracks capabilities (Database, Console, Clock) in the type signature." },
     { label: "Eric Normand — Grokking Simplicity", kind: "book", note: "Practical guide to separating pure calculations from actions (side effects) in everyday code." },

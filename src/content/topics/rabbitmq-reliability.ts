@@ -133,11 +133,11 @@ DLX is configured on the queue via the \`x-dead-letter-exchange\` argument (and 
   ],
   resources: [
     {
-      label: "RabbitMQ documentation — reliability guide",
+      label: "RabbitMQ documentation — reliability guide", url: "https://www.rabbitmq.com/docs",
       kind: "docs",
     },
     {
-      label: "RabbitMQ documentation — publisher confirms",
+      label: "RabbitMQ documentation — publisher confirms", url: "https://www.rabbitmq.com/docs",
       kind: "docs",
     },
   ],

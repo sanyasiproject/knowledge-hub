@@ -808,7 +808,7 @@ public class CASExamples {
       note: "Formal specification of C++ memory orderings with examples of valid and invalid reorderings for each ordering level.",
     },
     {
-      label: "Is Parallel Programming Hard, And, If So, What Can You Do About It? by Paul McKenney",
+      label: "Is Parallel Programming Hard, And, If So, What Can You Do About It? by Paul McKenney", url: "https://mirrors.edge.kernel.org/pub/linux/kernel/people/paulmck/perfbook/perfbook.html",
       kind: "book" as const,
       note: "Free online book from a Linux kernel developer covering RCU, memory barriers, lock-free techniques, and formal memory models.",
     },

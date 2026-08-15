@@ -413,7 +413,7 @@ double calculateInvoiceTotal(const std::vector<InvoiceLineItem>& lineItems) {
   resources: [
     { label: "Clean Code, Chapter 2: Meaningful Names", kind: "book", note: "Robert C. Martin's definitive guide to naming conventions with before/after examples" },
     { label: "Refactoring, Chapter 9: Organizing Data", kind: "book", note: "Martin Fowler covers Rename Field, Rename Variable, and strategies for safe renaming across codebases" },
-    { label: "PEP 8 -- Style Guide for Python Code", kind: "docs", note: "The official Python naming convention reference covering modules, classes, functions, variables, and constants" },
+    { label: "PEP 8 -- Style Guide for Python Code", url: "https://peps.python.org/pep-0008/", kind: "docs", note: "The official Python naming convention reference covering modules, classes, functions, variables, and constants" },
     { label: "Google Java Style Guide: Naming", kind: "docs", note: "Google's naming rules for Java covering packages, classes, methods, constants, and type variables" },
     { label: "Domain-Driven Design by Eric Evans", kind: "book", note: "Chapters on Ubiquitous Language and Bounded Contexts explain how naming bridges code and business" },
     { label: "Naming Things in Code (CodeAesthetic YouTube)", kind: "video", note: "Visual walkthrough of naming principles with real-world refactoring examples" }

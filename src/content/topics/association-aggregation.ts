@@ -845,7 +845,7 @@ public interface OrderRepository {
       note: "Covers unique_ptr, shared_ptr, and weak_ptr with precise guidance on modelling ownership semantics that directly map to composition and aggregation.",
     },
     {
-      label: "Martin Fowler — AggregateOrientedDatabase",
+      label: "Martin Fowler — AggregateOrientedDatabase", url: "https://martinfowler.com/",
       kind: "article",
       note: "Explains how aggregate boundaries influence database design and why composition within aggregates simplifies persistence.",
     },

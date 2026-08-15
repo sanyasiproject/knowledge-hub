@@ -13,6 +13,7 @@ export const designChatSystem: TopicContent = {
     "## Presence and Typing Indicators\n\n**Online/offline presence**: when a user connects via WebSocket, they are marked online in a presence service (Redis hash: userId -> {status, lastSeen, serverId}). The client sends heartbeats every 5-10 seconds. If no heartbeat is received for 30 seconds, the user is marked offline. On disconnect (WebSocket close), immediate offline marking. **Typing indicators**: when a user starts typing, the client sends a 'typing' event to the server. The server forwards it to other participants in the chat. Typing events are ephemeral (not stored). To avoid flooding, the client debounces: send 'typing started' on first keystroke, then suppress for 3 seconds, send 'typing stopped' after 3 seconds of inactivity. **Fan-out**: presence changes and typing events are sent only to users who are (1) online and (2) currently viewing a chat with that user, to minimize unnecessary traffic.",
     "## Offline Delivery and Sync\n\nWhen a user is offline, messages are stored in the database with a 'delivered' flag set to false. On reconnect, the client sends its last known sequence number for each chat. The server returns all messages with sequence numbers greater than the last known. This is the **sync protocol**: the client maintains a local sequence cursor, and the server sends the delta. For push notifications: when a message arrives for an offline user, the chat server triggers a push notification via APNs/FCM. The notification contains a preview but not the full message (for security and size reasons). When the user opens the app, the full sync happens. **Read receipts**: when a user reads messages up to sequence N, the client sends a 'read' event. The server updates the read watermark and notifies the sender. This enables double-check (delivered) and blue-check (read) indicators.",
     "## Group Chat and Scalability\n\n**Group messages** follow the same pattern but with fan-out to all group members. For a group of N members, one message generates N-1 deliveries. Small groups (< 100) can use fan-out on write to each member's message queue. Large groups (> 100) may need a group message service where members pull messages. **Scalability**: chat servers are stateful (each holds WebSocket connections), so horizontal scaling requires a connection registry. Use consistent hashing to assign users to chat servers. A message routing layer (Kafka, Redis Pub/Sub) ensures messages reach the right server. **Storage**: messages are stored in a database optimized for sequential writes and range reads by (chatId, sequenceNumber). Cassandra and HBase are common choices for their write throughput and range scan performance. **Media messages**: images and videos are uploaded to object storage (S3), and the message contains only the media URL.",
+    "## Capacity Estimation\n\nCapacity math for a chat system starts from concurrent connections, not requests per second, because the dominant cost is holding millions of open sockets. Assume a Slack/Discord-scale target: **500M registered users**, **50M concurrent connections** at peak, and **10B messages/day**.\n\n- **Gateway fleet**: a tuned gateway node (epoll/kqueue, ~10 KB kernel + userspace state per socket) comfortably holds ~500K connections. 50M concurrent / 500K per node ≈ **100 gateway nodes** — provision ~150 for headroom, failure domains, and rolling deploys.\n- **Message throughput**: 10B messages/day / 86,400s ≈ **116K messages/s average**; plan for a 3-5x peak, so ~350K-580K messages/s. Each message fans out to at least one recipient, so downstream delivery QPS is 2-10x the ingest rate depending on group sizes.\n- **Storage growth**: at ~100 bytes average per message (text + metadata; media lives in object storage), 10B/day x 100B = **1 TB/day ≈ 365 TB/year** before replication. With replication factor 3 that is ~1.1 PB/year — this is why a linearly scalable store like Cassandra, partitioned by channel + time bucket, is chosen over a single relational primary.\n- **Presence heartbeat traffic**: 50M connections sending a heartbeat every 10s = **5M heartbeats/s**. Each is a tiny frame handled entirely at the gateway (refresh a TTL in the local table + batched registry refresh), never fanned out — this is often the single largest QPS number in the system and must stay off the core services.\n\nKey insight: connections and heartbeats scale with online users; message writes scale with activity; storage scales with history retention. Sizing each layer against the right axis is what the interviewer is checking.",
   ],
   interviewQA: [
     {
@@ -31,11 +32,24 @@ export const designChatSystem: TopicContent = {
       q: "How would you design the storage layer for chat messages?",
       a: "Chat messages are a write-heavy, append-only workload with reads primarily by (chatId, time range). A wide-column store like Cassandra is ideal: partition key is chatId, clustering key is sequenceNumber. This gives fast sequential writes and efficient range scans for loading chat history. For small deployments, PostgreSQL with a (chatId, sequenceNumber) index works fine. Index recent messages in Redis for instant access to the latest N messages per chat. Archive old messages to cold storage after a retention period. For search across messages, use Elasticsearch with the message text indexed by chatId.",
     },
+    {
+      q: "How would you handle a message sent to a 100,000-member channel?",
+      a: "Do not copy the message per member — that is 100K writes for one send and write amplification destroys the system. Store the message once in the channel's partition (Cassandra, partition key channelId + time bucket) and use fan-out on read: members pull from the channel partition using their own read cursor. For online delivery, the gateways that host at least one subscriber of the channel receive a single pub/sub broadcast and fan out in memory to their local sockets. Offline members are not enqueued individually; on reconnect their client syncs the channel from its cursor. Skip per-message delivery/read receipts above a size threshold (Slack and Discord only keep per-channel read cursors). Contrast with small groups (< 100), where fan-out on write to per-user inboxes is fine and gives simpler per-device offline queues — state the threshold and the hybrid explicitly in the interview.",
+    },
+    {
+      q: "A gateway node holding 500K connections crashes. What happens next, and how do you keep it from cascading?",
+      a: "All 500K clients detect the drop and try to reconnect nearly simultaneously — the danger is not the lost node but the synchronized retry storm hitting the load balancer, auth service, connection registry, and message store (every reconnect triggers a delta sync). Mitigations: (1) client-side jittered exponential backoff so retries decorrelate instead of arriving in waves; (2) server-side admission control — cap handshake rate per gateway and shed excess with retry-after; (3) lazy sync — on reconnect, sync only the visible conversation immediately and defer the rest, flattening the read spike; (4) TTLs on registry entries so the dead gateway's userId-to-gateway mappings expire rather than black-holing routed messages; (5) suppress presence fan-out during the storm so 500K offline/online flaps do not amplify it. For planned restarts, use connection draining: stop accepting new connections and send RECONNECT frames gradually over minutes in randomized order.",
+    },
   ],
   followUps: [
     "How does a message reach a user connected to a different gateway node?",
     "How do you order messages when client clocks disagree?",
     "How do you deliver to a user who is offline?",
+    "Why is global message ordering unnecessary, and what does that buy you?",
+    "How do read receipts work when the user has three devices?",
+    "At what group size do you switch from inbox copies to reading the channel partition, and why?",
+    "How do you stop presence updates from scaling with the size of the social graph?",
+    "What breaks first during a reconnect storm, and how do you protect it?",
   ],
   mcqs: [
     {
@@ -116,11 +130,33 @@ export const designChatSystem: TopicContent = {
       front: "How do you route messages between chat servers?",
       back: "Chat servers are stateful (hold WebSocket connections). A connection registry (Redis) maps userId to serverId. When server A receives a message for user B on server C, it routes via a pub/sub layer (Redis Pub/Sub or Kafka). Server C pushes to B's WebSocket.",
     },
+    {
+      front: "Fan-out on write vs fan-out on read for group messages?",
+      back: "Small groups (< ~100): fan-out on write — copy a message reference into each member's inbox; simple per-device sync. Large channels: fan-out on read — store the message once in the channel partition (Cassandra: channelId + time bucket) and let members read from it with per-user cursors. One send = one write, not 100K.",
+    },
+    {
+      front: "Why per-channel sequence numbers instead of global order or timestamps?",
+      back: "Users only observe ordering within one conversation, so global order buys nothing and costs a coordination bottleneck. Timestamps drift and collide. A per-channel counter (Redis INCR or a Kafka partition keyed by channelId) shards naturally and is unambiguous within the only scope that matters.",
+    },
+    {
+      front: "How do you survive a reconnect storm after a gateway crash?",
+      back: "Client: jittered exponential backoff so 500K retries decorrelate. Server: handshake rate limiting with retry-after, lazy delta sync (visible conversation first), TTLs on registry entries, suppress presence fan-out during the storm. Planned restarts drain connections gradually with RECONNECT frames.",
+    },
+    {
+      front: "How do delivery receipts scale to long conversations?",
+      back: "Watermarks, not per-message flags: store lastDeliveredSeq and lastReadSeq per (user, channel). Clients batch acks (send highest seq every few seconds); server applies max(current, incoming) — idempotent. Read is per-user across devices; delivered is per-device. Large channels skip receipts entirely.",
+    },
   ],
   deepDive: [
     "## Real-Time Message Delivery Pipeline\n\nThe **core challenge** in designing a chat system is achieving *sub-100ms message delivery* at scale while maintaining **strict ordering guarantees**. The pipeline begins when a client sends a message over its **WebSocket connection** to a *connection server*. This server is **stateful** — it holds the TCP socket for that user. The message is first validated (auth token, rate limiting, content policy), then assigned a **monotonically increasing sequence number** from a per-chat counter (typically backed by `Redis INCR` or a dedicated sequencer). The message is persisted to the **write-ahead log** (e.g., Kafka topic partitioned by `chatId`) *before* acknowledgment is sent back to the sender. This ensures **at-least-once delivery** even if the connection server crashes mid-flight. From the WAL, a *message router* consumes events and resolves the recipient's connection server via a **connection registry** (a Redis hash mapping `userId -> serverId`). The message is then forwarded to the target server and pushed down the recipient's WebSocket. If the recipient is **offline**, the message is stored with `delivered: false` and a **push notification** is triggered via APNs/FCM. This entire pipeline — validate, sequence, persist, route, deliver — must complete in under 100ms for the *p99* case, which requires careful **connection pooling**, **batch writes**, and **locality-aware routing**.",
     "## Scaling WebSocket Connections\n\nA single server can hold roughly **500K–1M concurrent WebSocket connections** depending on memory and file descriptor limits. For a system serving *100M+ concurrent users*, you need a fleet of connection servers behind a **Layer 4 load balancer** (not L7, since WebSocket is a long-lived connection). Key challenges include:\n\n- **Connection draining**: when a server needs to be restarted, connections must be *gracefully migrated*. The server sends a `RECONNECT` frame, and clients reconnect to a new server via the load balancer.\n- **Hot-spot mitigation**: celebrity users or viral group chats can overload a single server. Use **consistent hashing** with *virtual nodes* to distribute load, and implement **backpressure** on high-fanout groups.\n- **Cross-server routing**: since user A and user B may be on different servers, a **pub/sub backbone** (Redis Pub/Sub, Kafka, or NATS) is essential. Each connection server subscribes to channels for all users it hosts. When a message arrives for user B, the routing layer publishes to B's channel, and B's connection server picks it up.\n- **Connection state**: maintain a `heartbeat` timestamp per connection. A background **reaper process** scans for stale connections (no heartbeat for 30s) and cleans up the registry. This prevents *ghost connections* from consuming resources.",
     "## End-to-End Encryption and Security\n\nModern chat systems implement **end-to-end encryption (E2EE)** using the *Signal Protocol* (Double Ratchet Algorithm). Each user generates an **identity key pair**, a set of **pre-keys**, and a **signed pre-key**. When user A wants to message user B for the first time, A fetches B's *pre-key bundle* from the server and performs an **X3DH key agreement** to establish a shared secret. Subsequent messages use the **Double Ratchet** — combining a *Diffie-Hellman ratchet* (new DH keys per message exchange) with a *symmetric-key ratchet* (KDF chain). This provides **forward secrecy** (compromising a key doesn't expose past messages) and **break-in recovery** (future messages are secure even if a key is compromised). The server **never sees plaintext** — it stores only *ciphertext blobs*. For **group chats**, the *Sender Keys* protocol is used: the sender encrypts once with a symmetric *sender key*, and each group member has the sender key encrypted to their public key. Key rotation happens when members join or leave. Additional security measures include **message authentication codes** (HMAC) to prevent tampering, **replay protection** via sequence numbers, and **metadata minimization** — the server should know *who* is talking to *whom* as little as possible (sealed sender in Signal).",
+    "## Message Ordering: Per-Channel Sequences, Not Global Order\n\nOrdering only needs to hold within a single channel — global order across a chat system is unnecessary and prohibitively expensive. Users never observe ordering across conversations; they only notice when messages inside one chat appear scrambled. This is why the unit of ordering is the **channel (conversation)**, and why each channel gets its own **monotonically increasing sequence number** (Redis `INCR`, or a Kafka partition keyed by `channelId` where the partition offset is the sequence).\n\n- **Why not timestamps?** Client clocks drift and can be spoofed; even server clocks skew across machines by milliseconds — enough to reorder two rapid-fire messages. A sequence number from a single sequencer per channel is unambiguous.\n- **Why not a global sequencer?** A single counter for 100K+ messages/s is a bottleneck and a single point of failure. Per-channel counters shard naturally: channel activity is the unit of contention, and even the busiest channel is a tiny fraction of total traffic.\n- **Hybrid IDs**: Discord uses *Snowflake IDs* (timestamp + worker + sequence bits) — roughly time-ordered globally, strictly ordered per generator — accepting that two messages in different channels may interleave arbitrarily, which no user can observe.\n\nKey insight: relaxing an invariant to the smallest scope users can actually observe (per-channel, not global) is what turns an impossible coordination problem into a trivially shardable one. This pattern — scope your ordering guarantee — reappears in feeds, comments, and collaborative editing.\n\nCommon mistake: proposing a globally consistent timestamp service (TrueTime-style) for chat ordering. That machinery exists for cross-shard transactions; chat needs none of it.",
+    "## Delivery Receipts as a State Machine\n\nEvery message moves through a small monotonic state machine: **sent -> delivered -> read**, and the states can only move forward. *Sent* means the server durably persisted the message and acked the sender (one tick). *Delivered* means a recipient device acked receipt over its socket (two ticks). *Read* means the recipient opened the conversation past that message (blue ticks).\n\n- **Watermarks, not per-message flags**: store a single `lastReadSeq` (and `lastDeliveredSeq`) per (user, channel). Marking 500 messages read is one integer update, and any message with `seq <= watermark` is read by definition.\n- **Batched acks**: a scrolling user would otherwise generate one read event per message. Clients batch: send the highest sequence read every few seconds or on conversation close. The server applies `max(current, incoming)` — idempotent and reorder-safe.\n- **Group receipts**: 'delivered to all / read by all' requires the *minimum* watermark across members. Computing this on every message for a 1,000-member group is O(N); most systems either cap receipt detail at a group size threshold or compute it lazily when the sender opens message info.\n- **Multi-device**: *delivered* is per-device, but *read* is per-user — when any device reads, all devices advance the watermark via the sync service.\n\nIn practice: WhatsApp exposes the full sent/delivered/read ladder; Slack and Discord skip per-message receipts entirely and only track per-channel read cursors — a deliberate product decision that removes the O(members) receipt fan-out problem for large channels.",
+    "## Large-Group Fan-Out: Write Path vs Read Path\n\nThe fan-out strategy must change with group size, because per-member message copies stop scaling long before membership stops growing. For a 1:1 chat or small group, **fan-out on write** is ideal: copy the message reference into each member's inbox/offline queue so every device syncs from its own queue. One message to a 10-member group = 10 cheap inbox writes.\n\n- **The breaking point**: a 100K-member Discord-style channel would turn one message into 100K writes — 116K msgs/s average ingest becomes billions of inbox writes/s. Write amplification kills you, not read traffic.\n- **Fan-out on read (channel model)**: store the message **once** in the channel's partition (Cassandra partition key `channelId + time bucket`, clustering by `messageId`). Members *read* from the channel partition; nothing is copied per member. Delivery to online members is a pub/sub broadcast to gateways holding subscribers of that channel — the gateway fans out in memory to its local sockets.\n- **Hybrid**: small groups (< 100) get inbox copies (fast per-device sync, works with offline queues); large channels get single-copy storage + per-user read cursors. The group/channel service decides the path at send time based on member count.\n- **Hot partition guard**: a viral channel writing to one `channelId` partition can hot-spot a Cassandra node — hence the **time bucket** in the partition key (e.g., `channelId + day`), which caps partition size and spreads history across nodes.\n\nReal-world example: Discord stores each message exactly once in Cassandra/ScyllaDB keyed by channel; a message to a million-viewer channel is one write plus a gateway broadcast. WhatsApp, with groups capped near 1K and E2EE requiring per-recipient ciphertext anyway, leans toward per-recipient delivery queues. Group size caps are architecture decisions in disguise.",
+    "## Presence at Scale: Avoiding the Broadcast Storm\n\nThe hard part of presence is not tracking who is online — it is deciding who to tell. Tracking is easy: each connection heartbeats every ~10s, the gateway refreshes a `presence:{userId}` key in Redis with a **30s TTL**, and expiry means offline (catching silent TCP drops that never fire a close event).\n\n- **The O(friends) trap**: naively, every online/offline transition broadcasts to all N friends or channel co-members. A user with 1,000 contacts flapping on a bad mobile link generates 1,000 updates per flap; multiplied across 50M users this is a storm that dwarfs message traffic.\n- **Lazy fetch**: don't push presence at all — when a client opens a conversation or renders a member list, it *fetches* presence for exactly the users on screen, and subscribes to updates only for that visible set. Closing the view unsubscribes. Pushed updates now scale with what users are looking at, not with the social graph.\n- **Debounce transitions**: only publish a transition after it is stable for a few seconds. A brief network blip never becomes a visible offline/online flap.\n- **Cheap reads**: presence queries are approximate, so serve them from Redis replicas or gateway-local caches with a few seconds of staleness — nobody can tell.\n\nKey insight: presence is an eventually consistent, lossy signal. Every design choice — TTLs, debouncing, lazy fetch, stale reads — exploits the fact that being wrong for 10 seconds is invisible to users.",
+    "## Multi-Device Sync: Per-Device Cursors\n\nA user is a set of devices, and each device is an independent replica that must converge on the same conversation history. The server maintains a **per-user inbox** (or the channel partitions themselves) as the source of truth, and each device keeps its own **cursor** — the last sequence number it has applied, per channel.\n\n- **Why per-device, not per-user**: the phone may be current while the laptop was off for a week. A single per-user cursor would either re-send everything to the current device or skip messages on the stale one. Each device syncs its own delta: `give me everything in channel C after seq N`.\n- **New device bootstrap**: starts with cursor 0 and pages history from the message store (recent first, lazily backfilling). Under E2EE this is where designs diverge — history either transfers from an existing device or is simply unavailable (classic WhatsApp behavior).\n- **Writes are also synced**: a message *sent* from the phone must appear on the laptop. Sends are appended to the same per-channel stream, so other devices pick up own-messages through the identical cursor mechanism — no special case.\n- **Read state sync**: the read watermark lives server-side per (user, channel); when the phone reads a message, the sync service pushes the new watermark to the laptop so badges clear everywhere.\n- **Retention**: the server-side inbox holds undelivered items until every registered device acks or a TTL (e.g., 30 days) expires; devices silent past the TTL are deregistered and must re-bootstrap.\n\nCommon mistake: treating multi-device as an afterthought bolted onto a per-user delivery flag. Model delivery as per-device cursors from day one — 'delivered' is then simply 'all active devices have advanced past this sequence'.",
+    "## Reconnect Storms and Gateway Failure\n\nWhen a gateway holding 500K connections dies, 500K clients notice within seconds and try to reconnect at once — and a naive retry loop turns one node failure into a fleet-wide outage. The reconnect flood hits the load balancer, then the surviving gateways, each reconnect triggering an auth check, a registry write, and a delta sync — the sync fan-in to the message store is often what actually falls over.\n\n- **Jittered exponential backoff**: clients retry at `base * 2^attempt + random jitter`, capped (e.g., 1s, 2s, 4s ... max 60s). The jitter is the critical part — without it, all 500K clients retry in synchronized waves.\n- **Server-side admission control**: gateways cap the rate of new connection handshakes and shed excess with a `retry-after` hint, protecting the auth service and registry from the spike.\n- **Lazy sync on reconnect**: don't run full delta sync for every channel on reconnect; sync the visible conversation immediately, defer the rest. This flattens the read spike on the message store.\n- **Planned restarts use connection draining**: a deploying gateway stops accepting new connections, then sends `RECONNECT` frames to its clients *gradually over minutes* (randomized order), so a rolling deploy never looks like a failure. Registry entries carry a TTL so a dead gateway's mappings expire instead of black-holing routed messages.\n- **Heartbeat grace on the receiving side**: during a known storm, presence transitions are suppressed — otherwise 500K users flap offline/online and the presence system amplifies the storm.\n\nWarning: this failure mode is invisible in normal operation and catastrophic under it. Interviewers ask 'what happens when a gateway dies?' precisely to see whether you reason about correlated client behavior, not just steady-state load.",
   ],
   code: [
     {
@@ -527,74 +563,69 @@ private:
     {
       title: "Chat System Architecture",
       kind: "architecture",
-      caption: "High-level architecture showing clients, connection servers, message routing, storage, and supporting services.",
+      caption: "Layered architecture. Online delivery path: sender -> gateway -> registry lookup -> recipient's gateway (solid numbered edges). Offline path: persist to inbox + push notification via FCM/APNs.",
       mermaid: `graph TB
-    subgraph Clients
-        C1[Mobile App]
-        C2[Web Browser]
-        C3[Desktop App]
+    subgraph LClients["Clients"]
+        MOB["Mobile App<br/>local message store"]
+        WEB["Web / Desktop App<br/>local message store"]
     end
 
-    subgraph Load_Balancer["Load Balancer (L4)"]
-        LB[TCP Load Balancer]
+    subgraph LGateway["Gateway Layer"]
+        LB["L4 Load Balancer"]
+        GW1["WebSocket Gateway 1<br/>approx 500K conns"]
+        GW2["WebSocket Gateway N"]
     end
 
-    subgraph Connection_Servers["Connection Servers (Stateful)"]
-        CS1[Chat Server 1<br/>WebSocket Handler]
-        CS2[Chat Server 2<br/>WebSocket Handler]
-        CS3[Chat Server N<br/>WebSocket Handler]
+    subgraph LCore["Core Services"]
+        REG["Connection Registry<br/>Redis: userId to gatewayId"]
+        CHAT["Chat Service<br/>validate + sequence + persist"]
+        GRP["Group / Channel Service<br/>membership lookup"]
+        PRES["Presence Service<br/>heartbeats + TTL"]
+        TYP["Typing Indicators<br/>ephemeral pub/sub, never stored"]
     end
 
-    subgraph Message_Layer["Message Routing Layer"]
-        MQ[Kafka / Redis Pub-Sub<br/>Message Broker]
-        SEQ[Sequence Service<br/>Redis INCR per chatId]
+    subgraph LAsync["Async Layer"]
+        KAFKA["Kafka<br/>message events, partitioned by channelId"]
+        PUSHB["Push Notification Bridge<br/>FCM / APNs for offline users"]
     end
 
-    subgraph Storage["Storage Layer"]
-        MONGO[(MongoDB / Cassandra<br/>Message Store)]
-        REDIS[(Redis Cache<br/>Recent Messages +<br/>Connection Registry)]
-        S3[(Object Storage<br/>Media Files)]
+    subgraph LData["Data Layer"]
+        CASS[("Message Store<br/>Cassandra: partition by<br/>channelId + time bucket")]
+        INBOX[("Inbox / Offline Queue<br/>undelivered per user")]
+        MEDIA[("Object Storage + CDN<br/>images, video, files")]
     end
 
-    subgraph Services["Supporting Services"]
-        PRESENCE[Presence Service<br/>Heartbeat Tracker]
-        PUSH[Push Notification<br/>APNs / FCM]
-        SEARCH[Search Service<br/>Elasticsearch]
-        AUTH[Auth Service<br/>JWT Validation]
+    subgraph LSync["Sync Layer"]
+        SYNC["Multi-Device Sync Service<br/>per-device cursors"]
     end
 
-    C1 -->|WebSocket| LB
-    C2 -->|WebSocket| LB
-    C3 -->|WebSocket| LB
-    LB --> CS1
-    LB --> CS2
-    LB --> CS3
+    MOB -->|"WebSocket"| LB
+    WEB -->|"WebSocket"| LB
+    LB --> GW1
+    LB --> GW2
 
-    CS1 --> SEQ
-    CS2 --> SEQ
-    CS3 --> SEQ
+    GW1 -->|"1 send"| CHAT
+    CHAT -->|"2 lookup recipient"| REG
+    REG -->|"3 recipient on GW N"| GW2
+    GW2 -.->|"4 deliver online"| WEB
 
-    CS1 <--> MQ
-    CS2 <--> MQ
-    CS3 <--> MQ
+    CHAT --> GRP
+    CHAT -->|"publish event"| KAFKA
+    KAFKA -->|"persist"| CASS
+    KAFKA -->|"offline: enqueue"| INBOX
+    KAFKA -->|"offline: notify"| PUSHB
+    PUSHB -.->|"push wakes app"| MOB
 
-    CS1 --> MONGO
-    CS2 --> MONGO
-    CS3 --> MONGO
+    GW1 -->|"heartbeat"| PRES
+    GW2 -->|"heartbeat"| PRES
+    GW1 -->|"typing events"| TYP
+    TYP -.->|"forward to viewers"| GW2
 
-    CS1 --> REDIS
-    CS2 --> REDIS
-    CS3 --> REDIS
-
-    MQ --> PUSH
-    CS1 --> S3
-    MONGO --> SEARCH
-
-    CS1 --> PRESENCE
-    CS2 --> PRESENCE
-    CS3 --> PRESENCE
-
-    CS1 --> AUTH`,
+    MOB -->|"upload media"| MEDIA
+    SYNC -->|"read"| INBOX
+    SYNC -->|"read"| CASS
+    MOB -->|"delta sync on reconnect"| SYNC
+    WEB -->|"delta sync on reconnect"| SYNC`,
     },
     {
       title: "Message Delivery Sequence",
@@ -632,6 +663,19 @@ private:
     Away --> Offline : WebSocket disconnect
     Online --> DoNotDisturb : User sets DND
     DoNotDisturb --> Online : User clears DND`,
+    },
+    {
+      title: "Delivery Receipt State Machine",
+      kind: "state",
+      caption: "Per-message receipt states move forward only. Implemented as per-(user, channel) watermarks with batched acks, not per-message flags.",
+      mermaid: `stateDiagram-v2
+    [*] --> Pending : client sends
+    Pending --> Sent : server persists + acks sender
+    Sent --> Delivered : recipient device acks over socket
+    Sent --> Queued : recipient offline, inbox + push
+    Queued --> Delivered : device reconnects and syncs
+    Delivered --> Read : read watermark advances past seq
+    Read --> [*]`,
     },
     {
       title: "Chat Storage Key Entities",
@@ -753,6 +797,10 @@ private:
     "**Offline sync protocol**: client stores `lastSeqNumber` per chat in `localStorage`. On reconnect, sends `{type: 'sync', chatId, lastSeq}`. Server responds with `SELECT * FROM messages WHERE chatId = ? AND seqNumber > ? ORDER BY seqNumber ASC`. Batch in pages of 50 for large deltas.",
     "**Message delivery guarantees**: *at-least-once* via WAL (Kafka) before ack. Deduplicate on client using `messageId` or `(chatId, seqNumber)` pair. Idempotent processing on server side — `upsert` with unique index on `(chatId, seqNumber)` prevents duplicates.",
     "**Group chat fan-out rule of thumb**: groups < 100 members use *fan-out on write* (push to each inbox). Groups > 100 use *fan-out on read* (members pull from group timeline). Hybrid: fan-out on write to *online* members, fan-out on read for *offline* members. Track active members in `Redis ZSET` with heartbeat timestamp as score.",
+    "**Capacity anchors**: 50M concurrent / 500K conns per gateway ≈ **100 gateways** (provision ~150). 10B msgs/day / 86,400s ≈ **116K msgs/s avg**, plan 3-5x peak. 10B/day x 100B avg ≈ **1 TB/day** message storage (~1.1 PB/yr at RF=3). 50M conns @ 10s heartbeat = **5M heartbeats/s** — keep these at the gateway.",
+    "**Receipt watermarks**: never per-message read flags. Store `lastDeliveredSeq` / `lastReadSeq` per (user, channel); apply `max(current, incoming)` (idempotent). Batch client acks every few seconds. *Delivered* is per-device, *read* is per-user. Skip per-message receipts for channels above ~1K members.",
+    "**Reconnect storm playbook**: client backoff `base * 2^n + jitter` capped at 60s; gateway handshake rate limits + `retry-after`; lazy sync (visible chat first); registry entries with TTL so dead gateways expire; suppress presence fan-out during the storm; planned deploys drain connections gradually with `RECONNECT` frames.",
+    "**Presence scaling rule**: never push presence to the whole friend list. Lazy-fetch presence for users *on screen*, subscribe only to the visible set, debounce transitions a few seconds, serve reads from replicas. Heartbeat + 30s TTL in Redis; TTL expiry = offline (catches silent TCP drops).",
   ],
   revisionNotes: [
     "The **three pillars** of a chat system are: (1) *real-time delivery* via WebSocket with pub/sub routing, (2) *message ordering* via server-assigned per-chat sequence numbers, and (3) *offline reliability* via persistent storage with delta sync on reconnect. Every design decision flows from these three requirements.",
@@ -760,14 +808,18 @@ private:
     "**Storage layer trade-offs**: use a *write-optimized store* (Cassandra, HBase) with partition key = `chatId` and clustering key = `seqNumber` for the message table. Cache the latest N messages per chat in **Redis** for sub-millisecond reads. Index in **Elasticsearch** for full-text search. Archive messages older than the retention period to **cold storage** (S3 + Parquet).",
     "**Presence is an eventually consistent system** — there is no need for strong consistency. A user appearing online for a few extra seconds after disconnecting is acceptable. Use *heartbeat + timeout* (not WebSocket close alone, since connections can drop silently). Debounce presence fan-out to avoid thundering-herd updates when many users connect/disconnect simultaneously.",
     "**End-to-end encryption** fundamentally changes the architecture: the server **cannot read, search, or moderate** message content. All indexing and search must happen *client-side*. Group key management adds complexity — key rotation on member join/leave, *Sender Keys* for efficient group encryption. E2EE trades server-side features for **privacy guarantees**.",
+    "**Ordering is scoped, not global**: guarantee order *per channel* only — users cannot observe cross-conversation order. Per-channel sequencer (Redis INCR or Kafka partition keyed by channelId) shards naturally; a global sequencer is a needless bottleneck. Never order by client timestamps.",
+    "**Fan-out strategy is a function of group size**: small groups copy message references into per-user inboxes (*fan-out on write*); large channels store the message **once** in the channel partition and members read with cursors (*fan-out on read*, Discord model). Time-bucket the partition key to avoid hot partitions on viral channels.",
+    "**Multi-device = per-device cursors**: each device syncs its own delta (`channel C after seq N`) from a server-side inbox/channel stream; own-sends propagate to sibling devices through the same stream. Read watermarks are per-user and pushed to all devices. 'Delivered' means all active devices advanced past the sequence.",
+    "**Failure math matters as much as steady state**: one gateway death = ~500K simultaneous reconnects, each triggering auth + registry write + delta sync. Jittered backoff, admission control, and lazy sync are what keep a single-node failure from cascading — interviewers probe this deliberately.",
   ],
   resources: [
     {
-      label: "System Design Interview — Alex Xu",
+      label: "System Design Interview — Alex Xu", url: "https://bytebytego.com/",
       kind: "book",
     },
     {
-      label: "WebSocket Protocol — RFC 6455",
+      label: "WebSocket Protocol — RFC 6455", url: "https://www.rfc-editor.org/rfc/rfc6455",
       kind: "docs",
     },
   ],

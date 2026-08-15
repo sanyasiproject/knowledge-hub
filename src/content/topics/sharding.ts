@@ -578,11 +578,11 @@ sh.getBalancerState();`,
 
   resources: [
     {
-      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      label: "Designing Data-Intensive Applications — Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
     },
     {
-      label: "Vitess documentation — sharding",
+      label: "Vitess documentation — sharding", url: "https://vitess.io/docs/",
       kind: "docs",
     },
   ],

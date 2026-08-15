@@ -9,16 +9,21 @@ export const designUber: TopicContent = {
     "The trip lifecycle flows through states: REQUESTED, MATCHED, DRIVER_EN_ROUTE, ARRIVED, TRIP_IN_PROGRESS, COMPLETED, CANCELLED. Each transition triggers downstream events: notifications, ETA updates, billing calculations, and driver availability changes.",
   ],
   detailed: [
-    "## Requirements and Scale Estimation\n\nFunctional requirements include rider requesting a ride, real-time driver-rider matching, ETA computation, fare estimation with dynamic pricing, trip tracking, and payment processing. Non-functional requirements demand sub-second location update ingestion, matching latency under 5 seconds, 99.99% availability, and strong consistency for payment but eventual consistency for location data. Scale estimation: 20M rides/day translates to ~230 rides/second at peak (assuming 3x peak-to-average ratio, ~700 rides/second peak). With 5M active drivers sending GPS pings every 4 seconds, the location service ingests ~1.25M updates/second. Each update is ~100 bytes (driverId, lat, lng, timestamp, heading, speed), producing ~125 MB/s of raw location data. Storage: 1.25M updates/sec x 86400 sec/day x 100 bytes = ~10 TB/day of location history. The system needs to support reads of ~500K nearby-driver queries/second during peak hours.",
-    "## High-Level Architecture\n\nThe system decomposes into several core services. The Location Service ingests driver GPS updates via a persistent WebSocket connection, writes them to an in-memory geospatial index (sharded by city/region), and publishes updates to Kafka for downstream consumers. The Matching Service subscribes to ride requests from the API Gateway, queries the Location Service for nearby available drivers, runs the matching algorithm, and dispatches the best driver. The Trip Service manages the ride lifecycle state machine, persisting trip records to a database (PostgreSQL for transactional data, Cassandra for trip events). The Pricing Service computes fare estimates and surge multipliers using real-time supply-demand signals. The ETA Service uses a combination of road-network graph routing (Dijkstra or A* on OpenStreetMap data) and ML models trained on historical trip data. An API Gateway handles authentication, rate limiting, and routes requests to backend services. All inter-service communication uses gRPC for synchronous calls and Kafka for asynchronous events.",
-    "## Geospatial Indexing and Location Tracking\n\nThe core data structure for spatial queries is a geohash-based grid or a quadtree. Geohashing encodes latitude and longitude into a single string by interleaving bits of each coordinate; longer prefixes represent smaller cells. A geohash of precision 6 (e.g., '9q8yyk') covers roughly 1.2 km x 0.6 km, which is ideal for urban driver search. To find drivers near a rider, compute the rider's geohash prefix and query all drivers in that cell plus the 8 neighboring cells (to handle edge effects). The location index is an in-memory hash map: geohash prefix maps to a set of driverIds. When a driver moves, remove them from the old cell and insert into the new cell, an O(1) operation. Uber actually uses a more sophisticated approach: Google S2 geometry library, which projects Earth onto a cube and uses Hilbert curves to index cells hierarchically. S2 cells at level 12 are roughly 3.3 km2, and at level 16 roughly 0.02 km2. The advantage over geohash is uniform cell area and no edge discontinuities at the antimeridian or poles. The location service is sharded by city, with each shard holding the geospatial index for one metropolitan area, keeping the working set in memory (~50 MB for a city with 100K active drivers).",
+    "## Requirements and Scale Estimation\n\nEvery number in this design flows from two inputs: 20M rides/day and 5M concurrent drivers pinging GPS every 4 seconds. Functional requirements include rider requesting a ride, real-time driver-rider matching, ETA computation, fare estimation with dynamic pricing, trip tracking, and payment processing. Non-functional requirements demand sub-second location update ingestion, matching latency under 5 seconds, 99.99% availability, and strong consistency for payment but eventual consistency for location data.\n\n### Capacity math, step by step\n\n- Ride requests: 20M rides/day / 86,400 s = ~230 rides/s average; with a 3x peak-to-average ratio that is ~700 ride requests/s at peak. Each request fans out into a fare estimate, a nearby-driver query, ~20 ETA computations, and a match decision.\n- Location writes: 5M concurrent drivers x (1 ping / 4 s) = 1.25M location writes/s. At ~100 bytes per ping (driverId, lat, lng, timestamp, heading, speed, accuracy) that is ~125 MB/s of raw ingest and 1.25M x 86,400 x 100 B = ~10.8 TB/day of location history.\n- WebSocket connections: 5M drivers + roughly 1M riders actively watching a trip = ~6M concurrent sockets. A tuned gateway node (Go/Netty class) comfortably holds ~100K connections, so you need ~60 WebSocket gateway nodes plus headroom, fronted by an L4 load balancer with connection-count-aware routing.\n- Nearby-driver reads: ~700 requests/s x 1 geo query, plus map-screen driver previews and re-dispatches, lands around 100-500K geo index reads/s at peak. This is why the index must be in memory: even 1 ms per query on a disk-backed store would not survive this fan-out.\n\nKey insight: writes dominate reads by roughly 1000:1 (1.25M writes/s vs ~700 ride requests/s). The architecture is shaped by the write path — that is why location goes to an in-memory index fed by Kafka rather than to the transactional database.\n\nCommon mistake: estimating storage for driver pings as if they must all live in the OLTP database. Live positions are ephemeral (only the latest ping per driver matters for matching, ~5M rows total); the 10 TB/day history stream goes to Cassandra/HDFS for analytics and is TTL'd or downsampled after days.",
+    "## High-Level Architecture\n\nThe system decomposes into two distinct traffic paths — a firehose write path for driver pings and a request/response path for rides — plus a shared realtime layer. On the write path, the Driver App holds a persistent WebSocket to a WebSocket Gateway; pings flow to the Location Ingestion service, which validates and Kalman-smooths them, publishes to Kafka (partitioned by city), and updates the in-memory geospatial index (H3/S2 cells, live positions mirrored in Redis for cross-service reads). On the request path, the Rider App hits the API Gateway (auth, rate limiting), which routes to the Pricing Service for a fare quote, then to the Matching/Dispatch Service, which queries the geo index for candidates, asks the ETA/Routing Service for pickup ETAs, and dispatches an offer back through the WebSocket Gateway. The Trip Service owns the ride lifecycle state machine, persisting trips to PostgreSQL and emitting every state transition to Kafka; the Payments Service pre-authorizes via an external processor (Stripe/Adyen/Braintree) and captures on completion; the Notification Service pushes trip updates (APNs/FCM, SMS fallback).\n\n### Named tech per layer\n\n| Layer | Technology | Why |\n| --- | --- | --- |\n| Edge | Envoy/NGINX L4 LB + API gateway + WebSocket gateway | Separate stateless HTTP from long-lived socket state |\n| Stream | Kafka (city-partitioned topics) | Durable buffer for 1.25M pings/s; replay on restart |\n| Geo index | H3 (Uber) or S2 (Google) cells in memory / Redis | O(1) cell lookup, ring expansion for radius search |\n| Trips/users/payments | PostgreSQL | ACID transactions, money must not be eventually consistent |\n| Location history | Cassandra | Write-optimized LSM store for 10 TB/day append-only data |\n| Live positions + surge cache | Redis | Sub-ms reads for map rendering and pricing |\n| Routing | OSM road graph + contraction hierarchies; ML ETA correction (Uber DeepETA) | Millisecond path queries at continent scale |\n\nIn practice: all synchronous inter-service calls are gRPC with deadlines and circuit breakers (Uber's internal stack is Go/Java services on a mesh), and everything asynchronous — analytics, surge signals, ML features, receipts — hangs off the Kafka event stream rather than adding synchronous hops to the hot path.",
+    "## Geospatial Indexing: H3/S2 Hexagonal Geosharding\n\nThe entire matching problem reduces to one query — 'give me available drivers near this point' — and the geo index exists to answer it in microseconds. Naive geohashing encodes lat/lng by interleaving coordinate bits; precision 6 (e.g., '9q8yyk') covers roughly 1.2 km x 0.6 km, and a nearby-driver query reads the rider's cell plus its 8 neighbors. Uber's production system uses H3, its open-source hexagonal hierarchical index: the globe is tiled with hexagons at 16 resolutions (res 7 hexes average ~5 km2, res 9 ~0.1 km2), and each hex has a 64-bit integer id.\n\n### How geosharding actually works\n\n- Every driver ping maps lat/lng to an H3 cell id in O(1) (a few hundred nanoseconds — pure math, no I/O).\n- The index is a hash map from cell id to the set of drivers currently in that cell: cellId -> {driverId: lastPing}. A driver moving between cells is a delete + insert, both O(1).\n- A radius search is 'k-ring expansion': fetch the rider's hex, then ring 1 (6 neighbors), then ring 2 (12 more), stopping once enough candidates are found. This bounds work to the local area regardless of global driver count.\n- The cell id doubles as the sharding key: contiguous ranges of cells (i.e., geographic regions/cities) are assigned to index shards via consistent hashing, so one shard owns one metro and keeps it fully in RAM (~50 MB for 100K drivers at ~500 bytes each).\n\nKey insight: hexagons beat squares (geohash/quadtree) for movement modeling because all 6 neighbors of a hex are equidistant from its center, while a square has 4 near neighbors and 4 diagonal ones ~41% farther. That makes ring-based radius search and per-cell surge zones far less distorted. S2 (Google's cube-projection + Hilbert curve alternative) solves the same problem with near-uniform quadrilateral cells and is what many geo systems use instead.\n\nCommon mistake: storing driver positions in PostgreSQL and querying WHERE lat BETWEEN ... AND lng BETWEEN ... with a B-tree index. B-trees index one dimension well; a 2D range query degenerates into scanning a huge latitude band. Even PostGIS with an R-tree cannot sustain 1.25M updates/s — the index must be in memory.",
     "## Driver-Rider Matching and ETA Calculation\n\nMatching is not simply assigning the closest driver. Uber's dispatch system collects all unmatched ride requests and available drivers in a region, then solves a batched assignment problem every 2 seconds. The objective function minimizes total pickup ETA across all pairs while considering driver preferences, vehicle type match, and predicted trip value. This is modeled as a minimum-cost bipartite matching problem solved with the Hungarian algorithm or auction-based methods. For ETA calculation, the system maintains a road-network graph with ~100M edges globally. Real-time ETAs combine: (1) a graph shortest-path algorithm (A* with landmark heuristics) to compute route distance, (2) real-time traffic data from driver GPS traces aggregated per road segment, and (3) an ML model that adjusts for time-of-day, weather, and special events. Historical trip data shows that ML-adjusted ETAs are 20-30% more accurate than pure graph routing. The Haversine formula provides quick straight-line distance estimates for initial filtering (eliminating drivers more than 10 km away before running expensive graph routing).",
+    "## One Ride, End to End\n\nTracing a single request through every component is the fastest way to prove the design hangs together. The rider opens the app: the client calls the API Gateway, which fans out to Pricing (fare quote using the current surge multiplier for the pickup hex, read from Redis) and ETA (rough pickup time from nearby-driver density). The rider confirms.\n\n1. Request: the gateway creates a ride request; the Trip Service writes a trip row in PostgreSQL in state REQUESTED and emits a trip-requested event to Kafka.\n2. Candidate search: Matching queries the geo index shard for the pickup hex — k-ring expansion returns, say, 12 available drivers within 2 rings.\n3. Rank: Matching asks the ETA service for road-network pickup ETAs on the top candidates (Haversine pre-filter first), builds a cost per pair, and runs the batched assignment for the current 2-second window.\n4. Offer: the winning driver gets a dispatch offer over their WebSocket with a 10-15 s countdown. The offer places a soft lock on the driver so no other match grabs them. Decline or timeout releases the lock and the request re-enters the next batch with the driver excluded.\n5. Accept: driver taps accept — Trip Service transitions REQUESTED -> MATCHED -> DRIVER_EN_ROUTE (each transition is a compare-and-set on the trip row plus a Kafka event). Payments pre-authorizes the estimated fare with the processor using idempotency key tripId:auth.\n6. Trip: ARRIVED when the driver's GPS enters the pickup geofence, TRIP_IN_PROGRESS on start; rider and observers stream the driver's position via the WebSocket gateway (fed from the location stream, throttled to ~1 update/s for the map).\n7. Completion: at dropoff the trip transitions to COMPLETED, the fare is finalized (distance + time from the GPS trace, surge multiplier locked at request time), and Payments captures against the earlier authorization with key tripId:capture. Receipt, rating prompt, and driver-earnings update all fan out asynchronously from the trip-completed Kafka event.\n\nKey insight: the surge multiplier is locked at request time, not completion time — otherwise the price a rider agreed to could change mid-trip, which is both a product and a legal problem.",
     "## Surge Pricing, Payments, and Failure Handling\n\nSurge pricing divides each city into hexagonal zones (~1 km2 each). For each zone, the system continuously computes the supply-demand ratio: available drivers divided by open ride requests. When demand exceeds supply beyond a threshold (e.g., ratio < 0.5), a surge multiplier is applied: typically 1.2x to 3x, capped at a regulatory maximum. The multiplier is smoothed over a 5-minute rolling window to avoid oscillation. Payment processing uses a two-phase approach: authorize the estimated fare when the ride is matched, then capture the actual fare on completion. This handles scenarios where the actual fare differs from the estimate. For failure handling, the system implements circuit breakers between services, fallback matching (greedy nearest-driver if the optimizer is down), and idempotent payment operations. If the matching service fails, riders see increased wait times but the system degrades gracefully rather than going offline. Driver location updates are buffered in Kafka so that a location service restart recovers state from the last few seconds of the stream. Trip state is event-sourced, allowing reconstruction from the event log if the Trip Service database fails.",
   ],
   deepDive: [
+    "## Why Naive Lat/Lng Queries Fail, and How Ring Expansion Wins\n\nThe deepest interview differentiator on this problem is explaining WHY a database range query cannot serve nearby-driver search. A B-tree can index latitude OR longitude, not both: SELECT ... WHERE lat BETWEEN a AND b AND lng BETWEEN c AND d uses the index for one dimension, then filters the other — in a dense city that means scanning every driver in a 1-degree latitude band (potentially hundreds of thousands of rows) to find 20 nearby ones. Spatial indexes (R-trees in PostGIS) fix the read but die on the write side: 1.25M position updates/s means 1.25M index mutations/s with page splits, WAL writes, and vacuum pressure. The solution inverts the data structure — instead of asking 'which drivers are within radius r of point p', pre-bucket drivers into fixed cells so the question becomes 'which cells overlap my search area', which is pure arithmetic.\n\n### Hex ring expansion search\n\n- Convert the pickup point to its H3 cell (res 8-9 for urban search). Look up that cell's driver set: O(1).\n- Not enough candidates? Expand to ring 1 — the 6 hexes touching the center — then ring 2 (12 hexes), ring 3 (18 hexes). Ring k adds 6k cells, so total cells after k rings is 1 + 3k(k+1); even ring 5 is only 91 cell lookups, each a hash-map hit.\n- Stop when you have N candidates (e.g., 20) or hit a max radius. Sparse suburbs naturally expand further; dense downtowns stop at ring 1. The algorithm is self-adapting with zero tuning.\n- Each candidate's last ping carries a timestamp: discard entries older than ~10 s (stale drivers who disconnected) at read time rather than eagerly cleaning the index.\n\nKey insight: cell size is a tuning knife-edge. Too coarse (res 6, ~36 km2) and every query returns thousands of candidates to filter; too fine (res 11, ~0.002 km2) and you burn CPU on deep ring expansion. Production systems pick a resolution where a typical urban query resolves within 1-2 rings, and may use coarser resolution for suburban shards.\n\nCommon mistake: forgetting driver movement between cells. Every ping potentially moves a driver from cell A to cell B — the update must atomically remove-then-insert, or a crash between the two operations leaves the driver duplicated or vanished. Single-threaded shard event loops (Redis-style) or per-cell locks solve this cheaply.",
     "## Sharding the Location Service for Global Scale\n\nThe location service cannot run as a single instance at Uber's scale. The primary sharding strategy is geographic: each major city or metro area gets its own location service shard. A city like New York with ~80K active drivers at peak holds its entire geospatial index in ~40 MB of RAM (80K drivers x 500 bytes per driver record including geohash, coordinates, status, vehicle info). Cross-city rides (e.g., a driver near a city boundary) are handled by registering drivers in multiple shards for overlapping boundary zones. Within a city, the geospatial index uses consistent hashing on geohash prefixes to distribute across multiple nodes for fault tolerance. Each node is replicated with a hot standby that consumes the same Kafka partition of location updates. Failover time is under 2 seconds since the standby has a warm cache. Uber's system (named Ringpop) uses a SWIM protocol-based membership for node discovery and consistent hashing for request routing.",
     "## The Matching Algorithm in Depth\n\nThe naive greedy approach (assign each request to the nearest available driver) yields suboptimal global outcomes. Consider two riders A and B and two drivers X and Y. Driver X is closest to both riders, but assigning X to A might leave B with a 15-minute wait, while assigning X to B and Y to A gives both a 5-minute wait. Uber's batched matching collects requests over a 2-second window and solves the assignment as an optimization problem. The cost matrix C[i][j] represents the cost of assigning rider i to driver j, incorporating pickup ETA, predicted trip revenue, driver fatigue score, and rider priority. The Hungarian algorithm solves this in O(n^3) time, which is feasible for batches of ~100-500 requests per city per 2-second window. For larger cities, the problem is decomposed into geographic sub-regions that are solved independently. An important edge case is handling shared rides (UberPool): here the matching must consider detour impact on existing passengers, requiring simulation of the new route with the additional pickup/dropoff inserted into the current trip plan. The system evaluates all possible insertion points and selects the one minimizing total detour.",
     "## Real-Time Data Pipeline and Analytics\n\nEvery location update, trip event, and pricing decision flows into Uber's real-time data pipeline built on Apache Kafka and Apache Flink. Kafka topics are partitioned by city and data type: location-updates-nyc, trip-events-sf, etc. Flink jobs compute real-time aggregations: drivers available per zone per minute, average pickup times, surge multiplier effectiveness, and anomaly detection (e.g., a sudden drop in driver supply indicating a system issue). These aggregations feed back into the pricing and matching systems with sub-minute latency. For historical analytics, data flows from Kafka into HDFS via a connector, then into Hive/Presto tables for batch analysis. The total data volume exceeds 100 PB across all of Uber's storage. A key challenge is exactly-once processing semantics: duplicate location updates (from retries) must be deduplicated using driverId + timestamp as a natural key. Flink's checkpointing with Kafka offsets provides effectively-once processing, though the location service also implements client-side deduplication using a sliding-window bloom filter per driver.",
+    "## The Surge Pricing Pipeline End to End\n\nSurge is a closed-loop control system, and interviewers reward candidates who describe it as a pipeline rather than a formula. The input signals flow from Kafka: open ride requests per hex (demand), available drivers per hex (supply), plus leading indicators — riders opening the app without requesting ('eyeballs'), event calendars, weather, and drivers about to complete trips nearby (imminent supply). A Flink job aggregates these per H3 hex per ~30-second window and computes a raw imbalance score. A smoothing stage applies an exponentially weighted moving average over ~5 minutes and hysteresis (surge rises fast, decays slowly) to prevent oscillation: without it, surge spikes, demand collapses, surge crashes, demand floods back — a feedback loop with riders as the plant. The ML layer (gradient-boosted or deep models) predicts demand 10-30 minutes ahead so surge can pre-position drivers before a concert lets out rather than react after. The resulting multiplier per hex is written to the Redis surge cache, versioned, and read by the Pricing Service on every fare quote; the quote embeds the multiplier so the price is locked for that ride.\n\nWarning: surge multipliers are regulated in many jurisdictions (caps during declared emergencies, disclosure requirements), so the pipeline needs per-region policy caps applied AFTER the model output — never trained into the model, where they would be impossible to audit.\n\nIn practice: surge is smoothed spatially as well as temporally — neighboring hexes are blended so a rider cannot walk one block to cross a hard 1.0x/2.5x boundary, which used to be a well-known rider trick.",
+    "## Trip State Machine and Exactly-Once Payment\n\nMoney is where eventual consistency goes to die, so the trip lifecycle and the payment flow must be designed together. The trip is a persisted state machine in PostgreSQL: REQUESTED -> MATCHED -> DRIVER_EN_ROUTE -> ARRIVED -> TRIP_IN_PROGRESS -> COMPLETED, with cancellation edges. Every transition is a conditional update (UPDATE trips SET state='ARRIVED' WHERE id=? AND state='DRIVER_EN_ROUTE'), which makes duplicate or out-of-order events from flaky mobile clients harmless — an event that does not match the expected current state is rejected or ignored. Each successful transition also appends an event row and publishes to Kafka in the same transaction (transactional outbox pattern), so downstream consumers see exactly the transitions that actually happened.\n\n### Exactly-once payment via idempotency + saga\n\n- Networks give you at-least-once delivery at best, so 'exactly-once payment' is engineered as: idempotent operations + retries + reconciliation.\n- Every call to the payment processor carries an idempotency key derived from the trip: tripId:auth for pre-authorization at match, tripId:capture for capture at completion. Stripe/Adyen/Braintree all dedupe on this key server-side, so a timed-out request retried five times charges once.\n- The complete flow is a saga: authorize -> ride -> capture, with compensating actions — if the trip is cancelled, the compensation is voiding the authorization; if capture permanently fails, the compensation is flagging the trip for the retry queue and dunning flow rather than blocking trip completion.\n- The payment state machine (PENDING_AUTH -> AUTHORIZED -> CAPTURED / VOIDED / FAILED) is stored alongside the trip, and an hourly reconciliation job diffs internal state against the processor's records to catch the inevitable drift (auth succeeded at the processor but the response was lost).\n\nKey insight: never make payment capture synchronous with trip completion in the user flow. The rider gets 'trip complete' immediately; capture happens asynchronously with retries. Blocking a driver's next dispatch on a payment processor's p99 latency would be a self-inflicted outage.\n\nCommon mistake: using a random UUID as the idempotency key on each retry. The key must be deterministic from the business operation (tripId + operation type) — a fresh UUID per attempt makes every retry look like a new charge, which is precisely the double-charge bug the key exists to prevent.",
+    "## Degraded Modes: Designing for Partial Failure\n\nA ride in progress must survive every dependency failing, because the physical trip continues whether or not your services are up. GPS gaps are the most common degradation: tunnels, urban canyons, and dead phone batteries silence a driver mid-trip. The location service dead-reckons short gaps using last-known heading and speed (the Kalman filter's prediction step with no measurement update) and widens the position uncertainty; the trip is NOT auto-cancelled on silence — the driver app buffers its GPS trace locally and replays it on reconnect, and fare calculation uses the reconciled trace. Matching degrades next: if the batched optimizer is slow or down, dispatch falls back to greedy nearest-driver per request — worse global outcomes, but rides still happen. Pricing degrades to multiplier 1.0x or the last cached surge value (choose deliberately: stale surge can badly over- or under-price after a demand shift). Payments degrade most gracefully of all: if the processor is down at trip end, the trip still completes, the capture enters a retry queue with exponential backoff, and only after repeated failures over hours does it escalate to account-level collection (retry on next ride, email dunning).\n\n- GPS gap during trip: dead-reckon, buffer client-side, reconcile fare from replayed trace.\n- Geo index shard crash: standby replays the city's Kafka partition; a few seconds of stale positions, matching pauses briefly in one metro only.\n- Optimizer down: greedy fallback matching, alert on pickup-ETA regression.\n- Payment processor outage: complete the trip, queue capture with backoff, hourly reconciliation catches stragglers.\n- Regional DC failure: fail over to secondary region; in-flight trips continue from driver-phone cached state and reconcile on reconnect.\n\nReal-world example: Uber drivers routinely go through tunnels with riders aboard; if trip state required continuous connectivity, every Lincoln Tunnel crossing would orphan a trip. The driver app is deliberately the source of truth for the in-progress trip, syncing to the server opportunistically.\n\nKey insight: rank failures by blast radius and design the fallback per failure, not one global 'maintenance mode'. Location loss affects one driver; a geo shard affects one city; the payment processor affects revenue timing but should never affect whether wheels turn.",
     "## Handling Edge Cases and Regional Failures\n\nSeveral edge cases deserve attention in a production Uber-scale system. GPS drift in urban canyons (tall buildings blocking satellite signals) causes driver positions to jump erratically. The location service applies a Kalman filter to smooth GPS readings, using heading and speed to predict the next position and reject outlier updates that imply physically impossible movement (e.g., teleporting 5 km in 4 seconds). Airport pickups require geofencing: drivers must be in a designated queue zone, and the matching algorithm respects first-in-first-out ordering within the geofence rather than using proximity-based matching. For regional failures (e.g., an entire data center going offline), the system fails over to a secondary region. Trip state must be replicated cross-region with RPO < 5 seconds. During failover, in-progress trips continue using cached state on the driver's phone, which reconciles with the server when connectivity is restored. Payment authorization tokens are stored in a globally replicated database (CockroachDB or Spanner) to prevent double charges during failover.",
   ],
   code: [
@@ -304,27 +309,74 @@ std::vector<MatchResult> greedy_match(
       title: "Uber High-Level Architecture",
       kind: "architecture",
       caption:
-        "Core services and data flow in the Uber platform, from rider/driver clients through the API gateway to backend services",
-      mermaid: `graph LR
-    RiderApp[Rider App] --> GW[API Gateway]
-    DriverApp[Driver App] -->|WebSocket| LS[Location Service]
-    DriverApp --> GW
-    GW --> MS[Matching Service]
-    GW --> TS[Trip Service]
-    GW --> PS[Pricing Service]
-    GW --> ETA[ETA Service]
-    LS --> GeoIdx[Geospatial Index]
-    LS --> Kafka[Kafka]
-    MS --> LS
-    MS --> ETA
-    MS --> TS
-    PS --> Kafka
-    TS --> TripDB[(Trip DB)]
-    TS --> Kafka
-    Kafka --> Analytics[Analytics Pipeline]
-    Kafka --> ML[ML Training]
-    ETA --> RoadGraph[(Road Network Graph)]
-    PS --> SupplyDemand[Supply Demand Cache]`,
+        "Layered view of the platform: the driver-ping ingestion path (driver app to WebSocket gateway to location ingestion to Kafka to geo index) and the ride-request path (rider app to matching to trip to payments) with named data stores, ML models, and external providers",
+      mermaid: `graph TB
+    subgraph Clients["Clients"]
+        RiderApp["Rider App"]
+        DriverApp["Driver App<br/>GPS ping every 4s"]
+    end
+    subgraph Edge["Edge / Gateway"]
+        LB["Load Balancer<br/>L4 anycast"]
+        APIGW["API Gateway<br/>auth, rate limit, routing"]
+        WSGW["WebSocket Gateway<br/>persistent driver + rider conns"]
+    end
+    subgraph Services["Core Services"]
+        LocIngest["Location Ingestion<br/>validate, Kalman-smooth"]
+        Match["Matching / Dispatch<br/>batched assignment every 2s"]
+        Trip["Trip Service<br/>trip state machine"]
+        Pricing["Pricing / Surge<br/>per-hex supply-demand"]
+        ETASvc["ETA / Routing<br/>A-star + contraction hierarchies"]
+        Pay["Payments<br/>auth then capture, idempotent"]
+        Notif["Notification Service<br/>push + SMS fallback"]
+    end
+    subgraph Realtime["Realtime Layer"]
+        Kafka["Kafka<br/>location + trip event streams"]
+        GeoIdx["Geospatial Index<br/>H3/S2 cells, city-sharded<br/>in-memory / Redis"]
+    end
+    subgraph Data["Data Stores"]
+        PG[("PostgreSQL<br/>trips, users, payments")]
+        Cass[("Cassandra<br/>location history, trip events")]
+        Redis[("Redis<br/>live driver positions,<br/>surge cache")]
+    end
+    subgraph ML["ML Systems"]
+        SurgeML["Surge Prediction Model"]
+        ETAML["ETA Correction Model"]
+    end
+    subgraph Ext["External"]
+        Maps["Maps Provider<br/>OSM / Google tiles"]
+        PSP["Payment Processor<br/>Stripe / Adyen / Braintree"]
+    end
+
+    DriverApp -->|"GPS ping"| LB
+    RiderApp -->|"request ride"| LB
+    LB --> APIGW
+    LB --> WSGW
+    WSGW -->|"1.25M pings/s"| LocIngest
+    LocIngest -->|"publish"| Kafka
+    Kafka -->|"consume + update cell"| GeoIdx
+    Kafka -->|"archive history"| Cass
+    GeoIdx --> Redis
+
+    APIGW --> Match
+    APIGW --> Trip
+    APIGW --> Pricing
+    Match -->|"nearby drivers?"| GeoIdx
+    Match -->|"pickup ETAs"| ETASvc
+    Match -->|"create trip"| Trip
+    Match -->|"offer via socket"| WSGW
+    Trip --> PG
+    Trip -->|"state events"| Kafka
+    Trip --> Pay
+    Trip --> Notif
+    Notif --> WSGW
+    Pricing --> Redis
+    Pricing --> SurgeML
+    ETASvc --> ETAML
+    ETASvc --> Maps
+    Pay --> PSP
+    Pay --> PG
+    Kafka --> SurgeML
+    Kafka --> ETAML`,
     },
     {
       title: "Ride Request Flow",
@@ -441,6 +493,30 @@ std::vector<MatchResult> greedy_match(
         "What consistency model do you use for the payment database vs the trip database?",
       ],
     },
+    {
+      q: "Walk me through the capacity estimation for the location ingestion path.",
+      a: "Start from drivers: 5M concurrent drivers x 1 ping per 4 seconds = 1.25M writes/second. Each ping is ~100 bytes (driverId, lat/lng, timestamp, heading, speed, accuracy), so ~125 MB/s of ingest and ~10.8 TB/day of history. Only the latest ping per driver matters for matching, so the live working set is just 5M records (~2.5 GB globally, tens of MB per city shard) — the full history streams to Cassandra/HDFS with a TTL. Connection count: 5M driver sockets plus ~1M rider sockets watching trips = ~6M concurrent WebSockets; at ~100K connections per gateway node that is ~60 nodes plus headroom. The read side is comparatively tiny: ~700 ride requests/s at peak, each triggering one k-ring geo query and ~20 ETA computations. The 1000:1 write-to-read ratio is the argument for an in-memory index fed by Kafka instead of a database.",
+      followUps: [
+        "How would the numbers change if you reduced ping frequency to every 10 seconds for idle drivers?",
+        "Where does backpressure go if the geo index consumer falls behind Kafka?",
+      ],
+    },
+    {
+      q: "Why did Uber build H3 with hexagons instead of using square grid cells?",
+      a: "Three reasons. First, neighbor uniformity: every hexagon has exactly 6 neighbors, all at the same center-to-center distance. A square has 4 edge neighbors and 4 corner neighbors ~41% farther away, which distorts any computation that treats 'adjacent cell' as 'roughly equidistant' — ring-based radius search, surge zone smoothing, and demand gradient calculations all behave more predictably on hexes. Second, k-ring expansion is clean: ring k adds exactly 6k cells, so expanding search radius is simple arithmetic. Third, hexagons approximate circles better than squares, so a hex-based surge zone or search area has less corner error relative to the true radius of interest. The trade-off is that hexagons do not perfectly subdivide into child hexagons (H3's hierarchy is approximate, with ~7 children per parent and slight boundary mismatch), whereas S2/quadtree squares nest exactly — which is why systems needing exact hierarchical containment sometimes prefer S2.",
+      followUps: [
+        "When would S2's exact hierarchical nesting matter more than hex neighbor uniformity?",
+        "How do you pick the H3 resolution for driver search vs surge zones?",
+      ],
+    },
+    {
+      q: "The driver's phone loses connectivity for 3 minutes during an active trip. What happens?",
+      a: "Nothing user-visible should break. The driver app is the source of truth for an in-progress trip: it continues recording the GPS trace and any state changes (arrived, trip started) locally. Server-side, the location service stops receiving pings; it dead-reckons the position briefly using the Kalman filter's prediction step and marks the driver's position as stale rather than cancelling anything — the rider's map may show a frozen or estimated car position. The trip state machine has no timeout that cancels an active trip on silence alone. On reconnect, the app replays its buffered trace and state transitions; the server applies them through the same conditional state-transition logic (duplicates and out-of-order events are rejected by the compare-and-set), and the fare is computed from the reconciled full trace. The key design principle: connectivity affects observability of the trip, never the existence of the trip.",
+      followUps: [
+        "What if the driver app crashes entirely and loses its local buffer?",
+        "How do you distinguish a connectivity gap from a driver going off-route or offline intentionally?",
+      ],
+    },
   ],
   mcqs: [
     {
@@ -525,6 +601,22 @@ std::vector<MatchResult> greedy_match(
       front: "How much memory does a city-level location shard use?",
       back: "Approximately 40-50 MB for a city with 80-100K active drivers (500 bytes per driver record including geohash, coordinates, status, and vehicle info).",
     },
+    {
+      front: "What is H3 and how does k-ring expansion work?",
+      back: "Uber's open-source hexagonal hierarchical spatial index: the globe is tiled with hexagons at 16 resolutions, each with a 64-bit cell id. K-ring search fetches the center hex, then ring 1 (6 hexes), ring 2 (12), etc. — ring k adds 6k cells — stopping when enough driver candidates are found.",
+    },
+    {
+      front: "Why not store live driver positions in PostgreSQL with a lat/lng B-tree index?",
+      back: "B-trees index one dimension: a 2D range query scans an entire latitude band. Even R-tree/PostGIS indexes cannot sustain 1.25M position updates/second. Live positions belong in an in-memory cell-bucketed index; only history goes to disk (Cassandra).",
+    },
+    {
+      front: "How is exactly-once payment achieved over an at-least-once network?",
+      back: "Deterministic idempotency keys (tripId:auth, tripId:capture) that the payment processor dedupes on, a saga with compensating actions (void auth on cancellation), and an hourly reconciliation job that diffs internal payment state against processor records.",
+    },
+    {
+      front: "How many WebSocket gateway nodes does the system need?",
+      back: "~5M driver sockets + ~1M rider sockets = ~6M concurrent connections. At ~100K connections per tuned gateway node, roughly 60 nodes plus headroom for failover and deploys.",
+    },
   ],
   exercises: [
     "Design a geospatial index that supports inserting 1M driver locations/second and querying all drivers within a 3 km radius in under 10 ms. Compare geohash-based and quadtree-based approaches in terms of insertion cost, query cost, and memory overhead.",
@@ -544,6 +636,12 @@ std::vector<MatchResult> greedy_match(
     "Trip state machine: REQUESTED -> MATCHING -> MATCHED -> DRIVER_EN_ROUTE -> ARRIVED -> TRIP_IN_PROGRESS -> COMPLETED. Cancellation possible from multiple states.",
     "The Location Service uses Kafka for durability: on restart, replay recent Kafka messages to rebuild the in-memory index within seconds.",
     "GPS drift mitigation: Kalman filter smooths readings, rejecting physically impossible jumps (e.g., 5 km in 4 seconds).",
+    "H3 k-ring search: center hex + ring k adds 6k cells (ring 5 = only 91 lookups total). Self-adapting: dense areas stop at ring 1, sparse areas expand further.",
+    "Hexagons beat squares: all 6 neighbors equidistant (squares have 4 diagonal neighbors ~41% farther), cleaner ring expansion and less-distorted surge zones.",
+    "WebSocket capacity: ~6M concurrent sockets (5M drivers + 1M watching riders) at ~100K per gateway node = ~60 nodes plus headroom.",
+    "Payments = idempotency keys (tripId:auth / tripId:capture) + saga with compensations (void on cancel) + hourly reconciliation. Capture is async — never block trip completion on the processor.",
+    "Trip transitions are conditional updates (compare-and-set on expected current state) + transactional-outbox Kafka events, making duplicate/out-of-order mobile events harmless.",
+    "Degraded modes: dead-reckon GPS gaps (never auto-cancel active trips on silence), greedy matching if the optimizer dies, queue payment captures if the processor is down.",
   ],
   cheatSheet: [
     "20M rides/day, ~700 rides/sec peak, ~1.25M location updates/sec, ~10 TB/day location data",
@@ -556,6 +654,11 @@ std::vector<MatchResult> greedy_match(
     "Location Service: city-sharded, in-memory index, WebSocket ingestion, Kafka persistence, hot standby replicas, <2s failover.",
     "Trip states: REQUESTED -> MATCHING -> MATCHED -> EN_ROUTE -> ARRIVED -> IN_PROGRESS -> COMPLETED. Each transition emits Kafka event.",
     "Payment: pre-auth at match, capture at completion. Globally replicated DB for auth tokens. Hourly reconciliation job for discrepancies.",
+    "H3: 16 resolutions, 64-bit cell ids, res 9 ~0.1 km2. k-ring: total cells after k rings = 1 + 3k(k+1).",
+    "Tech map: Kafka (streams), H3/S2 in memory + Redis (geo + live positions), PostgreSQL (trips/users/payments), Cassandra (location history), gRPC + Envoy mesh (services), Stripe/Adyen (PSP).",
+    "Sockets: 6M concurrent / 100K per node = ~60 WebSocket gateways. Offer flow: soft-lock driver, 10-15s countdown, release on decline/timeout.",
+    "Idempotency keys are deterministic per operation (tripId:capture), never random per retry. Saga compensation: void auth on cancel.",
+    "Degradation ladder: dead-reckon GPS gaps -> greedy matching fallback -> surge to 1.0x or cached -> queue payment captures. Trip existence never depends on connectivity.",
   ],
   glossary: [
     {
@@ -592,6 +695,36 @@ std::vector<MatchResult> greedy_match(
       term: "S2 Geometry",
       definition:
         "A library by Google that projects Earth's surface onto the six faces of a cube and uses Hilbert curves to define hierarchical cells. It provides uniform-area spatial indexing without the distortions of rectangular geohash grids.",
+    },
+    {
+      term: "H3",
+      definition:
+        "Uber's open-source hexagonal hierarchical spatial index. The globe is tiled with hexagons at 16 resolutions, each cell identified by a 64-bit integer. Hexagons give equidistant neighbors and clean k-ring radius expansion, making them well suited to driver search and surge zones.",
+    },
+    {
+      term: "K-ring Expansion",
+      definition:
+        "The radius-search pattern on a hex grid: query the center cell, then successive rings of neighbors (ring k contains 6k cells) until enough candidates are found. Bounds query cost to the local area regardless of total driver count.",
+    },
+    {
+      term: "Idempotency Key",
+      definition:
+        "A deterministic identifier (e.g., tripId + operation type) attached to a payment or API request so the receiver can deduplicate retries. Guarantees that an operation retried after a timeout executes at most once, the foundation of exactly-once payment semantics.",
+    },
+    {
+      term: "Saga Pattern",
+      definition:
+        "A way to manage a multi-step distributed transaction as a sequence of local transactions, each with a compensating action to undo it (e.g., void a payment authorization if the trip is cancelled). Trades atomicity for availability while preserving eventual business consistency.",
+    },
+    {
+      term: "Transactional Outbox",
+      definition:
+        "A pattern where a service writes its state change and the corresponding event to the same database in one transaction; a relay then publishes the event to Kafka. Prevents the classic bug where the database commit succeeds but the event publish is lost (or vice versa).",
+    },
+    {
+      term: "Dead Reckoning",
+      definition:
+        "Estimating a vehicle's current position from its last known position, heading, and speed when GPS updates are missing (tunnels, urban canyons). In a Kalman filter this is the prediction step running without measurement updates, with growing uncertainty.",
     },
   ],
   animations: [
@@ -692,30 +825,34 @@ std::vector<MatchResult> greedy_match(
     "How would you handle cross-border rides where pricing, regulations, and payment methods change mid-trip?",
     "What observability and monitoring would you build to detect matching quality degradation in real time?",
     "How would you design a driver incentive system that balances supply across zones without creating perverse incentives?",
+    "How would you shrink the 1.25M pings/sec write load — adaptive ping rates, client-side batching, or dead-reckoning on the server?",
+    "How would you detect and handle GPS spoofing by drivers gaming airport queues or surge zones?",
+    "How would the design change for a food-delivery variant (Uber Eats) where a 'trip' has three parties and two legs?",
+    "What changes if you must support cash payments in markets where card penetration is low?",
   ],
   resources: [
     {
-      label: "Uber Engineering Blog: Ringpop and Distributed Location Service",
+      label: "Uber Engineering Blog: Ringpop and Distributed Location Service", url: "https://www.uber.com/blog/engineering/",
       kind: "article",
       note: "Describes Uber's SWIM-based consistent hashing for sharding the real-time location service across nodes.",
     },
     {
-      label: "Designing Data-Intensive Applications by Martin Kleppmann",
+      label: "Designing Data-Intensive Applications by Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
       note: "Chapters on partitioning, replication, and stream processing directly apply to Uber's architecture. Essential reading for the data layer design.",
     },
     {
-      label: "Google S2 Geometry Library",
+      label: "Google S2 Geometry Library", url: "https://s2geometry.io/",
       kind: "repo",
       note: "The spatial indexing library used by Uber for hierarchical cell-based geospatial queries. Understanding S2 cells is critical for the location service design.",
     },
     {
-      label: "System Design Interview Vol 2 by Alex Xu - Proximity Service Chapter",
+      label: "System Design Interview Vol 2 by Alex Xu - Proximity Service Chapter", url: "https://bytebytego.com/",
       kind: "book",
       note: "Covers geospatial indexing approaches (geohash, quadtree, S2) with trade-off analysis directly relevant to Uber's driver lookup system.",
     },
     {
-      label: "Uber Engineering: How Uber Computes ETA at Scale",
+      label: "Uber Engineering: How Uber Computes ETA at Scale", url: "https://www.uber.com/blog/engineering/",
       kind: "article",
       note: "Details the contraction hierarchy approach for road-network routing and the ML model that adjusts ETAs using historical trip data.",
     },

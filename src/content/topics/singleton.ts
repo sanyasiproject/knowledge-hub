@@ -531,7 +531,7 @@ bus.on("user:login", (user) => console.log("Logged in:", user));`,
       note: "The original Singleton pattern description with C++ examples and discussion of known consequences.",
     },
     {
-      label: "Refactoring Guru - Singleton Pattern",
+      label: "Refactoring Guru - Singleton Pattern", url: "https://refactoring.guru/",
       kind: "article",
       note: "Clear visual explanation with UML diagrams and implementations in multiple languages.",
     },

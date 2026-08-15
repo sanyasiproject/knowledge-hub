@@ -423,17 +423,17 @@ int main() {
       note: "Free video series covering probability from basics through distributions and the CLT.",
     },
     {
-      label: "3Blue1Brown - Probability playlist",
+      label: "3Blue1Brown - Probability playlist", url: "https://www.3blue1brown.com/",
       kind: "video",
       note: "Visual, intuition-driven explanations of probability concepts including Bayes' theorem and the CLT.",
     },
     {
-      label: "Think Stats by Allen Downey",
+      label: "Think Stats by Allen Downey", url: "https://greenteapress.com/thinkstats2/",
       kind: "book",
       note: "A computational approach to probability and statistics using Python. Free online.",
     },
     {
-      label: "Seeing Theory (Brown University)",
+      label: "Seeing Theory (Brown University)", url: "https://seeing-theory.brown.edu/",
       kind: "article",
       note: "Interactive visual introduction to probability and statistics concepts.",
     },

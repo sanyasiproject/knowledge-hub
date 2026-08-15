@@ -712,17 +712,17 @@ int main() {
   ],
   resources: [
     {
-      label: "RFC 793 — Transmission Control Protocol (Original Specification)",
+      label: "RFC 793 — Transmission Control Protocol (Original Specification)", url: "https://www.rfc-editor.org/rfc/rfc793",
       kind: "docs",
       note: "The foundational TCP specification defining the three-way handshake, state machine, and segment format. Dense but authoritative.",
     },
     {
-      label: "RFC 6528 — Defending Against Sequence Number Attacks",
+      label: "RFC 6528 — Defending Against Sequence Number Attacks", url: "https://www.rfc-editor.org/rfc/rfc6528",
       kind: "docs",
       note: "Specifies the modern ISN generation algorithm using a cryptographic PRF to prevent sequence prediction attacks.",
     },
     {
-      label: "RFC 7413 — TCP Fast Open",
+      label: "RFC 7413 — TCP Fast Open", url: "https://www.rfc-editor.org/rfc/rfc7413",
       kind: "docs",
       note: "Defines the TFO mechanism for sending data in the SYN segment of repeat connections, reducing latency by one RTT.",
     },
@@ -742,7 +742,7 @@ int main() {
       note: "The original description of SYN cookies by their inventor, explaining the encoding scheme and trade-offs.",
     },
     {
-      label: "Beej's Guide to Network Programming",
+      label: "Beej's Guide to Network Programming", url: "https://beej.us/guide/bgnet/",
       kind: "article",
       note: "Practical guide to socket programming in C. Covers the socket API calls (socket, bind, listen, accept, connect) that trigger the TCP handshake.",
     },

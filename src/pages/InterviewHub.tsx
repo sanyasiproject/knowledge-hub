@@ -5,6 +5,7 @@ import { TRACKS, resolvedBlocks, trackMinutes } from "../interview/tracks";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { Card, Pill } from "../components/ui/primitives";
 import { Inline } from "../components/content/RichText";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 function formatBudget(minutes: number): string {
   if (minutes < 60) return `${minutes} min`;
@@ -13,6 +14,7 @@ function formatBudget(minutes: number): string {
 }
 
 export function InterviewHub() {
+  usePageTitle("Interview Prep");
   const stats = useMemo(() => interviewStats(), []);
   const groups = useMemo(() => areasByStream(), []);
   const [query, setQuery] = useState("");

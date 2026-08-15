@@ -9,17 +9,25 @@ export const designWebCrawler: TopicContent = {
     "Content extraction pipelines parse HTML to extract text, metadata, and outgoing links; the link graph built from crawled pages feeds ranking algorithms and enables discovery of new content across the web.",
   ],
   detailed: [
+    "## Capacity Estimation: Do the Math First\nBefore drawing boxes, anchor the design in numbers — interviewers expect the arithmetic, not just the conclusions. Throughput: 1 billion pages per month ÷ (30 days × 86,400 s ≈ 2.6M seconds) ≈ 385 pages/second sustained; provisioning for a 3x peak gives roughly 1,200 pages/second. Bandwidth: at an average page size of 100 KB, sustained ingress is 385 × 100 KB ≈ 38.5 MB/s ≈ 310 Mbps, and about 1 Gbps at peak — a real network-provisioning constraint, not a rounding error. Storage: 1B pages × 100 KB = 100 TB of raw HTML per month; keeping 5 historical versions per page pushes this toward 500 TB, which is why raw content lands in S3/HDFS rather than a database. Concurrency: with an average end-to-end fetch latency of 500 ms (DNS + TCP + TLS + download), sustaining 385 pages/s requires 385 × 0.5 ≈ 200 in-flight requests; async I/O means a handful of fetcher nodes suffice, so the fleet is sized by bandwidth and politeness spread, not CPU. Dedup memory: a Bloom filter for 10 billion URLs at 1% false-positive rate needs m = -n·ln(p)/(ln 2)² = 10^10 × 4.6 / 0.48 ≈ 9.6 × 10^10 bits ≈ 12 GB with k ≈ 7 hash functions. Frontier storage: billions of pending URLs at ~100 bytes each (URL + priority + metadata) is hundreds of GB — disk-backed by necessity, with only the hot front in memory. Key insight: politeness, not hardware, is usually the binding constraint — 385 pages/s at 1 request/host/second requires URLs spread across at least ~400 distinct hosts at any moment, so a frontier full of URLs from few hosts stalls the whole fleet regardless of how many fetchers you add.",
+
     "## URL Frontier and Crawl Scheduling\nThe URL frontier is the heart of a web crawler — it determines what gets crawled and in what order. A naive FIFO queue fails because it ignores page importance and politeness constraints. Instead, the frontier is split into a front queue (priority-based) and a back queue (politeness-based). The front queue uses multiple priority levels: seed URLs from high-authority domains get top priority, newly discovered links inherit a fraction of their parent page's importance, and re-crawl candidates are scored by estimated change frequency. The back queue ensures that at most one request is in-flight per host at any time, with configurable delays between requests to the same domain. A typical delay is 1-5 seconds per host, derived from robots.txt crawl-delay or measured server response times. At Google scale, the frontier holds billions of URLs and must be disk-backed (e.g., RocksDB) with an in-memory hot layer for the next N thousand URLs to fetch.",
 
-    "## Politeness and robots.txt\nPoliteness is not optional — aggressive crawling gets your IP blocked and can bring down small websites. The crawler must fetch and cache robots.txt for every domain before crawling any page on that domain, respecting Disallow rules and Crawl-delay directives. The robots.txt cache should have a TTL of 24 hours and be refreshed before it expires. Beyond robots.txt, adaptive politeness monitors server response times: if a server starts returning 503s or slowing down, the crawler should exponentially back off on that domain. A good crawler also identifies itself with a descriptive User-Agent string and provides a contact URL. At scale, you need a distributed politeness enforcer — since URLs for the same domain might land on different crawler nodes, consistent hashing ensures a single node owns each domain, centralizing rate-limit decisions. Some crawlers implement a token-bucket rate limiter per domain, allowing bursts of 2-3 requests followed by mandatory delays.",
+    "## Politeness and robots.txt\nPoliteness is not optional — aggressive crawling gets your IP blocked and can bring down small websites. The crawler must fetch and cache robots.txt for every domain before crawling any page on that domain, respecting Disallow rules and Crawl-delay directives. The robots.txt cache should have a TTL of 24 hours and be refreshed before it expires. Know the semantics (RFC 9309): rules are grouped by User-agent and the crawler obeys the most specific group matching its name; within a group, the longest matching path rule wins between Allow and Disallow; a 4xx response for robots.txt means everything is allowed, while a persistent 5xx should be treated as full disallow; Crawl-delay is a non-standard extension that major engines interpret differently, so treat it as a hint with a sane cap (e.g., ignore delays over 30s or the host would take years to crawl). Beyond robots.txt, adaptive politeness monitors server response times: if a server starts returning 503s or slowing down, the crawler should exponentially back off on that domain. A good crawler also identifies itself with a descriptive User-Agent string and provides a contact URL. At scale, you need a distributed politeness enforcer — since URLs for the same domain might land on different crawler nodes, consistent hashing ensures a single node owns each domain, centralizing rate-limit decisions. Some crawlers implement a token-bucket rate limiter per domain, allowing bursts of 2-3 requests followed by mandatory delays.",
 
     "## URL Deduplication and Content Fingerprinting\nWith billions of pages, the same URL appears in countless link lists. URL-level dedup uses a bloom filter: a 10-billion-entry bloom filter with 1% false-positive rate needs about 12 GB of memory — feasible for a single machine, or partitioned across nodes. But URL dedup alone is insufficient because the same content appears at different URLs (www vs non-www, HTTP vs HTTPS, trailing slashes, query parameter reordering). Content-level dedup computes SimHash or MinHash fingerprints of page content and compares against previously seen fingerprints. SimHash produces a 64-bit fingerprint where similar documents have fingerprints differing in few bits — documents within Hamming distance 3 are considered near-duplicates. This two-layer dedup (URL bloom filter + content fingerprint) eliminates the vast majority of redundant work. The fingerprint store can be a distributed hash table like Cassandra, keyed by fingerprint with the canonical URL as value.",
 
     "## Distributed Architecture and Scaling\nA production crawler at scale (billions of pages/month) requires a distributed architecture. The system consists of a URL frontier service, multiple crawler workers, a DNS resolver cache, a content store, and a link extractor pipeline. Crawler workers are stateless — they pull URLs from the frontier, fetch pages, and push results (content + extracted links) to downstream queues. DNS resolution is a hidden bottleneck: resolving each hostname takes 10-100ms, so a local DNS cache is essential, backed by a shared DNS cache across the cluster. The content store (e.g., HDFS or S3) holds raw HTML and extracted text, partitioned by crawl date for easy re-processing. Link extraction runs as a separate pipeline — it parses HTML, normalizes URLs (lowercasing hostnames, removing fragments, canonicalizing query parameters), and feeds new URLs back into the frontier. Failure handling is critical: if a crawler node dies mid-fetch, the URLs it was processing must be returned to the frontier after a timeout. The system should track crawl metadata (last crawl time, HTTP status, response time) per URL to inform re-crawl scheduling.",
 
-    "## Crawl Depth, Traps, and Quality\nSpider traps — URLs that generate infinite pages (calendars going forward forever, session IDs in URLs, faceted navigation producing combinatorial explosion) — can consume all crawler resources. Defense strategies include limiting crawl depth per domain, detecting URL patterns that produce unbounded growth (e.g., URLs containing dates that increment), and capping the total pages crawled per domain. URL normalization must strip session IDs, sort query parameters, and resolve relative URLs. Content quality filtering removes pages with very little text (boilerplate-heavy pages), duplicate content, and spam. A crawl budget per domain allocates more fetches to high-quality domains and fewer to low-quality ones. The budget is informed by historical crawl data: domains that consistently produce high-PageRank pages get larger budgets. Monitoring is essential — dashboards should track pages crawled per second, error rates per domain, frontier size, and dedup hit rates to detect problems early.",
+    "## Crawl Depth, Traps, and Quality\nSpider traps — URLs that generate infinite pages (calendars going forward forever, session IDs in URLs, faceted navigation producing combinatorial explosion) — can consume all crawler resources. Defense strategies include limiting crawl depth per domain, detecting URL patterns that produce unbounded growth (e.g., URLs containing dates that increment), and capping the total pages crawled per domain. Concrete detection heuristics: flag URLs longer than ~2 KB or with more than ~8 path segments or query parameters; flag repeating path segments (/a/b/a/b/a/b) which indicate a relative-link loop; flag high-entropy parameter values that differ across links to identical content (session IDs); flag dates beyond a sane window (a calendar link to the year 2087); and watch the yield ratio per URL pattern — if 10,000 fetches matching /calendar/* produced near-identical SimHash fingerprints and zero new outlinks, quarantine the pattern and crawl only a sample. URL normalization must strip session IDs, sort query parameters, and resolve relative URLs. Content quality filtering removes pages with very little text (boilerplate-heavy pages), duplicate content, and spam. A crawl budget per domain allocates more fetches to high-quality domains and fewer to low-quality ones. The budget is informed by historical crawl data: domains that consistently produce high-PageRank pages get larger budgets. Monitoring is essential — dashboards should track pages crawled per second, error rates per domain, frontier size, and dedup hit rates to detect problems early.",
+
+    "## Recrawl Scheduling and Freshness\nCrawling is not a one-shot job — the web changes constantly, and a search index is only as good as its freshness. The scheduler maintains per-URL metadata (last crawl time, content checksum, observed change history) and models each page's change rate, classically as a Poisson process with rate λ estimated from how often successive crawls saw different checksums. A simple and effective policy is multiplicative-adaptive: if a page is unchanged since the last crawl, double its recrawl interval (capped at, say, 30 days); if it changed, halve it (floored at, say, 15 minutes for news front pages). This converges toward each page's true change frequency without wasting fetches. Priority for recrawl combines change rate with importance — a counterintuitive result from Cho and Garcia-Molina is that pages changing extremely fast should sometimes be crawled LESS often, because no feasible schedule keeps them fresh and the budget is better spent elsewhere. Signals that sharpen the estimate: HTTP Last-Modified and ETag headers (use conditional GETs — a 304 Not Modified costs almost no bandwidth), sitemap lastmod hints, and RSS/Atom feeds for push-style discovery. In practice: search engines split the crawl into a fast lane (news, home pages — minutes to hours) and a batch lane (the long tail — days to weeks), each with its own frontier and budget, so a burst of breaking news never starves long-tail coverage.",
   ],
   deepDive: [
+    "The Mercator frontier is the canonical answer to 'how do you combine priority with politeness' and is worth knowing in mechanical detail. It has F front queues (one per priority level, e.g. F = 8) and B back queues, where every back queue holds URLs for exactly one host and B is sized at roughly 3x the number of fetcher threads so most threads find a ready host. A prioritizer assigns each incoming URL to a front queue; a router moves URLs from front queues (biased random selection favoring high priorities) into the back queue owning that URL's host, and a host-to-queue table tracks the mapping. The elegant piece is the heap: one entry per back queue keyed by the earliest time that host may be contacted again (last fetch time + crawl delay). A fetcher thread pops the heap root, blocks until its timestamp if needed, drains one URL from that back queue, fetches it, then re-inserts the heap entry with the new next-allowed time. When a back queue empties, the router refills it with URLs for a NEW host pulled from the front queues, keeping all B queues busy. Key insight: the heap makes politeness enforcement O(log B) per fetch and guarantees by construction that no host ever has two in-flight requests — there is no rate-limit check to forget, because the data structure cannot express a violation. Common mistake: candidates propose a single global priority queue plus a 'check if host is rate-limited' step at dispatch time — under skewed host distributions this degenerates into repeatedly popping and re-inserting blocked URLs, which is exactly the busy-wait Mercator's design eliminates.",
+
+    "URL normalization looks trivial and is a minefield — getting it wrong either merges distinct pages or misses obvious duplicates, and both failure modes are silent. The safe, semantics-preserving transforms (RFC 3986): lowercase the scheme and host, decode unreserved percent-encodings (%7E to ~), uppercase remaining percent-encoding hex digits, remove default ports (:80, :443), resolve dot-segments in the path, and strip the fragment. The heuristic transforms are where judgment enters: sorting query parameters is usually safe; stripping known tracking parameters (utm_*, fbclid, gclid) is high-value; removing session IDs (jsessionid, PHPSESSID, sid) is essential to avoid infinite URL spaces; collapsing http/https and www/non-www variants is usually right but technically lossy. Warning: URL paths are case-sensitive by spec — /About and /about may be different pages on a Linux-served site — so lowercasing paths is a correctness bug, unlike lowercasing hosts. For example, example.com/index.html vs example.com/ often serve identical content, but only a content-level checksum can prove it; normalization alone cannot. Distributed coordination hangs off the normalized host: hash(host) mod N assigns every URL of a host to one crawler node, which localizes the robots.txt cache, DNS entry, politeness timer, and per-host state with zero cross-node chatter — a node that extracts a link to a foreign host simply forwards it to the owning node's frontier. Consistent hashing (rather than mod N) keeps reassignment to ~1/N of hosts when the fleet resizes, so politeness state and caches survive scaling events mostly intact.",
+
     "DNS resolution is a critical performance bottleneck that is often underestimated in crawler design. Each new hostname requires a DNS lookup that can take 10-200ms depending on resolver proximity and cache state. A production crawler resolves millions of unique hostnames per day, so relying on the system DNS resolver creates a serialization point. The solution is a dedicated DNS resolver layer: a cluster of caching DNS resolvers (e.g., Unbound) with aggressive TTL extension — even if a DNS record has a 5-minute TTL, the crawler can safely cache it for hours since IP changes are rare. Prefetching DNS for URLs in the frontier before they reach the front of the queue hides latency entirely. Some crawlers maintain a persistent hostname-to-IP mapping table, updated asynchronously, so DNS lookups never block the critical path of page fetching.",
 
     "The link graph built during crawling is itself a valuable data structure that feeds search ranking algorithms. Storing the full web graph (billions of nodes, trillions of edges) requires compressed adjacency lists. Webgraph compression exploits the fact that link targets from a single page tend to cluster (links often go to pages on the same domain or to popular domains), enabling reference coding where each adjacency list is stored as a delta from a similar reference list. This achieves 2-4 bits per edge for large web graphs, making it feasible to store the entire web graph in memory on a modest cluster. Graph algorithms like PageRank, HITS, and spam detection run on this compressed graph. Incremental graph updates from new crawls must be merged efficiently — a common approach is to rebuild the graph periodically (e.g., weekly) rather than updating it in real-time, since graph algorithms need a consistent snapshot.",
@@ -239,24 +247,52 @@ public:
     {
       title: "Web Crawler High-Level Architecture",
       kind: "architecture",
-      caption: "Distributed crawler architecture showing the URL frontier, crawler workers, DNS cache, and content processing pipeline.",
-      mermaid: `graph TD
-    SEED["Seed URLs"] --> FRONTIER["URL Frontier Service"]
-    FRONTIER --> WORKER1["Crawler Worker 1"]
-    FRONTIER --> WORKER2["Crawler Worker 2"]
-    FRONTIER --> WORKERN["Crawler Worker N"]
-    WORKER1 --> DNS["DNS Cache Cluster"]
-    WORKER2 --> DNS
-    WORKERN --> DNS
-    WORKER1 --> FETCH["HTTP Fetch"]
-    WORKER2 --> FETCH
-    WORKERN --> FETCH
-    FETCH --> CONTENT["Content Store S3/HDFS"]
-    FETCH --> EXTRACT["Link Extractor"]
-    EXTRACT --> DEDUP["URL Dedup Bloom Filter"]
-    DEDUP --> FRONTIER
-    CONTENT --> INDEX["Search Indexer"]
-    EXTRACT --> GRAPH["Link Graph Store"]`
+      caption: "Layered crawler architecture. The crawl loop runs continuously and is numbered 1-12: frontier dispatches URLs, fetchers download pages, processing extracts and normalizes new links, and deduplicated URLs flow back into the frontier. The control plane schedules recrawls from metadata and monitors the whole pipeline.",
+      mermaid: `graph TB
+    subgraph CONTROL["Control Plane"]
+        SCHED["Scheduler<br/>recrawl policies"]
+        MON["Monitoring<br/>pages per sec, error rates,<br/>frontier depth"]
+    end
+    subgraph FRONTIER["URL Frontier"]
+        SEED["Seed URLs"]
+        FQ["Front Queues<br/>priority levels"]
+        BQ["Back Queues<br/>per-host politeness<br/>with delay timers"]
+        SEED --> FQ
+        FQ -->|"1. assign to per-host queue"| BQ
+    end
+    subgraph FETCHING["Fetcher Fleet"]
+        FETCHERS["Async HTTP Fetchers<br/>hundreds of concurrent<br/>connections per node"]
+        DNSC["DNS Resolver<br/>with cache"]
+        ROBOTS["robots.txt Cache<br/>24h TTL per host"]
+    end
+    subgraph PROCESSING["Processing Pipeline"]
+        PARSER["HTML Parser"]
+        CDEDUP["Content Dedup<br/>checksums and SimHash"]
+        LINKX["Link Extractor"]
+        NORM["URL Normalizer"]
+        SEEN["Seen-URL Filter<br/>Bloom filter approx 12GB<br/>for 10B URLs"]
+    end
+    subgraph STORAGE["Storage Layer"]
+        RAW["Raw Content Store<br/>S3 or HDFS"]
+        META["Metadata DB<br/>crawl history, status,<br/>change frequency"]
+        GRAPHDB["Link Graph Store"]
+    end
+    BQ -->|"2. dispatch when<br/>host timer expires"| FETCHERS
+    FETCHERS -->|"3. resolve host"| DNSC
+    FETCHERS -->|"4. check robots.txt"| ROBOTS
+    FETCHERS -->|"5. fetched HTML"| PARSER
+    PARSER -->|"6. checksum content"| CDEDUP
+    CDEDUP -->|"7. unique content"| RAW
+    CDEDUP -->|"8. record crawl result"| META
+    PARSER -->|"9. extract links"| LINKX
+    LINKX -->|"10. normalize URLs"| NORM
+    NORM -->|"11. filter seen URLs"| SEEN
+    LINKX --> GRAPHDB
+    SEEN -->|"12. new URLs back<br/>to frontier"| FQ
+    META --> SCHED
+    SCHED -->|"recrawl candidates"| FQ
+    MON -.-> FETCHERS
+    MON -.-> FRONTIER`
     },
     {
       title: "Crawl Request Flow",
@@ -362,6 +398,22 @@ public:
         "What is the failure mode if the frontier service goes down?",
       ],
     },
+    {
+      q: "Walk me through the capacity estimation for a crawler that must fetch 1 billion pages per month.",
+      a: "Start with throughput: 1B pages / (30 × 86,400 ≈ 2.6M seconds) ≈ 385 pages/second sustained, and I would provision for a ~3x peak of about 1,200 pages/second. Bandwidth: at 100 KB average page size, 385 × 100 KB ≈ 38.5 MB/s ≈ 310 Mbps sustained, around 1 Gbps at peak — so network capacity is a first-class constraint. Storage: 100 TB/month of raw HTML, which mandates blob storage (S3/HDFS) rather than a database; metadata at ~1 KB/URL for 10B known URLs is another ~10 TB in a proper database. Concurrency: at 500 ms average fetch latency, Little's Law gives 385 × 0.5 ≈ 200 concurrent requests sustained — trivially handled by a few async-I/O nodes, so fetcher count is driven by bandwidth and fault isolation, not CPU. Dedup: a Bloom filter for 10B URLs at 1% false positives needs about 12 GB (m = -n·ln(p)/(ln 2)², k ≈ 7 hashes). Frontier: billions of pending URLs at ~100 bytes each means hundreds of GB, so it must be disk-backed. Finally I would flag the politeness constraint: at 1 req/host/sec, sustaining 385 pages/s requires ~400 hosts ready to fetch at all times, so frontier host diversity — not hardware — is often the real throughput ceiling.",
+      followUps: [
+        "How do the numbers change if average page size is 500 KB because you also fetch images and PDFs?",
+        "Where would you place crawler datacenters geographically, and why does it matter?",
+      ],
+    },
+    {
+      q: "How do you keep the crawled corpus fresh without wasting fetches on pages that never change?",
+      a: "Model each page's change behavior and adapt the recrawl interval per URL. The metadata DB stores last crawl time, a content checksum, and the change history; from repeated observations you estimate a change rate (classically a Poisson rate λ). A robust practical policy is multiplicative-adaptive scheduling: unchanged since last crawl → double the interval (capped around 30 days); changed → halve it (floored at minutes for hot pages). This converges to each page's real change frequency automatically. I would cut costs further with conditional GETs using ETag/If-Modified-Since — a 304 response confirms freshness for a few hundred bytes — plus sitemap lastmod hints and RSS feeds as push signals. Priority combines change rate with page importance, and I would cite the Cho & Garcia-Molina result that pathologically fast-changing pages should get LESS budget, since no schedule can keep them fresh and the fetches are better spent on pages where crawling actually improves index freshness. Operationally, I would run two lanes: a fast lane for news and high-traffic home pages with minute-level recrawl, and a batch lane for the long tail, each with an isolated budget so neither starves the other.",
+      followUps: [
+        "How would you bootstrap change-rate estimates for a URL you have crawled only once?",
+        "How do you detect that a page changed meaningfully vs just rotating ads or timestamps?",
+      ],
+    },
   ],
   mcqs: [
     {
@@ -418,6 +470,10 @@ public:
     { front: "What is a spider trap?", back: "URLs that generate infinite pages — calendars, session IDs, faceted navigation. Defended by crawl depth limits, per-domain page budgets, URL pattern detection, and content similarity monitoring." },
     { front: "How is crawl priority determined?", back: "Multi-factor scoring: PageRank of linking page, domain reputation, estimated change frequency, content freshness. Re-crawl intervals adapt based on observed change rates — double interval if unchanged, halve if changed." },
     { front: "What is the role of DNS caching in a web crawler?", back: "DNS lookups take 10-200ms per hostname. A dedicated DNS cache (e.g., Unbound) with extended TTLs eliminates this bottleneck. Prefetching DNS for frontier URLs hides latency entirely." },
+    { front: "1B pages/month — what sustained and peak crawl rate?", back: "1B / 2.6M seconds ≈ 385 pages/s sustained; provision ~3x for peak ≈ 1,200 pages/s. At 100KB/page that is ~38.5 MB/s ≈ 310 Mbps sustained ingress, ~1 Gbps peak, and 100 TB/month of raw storage." },
+    { front: "Describe the Mercator frontier structure.", back: "F front queues by priority feed B back queues (one host each, B ≈ 3x fetcher threads). A heap keyed by each host's next-allowed fetch time drives dispatch — guaranteeing one in-flight request per host by construction. Empty back queues are refilled with a new host from the front queues." },
+    { front: "Which URL normalizations are always safe vs heuristic?", back: "Safe (RFC 3986): lowercase scheme/host, remove default ports, resolve dot-segments, decode unreserved percent-encodings, strip fragments. Heuristic: sort query params, strip utm_*/session IDs, merge www/non-www. Never lowercase paths — they are case-sensitive by spec." },
+    { front: "What are the key robots.txt semantics (RFC 9309)?", back: "Most specific User-agent group applies; longest matching path rule wins between Allow/Disallow; 4xx for robots.txt = allow all; persistent 5xx = treat as disallow all; Crawl-delay is non-standard — honor as a capped hint." },
   ],
   exercises: [
     "Design a URL normalization function that handles: scheme lowercasing, hostname lowercasing, default port removal, path resolution (. and ..), query parameter sorting, fragment removal, and trailing slash normalization. Test with edge cases like IDN domains and percent-encoded characters.",
@@ -437,6 +493,10 @@ public:
     "At 1B pages/day = 11,500 pages/sec. Each worker handles ~200 pages/sec with 100 concurrent fetches. Need ~60 workers plus DNS cache, frontier service, and content store.",
     "Two-tier crawling: fast HTTP fetch for most pages, headless browser (Chromium) for JS-heavy SPAs. Headless is 10-100x slower, 100-500MB RAM per instance.",
     "Link graph compression: Webgraph format achieves 2-4 bits per edge using reference coding and delta encoding. Full web graph fits in memory on a modest cluster.",
+    "Capacity anchor: 1B pages/month ≈ 385 pages/s sustained, ~1,200 peak; ~310 Mbps ingress at 100KB/page; 100 TB/month raw storage; ~200 concurrent fetches at 500ms latency (Little's Law).",
+    "Mercator frontier: F priority front queues, B one-host back queues (B ≈ 3x threads), heap keyed by per-host next-allowed time. One in-flight request per host guaranteed by construction.",
+    "robots.txt semantics: most specific User-agent group; longest path match wins Allow vs Disallow; 4xx = allow all, persistent 5xx = disallow all; Crawl-delay is a non-standard capped hint.",
+    "URL normalization: safe = lowercase scheme/host, drop default port, resolve dot-segments, strip fragment; heuristic = sort params, strip utm_*/session IDs. Paths are case-sensitive — do not lowercase them.",
   ],
   cheatSheet: [
     "Bloom filter sizing: m = -n * ln(fpr) / (ln2)^2; k = (m/n) * ln2",
@@ -449,6 +509,11 @@ public:
     "Spider trap defenses: depth limit (15-20), domain page cap, URL pattern detection, content similarity",
     "Scale estimate: 1B pages/day ≈ 12K pages/sec ≈ 60 workers at 200 pages/sec each",
     "Re-crawl: double interval if unchanged (max 30 days), halve if changed (min 1 hour)",
+    "Capacity: 1B pages/month ≈ 385 pages/s sustained ≈ 1,200 peak; 100KB avg → ~310 Mbps sustained, ~1 Gbps peak; 100 TB/month raw",
+    "Concurrency (Little's Law): 385 pages/s × 0.5s latency ≈ 200 in-flight requests",
+    "Mercator frontier: F front queues (priority) → B back queues (one host each, B ≈ 3x threads) → heap by next-allowed fetch time",
+    "robots.txt: longest path match wins; 4xx = allow all, 5xx = disallow all; conditional GET (ETag/304) makes recrawl checks nearly free",
+    "Host diversity limit: at 1 req/host/sec you need ~400 ready hosts to sustain 385 pages/s — frontier mix caps throughput",
   ],
   glossary: [
     { term: "URL Frontier", definition: "The data structure managing URLs to be crawled, combining priority queues (front) for importance-based selection with per-host queues (back) for politeness enforcement." },
@@ -508,6 +573,9 @@ public:
     "What are the legal and ethical considerations of web crawling at scale?",
     "How would you design the storage layer for a crawler archiving petabytes of web content?",
     "How does a crawler handle internationalized domain names (IDN) and non-Latin URL encoding?",
+    "How would you crawl efficiently when a large fraction of the web moves behind CDNs with aggressive bot detection?",
+    "How would you adapt the recrawl scheduler if the product needed near-real-time freshness for e-commerce prices?",
+    "How would you shard the URL frontier itself when a single host (e.g., wikipedia.org) has hundreds of millions of URLs?",
   ],
   resources: [
     { label: "Web Crawling and Indexing (Stanford IR Book)", kind: "book", note: "Chapter 20 covers crawler architecture, politeness, and frontier management in depth." },

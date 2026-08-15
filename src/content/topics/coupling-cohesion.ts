@@ -779,7 +779,7 @@ class InventoryService {
       note: "Defines CBO, LCOM, and other OO metrics. The foundational academic paper on coupling and cohesion measurement.",
     },
     {
-      label: "Refactoring: Improving the Design of Existing Code - Martin Fowler",
+      label: "Refactoring: Improving the Design of Existing Code - Martin Fowler", url: "https://martinfowler.com/",
       kind: "book",
       note: "Catalogs refactoring patterns that reduce coupling (Extract Interface, Introduce Parameter Object) and improve cohesion (Extract Class, Move Method).",
     },

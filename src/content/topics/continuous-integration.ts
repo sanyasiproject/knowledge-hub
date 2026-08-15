@@ -544,10 +544,10 @@ deploy-staging:
     "The 'stop the line' culture is non-negotiable: a broken build is the team's top priority, fix it or revert within minutes"
   ],
   resources: [
-    { label: "Continuous Integration (Martin Fowler)", kind: "article", note: "The seminal article defining CI practices, principles, and anti-patterns -- the canonical reference" },
+    { label: "Continuous Integration (Martin Fowler)", url: "https://martinfowler.com/", kind: "article", note: "The seminal article defining CI practices, principles, and anti-patterns -- the canonical reference" },
     { label: "Accelerate: The Science of Lean Software and DevOps", kind: "book", note: "Forsgren, Humble, Kim -- data-driven research linking CI, trunk-based dev, and delivery performance (DORA metrics)" },
-    { label: "GitHub Actions Documentation", kind: "docs", note: "Official reference for workflow syntax, runners, caching, matrix builds, and security hardening" },
-    { label: "GitLab CI/CD Documentation", kind: "docs", note: "Comprehensive guide covering pipeline configuration, caching, artifacts, environments, and Auto DevOps" },
+    { label: "GitHub Actions Documentation", url: "https://docs.github.com/en/actions", kind: "docs", note: "Official reference for workflow syntax, runners, caching, matrix builds, and security hardening" },
+    { label: "GitLab CI/CD Documentation", url: "https://docs.gitlab.com/ee/ci/", kind: "docs", note: "Comprehensive guide covering pipeline configuration, caching, artifacts, environments, and Auto DevOps" },
     { label: "Continuous Delivery (Jez Humble & David Farley)", kind: "book", note: "The foundational book on build pipelines, deployment automation, and the practices that extend CI into CD" }
   ],
 };

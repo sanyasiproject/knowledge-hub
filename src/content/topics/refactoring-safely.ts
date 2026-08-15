@@ -595,7 +595,7 @@ void emit_metric(const std::string& name,
   ],
   resources: [
     {
-      label: "Refactoring: Improving the Design of Existing Code — Martin Fowler",
+      label: "Refactoring: Improving the Design of Existing Code — Martin Fowler", url: "https://martinfowler.com/",
       kind: "book",
       note: "The definitive reference on refactoring. The catalog of named refactorings (Extract Method, Move Field, Replace Conditional with Polymorphism) provides a shared vocabulary. The 2nd edition uses JavaScript examples and covers modern practices.",
     },
@@ -605,7 +605,7 @@ void emit_metric(const std::string& name,
       note: "Essential for refactoring code without tests. Introduces characterization tests, seams, and techniques for breaking dependencies in untested code. Every senior engineer should read this before tackling legacy systems.",
     },
     {
-      label: "StranglerFigApplication — Martin Fowler (martinfowler.com)",
+      label: "StranglerFigApplication — Martin Fowler (martinfowler.com)", url: "https://martinfowler.com/",
       kind: "article",
       note: "The original description of the Strangler Fig pattern for incrementally replacing legacy systems. Short, clear, and foundational for anyone planning a migration from monolith to microservices or any system replacement.",
     },

@@ -1,30 +1,26 @@
 import { Link, useParams } from "react-router-dom";
 import { getCategory, getDomain } from "../data/taxonomy";
 import { CATEGORY_STRUCTURE } from "../data/categoryStructure";
-import { getContent } from "../content";
+import type { Level, Topic } from "../data/schema";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
-import { Card, LevelBadge } from "../components/ui/primitives";
-import { ContentCompletenessBadge } from "../components/ui/ProgressBadge";
+import { Card, FrequencyBadge, LevelBadge } from "../components/ui/primitives";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { NotFound } from "./NotFound";
 
-/** Count how many of the standard content sections are populated for a topic. */
-const CONTENT_KEYS = [
-  "quickSummary", "detailed", "deepDive", "code", "diagrams", "animations",
-  "comparison", "interviewQA", "followUps", "mcqs", "exercises", "flashcards",
-  "revisionNotes", "cheatSheet", "resources", "glossary",
-] as const;
-const TOTAL_SECTIONS = CONTENT_KEYS.length;
+const LEVEL_ORDER: Level[] = ["Beginner", "Intermediate", "Advanced", "Advanced Concepts", "Expert"];
 
-function countAuthored(topicSlug: string): number {
-  const c = getContent(topicSlug);
-  if (!c) return 0;
-  return CONTENT_KEYS.filter((k) => {
-    const v = c[k];
-    if (v == null) return false;
-    if (Array.isArray(v)) return v.length > 0;
-    if (typeof v === "object") return Object.keys(v).length > 0;
-    return true;
-  }).length;
+/**
+ * Groups a category's topics by level, preserving the authored order within
+ * each tier. A category that spans core → advanced then reads as one list with
+ * the ladder visible, rather than being split across separate categories.
+ */
+function levelGroups(topics: Topic[]): [Level, Topic[]][] {
+  const byLevel = new Map<Level, Topic[]>();
+  for (const t of topics) {
+    if (!byLevel.has(t.level)) byLevel.set(t.level, []);
+    byLevel.get(t.level)!.push(t);
+  }
+  return LEVEL_ORDER.filter((l) => byLevel.has(l)).map((l) => [l, byLevel.get(l)!]);
 }
 
 /**
@@ -36,6 +32,7 @@ export function CategoryPage() {
   const { domainSlug = "", categorySlug = "" } = useParams();
   const domain = getDomain(domainSlug);
   const category = getCategory(domainSlug, categorySlug);
+  usePageTitle(category?.title, category?.summary);
   if (!domain || !category) return <NotFound />;
 
   return (
@@ -49,30 +46,52 @@ export function CategoryPage() {
         <p className="mt-1 max-w-3xl text-slate-600 dark:text-slate-300">{category.summary}</p>
       </header>
 
-      {/* Topics */}
+      {/* Topics, grouped by level so the progression is visible in place */}
       <section className="mb-10">
-        <h2 className="mb-3 text-lg font-bold text-slate-900 dark:text-white">Topics in this category</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {category.topics.map((t) => {
-            const authored = countAuthored(t.slug);
-            return (
-              <Link key={t.slug} to={`/topic/${domain.slug}/${category.slug}/${t.slug}`}>
-                <Card hover className="h-full">
-                  <div className="mb-1 flex items-center gap-2">
-                    <h3 className="font-semibold text-slate-900 dark:text-white">{t.title}</h3>
-                    <div className="ml-auto">
-                      <LevelBadge level={t.level} />
+        <h2 className="mb-1 text-lg font-bold text-slate-900 dark:text-white">
+          Topics in this category
+        </h2>
+        <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+          {category.topics.length} topics, ordered so each builds on the one before. Every entry says
+          what it is for, so you can pick the right tool without opening them all.
+          {category.topics.some((t) => t.frequency) && (
+            <> The frequency badge shows how often it comes up in interviews — start with the busiest.</>
+          )}
+        </p>
+
+        {levelGroups(category.topics).map(([level, topics]) => (
+          <div key={level} className="mb-6">
+            {/* Only label the tier when a category actually spans more than one */}
+            {levelGroups(category.topics).length > 1 && (
+              <div className="mb-3 flex items-center gap-3">
+                <LevelBadge level={level} />
+                <div className="h-px flex-1 bg-slate-200 dark:bg-slate-800" />
+              </div>
+            )}
+            <div className="grid gap-3 sm:grid-cols-2">
+              {topics.map((t) => (
+                <Link key={t.slug} to={`/topic/${domain.slug}/${category.slug}/${t.slug}`}>
+                  <Card hover className="flex h-full flex-col">
+                    <div className="mb-1 flex flex-wrap items-center gap-2">
+                      <h3 className="font-semibold text-slate-900 dark:text-white">{t.title}</h3>
+                      <div className="ml-auto flex items-center gap-1.5">
+                        <FrequencyBadge frequency={t.frequency} />
+                        <LevelBadge level={t.level} />
+                      </div>
                     </div>
-                  </div>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">{t.summary}</p>
-                  <div className="mt-2">
-                    <ContentCompletenessBadge authored={authored} total={TOTAL_SECTIONS} />
-                  </div>
-                </Card>
-              </Link>
-            );
-          })}
-        </div>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">{t.summary}</p>
+                    {t.useCase && (
+                      <p className="mt-2 border-l-2 border-brand-300 pl-2 text-xs leading-relaxed text-slate-500 dark:border-brand-700 dark:text-slate-400">
+                        <span className="font-semibold text-brand-600 dark:text-brand-300">Use it for: </span>
+                        {t.useCase}
+                      </p>
+                    )}
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          </div>
+        ))}
       </section>
 
       {/* Standard category structure */}

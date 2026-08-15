@@ -462,7 +462,7 @@ int main() {
       note: "The definitive reference covering BFS, DFS, shortest paths, MST, and network flow.",
     },
     {
-      label: "Visualgo - Graph Traversal & Shortest Path Visualizations",
+      label: "Visualgo - Graph Traversal & Shortest Path Visualizations", url: "https://visualgo.net/",
       kind: "article",
       note: "Interactive animations for BFS, DFS, Dijkstra, Bellman-Ford, and more.",
     },

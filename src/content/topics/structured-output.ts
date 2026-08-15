@@ -465,7 +465,7 @@ TypeScript runtime"]
   ],
   resources: [
     {
-      label: "Anthropic documentation — prompt engineering and tool use",
+      label: "Anthropic documentation — prompt engineering and tool use", url: "https://docs.anthropic.com/",
       kind: "docs",
     },
     {

@@ -413,11 +413,11 @@ async function getViewCount(productId: string): Promise<number> {
     "Computed Pattern: $inc counters at write time, not $count at read time.",
   ],
   resources: [
-    { label: "MongoDB Data Modeling Documentation", kind: "docs", note: "Official guide covering embedding, referencing, and schema design patterns." },
+    { label: "MongoDB Data Modeling Documentation", url: "https://www.mongodb.com/docs/", kind: "docs", note: "Official guide covering embedding, referencing, and schema design patterns." },
     { label: "Building with Patterns (MongoDB Blog Series)", kind: "article", note: "Covers Subset, Computed, Bucket, Outlier, and other advanced patterns." },
     { label: "The DynamoDB Book by Alex DeBrie", kind: "book", note: "The definitive guide to single-table design, access pattern modeling, and advanced DynamoDB patterns." },
     { label: "AWS re:Invent - Advanced Design Patterns for DynamoDB", kind: "video", note: "Rick Houlihan's talks on single-table design, adjacency lists, and GSI overloading." },
-    { label: "Designing Data-Intensive Applications by Martin Kleppmann", kind: "book", note: "Chapter 2 covers data models and query languages, comparing relational, document, and graph models." },
+    { label: "Designing Data-Intensive Applications by Martin Kleppmann", url: "https://dataintensive.net/", kind: "book", note: "Chapter 2 covers data models and query languages, comparing relational, document, and graph models." },
     { label: "dynamodb-toolbox", kind: "repo", note: "TypeScript library that simplifies single-table design with entity definitions and mapped attributes." },
   ],
   glossary: [

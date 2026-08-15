@@ -384,7 +384,7 @@ kubectl create job test-job --from=cronjob/backup # Manual CronJob trigger`,
   ],
   resources: [
     {
-      label: "Kubernetes documentation — Workloads",
+      label: "Kubernetes documentation — Workloads", url: "https://kubernetes.io/docs/",
       kind: "docs",
     },
     {

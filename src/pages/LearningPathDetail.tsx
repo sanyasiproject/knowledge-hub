@@ -4,10 +4,12 @@ import { findTopicBySlug, topicPath } from "../data/taxonomy";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { Card, LevelBadge } from "../components/ui/primitives";
 import { NotFound } from "./NotFound";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 export function LearningPathDetail() {
   const { pathSlug = "" } = useParams();
   const path = getLearningPath(pathSlug);
+  usePageTitle(path?.title);
 
   if (!path) return <NotFound />;
 

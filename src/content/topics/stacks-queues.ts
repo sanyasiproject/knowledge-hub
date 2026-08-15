@@ -443,7 +443,7 @@ public:
   ],
   resources: [
     {
-      label: "Visualgo - Stack and Queue Visualizations",
+      label: "Visualgo - Stack and Queue Visualizations", url: "https://visualgo.net/",
       kind: "article",
       note: "Interactive animations showing push, pop, enqueue, dequeue, and heap operations step by step.",
     },
@@ -453,7 +453,7 @@ public:
       note: "Formal treatment of heap properties, heapsort, and elementary stack/queue implementations.",
     },
     {
-      label: "Monotonic Stack Problems on LeetCode",
+      label: "Monotonic Stack Problems on LeetCode", url: "https://leetcode.com/",
       kind: "article",
       note: "Collection of problems (Daily Temperatures, Largest Rectangle, Trapping Rain Water) that use monotonic stacks.",
     },

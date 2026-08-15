@@ -1,11 +1,14 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import { findTopicBySlug, getCategory, getDomain, getTopic, topicPath } from "../data/taxonomy";
 import { TOPIC_SECTIONS, TOPIC_SECTION_GROUPS } from "../data/topicSections";
-import { getContent } from "../content";
-import { renderSection } from "../components/content/sections";
+import type { TopicSectionDef } from "../data/topicSections";
+import { loadContent } from "../content";
+import type { TopicContent } from "../content/types";
+import { hasSectionContent, renderSection } from "../components/content/sections";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
-import { Card, LevelBadge, Pill, Placeholder } from "../components/ui/primitives";
+import { Card, FrequencyBadge, LevelBadge, Pill } from "../components/ui/primitives";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { NotFound } from "./NotFound";
 
 /* ------------------------------------------------------------------ */
@@ -30,7 +33,7 @@ function ReadingProgressBar() {
   return (
     <div className="fixed left-0 top-0 z-50 h-[3px] w-full">
       <div
-        className="h-full bg-brand-500 transition-[width] duration-150"
+        className="h-full bg-gradient-to-r from-brand-500 to-indigo-400 transition-[width] duration-150"
         style={{ width: `${progress}%` }}
       />
     </div>
@@ -77,10 +80,8 @@ function useScrollSpy(sectionIds: string[]) {
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
-        // Find the first visible section
         const visible = entries.filter((e) => e.isIntersecting);
         if (visible.length > 0) {
-          // Pick the one closest to the top
           visible.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
           setActiveId(visible[0].target.id);
         }
@@ -147,6 +148,43 @@ function ShareLinkButton({ sectionId }: { sectionId: string }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Loading skeleton while the topic's content chunk downloads          */
+/* ------------------------------------------------------------------ */
+
+function ContentSkeleton() {
+  return (
+    <div className="animate-pulse space-y-8" aria-label="Loading content">
+      {[0, 1, 2].map((i) => (
+        <div key={i}>
+          <div className="mb-3 h-6 w-56 rounded bg-slate-200 dark:bg-slate-800" />
+          <div className="space-y-2">
+            <div className="h-4 w-full rounded bg-slate-100 dark:bg-slate-800/60" />
+            <div className="h-4 w-11/12 rounded bg-slate-100 dark:bg-slate-800/60" />
+            <div className="h-4 w-4/5 rounded bg-slate-100 dark:bg-slate-800/60" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Reading-time estimate                                               */
+/* ------------------------------------------------------------------ */
+
+function estimateMinutes(content: TopicContent): number {
+  // Rough word count over all authored text; ~6 chars/word, 200 wpm.
+  let chars = 0;
+  const walk = (v: unknown) => {
+    if (typeof v === "string") chars += v.length;
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === "object") Object.values(v).forEach(walk);
+  };
+  walk(content);
+  return Math.max(1, Math.round(chars / 6 / 200));
+}
+
+/* ------------------------------------------------------------------ */
 /* TopicPage                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -155,11 +193,41 @@ export function TopicPage() {
   const domain = getDomain(domainSlug);
   const category = getCategory(domainSlug, categorySlug);
   const topic = getTopic(domainSlug, categorySlug, topicSlug);
-  if (!domain || !category || !topic) return <NotFound />;
 
-  const content = getContent(topicSlug) ?? {};
+  const [content, setContent] = useState<TopicContent | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const sectionIds = TOPIC_SECTIONS.map((s) => s.id);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setContent(null);
+    loadContent(topicSlug).then((c) => {
+      if (!cancelled) {
+        setContent(c ?? {});
+        setLoading(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [topicSlug]);
+
+  usePageTitle(topic?.title, topic?.summary);
+
+  // Reading controls: text size (zoom scales diagrams and code too) and
+  // collapse/expand state applied across all visible sections at once.
+  const [textSize, setTextSize] = useState<0 | 1 | 2>(1);
+  const zoomFor = [0.92, 1, 1.1][textSize];
+
+  // Only sections with authored material render — a topic without code has no
+  // Code section, a behavioral topic without diagrams has no Visualize group.
+  const relatedResolvable = !!topic?.related?.some((s) => findTopicBySlug(s));
+  const visibleSections = useMemo<TopicSectionDef[]>(() => {
+    if (!content) return [];
+    return TOPIC_SECTIONS.filter((s) =>
+      s.component === "related" ? relatedResolvable : hasSectionContent(s.component, content)
+    );
+  }, [content, relatedResolvable]);
+
+  const sectionIds = useMemo(() => visibleSections.map((s) => s.id), [visibleSections]);
   const activeId = useScrollSpy(sectionIds);
 
   // Collapsible sections state — all expanded by default
@@ -167,6 +235,13 @@ export function TopicPage() {
   const toggleSection = useCallback((id: string) => {
     setCollapsed((prev) => ({ ...prev, [id]: !prev[id] }));
   }, []);
+
+  if (!domain || !category || !topic) return <NotFound />;
+
+  const minutes = content ? estimateMinutes(content) : 0;
+  const visibleGroups = TOPIC_SECTION_GROUPS.filter((g) =>
+    visibleSections.some((s) => s.group === g)
+  );
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -180,75 +255,171 @@ export function TopicPage() {
         ]}
       />
 
-      <div className="lg:grid lg:grid-cols-[1fr_15rem] lg:gap-8">
+      <div className="lg:grid lg:grid-cols-[1fr_15rem] lg:gap-10">
         <article className="min-w-0">
           {/* Header */}
-          <header className="mb-8 border-b border-slate-200 pb-6 dark:border-slate-800">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <LevelBadge level={topic.level} />
-              {topic.tags?.map((t) => (
-                <Pill key={t}>#{t}</Pill>
-              ))}
+          <header className="relative mb-10 overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-white to-brand-50/60 px-6 py-7 dark:border-slate-800 dark:from-slate-900 dark:via-slate-900 dark:to-brand-900/20 sm:px-8">
+            <div
+              className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-brand-100/70 blur-3xl dark:bg-brand-800/20"
+              aria-hidden
+            />
+            <div className="relative">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <LevelBadge level={topic.level} />
+                <FrequencyBadge frequency={topic.frequency} />
+                {topic.tags?.map((t) => (
+                  <Pill key={t}>#{t}</Pill>
+                ))}
+              </div>
+              <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white sm:text-4xl">
+                {topic.title}
+              </h1>
+              <p className="mt-3 max-w-3xl text-lg leading-relaxed text-slate-600 dark:text-slate-300">
+                {topic.summary}
+              </p>
+              {!loading && (
+                <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-400 dark:text-slate-500">
+                  <span>{visibleSections.length} sections</span>
+                  <span aria-hidden>·</span>
+                  <span>~{minutes} min read</span>
+                </div>
+              )}
             </div>
-            <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white sm:text-4xl">{topic.title}</h1>
-            <p className="mt-2 max-w-3xl text-lg text-slate-600 dark:text-slate-300">{topic.summary}</p>
           </header>
 
-          {/* Sections grouped by Learn / Visualize / Practice / Reference */}
-          {TOPIC_SECTION_GROUPS.map((group) => {
-            const sections = TOPIC_SECTIONS.filter((s) => s.group === group);
-            return (
-              <div key={group} className="mb-12">
-                <div className="mb-5 flex items-center gap-3">
-                  <h2 className="text-xs font-bold uppercase tracking-widest text-brand-500">{group}</h2>
-                  <div className="h-px flex-1 bg-slate-200 dark:bg-slate-800" />
-                </div>
-                <div className="space-y-8">
-                  {sections.map((s) => {
-                    const isCollapsed = !!collapsed[s.id];
-                    return (
-                      <section key={s.id} id={s.id}>
-                        <div className="group/heading mb-3 flex items-center">
-                          <button
-                            onClick={() => toggleSection(s.id)}
-                            className="mr-2 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-300"
-                            aria-label={isCollapsed ? "Expand section" : "Collapse section"}
-                          >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              className={`h-4 w-4 transition-transform duration-200 ${isCollapsed ? "" : "rotate-90"}`}
-                              viewBox="0 0 20 20"
-                              fill="currentColor"
-                            >
-                              <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                            </svg>
-                          </button>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center">
-                              <h2 id={`h-${s.id}`} className="scroll-mt-24 text-xl font-bold text-slate-900 dark:text-white">
-                                {s.label}
-                              </h2>
-                              <ShareLinkButton sectionId={s.id} />
-                            </div>
-                            {s.note && <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{s.note}</p>}
-                          </div>
-                        </div>
-                        {!isCollapsed && (
-                          <div className="ml-8">
-                            {s.component === "related" ? (
-                              <RelatedTopics slugs={topic.related} />
-                            ) : (
-                              renderSection(s.component, content)
-                            )}
-                          </div>
-                        )}
-                      </section>
-                    );
-                  })}
-                </div>
+          {/* Reading toolbar: jump chips per group + text size + expand/collapse */}
+          {!loading && visibleSections.length > 0 && (
+            <div className="mb-8 flex flex-wrap items-center gap-2">
+              {visibleGroups.map((g) => {
+                const first = visibleSections.find((s) => s.group === g);
+                return (
+                  <a
+                    key={g}
+                    href={`#${first!.id}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      document.getElementById(first!.id)?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand-300 hover:text-brand-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-brand-600"
+                  >
+                    {g}
+                  </a>
+                );
+              })}
+              <div className="ml-auto flex items-center gap-1.5">
+                <button
+                  onClick={() => setTextSize((s) => ((s + 1) % 3) as 0 | 1 | 2)}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500 transition hover:border-brand-300 hover:text-brand-600 dark:border-slate-700 dark:text-slate-400"
+                  title={`Text size: ${["compact", "comfortable", "large"][textSize]}`}
+                  aria-label="Cycle text size"
+                >
+                  <span className="text-[10px]">A</span>
+                  <span className="text-sm">A</span>
+                </button>
+                <button
+                  onClick={() => setCollapsed(Object.fromEntries(visibleSections.map((s) => [s.id, true])))}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:border-brand-300 hover:text-brand-600 dark:border-slate-700 dark:text-slate-400"
+                >
+                  Collapse all
+                </button>
+                <button
+                  onClick={() => setCollapsed({})}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:border-brand-300 hover:text-brand-600 dark:border-slate-700 dark:text-slate-400"
+                >
+                  Expand all
+                </button>
               </div>
-            );
-          })}
+            </div>
+          )}
+
+          {/* Mobile "on this page" nav (the sidebar TOC is desktop-only) */}
+          {!loading && visibleSections.length > 0 && (
+            <details className="mb-8 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:hidden">
+              <summary className="cursor-pointer text-sm font-bold text-slate-700 dark:text-slate-200">
+                On this page ({visibleSections.length} sections)
+              </summary>
+              <ul className="mt-3 space-y-1.5">
+                {visibleSections.map((s) => (
+                  <li key={s.id}>
+                    <a
+                      href={`#${s.id}`}
+                      className="text-sm text-slate-500 hover:text-brand-600 dark:text-slate-400 dark:hover:text-brand-300"
+                    >
+                      <span className="mr-1.5 text-xs text-slate-400">{s.group} ·</span>
+                      {s.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {loading && <ContentSkeleton />}
+
+          {/* Sections grouped by Learn / Visualize / Practice / Reference —
+              only groups that actually have authored sections appear. The
+              zoom wrapper implements the text-size control (scales diagrams
+              and code proportionally, unlike a font-size override). */}
+          {!loading && (
+          <div style={zoomFor !== 1 ? ({ zoom: zoomFor } as React.CSSProperties) : undefined}>
+          {
+            visibleGroups.map((group) => {
+              const sections = visibleSections.filter((s) => s.group === group);
+              return (
+                <div key={group} className="mb-12">
+                  <div className="mb-5 flex items-center gap-3">
+                    <h2 className="text-xs font-bold uppercase tracking-widest text-brand-500">{group}</h2>
+                    <div className="h-px flex-1 bg-slate-200 dark:bg-slate-800" />
+                  </div>
+                  <div className="space-y-10">
+                    {sections.map((s) => {
+                      const isCollapsed = !!collapsed[s.id];
+                      return (
+                        <section key={s.id} id={s.id}>
+                          <div className="group/heading mb-4 flex items-center">
+                            <button
+                              onClick={() => toggleSection(s.id)}
+                              className="mr-2 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+                              aria-label={isCollapsed ? "Expand section" : "Collapse section"}
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                className={`h-4 w-4 transition-transform duration-200 ${isCollapsed ? "" : "rotate-90"}`}
+                                viewBox="0 0 20 20"
+                                fill="currentColor"
+                              >
+                                <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                              </svg>
+                            </button>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center">
+                                <h2 id={`h-${s.id}`} className="scroll-mt-24 text-xl font-bold tracking-tight text-slate-900 dark:text-white">
+                                  {s.label}
+                                </h2>
+                                <ShareLinkButton sectionId={s.id} />
+                              </div>
+                              {s.note && <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{s.note}</p>}
+                            </div>
+                          </div>
+                          {!isCollapsed && (
+                            <div className="ml-8">
+                              {s.component === "related" ? (
+                                <RelatedTopics slugs={topic.related} />
+                              ) : (
+                                content && renderSection(s.component, content)
+                              )}
+                            </div>
+                          )}
+                        </section>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })
+          }
+          </div>
+          )}
         </article>
 
         {/* On-page table of contents with scroll spy */}
@@ -256,11 +427,11 @@ export function TopicPage() {
           <div className="sticky top-20">
             <div className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">In this topic</div>
             <nav className="thin-scroll max-h-[calc(100vh-8rem)] space-y-3 overflow-y-auto pr-2 text-sm">
-              {TOPIC_SECTION_GROUPS.map((group) => (
+              {visibleGroups.map((group) => (
                 <div key={group}>
                   <div className="mb-1 text-xs font-semibold text-slate-500">{group}</div>
                   <ul className="space-y-1">
-                    {TOPIC_SECTIONS.filter((s) => s.group === group).map((s) => {
+                    {visibleSections.filter((s) => s.group === group).map((s) => {
                       const isActive = activeId === s.id;
                       return (
                         <li key={s.id}>
@@ -296,8 +467,7 @@ export function TopicPage() {
 
 function RelatedTopics({ slugs }: { slugs?: string[] }) {
   const resolved = (slugs ?? []).map(findTopicBySlug).filter(Boolean);
-  if (!resolved.length)
-    return <Placeholder icon="🔗" title="Related Topics">Cross-links to related topics across the hub will appear here.</Placeholder>;
+  if (!resolved.length) return null;
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {resolved.map((loc) => (

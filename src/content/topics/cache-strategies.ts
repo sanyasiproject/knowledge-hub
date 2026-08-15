@@ -454,8 +454,8 @@ async function warmCache(): Promise<void> {
   ],
   resources: [
     { label: "AWS ElastiCache Caching Strategies", kind: "docs", note: "Official AWS documentation covering lazy loading, write-through, and TTL strategies with ElastiCache." },
-    { label: "Designing Data-Intensive Applications by Martin Kleppmann", kind: "book", note: "Chapter 5 covers replication and caching. Essential reading on consistency trade-offs." },
-    { label: "Redis Documentation on Persistence", kind: "docs", note: "Understanding RDB and AOF is critical for write-behind durability guarantees." },
+    { label: "Designing Data-Intensive Applications by Martin Kleppmann", url: "https://dataintensive.net/", kind: "book", note: "Chapter 5 covers replication and caching. Essential reading on consistency trade-offs." },
+    { label: "Redis Documentation on Persistence", url: "https://redis.io/docs/latest/", kind: "docs", note: "Understanding RDB and AOF is critical for write-behind durability guarantees." },
     { label: "Caching at Scale with Spring by Netflix", kind: "video", note: "Netflix's EVCache architecture and multi-tier caching strategy." },
     { label: "Facebook's Scaling Memcache paper (NSDI 2013)", kind: "paper", note: "Covers cache-aside at Facebook scale, including lease-based thundering herd prevention." },
     { label: "node-cache-manager", kind: "repo", note: "Multi-tier caching library for Node.js supporting in-memory, Redis, and custom stores." },

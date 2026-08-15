@@ -2,9 +2,9 @@ import type { TopicContent } from "../types";
 
 export const designTaskScheduler: TopicContent = {
   quickSummary: [
-    "A distributed task scheduler is essentially a distributed cron system that manages millions of scheduled tasks across a fleet of workers, ensuring each task runs exactly once, at the right time, with proper failure handling and retries.",
+    "A distributed task scheduler is essentially cron at scale: a system that manages millions of scheduled tasks across a fleet of workers, ensuring each task fires at the right time and runs effectively once, with proper failure handling and retries.",
     "The core components are: a task store (database holding task definitions and state), a scheduler service (determines when tasks should fire), a dispatcher (assigns ready tasks to workers), and a worker pool (executes the actual task logic).",
-    "Exactly-once execution is the hardest guarantee: you achieve it through a combination of distributed locking (lease-based), idempotent task handlers, and a state machine that tracks each task through PENDING, CLAIMED, RUNNING, SUCCEEDED, or FAILED states.",
+    "True exactly-once execution is impossible in a distributed system (a worker can crash after doing the work but before acknowledging it), so the realistic guarantee is at-least-once firing plus idempotent task handlers, enforced with lease-based locking, fencing tokens, idempotency keys, and a state machine tracking PENDING, CLAIMED, RUNNING, SUCCEEDED, or FAILED.",
     "Scaling to millions of tasks requires partitioning the task space (by hash, time bucket, or tenant), using priority queues with multiple levels, and separating the scheduling hot path (what fires next?) from the cold storage of task definitions.",
     "Failure handling must account for worker crashes (heartbeat-based lease expiry), scheduler crashes (redundant scheduler replicas with leader election), and network partitions (fencing tokens to prevent stale workers from completing tasks)."
   ],
@@ -16,9 +16,11 @@ export const designTaskScheduler: TopicContent = {
 
     "## Worker Pool and Execution Engine\nThe worker pool is a fleet of stateless processes that pull tasks from a dispatch queue and execute them. Each worker registers itself with a service registry (Consul, etcd, or a custom heartbeat table) and advertises its capacity (how many concurrent tasks it can handle, which task types it supports). The dispatcher assigns tasks to workers using a strategy: round-robin for uniform tasks, least-loaded for heterogeneous workloads, or affinity-based to route tasks of the same type to the same workers (improving cache hit rates). Workers execute tasks within a sandbox with resource limits (CPU time, memory, wall-clock timeout). Each worker sends periodic heartbeats (every 5-10 seconds) to renew its lease on the task. If a heartbeat is missed for 3 consecutive intervals, the task is considered abandoned, its state resets to PENDING, and it re-enters the dispatch queue. This lease-based model is critical for exactly-once semantics: only the worker holding the current lease (identified by a monotonically increasing fencing token) can mark the task as completed.",
 
-    "## Exactly-Once Execution and Failure Handling\nExactly-once execution in a distributed system is achieved through three layers. First, the claim layer: when the dispatcher assigns a task, it performs an atomic compare-and-swap on the task state (SCHEDULED to CLAIMED) with a fencing token. Only one worker wins the CAS operation. Second, the execution layer: the worker executes the task and writes the result back with the same fencing token. The store rejects any write with a stale fencing token, preventing a zombie worker (one whose lease expired but is still running) from overwriting a fresh execution. Third, the idempotency layer: task handlers must be idempotent, meaning running the same task twice produces the same side effects. This is the application-level safety net. For failure handling, tasks define a retry policy (max attempts, backoff strategy: fixed, exponential, or exponential with jitter). After exhausting retries, tasks move to a dead-letter queue for manual inspection. The system also supports circuit-breaking: if a task type fails repeatedly across multiple workers, the scheduler can pause that task type to prevent cascading failures.",
+    "## Effectively-Once Execution and Failure Handling\nTrue exactly-once execution cannot be guaranteed by infrastructure alone, so the practical goal is effectively-once: at-least-once firing made safe by three layers. First, the claim layer: when the dispatcher assigns a task, it performs an atomic compare-and-swap on the task state (SCHEDULED to CLAIMED) with a fencing token. Only one worker wins the CAS operation. Second, the execution layer: the worker executes the task and writes the result back with the same fencing token. The store rejects any write with a stale fencing token, preventing a zombie worker (one whose lease expired but is still running) from overwriting a fresh execution. Third, the idempotency layer: task handlers must be idempotent, meaning running the same task twice produces the same side effects. This is the application-level safety net. For failure handling, tasks define a retry policy (max attempts, backoff strategy: fixed, exponential, or exponential with jitter). After exhausting retries, tasks move to a dead-letter queue for manual inspection. The system also supports circuit-breaking: if a task type fails repeatedly across multiple workers, the scheduler can pause that task type to prevent cascading failures.",
 
-    "## Scaling, Priority, and Task Dependencies\nTo handle millions of tasks, the scheduler itself must be horizontally scalable. Multiple scheduler instances run concurrently, each owning a partition of the task space (assigned via consistent hashing or a lease-based partition manager). Each scheduler instance scans only its partition of the schedule index. Priority is implemented with multiple dispatch queues (e.g., P0-critical, P1-high, P2-normal, P3-low), and workers drain higher-priority queues first using a weighted fair-queuing algorithm. For task dependencies (task B runs only after task A completes), the system maintains a DAG (directed acyclic graph) of dependencies. When task A completes, the scheduler evaluates whether all predecessors of task B are done and, if so, moves task B to SCHEDULED. At 10 million tasks with 100K firing per minute, you need approximately 50-100 scheduler partitions, 500-1000 workers, and a schedule index that supports 100K reads/writes per second. Redis cluster or a time-series-optimized database handles this index load well."
+    "## Scaling, Priority, and Task Dependencies\nTo handle millions of tasks, the scheduler itself must be horizontally scalable. Multiple scheduler instances run concurrently, each owning a partition of the task space (assigned via consistent hashing or a lease-based partition manager). Each scheduler instance scans only its partition of the schedule index. Priority is implemented with multiple dispatch queues (e.g., P0-critical, P1-high, P2-normal, P3-low), and workers drain higher-priority queues first using a weighted fair-queuing algorithm. For task dependencies (task B runs only after task A completes), the system maintains a DAG (directed acyclic graph) of dependencies. When task A completes, the scheduler evaluates whether all predecessors of task B are done and, if so, moves task B to SCHEDULED. At 10 million tasks with 100K firing per minute, you need approximately 50-100 scheduler partitions, 500-1000 workers, and a schedule index that supports 100K reads/writes per second. Redis cluster or a time-series-optimized database handles this index load well.",
+
+    "## Capacity Estimation: 100M Jobs, 10K Fires per Second\nBack-of-envelope math should ground every box you draw, so work through the numbers before the architecture. Assume 100 million registered jobs, an average fire rate of 5K/s, and a peak of 10K fires/s (cron expressions cluster at the top of the hour and at midnight). Storage: at roughly 2 KB per job definition (ID, cron spec, payload reference, state, retry policy), 100M x 2 KB = 200 GB — comfortably held on 8-16 database shards. Schedule index: each entry is about 50 bytes (job ID + next fire time + shard key), so 100M x 50 B = 5 GB total, which means the next several hours of fire times fit entirely in memory. Scheduler shards: if one scheduler process can fire about 1K jobs/s (the bottleneck is queue-publish latency, not computation), a 10K/s peak needs 10 shards — provision 16 for headroom and clean hash distribution. Queue throughput: 10K messages/s at 1 KB each is only 10 MB/s, trivial for Kafka, so partition count (say 64) is chosen for consumer parallelism, not bandwidth. Workers: if the average task runs 500 ms, 10K fires/s implies 10K x 0.5 = 5,000 concurrently running tasks; at 50 concurrent tasks per worker that is 100 workers — provision 150 to absorb failures and retry amplification. Polling vs timing wheel: polling the database every second means a 10K-row indexed range scan per second per shard, all hammering the hot 'now' end of the index; a timing wheel that pre-loads the next 60 seconds instead holds at most 10K x 60 = 600K in-memory entries (about 30 MB per shard), making the fire path a pure memory operation with the database touched only on state changes. Key insight: separate the read-hot 'what fires next' problem (in-memory timing wheel, refilled in batches) from the durability problem (database as source of truth) — this single split is what lets the design scale."
   ],
 
   deepDive: [
@@ -28,7 +30,17 @@ export const designTaskScheduler: TopicContent = {
 
     "Multi-tenancy adds another dimension of complexity. In a shared scheduler serving multiple teams or customers, you need per-tenant rate limiting (tenant A cannot starve tenant B), per-tenant quotas (max tasks, max execution time), and tenant-aware priority (a tenant's P0 task should not preempt another tenant's already-running task). The typical approach is to give each tenant a virtual scheduler partition with a guaranteed minimum throughput (e.g., 1000 tasks/minute) and burst capacity drawn from a shared pool. Tenant isolation in the worker pool is achieved through container-level sandboxing or separate worker groups per tenant tier.",
 
-    "Observability and operational tooling are critical for a scheduler handling millions of tasks. You need real-time dashboards showing tasks scheduled vs. fired vs. completed per second, p50/p95/p99 scheduling latency (time between intended fire time and actual execution start), worker utilization, queue depths per priority level, and retry/DLQ rates. Alerting should cover: scheduling lag exceeding SLA (e.g., more than 5 seconds), DLQ growth rate spikes, worker pool saturation (all workers at max capacity), and partition imbalance (one scheduler partition has 10x the tasks of others). A task audit log recording every state transition with timestamps enables debugging any execution anomaly."
+    "Observability and operational tooling are critical for a scheduler handling millions of tasks. You need real-time dashboards showing tasks scheduled vs. fired vs. completed per second, p50/p95/p99 scheduling latency (time between intended fire time and actual execution start), worker utilization, queue depths per priority level, and retry/DLQ rates. Alerting should cover: scheduling lag exceeding SLA (e.g., more than 5 seconds), DLQ growth rate spikes, worker pool saturation (all workers at max capacity), and partition imbalance (one scheduler partition has 10x the tasks of others). A task audit log recording every state transition with timestamps enables debugging any execution anomaly.",
+
+    "Exactly-once execution is provably impossible at the infrastructure level, and saying so explicitly is what separates a strong answer from a memorized one. The core problem is acknowledgment ambiguity: a worker can crash after performing its side effect (sending the email, charging the card) but before acknowledging completion. The scheduler cannot distinguish 'crashed before executing' from 'crashed after executing but before acking', so it must choose: never retry (at-most-once, losing work) or retry (at-least-once, risking duplicates). Every serious scheduler chooses at-least-once and pushes deduplication into the task layer via idempotency keys. The canonical key is hash(job_id + scheduled_fire_time): every retry of the same logical firing carries the same key, and the handler records the key in the same transaction as its side effect (an INSERT into a processed_keys table alongside the business write), so a duplicate delivery hits a unique-constraint violation and becomes a no-op. Common mistake: claiming that fencing tokens give you exactly-once. Fencing tokens prevent a stale worker from corrupting the task store's state, but they cannot un-send an email the zombie worker already sent — only application-level idempotency handles duplicated external side effects.",
+
+    "Scheduler shard failover is where double-firing sneaks in, and the defense is leases plus epochs. Each scheduler shard has exactly one leader elected through etcd or ZooKeeper: the leader holds a lease (a TTL-bound key it must keep refreshing), and candidates watch the key. When the leader dies, a candidate acquires the lease — but the dangerous window is when the old leader is not dead, only partitioned or GC-paused, and still believes it owns the shard. Two defenses compose. First, the new leader waits out the old lease's full TTL before firing anything, guaranteeing the old leader has observed its own lease expiry (this requires the old leader to check its lease before every dispatch batch). Second, every leadership change increments an epoch (a fencing token from etcd's revision counter), and the leader stamps the epoch into every message it publishes; downstream consumers and the task store reject messages carrying a lower epoch than the highest seen for that shard. Any residual overlap is absorbed by the idempotency key on (job_id, scheduled_fire_time). Warning: never use wall-clock timestamps as the fencing value — clocks on the old and new leader can disagree by more than the failover window, silently inverting the ordering that fencing depends on.",
+
+    "Misfire handling — what to do when a fire time was missed because schedulers were down, queues were backed up, or a shard was mid-failover — needs an explicit per-job policy, because no single default is right. Fire-immediately runs the missed job once as soon as the scheduler recovers, then resumes the normal schedule; it is the right default for most jobs (a report generated 4 minutes late is still wanted). Skip drops missed firings and just computes the next future fire time; it is correct for idempotent refresh jobs where a stale run is worthless (a cache warmer that missed its slot should not add load now — the next run refreshes everything anyway). Catch-up (fire-all) replays one execution per missed interval; it is mandatory for jobs where each interval carries distinct meaning, like hourly billing aggregation or ledger rollups, where skipping an interval silently loses money. Real-world example: Quartz encodes exactly these choices as misfire instructions (MISFIRE_INSTRUCTION_FIRE_ONCE_NOW, DO_NOTHING, and the repeat-count policies), and Kubernetes CronJob exposes startingDeadlineSeconds plus concurrencyPolicy to bound how stale a firing may be before it is skipped. Common mistake: choosing catch-up as a global default — after a 6-hour outage, a per-minute job replays 360 times per job, and the recovery storm takes the system down again.",
+
+    "Long-running tasks (minutes to hours) break the simple claim-execute-ack model and need task-level heartbeats plus zombie detection. The worker extends its lease by heartbeating every few seconds with its fencing token; the lease TTL is a small multiple of the heartbeat interval (e.g., 15s TTL on a 5s heartbeat), not a multiple of the task duration — a 2-hour task should not need a 2-hour lease, or every worker crash costs 2 hours of stalled detection. A zombie is a worker that stopped heartbeating but is still executing (GC pause, network partition, wedged runtime): the scheduler reassigns its task, and when the zombie wakes, its stale fencing token gets its writes rejected. A watchdog service continually diffs the set of tasks in RUNNING state against the heartbeat table and force-fails any task whose lease has been expired past a grace period, so nothing stays RUNNING forever. In practice: long tasks should also checkpoint progress (e.g., 'processed through row 4.2M') keyed by the idempotency key, so a retry resumes rather than restarts — turning a 3-hour re-execution into a 5-minute tail.",
+
+    "Cron-style scheduling and durable workflow engines (Temporal, AWS Step Functions, Azure Durable Functions) solve different problems, and knowing when to reach for which is a senior-level distinction. A cron scheduler fires stateless tasks at points in time: state between firings lives in your database, and multi-step processes are stitched together manually with task chains and DAGs. A durable workflow engine instead persists the program itself: workflow code is replayed from an event-sourced history, so a 30-day process with sleeps, retries, human approvals, and compensation logic survives any number of process crashes with no hand-written state machine. Timers in Temporal are just persisted workflow state — 'sleep 30 days' is one line, and the engine's internal scheduler (itself a sharded timer service with the same timing-wheel ideas) wakes the workflow. Choose the cron-style scheduler when you need to fire many independent jobs on schedules (report generation, cleanup, syncs) at massive fan-out; choose durable workflows when the hard part is orchestrating multi-step, long-lived business logic with per-step retries and compensation. Key insight: many teams build fragile DAG features into their scheduler when what they actually needed was a workflow engine — if your task payloads start containing 'step number' fields, you are reinventing Temporal badly."
   ],
 
   code: [
@@ -407,32 +419,56 @@ private:
     {
       title: "Distributed Task Scheduler Architecture",
       kind: "architecture",
-      caption: "High-level architecture showing the flow from task submission through scheduling, dispatching, and execution by the worker pool.",
-      mermaid: `graph LR
-    Client["Client / API"]
-    TaskStore["Task Store DB"]
-    ScheduleIdx["Schedule Index - Redis"]
-    Scheduler1["Scheduler Partition 1"]
-    Scheduler2["Scheduler Partition 2"]
-    DispatchQ["Dispatch Queues - P0 P1 P2"]
-    W1["Worker 1"]
-    W2["Worker 2"]
-    W3["Worker N"]
-    DLQ["Dead Letter Queue"]
-    ResultStore["Result Store"]
+      caption: "Layered architecture: jobs enter through the API, land in the store, are loaded into sharded schedulers (one elected leader per shard) whose timing wheels fire due jobs into Kafka; workers pull, execute, heartbeat, and ack. Failures flow through retry-with-backoff back into the queue, then to the DLQ; missed fire times go through the misfire policy.",
+      mermaid: `graph TB
+    subgraph APILayer["API Layer"]
+        API["Job API<br/>create / update / delete jobs<br/>cron expression validation"]
+    end
+    subgraph StoreLayer["Storage Layer"]
+        JobDB["Job Store DB - sharded<br/>definitions, payloads, state,<br/>retry policy, execution history"]
+        SchedIdx["Schedule Index<br/>job id sorted by next fire time"]
+    end
+    subgraph SchedTier["Scheduler Tier - sharded by job hash"]
+        Coord["etcd / ZooKeeper<br/>leader election per shard<br/>leases + fencing epochs"]
+        Sch1["Scheduler Shard 1 leader<br/>timing wheel / min-heap<br/>of next fire times"]
+        SchN["Scheduler Shard N leader<br/>timing wheel / min-heap"]
+    end
+    subgraph DispatchLayer["Dispatch Layer"]
+        Kafka["Kafka dispatch topics<br/>partitioned, per-priority<br/>epoch stamped on each message"]
+    end
+    subgraph WorkerLayer["Worker Layer"]
+        W1["Worker Pool A<br/>pull tasks, heartbeat lease,<br/>idempotency-key dedupe"]
+        W2["Worker Pool B<br/>pull tasks, heartbeat lease"]
+    end
+    subgraph Reliability["Reliability Layer"]
+        Retry["Retry with exponential<br/>backoff plus jitter"]
+        DLQ["Dead Letter Queue<br/>retries exhausted"]
+        Misfire["Misfire handler<br/>fire-now / skip / catch-up"]
+    end
+    subgraph Obs["Observability"]
+        Metrics["Metrics + audit log<br/>scheduling lag, queue depth,<br/>retry rate, DLQ growth"]
+    end
 
-    Client -->|Submit Task| TaskStore
-    TaskStore -->|Index next fire time| ScheduleIdx
-    ScheduleIdx -->|Scan ready tasks| Scheduler1
-    ScheduleIdx -->|Scan ready tasks| Scheduler2
-    Scheduler1 -->|Enqueue| DispatchQ
-    Scheduler2 -->|Enqueue| DispatchQ
-    DispatchQ -->|Claim| W1
-    DispatchQ -->|Claim| W2
-    DispatchQ -->|Claim| W3
-    W1 -->|Result| ResultStore
-    W2 -->|Result| ResultStore
-    W3 -->|Failed after retries| DLQ`
+    API -->|"1. persist job + next fire time"| JobDB
+    JobDB --> SchedIdx
+    Coord -.->|"shard lease"| Sch1
+    Coord -.->|"shard lease"| SchN
+    SchedIdx -->|"2. preload next 60s window"| Sch1
+    SchedIdx --> SchN
+    Sch1 -->|"3. fire due job"| Kafka
+    SchN -->|"3. fire due job"| Kafka
+    Kafka -->|"4. pull + execute"| W1
+    Kafka -->|"4. pull + execute"| W2
+    W1 -->|"5. ack result + next fire time"| JobDB
+    W2 -->|"5. ack result"| JobDB
+    W1 -->|"failure"| Retry
+    Retry -->|"re-enqueue with backoff"| Kafka
+    Retry -->|"max retries exceeded"| DLQ
+    Sch1 -.->|"overdue jobs on recovery"| Misfire
+    Misfire -->|"policy says fire"| Kafka
+    Sch1 -.-> Metrics
+    Kafka -.-> Metrics
+    W1 -.-> Metrics`
     },
     {
       title: "Task State Machine",
@@ -546,6 +582,22 @@ private:
         "How do you handle daylight saving time transitions for cron tasks?",
         "What if a recurring task is still running when its next fire time arrives?"
       ]
+    },
+    {
+      q: "Is exactly-once execution actually achievable? What would you guarantee instead, and how?",
+      a: "No — and stating that upfront matters. The impossibility comes from acknowledgment ambiguity: a worker can crash after performing its side effect but before acking, and the scheduler cannot tell 'crashed before executing' apart from 'crashed after executing but before acking'. It must either never retry (at-most-once, losing work) or retry (at-least-once, risking duplicates). I would guarantee at-least-once firing and make duplicates harmless with idempotency. Concretely: every firing carries an idempotency key derived from (job_id, scheduled_fire_time), so all retries of the same logical firing share one key. The task handler records that key in the same transaction as its business side effect — an INSERT into a processed_keys table with a unique constraint, committed atomically with the actual work — so a duplicate delivery fails the unique constraint and becomes a no-op. For side effects on external systems (payments, emails), I pass the idempotency key downstream: Stripe-style APIs accept it natively; for email I would record send-intent transactionally before calling the provider. Fencing tokens complement this by stopping zombie workers from corrupting scheduler state, but they cannot undo an external side effect that already happened — only idempotency keys handle that. So the honest guarantee is at-least-once delivery plus effectively-once observable effect.",
+      followUps: [
+        "How do you garbage-collect the processed-keys table without reopening the duplicate window?",
+        "What do you do when the downstream system offers no idempotency support at all?"
+      ]
+    },
+    {
+      q: "How do you shard the scheduler tier, and how do you prevent double-firing during shard failover?",
+      a: "I shard by hashing job ID into N shards (say 16 for a 10K fires/s peak, since one scheduler process can fire roughly 1K jobs/s), and each shard has exactly one active leader elected via etcd or ZooKeeper. The leader holds a TTL lease it must keep refreshing; standbys watch the lease key and take over when it expires. The dangerous case is not a dead leader but a slow one — GC-paused or partitioned — that still believes it owns the shard. I defend in three layers. First, the old leader checks its lease before publishing each dispatch batch, and the new leader waits out the full lease TTL before firing, so their active windows cannot overlap under correct clocks. Second, because clocks and pauses are not trustworthy, every leadership change increments an epoch (etcd's revision counter works as a fencing token), the leader stamps the epoch into every message it publishes, and consumers plus the task store reject any message with a lower epoch than the highest seen for that shard. Third, any residual double-fire that slips through both layers is absorbed by the idempotency key on (job_id, scheduled_fire_time) at the worker. On failover the new leader also rescans its shard's schedule index for overdue jobs and runs each one through its misfire policy — fire-now, skip, or catch-up — rather than blindly replaying everything.",
+      followUps: [
+        "Why is a wall-clock timestamp a dangerous choice for the fencing value?",
+        "How do you rebalance shards when you grow from 16 to 32 scheduler instances?"
+      ]
     }
   ],
 
@@ -628,6 +680,26 @@ private:
     {
       front: "How do you handle task dependencies in a distributed scheduler?",
       back: "Model dependencies as a DAG. Each task stores its predecessor IDs. When a task completes, evaluate all dependents: if all predecessors are SUCCEEDED, transition the dependent to SCHEDULED. Reject submissions that create cycles via topological sort validation."
+    },
+    {
+      front: "Why is exactly-once execution impossible, and what do you guarantee instead?",
+      back: "Acknowledgment ambiguity: a worker can crash after performing its side effect but before acking, and the scheduler cannot tell the two crash cases apart. Guarantee at-least-once firing plus idempotency keys — hash(job_id + scheduled_fire_time) recorded in the same transaction as the side effect — for effectively-once observable results."
+    },
+    {
+      front: "What is a timing wheel and why prefer it to polling the database for due jobs?",
+      back: "An in-memory ring of time slots holding jobs due in each tick. The scheduler preloads a window (e.g., next 60s) from the schedule index; at 10K fires/s that is ~600K entries (~30 MB). Firing becomes a memory operation instead of a per-second hot-index range scan against the database."
+    },
+    {
+      front: "What are the three misfire policies and when do you use each?",
+      back: "Fire-immediately: run the missed job once on recovery (default for most jobs). Skip: drop missed firings, schedule the next future one (idempotent refreshers like cache warmers). Catch-up: one run per missed interval (billing/ledger jobs where every interval matters — but never as a global default)."
+    },
+    {
+      front: "How does shard failover avoid double-firing jobs?",
+      back: "Per-shard leader election via etcd/ZooKeeper leases. The new leader waits out the old lease TTL, and every leadership change bumps an epoch (fencing token) stamped into each fired message; consumers reject lower epochs. Anything that still slips through is deduped by the idempotency key."
+    },
+    {
+      front: "When should you use a durable workflow engine (Temporal) instead of a cron-style scheduler?",
+      back: "Scheduler: many independent, stateless jobs fired on schedules at large fan-out. Workflow engine: long-lived multi-step business logic (sleeps, human approvals, compensation) — it persists program state via event-sourced replay, so 'sleep 30 days' is one line and survives crashes."
     }
   ],
 
@@ -649,7 +721,12 @@ private:
     "Priority starvation is a real operational problem. Use weighted fair queuing or priority aging (auto-promote tasks waiting too long) rather than strict priority ordering.",
     "Task dependencies form a DAG. Evaluate dependents on completion, validate no cycles at submission time, and decide on a failure policy (fail-fast vs. best-effort for independent branches).",
     "Multi-tenancy requires per-tenant rate limits, quotas, and isolated worker pools or at minimum weighted scheduling to prevent one tenant from starving others.",
-    "Key metrics to monitor: scheduling lag (fire-time to execution-start), queue depth per priority, worker utilization, retry rate, DLQ growth, and partition balance across scheduler instances."
+    "Key metrics to monitor: scheduling lag (fire-time to execution-start), queue depth per priority, worker utilization, retry rate, DLQ growth, and partition balance across scheduler instances.",
+    "True exactly-once execution is impossible (ack ambiguity: a worker can crash after the side effect but before the ack). Guarantee at-least-once firing plus idempotency keys derived from (job_id, scheduled_fire_time), recorded in the same transaction as the side effect.",
+    "Timing wheel vs DB polling math: preloading the next 60 seconds at 10K fires/s is only 600K in-memory entries (~30 MB per shard), versus a 10K-row hot-index range scan every second when polling the database.",
+    "Misfire policies are per-job, not global: fire-immediately (sane default), skip (idempotent refresh jobs like cache warmers), catch-up/fire-all (billing and ledger jobs where each interval carries distinct meaning). A global catch-up default causes a replay storm after long outages.",
+    "Shard failover without double-firing: etcd/ZooKeeper lease per shard, new leader waits out the old lease TTL, every leadership change bumps an epoch stamped into each fired message, and consumers reject lower epochs. Residual overlap is absorbed by idempotency keys.",
+    "Know the cron-scheduler vs durable-workflow (Temporal) boundary: schedulers fire many independent stateless jobs; workflow engines persist multi-step program state via event sourcing. Task payloads growing 'step number' fields are a sign you need the latter."
   ],
 
   cheatSheet: [
@@ -662,7 +739,12 @@ private:
     "Priority queues: 4 levels (P0-P3), weighted fair queuing (50/30/15/5%). Aging: auto-promote after configurable wait time.",
     "Recurring tasks: store cron expression, compute next fire time after execution, insert into future time bucket. Add jitter (0-30s) to spread load.",
     "Scaling numbers: 10M tasks, 100K fires/min needs approximately 50-100 scheduler partitions, 500-1000 workers, schedule index supporting 100K ops/sec.",
-    "Failure modes: worker crash (lease expiry), scheduler crash (partition takeover via lease), network partition (fencing tokens prevent stale writes), thundering herd (jitter + rate limiting)."
+    "Failure modes: worker crash (lease expiry), scheduler crash (partition takeover via lease), network partition (fencing tokens prevent stale writes), thundering herd (jitter + rate limiting).",
+    "Capacity at 100M jobs / 10K fires/s: store 100M x 2 KB = 200 GB (8-16 DB shards); index 100M x 50 B = 5 GB; 10K/s at ~1K fires/s per scheduler = 10 shards (provision 16); 10K/s x 0.5s avg runtime = 5,000 concurrent tasks = 100 workers at 50 each (provision 150); queue load 10 MB/s.",
+    "Exactly-once is impossible: guarantee at-least-once + idempotency key = hash(job_id + scheduled_fire_time), recorded in the SAME transaction as the side effect; duplicates hit a unique constraint and no-op.",
+    "Misfire policy per job: FIRE_NOW (default, run once on recovery), SKIP (idempotent refreshers), CATCH_UP (one run per missed interval — billing/ledger). Never default globally to CATCH_UP.",
+    "Shard leadership: etcd/ZK lease per shard; new leader waits out old TTL; epoch (fencing token) stamped on every fired message; store and consumers reject lower epochs. Never fence with wall-clock time.",
+    "Long-running tasks: lease TTL = small multiple of heartbeat (15s on 5s beat), not task duration; checkpoint progress under the idempotency key so retries resume instead of restarting; watchdog force-fails RUNNING tasks with expired leases."
   ],
 
   glossary: [
@@ -693,6 +775,22 @@ private:
     {
       term: "Weighted Fair Queuing",
       definition: "A scheduling algorithm that allocates worker capacity across priority levels according to configured weights, preventing starvation of lower-priority tasks during high-priority bursts."
+    },
+    {
+      term: "Timing Wheel",
+      definition: "An in-memory circular array of time slots, each holding the tasks due in that tick. The scheduler preloads an upcoming window from the schedule index and advances one slot per tick, making the fire path a pure memory operation instead of a database scan."
+    },
+    {
+      term: "Idempotency Key",
+      definition: "A unique key for one logical firing, typically derived from (job_id, scheduled_fire_time). Handlers record it in the same transaction as their side effect, so at-least-once delivery yields effectively-once observable results."
+    },
+    {
+      term: "Misfire Policy",
+      definition: "The per-job rule for fire times missed during downtime: fire-immediately (run once on recovery), skip (only schedule the next future firing), or catch-up (run once per missed interval)."
+    },
+    {
+      term: "Zombie Worker",
+      definition: "A worker that stopped heartbeating (GC pause, partition, wedged runtime) but is still executing its task. Its lease expires and the task is reassigned; its late writes are rejected via stale fencing tokens."
     }
   ],
 
@@ -745,7 +843,11 @@ private:
     "What changes are needed to support long-running tasks (hours or days) versus short tasks (seconds)?",
     "How would you implement task rate limiting to prevent a burst of tasks from overwhelming a downstream service?",
     "How do you migrate millions of existing tasks when upgrading the scheduler's data model or changing the partitioning scheme?",
-    "How would you add observability to trace a task from submission through scheduling, dispatch, execution, and completion?"
+    "How would you add observability to trace a task from submission through scheduling, dispatch, execution, and completion?",
+    "Which misfire policy would you pick for a billing rollup job versus a cache-refresh job, and what breaks if you swap them?",
+    "When would you recommend a durable workflow engine like Temporal over a cron-style scheduler, and what does the migration path look like?",
+    "How would you enforce per-tenant fairness so one tenant submitting a million jobs cannot delay other tenants' cron jobs?",
+    "How would you garbage-collect old idempotency keys without reopening the window for duplicate execution?"
   ],
 
   resources: [

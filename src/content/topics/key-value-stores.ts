@@ -272,10 +272,10 @@ int main() {
     "Consistent hashing: minimal remapping on node changes",
   ],
   resources: [
-    { label: "Redis Documentation", kind: "docs", note: "Complete reference for all Redis commands and data types." },
-    { label: "Amazon DynamoDB Developer Guide", kind: "docs", note: "Official guide for DynamoDB data modeling and operations." },
-    { label: "Designing Data-Intensive Applications, Ch. 2", kind: "book", note: "Covers data models including key-value stores." },
-    { label: "Dynamo: Amazon's Highly Available Key-Value Store", kind: "paper", note: "The foundational paper behind DynamoDB's design." },
+    { label: "Redis Documentation", url: "https://redis.io/docs/latest/", kind: "docs", note: "Complete reference for all Redis commands and data types." },
+    { label: "Amazon DynamoDB Developer Guide", url: "https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf", kind: "docs", note: "Official guide for DynamoDB data modeling and operations." },
+    { label: "Designing Data-Intensive Applications, Ch. 2", url: "https://dataintensive.net/", kind: "book", note: "Covers data models including key-value stores." },
+    { label: "Dynamo: Amazon's Highly Available Key-Value Store", url: "https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf", kind: "paper", note: "The foundational paper behind DynamoDB's design." },
   ],
   glossary: [
     { term: "Key-value store", definition: "A database that stores data as key-value pairs, where the value is opaque to the store." },

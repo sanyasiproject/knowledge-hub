@@ -11,6 +11,8 @@ export const designTicketmaster: TopicContent = {
   detailed: [
     "## Seat Inventory Model and Data Design\nThe seat inventory is the core data structure of the system. Each venue has a hierarchical model: venue → sections → rows → seats. Each seat has a unique identifier (venue_id + section + row + seat_number) and a state (AVAILABLE, HELD, BOOKED, BLOCKED). The state transitions are: AVAILABLE → HELD (user selects seat), HELD → BOOKED (payment confirmed), HELD → AVAILABLE (hold expires or user cancels), AVAILABLE → BLOCKED (venue removes from sale). For general admission (GA) events without assigned seating, the inventory is a simple counter of available tickets per tier (e.g., 5000 GA, 500 VIP). The seat map is pre-loaded for each event and cached aggressively — it changes only when the venue modifies the layout, which happens rarely. Pricing is attached at the section or row level and can vary by event (dynamic pricing). The database schema uses a composite key (event_id, seat_id) with the state and a version column for optimistic locking. Indexes on (event_id, state) enable efficient queries for available seats in a section. At scale, each event's seat inventory can be partitioned onto a dedicated database shard or Redis instance, since events are independent of each other.",
 
+    "## Capacity Estimation: Why the Waiting Room Exists\nRun the arithmetic before choosing the architecture — the numbers explain almost every design decision in this system. Consider a stadium on-sale: 100K tickets, 10M fans arriving in the first minute. That is a 100:1 ratio of demand to supply — 99% of the people hitting your system will not get a ticket no matter how fast it is, so the goal is not to serve everyone, it is to serve exactly as many as the inventory supports while everyone else waits fairly. If each admitted user takes about 5 minutes to browse, hold, and pay, and you want roughly 50K concurrent active shoppers on the booking backend, the admission rate is 50,000 / 300s ≈ 170 users/sec (round to 200-1,000/sec depending on backend headroom); at 500/sec the entire 10M-person queue would take 10,000,000 / 500 = 20,000s ≈ 5.5 hours to drain, but the sale ends long before that — the queue mostly exists to reject demand gracefully, not to serve it all. The database write load is bounded by seats, not by fans: there are only 100K confirmed-booking row updates in the entire sale, so even if 90% sell in the first 2 minutes that is 90,000 / 120 = 750 writes/sec — trivial for any relational database. Hold churn is the real hot path: if each ticket is held 3-5 times before someone completes payment (abandonments, payment failures), that is 300-500K hold/release operations, peaking around 5-10K ops/sec — comfortably inside a single Redis node's 100K+ ops/sec budget. The crushing load is reads: 10M queued users polling status every 3 seconds is 3.3M requests/sec, which is why queue polling must terminate at the edge (CDN or a lightweight queue tier) and never touch the booking backend. Key insight: the waiting room converts an unbounded, spiky arrival rate into a bounded, tunable admission rate — the backend is sized for the admission rate, and the edge is sized for the arrival rate.",
+
     "## Seat Reservation with TTL and Distributed Locking\nWhen a user selects a seat, the system must atomically transition it from AVAILABLE to HELD and associate it with the user's session, preventing other users from selecting the same seat. This is implemented as an optimistic locking update: UPDATE seats SET state='HELD', held_by=user_id, held_until=NOW()+5min, version=version+1 WHERE event_id=? AND seat_id=? AND state='AVAILABLE' AND version=?. If the update affects zero rows, the seat was already taken — the user sees an error and must select another seat. The hold has a TTL (typically 5-10 minutes) that gives the user time to complete payment. A background process runs every 30 seconds, querying for seats where held_until < NOW() and transitioning them back to AVAILABLE. Redis can augment or replace the database for hot events: the seat state is cached in Redis with EXPIRE for automatic TTL management, and the database is updated asynchronously. For events with extremely high concurrency (100K+ simultaneous seat selections), the database becomes a bottleneck — Redis with Lua scripts provides atomic read-modify-write operations at 100K+ ops/sec on a single node. The Lua script checks state, sets HELD with TTL, and returns success/failure in a single atomic operation.",
 
     "## Virtual Waiting Room and Traffic Management\nDuring high-demand on-sales (popular concerts, sports finals), millions of users arrive within seconds of the sale opening. Without throttling, this traffic surge overwhelms the booking system, causing cascading failures, timeouts, and a terrible user experience. The virtual waiting room is a queue that sits in front of the booking system. When an on-sale begins, all users are placed in a queue and assigned a position. Users are admitted to the booking system at a controlled rate (e.g., 1000 users per second) based on the system's measured capacity. The queue is implemented as a distributed queue (Redis sorted set with join timestamp as score, or a dedicated queue service like AWS SQS). Each user receives a queue token and polls for their turn — the polling response includes their current position and estimated wait time. When admitted, the token is exchanged for a booking session with a TTL. Anti-gaming measures prevent queue manipulation: tokens are tied to device fingerprints to prevent one person from joining the queue multiple times, and CAPTCHA is presented before queue entry. The admission rate is dynamically adjusted based on system health metrics (error rate, latency, database connection pool usage).",
@@ -27,6 +29,16 @@ export const designTicketmaster: TopicContent = {
     "The economics and fairness of ticket sales create unique design requirements. Scalpers use bots to buy tickets faster than humans, leading to resale at inflated prices. Anti-bot measures include: CAPTCHA at queue entry (invisible reCAPTCHA for minimal friction, with escalation to visual CAPTCHA for suspicious behavior), device fingerprinting to detect multiple sessions from the same device, rate limiting per IP address and per user account, and behavioral analysis (human users move mice, pause between clicks, and make mistakes — bots submit forms instantly with perfect accuracy). Purchase limits (e.g., maximum 4 tickets per customer) are enforced per account and per payment method. Verified fan programs (like Ticketmaster's Verified Fan) pre-register interested buyers and use lottery or priority queues instead of first-come-first-served, reducing the advantage of speed that bots exploit. Dynamic pricing adjusts ticket prices based on demand, reducing the economic incentive for scalping — if the primary market price is close to the resale market price, scalping becomes unprofitable. These measures exist in tension with user experience: every anti-bot check adds friction for legitimate buyers.",
 
     "Post-sale operations and the secondary market add significant complexity. Ticket transfers must be supported (sending a ticket to another person), requiring the ticket identity to be mutable while maintaining an audit trail. Refund policies vary by event and must be enforced: some events allow refunds until 48 hours before the event, others are non-refundable. For cancelled or postponed events, the system must bulk-process refunds for all ticket holders. Waitlists for sold-out events must be managed: when a ticket is released (refund, cancellation, or transfer failure), the next person on the waitlist is offered the ticket with a time-limited acceptance window. The secondary marketplace (resale) integrates with the primary system: resale tickets are verified against the original booking, transferred to the new buyer, and often subject to price caps set by the venue or artist. All of these operations must maintain the fundamental invariant: the number of confirmed bookings for an event never exceeds the venue capacity, and each confirmed booking maps to exactly one valid ticket.",
+
+    "Overselling prevention comes down to a choice between two correct designs: pessimistic seat holds with a TTL, or optimistic version-checks at confirm time — and for assigned seating, holds win on user experience, not on correctness. The optimistic design lets any number of users put the same seat in their cart and resolves the conflict only at checkout: the confirm runs UPDATE seats SET state='BOOKED' WHERE seat_id=? AND version=?, exactly one user succeeds, and everyone else learns after entering payment details that the seat is gone. That is technically consistent but a terrible experience — the user invested 3-4 minutes of checkout effort and lost a race they did not know they were in. The pessimistic-hold design moves the conflict to the cheapest possible moment: the instant of seat selection. The atomic hold (Redis Lua script or conditional UPDATE with state='AVAILABLE') either succeeds in milliseconds or fails immediately, so the losing user just clicks a different seat — one wasted click instead of one wasted checkout. The TTL is what makes pessimistic holds safe at scale: unlike a classic pessimistic database lock that can be held indefinitely by a crashed client, a hold self-releases after 5-10 minutes, bounding the worst-case inventory lockup. Key insight: the hold is not the final guard — the confirm step still performs a conditional transition (HELD by this user → BOOKED) and the database keeps a uniqueness invariant on booked seats, so even a bug in the hold layer cannot double-sell. In practice: production systems layer both — pessimistic holds for UX, plus an optimistic conditional confirm as the last line of defense.",
+
+    "The waiting room is a fairness mechanism as much as a load shedder, and its internal design matters. Arrival-time ordering sounds fair but rewards network proximity and scripted clients — the user on fiber next to the data center always beats the user on mobile. A common refinement is randomized batching: everyone who arrives within the same short window (for example, the 60 seconds before the on-sale opens) is assigned a random position within that batch, so pre-positioning gives no advantage; arrivals after the sale opens are ordered behind the batch by true arrival time. Admission itself is a token bucket: the bucket refills at the target admission rate (say 500 tokens/sec), each admitted user consumes a token, and the rate is adjusted in real time from backend health signals — p99 booking latency, error rate, database connection pool saturation. Admission grants a signed, short-lived token (a JWT carrying queue id, user id, and expiry) that the API gateway validates statelessly on every booking request, so a user cannot skip the queue by guessing URLs and the booking tier does not need to consult queue state. Queue position and estimated wait are served from an edge-cacheable endpoint — position only needs to be approximate (updated every few seconds), which turns 3M+ polls/sec into cheap cache hits. Common mistake: letting admitted users keep their session forever — the admission token must have a TTL (10-15 minutes) so abandoned sessions return capacity to the queue instead of silently starving it.",
+
+    "Hot-row contention is the classic failure mode when one event dominates traffic, and the per-seat data model is the primary defense. If availability is tracked as a single counter row per event or per section (available_count = available_count - 1), every purchase for that event serializes on one row lock — 10K purchases/sec against one row means the lock queue, not the hardware, is the bottleneck, and lock-wait timeouts cascade into retries that make it worse. Modeling one row per seat spreads the writes: two users buying different seats touch different rows and never contend, so the natural contention unit shrinks from 'the event' to 'the individual seat', where genuine conflicts (two humans clicking the same seat in the same second) are rare and fail fast. This is why the hold path avoids aggregate counters entirely and why 'available seats in section' counts are computed asynchronously or served as slightly-stale cached aggregates rather than maintained transactionally. Remaining hot spots are handled by moving them off the database: the hold itself lives in Redis (single-threaded, no lock queue, fail-fast semantics), and the database only sees the low-rate confirm traffic bounded by ticket count. For example, a 60K-seat stadium sale generates at most 60K confirm writes spread over minutes, while the same sale modeled as a counter would funnel every one of those writes plus every failed attempt through one row. Warning: never put a synchronously-maintained 'tickets_remaining' counter on the checkout path of an assigned-seat event — derive it from seat states instead.",
+
+    "General admission inverts the assigned-seat design: there is no specific seat to lock, only a quantity, so the counter that was an anti-pattern for assigned seating becomes the correct tool — with a conditional decrement. The GA tier is a single inventory number (say 5,000 floor tickets), and a purchase of n tickets executes an atomic conditional decrement: in Redis, a Lua script that reads the count, checks count >= n, decrements, and returns the result in one atomic step (or DECRBY followed by a compensating INCRBY if the result went negative); in SQL, UPDATE ga_inventory SET remaining = remaining - n WHERE tier_id=? AND remaining >= n, checking affected rows. There is no per-seat hold phase to protect UX because there is nothing to choose — any ticket is as good as any other, so the decrement can happen at checkout initiation with a TTL-tracked pending purchase that increments the count back if payment fails or times out. The counter is a genuine hot spot here, but a tolerable one: the operation is a single in-memory atomic op (sub-microsecond in Redis), not a disk-backed row lock held across a transaction, and one Redis node sustains 100K+ decrements/sec — far above any realistic checkout rate. For very large GA inventories, the counter can be sharded (10 sub-counters of 500 each, pick one at random, rebalance in the background) to spread load, at the cost of occasionally telling a user a shard is empty while another has stock. Key insight: assigned seating shards naturally by seat; general admission must choose between one hot counter (simple, usually fine) and sharded counters (scales further, adds rebalancing complexity).",
+
+    "Payment-timeout compensation is where the reservation flow earns its keep, because the payment provider is a third party you cannot make atomic with your inventory. The moment checkout starts, the system is running a distributed transaction across the seat hold (yours) and the charge (the PSP's), coordinated by a saga rather than two-phase commit: hold seats, create a pending payment record with an idempotency key, call the PSP, then either confirm (HELD → BOOKED) or compensate (release the hold, void or refund the charge). Timeouts are the ambiguous middle: a timed-out charge call may have succeeded on the PSP side, so the compensating action is never 'assume failure and release' — it is 'query the PSP for the authoritative status of this idempotency key, then act'. If the PSP says succeeded, confirm the booking even though the user saw an error page (and notify them); if failed, release the hold immediately; if the PSP is unreachable, park the reservation in a PENDING_RECONCILIATION state and let a background reconciler resolve it against the PSP's records, extending the seat hold so the seat is not resold while the payment's fate is unknown. The hold TTL and the payment window interact: a 5-minute hold with a 30-second payment call is fine, but if the user starts payment at 4:50, the system should atomically extend the hold (conditional update: extend only if still held by this user) rather than let it lapse mid-charge. Common mistake: releasing a hold on payment timeout without querying the PSP first — this is the exact sequence that sells a seat twice: user A's charge actually succeeded, the hold was released, user B bought the seat, and now two people hold valid-looking confirmations for one seat.",
   ],
   code: [
     {
@@ -428,25 +440,59 @@ public:
     {
       title: "Ticket Booking System Architecture",
       kind: "architecture",
-      caption: "High-level architecture showing the virtual waiting room, booking service, seat inventory, and payment integration.",
-      mermaid: `graph TD
-    USER["Users Millions"] --> CDN["CDN Static Assets"]
-    USER --> WR["Virtual Waiting Room"]
-    WR --> LB["Load Balancer"]
-    LB --> APP1["Booking Server 1"]
-    LB --> APP2["Booking Server 2"]
-    LB --> APPN["Booking Server N"]
-    APP1 --> REDIS["Redis Seat Lock Cluster"]
-    APP2 --> REDIS
-    APPN --> REDIS
-    APP1 --> DB["PostgreSQL Booking DB"]
-    APP2 --> DB
-    APPN --> DB
-    APP1 --> PAY["Payment Service"]
-    PAY --> PSP["Payment Provider"]
-    APP1 --> NOTIFY["Notification Email/SMS"]
-    REDIS --> SYNC["Redis-DB Sync Worker"]
-    SYNC --> DB`
+      caption: "Layered architecture: the edge waiting room admits users at a controlled rate, the browse path is served from cache, and the reserve-hold-pay-confirm path flows through Redis seat holds and the per-seat inventory database, with async hold-expiry and notifications.",
+      mermaid: `graph TB
+    subgraph CLIENTS["Clients"]
+        WEB["Web App"]
+        MOB["Mobile App"]
+    end
+    subgraph EDGE["Edge"]
+        CDN["CDN<br/>static assets + seat map snapshots"]
+        WR["Waiting Room / Virtual Queue<br/>admits users at controlled rate"]
+    end
+    subgraph GATEWAY["Gateway"]
+        LB["Load Balancer + API Gateway"]
+        BOT["Bot Detection<br/>fingerprint + rate limits"]
+    end
+    subgraph SERVICES["Services"]
+        BROWSE["Event Browse Service<br/>cacheable reads"]
+        SEATMAP["Seat Map Service<br/>real-time availability"]
+        RESV["Reservation Service<br/>seat hold + TTL"]
+        CHECKOUT["Checkout / Payment Service"]
+    end
+    subgraph DATA["Data"]
+        META["Event Metadata + Search"]
+        REDIS["Redis Seat-Hold Locks<br/>TTL per hold"]
+        INV["Seat Inventory DB<br/>one row per seat"]
+    end
+    subgraph ASYNC["Async"]
+        KAFKA["Kafka Booking Events"]
+        SWEEP["Hold-Expiry Sweeper"]
+        NOTIF["Notification Service<br/>email / SMS / wallet"]
+    end
+    PSP["Payment Provider PSP"]
+
+    WEB --> CDN
+    MOB --> CDN
+    WEB --> WR
+    MOB --> WR
+    WR -->|"admission token"| LB
+    LB --> BOT
+    BOT -->|"browse path"| BROWSE
+    BOT --> SEATMAP
+    BOT -->|"reserve path"| RESV
+    BROWSE --> META
+    SEATMAP --> REDIS
+    SEATMAP --> INV
+    RESV -->|"1 hold seat with TTL"| REDIS
+    RESV -->|"2 proceed to pay"| CHECKOUT
+    CHECKOUT -->|"3 charge"| PSP
+    CHECKOUT -->|"4 confirm HELD to BOOKED"| INV
+    CHECKOUT --> KAFKA
+    KAFKA --> NOTIF
+    SWEEP -->|"scan expired holds"| REDIS
+    SWEEP -->|"release back to AVAILABLE"| INV
+    KAFKA --> SWEEP`
     },
     {
       title: "Seat Booking Sequence",
@@ -560,6 +606,22 @@ public:
         "What if the payment provider webhook arrives before the synchronous payment response?",
       ],
     },
+    {
+      q: "One event is generating 95% of all traffic. How do you avoid hot-row contention in the database?",
+      a: "The root cause of hot-row contention is funneling many writers through one row, so the fix is to change the data model, not just add hardware. First, model inventory as one row per seat rather than a counter per event or section: two users buying different seats then touch different rows and never contend, shrinking the contention unit from 'the event' to 'the individual seat', where real conflicts are rare and fail fast. Second, never maintain a synchronous 'tickets_remaining' counter on the checkout path — derive availability counts asynchronously from seat states and serve them as slightly-stale cached aggregates, since browsing tolerates a few seconds of staleness. Third, move the highest-churn operation (holds, which happen 3-5 times per ticket due to abandonment) out of the database entirely into Redis, where a single-threaded atomic Lua script gives fail-fast semantics with no lock queue; the database then only sees confirm traffic, which is bounded by ticket count, not fan count — a 60K-seat sellout is at most 60K confirm writes spread over minutes. Finally, shard by event_id so one hot event gets a dedicated Redis instance and database partition and cannot degrade other events. For general admission, where a counter is unavoidable, keep it as an atomic in-memory conditional decrement in Redis (100K+ ops/sec) and shard the counter only if measurements demand it.",
+      followUps: [
+        "How would you serve section-level availability counts without a transactional counter?",
+        "When would you shard a general-admission counter, and what does it cost?",
+      ],
+    },
+    {
+      q: "How does the design differ between assigned seating and general admission (GA)?",
+      a: "Assigned seating is an identity problem — each unit of inventory is unique, so the design centers on per-seat rows, per-seat holds with TTL, and atomic per-seat state transitions (AVAILABLE → HELD → BOOKED); the hold phase exists because the user chose a specific seat and losing it after entering payment details is a bad experience. General admission is a quantity problem — any ticket is interchangeable, so there is nothing to choose and nothing to hold by identity; inventory is a counter per tier, and a purchase is an atomic conditional decrement: UPDATE ga_inventory SET remaining = remaining - n WHERE tier_id = ? AND remaining >= n (check affected rows), or the equivalent Redis Lua script. The interesting inversion is that the counter, which is an anti-pattern for assigned seating (hot-row contention), is the correct tool for GA — it is a single sub-microsecond atomic operation, and one Redis node sustains far more decrements per second than any realistic checkout rate. GA still needs compensation: the decrement happens at checkout start with a TTL-tracked pending purchase, and payment failure or timeout increments the count back. Overselling risk also differs: assigned seating can oversell only via a race on one seat (prevented by atomic transitions plus a database uniqueness invariant), while GA can oversell via a lost compensation (a decrement whose failed payment never incremented back is under-selling; a compensating increment applied twice is over-selling) — so GA compensations must be idempotent, keyed by the pending-purchase id. Mixed venues run both models side by side: per-seat rows for reserved sections, counters for GA floor.",
+      followUps: [
+        "How do you make the GA compensating increment idempotent?",
+        "How would you handle a hybrid event where GA tickets can be upgraded to assigned seats?",
+      ],
+    },
   ],
   mcqs: [
     {
@@ -616,6 +678,10 @@ public:
     { front: "What happens if payment succeeds but booking confirmation fails?", back: "Retry confirmation with exponential backoff using idempotency key. If retries exhaust, background reconciliation detects 'paid but unconfirmed' by cross-referencing payment provider records. Never assume failure on timeout — query provider for status." },
     { front: "How are scalper bots prevented?", back: "CAPTCHA at queue entry, device fingerprinting, rate limiting per IP, behavioral analysis (bots submit instantly, humans have natural delays), purchase limits per account/payment method, Verified Fan pre-registration with lottery." },
     { front: "What is the hybrid locking strategy for near-sellout?", back: "Use optimistic locking (user selects specific seat) when many seats available. Switch to server-assigned seats (system picks best available) when inventory drops below 5-10%, eliminating selection conflicts entirely." },
+    { front: "Why is DB write load bounded by seats, not fans?", back: "There are only as many confirmed-booking writes as tickets: 100K tickets = 100K row updates total. Even at 90% sold in 2 minutes that is ~750 writes/sec. Fan-scale load (queue polling, browsing) is reads and must terminate at the edge." },
+    { front: "Why do TTL seat holds beat optimistic version-check-on-confirm for assigned seats?", back: "Same correctness, better UX: the hold resolves the conflict at seat-click time in milliseconds (loser picks another seat), while optimistic confirm makes the loser complete checkout before learning the seat is gone. TTL bounds worst-case lockup; conditional confirm remains the last-line guard." },
+    { front: "How does general admission handle inventory?", back: "Counter per tier with atomic conditional decrement: UPDATE ... SET remaining = remaining - n WHERE remaining >= n (or a Redis Lua script). Payment failure triggers an idempotent compensating increment keyed by pending-purchase id. No per-seat hold — tickets are interchangeable." },
+    { front: "Why avoid a tickets_remaining counter for assigned-seat checkout?", back: "A single counter row serializes every purchase on one row lock — hot-row contention. Per-seat rows spread writes so only genuine same-seat conflicts contend. Derive availability counts asynchronously as cached, slightly-stale aggregates." },
   ],
   exercises: [
     "Design the database schema for a ticket booking system including tables for venues, events, seat inventory, reservations, bookings, and waitlists. Include indexes optimized for the two hottest queries: 'available seats in section X for event Y' and 'expired holds needing cleanup'.",
@@ -635,6 +701,11 @@ public:
     "Event sharding: each event gets dedicated Redis instance + DB partition. Events are independent — no cross-event contention.",
     "Scale targets: 10M users → 100K+ req/sec API, 50K+ seat selections/sec, 10K+ payments/sec. 90% of tickets sold in first 2 minutes.",
     "Reconciliation: compare Redis seat states vs DB booking records every minute. DB is source of truth. UNIQUE constraint prevents double-booking at DB level.",
+    "Capacity math: 100K tickets, 10M fans = 100:1 demand. DB confirm writes bounded by seats (~750/sec even at 90% in 2 min); queue polling (3M+/sec) must terminate at the edge.",
+    "Hot-row defense: one row per seat, never a synchronous tickets_remaining counter on the checkout path — derive counts async and serve stale cached aggregates.",
+    "GA vs assigned: assigned = per-seat rows + TTL holds; GA = counter with conditional decrement (remaining >= n) plus idempotent compensating increment on payment failure.",
+    "Payment timeout: saga with compensation. Never release the hold on timeout without querying the PSP for the idempotency key's status — that sequence sells a seat twice.",
+    "Waiting-room fairness: randomize positions within the pre-open arrival batch, token-bucket admission tuned by backend health, signed short-TTL admission JWT validated statelessly at the gateway.",
   ],
   cheatSheet: [
     "Seat states: AVAILABLE → HELD (TTL 5min) → BOOKED | AVAILABLE → BLOCKED",
@@ -647,6 +718,11 @@ public:
     "Payment timeout: query provider for status, never assume failure",
     "Anti-bot: CAPTCHA + fingerprint + rate limit + behavioral analysis + purchase limit",
     "Shard by event_id: separate Redis + DB per event, no cross-event contention",
+    "Capacity: DB writes bounded by seats not fans — 100K tickets = 100K confirms total (~750/sec peak)",
+    "Hot rows: one row per seat, no synchronous counters on checkout path; counts derived async",
+    "GA: atomic conditional decrement (remaining >= n) + idempotent compensating increment",
+    "Holds beat optimistic-confirm on UX: conflict fails at seat click (ms), not after checkout effort",
+    "Fairness: randomized batch positions pre-open, token-bucket admission, signed admission JWT with TTL",
   ],
   glossary: [
     { term: "Virtual Waiting Room", definition: "A queue-based traffic management system that sits in front of the booking service, throttling user admission to a rate the backend can handle during high-demand events." },
@@ -706,12 +782,15 @@ public:
     "How would you handle event cancellation and bulk refund processing for tens of thousands of ticket holders?",
     "How would you extend the system to support season tickets, subscription packages, and bundled events?",
     "How would you design an analytics dashboard for event organizers showing real-time sales velocity, revenue, and audience demographics?",
+    "How would you make queue admission fair across regions and device types without rewarding network proximity?",
+    "How would you migrate an event from optimistic version-check booking to TTL seat holds with zero downtime mid-sale?",
+    "How would you design a presale with access codes so codes cannot be shared or brute-forced at scale?",
   ],
   resources: [
-    { label: "Designing Data-Intensive Applications (Kleppmann)", kind: "book", note: "Chapters on transactions, concurrency control, and distributed systems provide the theoretical foundation for booking system design." },
+    { label: "Designing Data-Intensive Applications (Kleppmann)", url: "https://dataintensive.net/", kind: "book", note: "Chapters on transactions, concurrency control, and distributed systems provide the theoretical foundation for booking system design." },
     { label: "How Ticketmaster Handles Flash Sales (QCon Talk)", kind: "video", note: "Conference presentation on virtual waiting rooms, queue fairness, and scaling strategies for high-demand ticket sales." },
     { label: "Redis Lua Scripting Documentation", kind: "docs", note: "Official Redis documentation on Lua scripting for atomic operations, essential for implementing the seat locking layer." },
-    { label: "System Design Interview (Alex Xu) - Chapter on Booking Systems", kind: "book", note: "Covers seat reservation patterns, distributed locking, and the challenges of inventory management under high concurrency." },
+    { label: "System Design Interview (Alex Xu) - Chapter on Booking Systems", url: "https://bytebytego.com/", kind: "book", note: "Covers seat reservation patterns, distributed locking, and the challenges of inventory management under high concurrency." },
     { label: "Queue-it (Virtual Waiting Room SaaS)", kind: "article", note: "Documentation and architecture blog posts from a leading virtual waiting room provider, showing production patterns for traffic management." },
   ],
 };

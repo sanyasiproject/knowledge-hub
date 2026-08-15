@@ -503,10 +503,10 @@ function sleep(ms: number) {
     "Non-idempotent external call: record intent -> call API -> mark done; check status on retry",
   ],
   resources: [
-    { label: "Stripe API Idempotent Requests", kind: "docs", note: "Stripe's documentation on idempotency key usage and behavior." },
-    { label: "Designing Data-Intensive Applications, Ch. 11", kind: "book", note: "Covers exactly-once semantics, idempotent consumers, and the outbox pattern." },
-    { label: "Brandur Leach: Implementing Stripe-like Idempotency Keys", kind: "article", note: "Detailed walkthrough of building an idempotency key system with PostgreSQL." },
-    { label: "RFC 7231 Section 4.2.2", kind: "docs", note: "HTTP specification defining which methods are idempotent and why." },
+    { label: "Stripe API Idempotent Requests", url: "https://docs.stripe.com/api", kind: "docs", note: "Stripe's documentation on idempotency key usage and behavior." },
+    { label: "Designing Data-Intensive Applications, Ch. 11", url: "https://dataintensive.net/", kind: "book", note: "Covers exactly-once semantics, idempotent consumers, and the outbox pattern." },
+    { label: "Brandur Leach: Implementing Stripe-like Idempotency Keys", url: "https://docs.stripe.com/api/idempotent_requests", kind: "article", note: "Detailed walkthrough of building an idempotency key system with PostgreSQL." },
+    { label: "RFC 7231 Section 4.2.2", url: "https://www.rfc-editor.org/rfc/rfc7231", kind: "docs", note: "HTTP specification defining which methods are idempotent and why." },
     { label: "Martin Kleppmann: Turning the database inside-out", kind: "video", note: "Explains event sourcing, change data capture, and how idempotency fits into event-driven architectures." },
   ],
   glossary: [

@@ -330,8 +330,8 @@ export async function retrieveAndRerank(query: string, topK = 5): Promise<Hit[]>
   ],
   resources: [
     { label: "Pinecone Learning Center: Retrieval Augmented Generation", kind: "docs", note: "Comprehensive guide to dense retrieval, hybrid search, and RAG architecture with Pinecone." },
-    { label: "Introduction to Information Retrieval (Manning, Raghavan, Schutze)", kind: "book", note: "The foundational textbook covering BM25, TF-IDF, inverted indexes, and evaluation metrics." },
-    { label: "ColBERT: Efficient and Effective Passage Search via Contextualized Late Interaction (Khattab & Zaharia, 2020)", kind: "paper", note: "Introduces late interaction for balancing bi-encoder speed with cross-encoder accuracy." },
+    { label: "Introduction to Information Retrieval (Manning, Raghavan, Schutze)", url: "https://nlp.stanford.edu/IR-book/", kind: "book", note: "The foundational textbook covering BM25, TF-IDF, inverted indexes, and evaluation metrics." },
+    { label: "ColBERT: Efficient and Effective Passage Search via Contextualized Late Interaction (Khattab & Zaharia, 2020)", url: "https://arxiv.org/abs/1810.04805", kind: "paper", note: "Introduces late interaction for balancing bi-encoder speed with cross-encoder accuracy." },
     { label: "Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods (Cormack et al., 2009)", kind: "paper", note: "The original RRF paper proving rank-based fusion beats score-based and learned methods." },
     { label: "Cohere Rerank Documentation", kind: "docs", note: "API reference and best practices for using Cohere's cross-encoder re-ranking models." },
     { label: "sentence-transformers Cross-Encoders", kind: "repo", note: "Open-source cross-encoder models and training scripts for building custom re-rankers." },

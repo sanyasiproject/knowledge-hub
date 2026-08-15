@@ -443,9 +443,9 @@ const topProducts = await xfetch(
   resources: [
     { label: "Optimal Probabilistic Cache Stampede Prevention (Vattani et al.)", kind: "paper", note: "The original XFetch paper formalizing probabilistic early expiration." },
     { label: "Scaling Memcache at Facebook (NSDI 2013)", kind: "paper", note: "Covers lease-based invalidation and thundering herd prevention at Facebook scale." },
-    { label: "Redis Documentation: Distributed Locks (Redlock)", kind: "docs", note: "Official Redis guide on implementing distributed locks for stampede prevention." },
-    { label: "Designing Data-Intensive Applications by Martin Kleppmann", kind: "book", note: "Chapters on caching, consistency, and the fundamental trade-offs in distributed data systems." },
-    { label: "HTTP Caching (MDN Web Docs)", kind: "docs", note: "Covers Cache-Control directives including stale-while-revalidate and stale-if-error." },
+    { label: "Redis Documentation: Distributed Locks (Redlock)", url: "https://redis.io/docs/latest/", kind: "docs", note: "Official Redis guide on implementing distributed locks for stampede prevention." },
+    { label: "Designing Data-Intensive Applications by Martin Kleppmann", url: "https://dataintensive.net/", kind: "book", note: "Chapters on caching, consistency, and the fundamental trade-offs in distributed data systems." },
+    { label: "HTTP Caching (MDN Web Docs)", url: "https://developer.mozilla.org/", kind: "docs", note: "Covers Cache-Control directives including stale-while-revalidate and stale-if-error." },
     { label: "Varnish Cache: Surrogate Keys", kind: "article", note: "How CDNs use surrogate keys (tags) for efficient group invalidation." },
   ],
   glossary: [

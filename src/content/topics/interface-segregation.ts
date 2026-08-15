@@ -507,8 +507,8 @@ supervisor.assignWork([human, robot]); // both are Workable
   resources: [
     { label: "Agile Software Development by Robert C. Martin", kind: "book", note: "Chapter on ISP with the Xerox printer origin story." },
     { label: "Clean Architecture by Robert C. Martin", kind: "book", note: "ISP in the context of component and architecture design." },
-    { label: "Refactoring.Guru -- Interface Segregation Principle", kind: "article", note: "Visual walkthrough with code examples." },
-    { label: "Role Interfaces (Martin Fowler)", kind: "article", note: "Fowler's discussion of role interfaces vs header interfaces." },
+    { label: "Refactoring.Guru -- Interface Segregation Principle", url: "https://refactoring.guru/", kind: "article", note: "Visual walkthrough with code examples." },
+    { label: "Role Interfaces (Martin Fowler)", url: "https://martinfowler.com/", kind: "article", note: "Fowler's discussion of role interfaces vs header interfaces." },
     { label: "SOLID Principles in TypeScript (DigitalOcean)", kind: "article", note: "ISP examples using TypeScript's structural type system." }
   ],
   glossary: [

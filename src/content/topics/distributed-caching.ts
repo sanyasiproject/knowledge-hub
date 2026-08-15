@@ -588,11 +588,11 @@ async function invalidateUser(userId: string): Promise<void> {
 
   resources: [
     {
-      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      label: "Designing Data-Intensive Applications — Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
     },
     {
-      label: "Redis documentation — clustering and eviction",
+      label: "Redis documentation — clustering and eviction", url: "https://redis.io/docs/latest/",
       kind: "docs",
     },
     {

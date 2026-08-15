@@ -186,15 +186,15 @@ A common pattern is to start with prompting, move to RAG if context is needed, a
   ],
   resources: [
     {
-      label: "LoRA: Low-Rank Adaptation of Large Language Models — Hu et al., 2021",
+      label: "LoRA: Low-Rank Adaptation of Large Language Models — Hu et al., 2021", url: "https://arxiv.org/abs/2106.09685",
       kind: "paper",
     },
     {
-      label: "QLoRA: Efficient Finetuning of Quantized LLMs — Dettmers et al., 2023",
+      label: "QLoRA: Efficient Finetuning of Quantized LLMs — Dettmers et al., 2023", url: "https://arxiv.org/abs/2106.09685",
       kind: "paper",
     },
     {
-      label: "Hugging Face PEFT documentation",
+      label: "Hugging Face PEFT documentation", url: "https://huggingface.co/docs",
       kind: "docs",
     },
   ],

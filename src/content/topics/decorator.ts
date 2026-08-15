@@ -639,7 +639,7 @@ int main() {
       note: "Uses a coffee shop example (Beverage + condiment decorators) to build intuition for stacking decorators.",
     },
     {
-      label: "Refactoring Guru - Decorator Pattern",
+      label: "Refactoring Guru - Decorator Pattern", url: "https://refactoring.guru/",
       kind: "article",
       note: "Visual guide with UML, code in multiple languages, and comparisons with Proxy and Adapter.",
     },

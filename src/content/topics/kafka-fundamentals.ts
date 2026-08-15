@@ -300,8 +300,8 @@ while (true) {
   ],
   resources: [
     { label: "Kafka: The Definitive Guide (O'Reilly)", kind: "book", note: "Comprehensive Kafka book from Confluent engineers." },
-    { label: "Apache Kafka Documentation", kind: "docs", note: "Official docs — thorough on configuration and internals." },
-    { label: "The Log: What every software engineer should know (Jay Kreps)", kind: "article", note: "The foundational blog post explaining the log abstraction behind Kafka." },
+    { label: "Apache Kafka Documentation", url: "https://kafka.apache.org/documentation/", kind: "docs", note: "Official docs — thorough on configuration and internals." },
+    { label: "The Log: What every software engineer should know (Jay Kreps)", url: "https://engineering.linkedin.com/distributed-systems/log-what-every-software-engineer-should-know-about-real-time-datas-unifying", kind: "article", note: "The foundational blog post explaining the log abstraction behind Kafka." },
     { label: "Confluent Developer Tutorials", kind: "video", note: "Hands-on video tutorials for Kafka." },
   ],
   glossary: [

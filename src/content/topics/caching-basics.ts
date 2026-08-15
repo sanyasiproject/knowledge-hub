@@ -298,8 +298,8 @@ async function updateUser(userId: string, data: Partial<User>) {
   ],
   resources: [
     { label: "Caching best practices — AWS Whitepaper", kind: "docs" },
-    { label: "Designing Data-Intensive Applications, Ch. 5 (Replication) & Ch. 6 (Partitioning) — Martin Kleppmann", kind: "book" },
-    { label: "Redis documentation — Commands and data types", kind: "docs" },
+    { label: "Designing Data-Intensive Applications, Ch. 5 (Replication) & Ch. 6 (Partitioning) — Martin Kleppmann", url: "https://dataintensive.net/", kind: "book" },
+    { label: "Redis documentation — Commands and data types", url: "https://redis.io/docs/latest/", kind: "docs" },
     { label: "A Hitchhiker's Guide to Caching Patterns — Hazelcast Blog", kind: "article" },
     { label: "Consistent Hashing: Algorithmic Tradeoffs — Vimeo engineering blog", kind: "article" },
   ],

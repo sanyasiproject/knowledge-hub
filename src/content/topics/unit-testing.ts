@@ -601,7 +601,7 @@ one logical assertion"]
       note: "Official documentation covering all JUnit 5 features including parameterized tests, nested tests, extensions, and parallel execution.",
     },
     {
-      label: "Jest Documentation",
+      label: "Jest Documentation", url: "https://jestjs.io/docs/getting-started",
       kind: "docs",
       note: "Complete reference for Jest including mocking, snapshot testing, async testing, and custom matchers.",
     },

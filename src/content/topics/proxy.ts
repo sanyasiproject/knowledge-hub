@@ -651,12 +651,12 @@ int main() {
       note: "Original Proxy pattern with virtual proxy, remote proxy, and protection proxy variants.",
     },
     {
-      label: "Refactoring Guru - Proxy Pattern",
+      label: "Refactoring Guru - Proxy Pattern", url: "https://refactoring.guru/",
       kind: "article",
       note: "Visual guide with UML, real-world analogy, and code examples comparing Proxy with Decorator.",
     },
     {
-      label: "MDN Web Docs - Proxy (JavaScript)",
+      label: "MDN Web Docs - Proxy (JavaScript)", url: "https://developer.mozilla.org/",
       kind: "docs",
       note: "Complete reference for JavaScript's Proxy object, including all trap handlers and Reflect API.",
     },

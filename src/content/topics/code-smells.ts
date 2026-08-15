@@ -639,9 +639,9 @@ private:
   ],
 
   resources: [
-    { label: "Refactoring by Martin Fowler (2nd edition)", kind: "book", note: "The definitive catalog of code smells and their corresponding refactoring techniques" },
+    { label: "Refactoring by Martin Fowler (2nd edition)", url: "https://martinfowler.com/", kind: "book", note: "The definitive catalog of code smells and their corresponding refactoring techniques" },
     { label: "Clean Code by Robert C. Martin", kind: "book", note: "Covers code smells in the context of writing clean, maintainable code" },
-    { label: "Refactoring Guru: Code Smells", kind: "article", note: "Interactive web catalog of all code smells with visual examples and refactoring recipes" },
+    { label: "Refactoring Guru: Code Smells", url: "https://refactoring.guru/", kind: "article", note: "Interactive web catalog of all code smells with visual examples and refactoring recipes" },
     { label: "Working Effectively with Legacy Code by Michael Feathers", kind: "book", note: "Practical techniques for identifying and fixing smells in codebases without tests" },
     { label: "SonarQube documentation on Code Smells", kind: "docs", note: "How the leading static analysis platform detects and categorizes code smells" }
   ],

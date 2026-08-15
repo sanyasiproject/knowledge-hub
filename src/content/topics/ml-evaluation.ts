@@ -175,7 +175,7 @@ Overfitting to a single metric is dangerous. Use a primary metric for optimizati
       kind: "book",
     },
     {
-      label: "scikit-learn documentation — model evaluation",
+      label: "scikit-learn documentation — model evaluation", url: "https://scikit-learn.org/stable/",
       kind: "docs",
     },
   ],

@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap");
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -14,10 +14,23 @@ html {
 
 body {
   @apply bg-slate-50 text-slate-800 antialiased;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11"; /* Inter's calmer alternates */
 }
 
 .dark body {
   @apply bg-slate-950 text-slate-100;
+}
+
+/* Headings use the display face so pages read as designed, not defaulted. */
+h1, h2, h3, .font-display {
+  font-family: "Sora", "Inter", system-ui, sans-serif;
+}
+
+::selection {
+  @apply bg-brand-200 text-slate-900;
+}
+.dark ::selection {
+  @apply bg-brand-700 text-white;
 }
 
 .prose-hub :where(p, ul, ol) {

@@ -238,10 +238,10 @@ ORDER BY o.order_id, p.product_name;`
     "Avoid NOT IN with nullable columns",
   ],
   resources: [
-    { label: "PostgreSQL Documentation — Joins Between Tables", kind: "docs", note: "Official reference for all join types and syntax." },
+    { label: "PostgreSQL Documentation — Joins Between Tables", url: "https://www.postgresql.org/docs/current/", kind: "docs", note: "Official reference for all join types and syntax." },
     { label: "Visual Representation of SQL Joins — C.L. Moffatt", kind: "article", note: "Classic visual guide with Venn diagrams for every join type." },
     { label: "SQL Performance Explained — Markus Winand", kind: "book", note: "Detailed coverage of join algorithms and their performance." },
-    { label: "Use The Index, Luke — Join Operations", kind: "article", note: "How indexes affect join performance." },
+    { label: "Use The Index, Luke — Join Operations", url: "https://use-the-index-luke.com/", kind: "article", note: "How indexes affect join performance." },
   ],
   glossary: [
     { term: "Join condition", definition: "The ON clause that specifies how rows from two tables should be matched (e.g., ON a.id = b.a_id)." },

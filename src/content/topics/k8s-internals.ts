@@ -410,7 +410,7 @@ kubectl get deployments --watch -o wide`,
   ],
   resources: [
     {
-      label: "Kubernetes documentation — Cluster Architecture",
+      label: "Kubernetes documentation — Cluster Architecture", url: "https://kubernetes.io/docs/",
       kind: "docs",
     },
     {

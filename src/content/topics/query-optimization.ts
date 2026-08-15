@@ -228,8 +228,8 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY monthly_revenue;`
     "SET enable_seqscan = off — for testing, not production",
   ],
   resources: [
-    { label: "Use The Index, Luke — Markus Winand", kind: "article", note: "The best free guide to SQL performance and index optimization." },
-    { label: "PostgreSQL Documentation — Using EXPLAIN", kind: "docs", note: "Official guide to reading and interpreting query plans." },
+    { label: "Use The Index, Luke — Markus Winand", url: "https://use-the-index-luke.com/", kind: "article", note: "The best free guide to SQL performance and index optimization." },
+    { label: "PostgreSQL Documentation — Using EXPLAIN", url: "https://www.postgresql.org/docs/current/", kind: "docs", note: "Official guide to reading and interpreting query plans." },
     { label: "SQL Performance Explained — Markus Winand", kind: "book", note: "Deep dive into how the optimizer uses indexes." },
     { label: "The Art of PostgreSQL — Dimitri Fontaine", kind: "book", note: "Practical SQL optimization techniques." },
   ],

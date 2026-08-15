@@ -472,7 +472,7 @@ public:
   ],
   resources: [
     {
-      label: "In Search of an Understandable Consensus Algorithm (Raft) — Ongaro & Ousterhout",
+      label: "In Search of an Understandable Consensus Algorithm (Raft) — Ongaro & Ousterhout", url: "https://raft.github.io/raft.pdf",
       kind: "paper",
     },
     {

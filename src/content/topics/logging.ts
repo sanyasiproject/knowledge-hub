@@ -150,11 +150,11 @@ Alternatives include **Grafana Loki** (stores labels, not full text — cheaper 
   ],
   resources: [
     {
-      label: "OpenTelemetry documentation — logs",
+      label: "OpenTelemetry documentation — logs", url: "https://opentelemetry.io/docs/",
       kind: "docs",
     },
     {
-      label: "The Twelve-Factor App — Logs",
+      label: "The Twelve-Factor App — Logs", url: "https://12factor.net/",
       kind: "article",
     },
   ],

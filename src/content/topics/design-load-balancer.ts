@@ -10,6 +10,7 @@ export const designLoadBalancer: TopicContent = {
   ],
   detailed: [
     "## L4 vs L7 Load Balancing\n\nLayer 4 load balancers operate at the transport layer, making routing decisions based on IP addresses and TCP/UDP port numbers without inspecting packet contents. They are extremely fast -- capable of handling millions of connections per second with sub-millisecond latency overhead -- because they simply forward packets using NAT or Direct Server Return (DSR). L7 load balancers operate at the application layer, parsing HTTP headers, URLs, cookies, and even request bodies to make intelligent routing decisions. This enables powerful features like routing /api/* to API servers, /static/* to CDN origins, and /ws/* to WebSocket servers. The trade-off is clear: L4 gives you raw throughput (10M+ concurrent connections on commodity hardware) while L7 gives you content-aware routing at the cost of higher latency (1-5ms overhead) and lower throughput (hundreds of thousands of connections). Modern load balancers like NGINX, HAProxy, and Envoy support both modes, and production architectures often use L4 at the edge for raw speed and L7 internally for smart routing.",
+    "## Capacity Estimation: Sizing the L4 and L7 Tiers\n\nSizing starts from two numbers: concurrent connections and new connections per second. Take a target of **10M concurrent connections** and **1M new connections/sec**.\n\n**L4 tier works in packets, not requests.** At roughly 10 packets/sec per active connection (interactive API traffic), 10M connections generate about 100M packets/sec (pps) in aggregate. A kernel-bypass L4 LB (Maglev, Katran with XDP) sustains roughly 10M pps per box, so you need about 100M / 10M = **10 L4 machines**, provisioned as 13-14 for N+2 redundancy and headroom. Memory for connection tracking: 10M connections x ~128-256 bytes = 1.3-2.6 GB per box if fully stateful, or near zero if flow mapping is derived statelessly from a consistent hash of the 5-tuple.\n\n**L7 tier works in requests.** If each connection carries ~2 requests/sec, 10M connections produce 20M requests/sec. A tuned Envoy/Nginx node handles ~50-100K requests/sec with TLS and routing enabled, so you need 20M / 100K = **200 L7 machines** -- roughly 15-20x the L4 count for the same traffic. TLS handshake cost dominates connection setup: at 1M new connections/sec with ECDHE (~0.3ms CPU each), raw handshakes alone cost 1M x 0.3ms = **300 CPU-cores of continuous work**; TLS session resumption (tickets/0-RTT) typically eliminates 80-90% of that, bringing it to 30-60 cores.\n\nKey insight: the L4 tier handles roughly 10x the throughput per box of the L7 tier because L4 touches only packet headers (an O(100ns) hash-and-forward per packet, no allocation, no parsing), while L7 must terminate TLS, parse HTTP, allocate per-request state, and often re-encode -- microseconds per request. That asymmetry is exactly why production designs put a thin, wide L4 layer in front of a horizontally scaled L7 layer rather than scaling L7 to the edge.\n\nCommon mistake: sizing the L7 tier by concurrent connections instead of request rate and TLS handshake rate. An idle keep-alive connection is nearly free at L7; a new TLS connection is thousands of times more expensive than a request on a warm connection.",
     "## Load Balancing Algorithms\n\n**Round Robin** cycles through servers sequentially -- simple but assumes all servers have equal capacity and all requests have equal cost. **Weighted Round Robin** assigns weights proportional to server capacity (e.g., a server with 16 cores gets weight 4 while an 8-core server gets weight 2), distributing traffic accordingly. **Least Connections** routes each new request to the server with the fewest active connections, naturally adapting to heterogeneous request costs. **IP Hash** computes a hash of the client IP to deterministically map clients to servers, providing natural session affinity without cookies. **Consistent Hashing** maps both servers and requests onto a hash ring; each request goes to the next server clockwise on the ring. When a server is removed, only 1/N of requests are redistributed (where N is the number of servers), compared to nearly all requests being redistributed with simple modular hashing. This is critical for cache-heavy architectures where redistribution means cache misses. In practice, consistent hashing uses virtual nodes (100-200 per physical server) to achieve uniform distribution.",
     "## Health Checks and Failure Detection\n\nActive health checks send periodic probes to each backend server -- TCP connect checks verify the server is listening, HTTP checks verify the application returns a 200 OK from a health endpoint, and deep health checks can verify database connectivity or dependency health. Intervals are typically 5-10 seconds with a timeout of 2-3 seconds. A server is marked unhealthy after 2-3 consecutive failures and healthy after 3-5 consecutive successes (hysteresis prevents flapping). Passive health checks monitor real traffic: if a server returns 5xx errors or times out for a configurable percentage of requests (e.g., 50% of requests in a 10-second window), it is temporarily removed. The combination of active and passive checks provides fast detection of both hard failures (server crash) and soft failures (application bugs, resource exhaustion). Health check endpoints should be lightweight but meaningful -- checking that the application can serve requests, not just that the process is running.",
     "## SSL Termination and Session Persistence\n\n**SSL/TLS termination** at the load balancer means the LB handles the TLS handshake and decrypts traffic, forwarding plain HTTP to backends. This offloads CPU-intensive cryptographic operations: a TLS handshake with RSA-2048 costs roughly 1ms of CPU time, while ECDHE is faster at 0.3ms but still significant at scale. With SSL termination, backends save 60-80% CPU on cryptographic operations. The trade-off is that traffic between the LB and backends is unencrypted, which is acceptable within a trusted network but may require re-encryption (SSL bridging) for compliance. **Session persistence** ensures a user's requests consistently reach the same backend server. Methods include cookie-based affinity (the LB injects a cookie identifying the backend), IP-based affinity (hash the client IP), and application-level session IDs. Cookie-based is most reliable since IP-based breaks with NAT and proxies. The downside of session persistence is uneven load distribution -- if one server accumulates many long-lived sessions, it becomes overloaded while others are idle.",
@@ -20,6 +21,10 @@ export const designLoadBalancer: TopicContent = {
     "**Consistent hashing in practice** requires careful tuning to achieve uniform load distribution. With only N physical servers on the hash ring, the load variance is O(log N / N) -- unacceptably high for small clusters. Virtual nodes solve this: mapping each physical server to 100-200 points on the ring reduces variance to under 10%. Google's Maglev uses a custom lookup table algorithm instead of a traditional hash ring, achieving perfectly uniform distribution with O(1) lookup time. The table is built using a permutation-based algorithm that ensures each server fills roughly the same number of table entries. Bounded load consistent hashing (from Vimeo) adds a capacity cap: if the target server's load exceeds the average load by a factor (e.g., 1.25x), the request overflows to the next server on the ring. This prevents hot spots while maintaining the cache-locality benefits of consistent hashing.",
     "**High availability for the load balancer itself** is crucial since it is a single point of failure. The standard approach is an active-passive pair using VRRP (Virtual Router Redundancy Protocol): both LBs share a virtual IP (VIP), with the active one handling all traffic. If the active LB fails, the passive one claims the VIP within 1-3 seconds via a gratuitous ARP announcement. For even higher availability, active-active configurations use ECMP (Equal-Cost Multi-Path routing) to distribute traffic across multiple LBs simultaneously; if one fails, the others absorb its share. State synchronization between LB instances is needed for session persistence: either synchronize connection tables (expensive, complex) or use stateless session affinity (consistent hashing on client IP, no shared state needed). In cloud environments, managed load balancers (AWS ALB/NLB, GCP LB) handle HA transparently, but understanding these patterns matters for on-premise deployments and for making informed cloud architecture decisions.",
     "**Performance tuning and observability** are the difference between a load balancer that works in development and one that survives production traffic spikes. Key metrics to monitor include: connections per second (capacity), active connections (concurrency), request latency percentiles (p50, p95, p99), backend health check results (availability), error rates by backend (quality), and bandwidth (throughput). Connection pooling between the LB and backends reduces TCP handshake overhead for HTTP/1.1 traffic: instead of opening a new connection for each request, the LB maintains a pool of persistent connections to each backend. HTTP/2 multiplexing further reduces connection count by sending multiple requests over a single connection. For WebSocket traffic, the LB must support long-lived connections without timing them out -- configure idle timeouts of 300+ seconds for WebSocket backends versus 60 seconds for HTTP. Rate limiting at the LB layer protects backends from abuse: per-IP rate limits prevent individual clients from monopolizing resources, while global rate limits prevent total overload during traffic spikes.",
+    "**Algorithm selection under real traffic** is subtler than the textbook list suggests. Least-connections behaves badly when multiple independent LB instances each track only their own connections: they all see the same server as \"least loaded\" and stampede it (the herd problem). **Power of two choices** fixes this elegantly: pick two backends uniformly at random and send the request to the less loaded of the two. This costs O(1), needs no global state, and reduces maximum load from O(log n / log log n) for random assignment to O(log log n) -- an exponential improvement from just one extra sample. **EWMA latency balancing** (used by Envoy's least-request and Finagle) scores each backend by an exponentially weighted moving average of observed response latency, weighted by outstanding requests; it automatically routes around a backend that is slow but not yet failing (GC pauses, noisy neighbor, cold cache) long before a health check would eject it. In practice: modern L7 proxies default to power-of-two-choices over least-request or EWMA scores, reserving consistent hashing for cache-affinity routes and round robin for genuinely uniform stateless pools.\n\nCommon mistake: using pure least-connections across a fleet of L7 proxies without power-of-two sampling -- the synchronized herding it causes looks exactly like a mysterious rolling hot spot in production.",
+    "**Maglev-style stateless consistent hashing** is the reason a modern L4 tier can lose a machine without dropping connections and without any state synchronization. Every Maglev instance independently builds the same lookup table -- a large prime-sized array (e.g., 65,537 entries) filled by having each backend claim slots in a deterministic permutation order until the table is full, giving each backend an almost perfectly equal share. Packet forwarding is then: hash the connection 5-tuple, index the table, forward to that backend. Because the table is a pure function of the backend set, every L4 instance computes an identical mapping.\n\nKey insight: when an L4 LB dies and ECMP reshuffles its flows to surviving peers, the peer computes the same 5-tuple hash against the same table and forwards mid-connection packets to the same backend -- connections survive the LB failure with zero connection-state replication. Contrast this with stateful LBs synchronizing multi-gigabyte connection tables over the network, which is expensive, lossy under load, and itself a failure mode.\n\nThe residual gap: when the *backend set* changes, a small fraction of table entries remap (Maglev tolerates slightly more disruption than a classic ring in exchange for near-perfect balance). A local connection-tracking table papers over this: existing flows found in the table keep their old backend; only genuinely new flows use the updated table. Katran (Meta) and Cloudflare's Unimog follow the same recipe with XDP/eBPF instead of DPDK.",
+    "**Direct Server Return (DSR) trade-offs** deserve explicit analysis because DSR is the single biggest lever on L4 capacity. In DSR, the LB forwards only client-to-server packets; the backend writes its response with the VIP as the source address and sends it straight to the client. Since responses are commonly 10-100x larger than requests, the LB's egress bandwidth requirement drops by 90-99% -- a video CDN edge doing 100 Gbps of egress might need only 1-5 Gbps through the LB. The costs: (1) delivery requires either L2 adjacency (rewrite the MAC, same broadcast domain) or IP-in-IP/GUE encapsulation across L3 networks, and encapsulation eats MTU, inviting fragmentation issues; (2) backends must be configured to accept and source traffic for the VIP (VIP on loopback, ARP suppression) -- easy to misconfigure; (3) the LB never sees responses, so it cannot do L7 anything -- no TLS termination, no retries, no response-based passive health signals; you rely on active probes and out-of-band metrics; (4) NAT-based alternatives keep full visibility but pay double bandwidth.\n\nIn practice: DSR is standard for the L4 tier in front of L7 proxies (Maglev, Katran both use encapsulated DSR), while the L7 tier stays full-proxy because it must terminate TLS and inspect responses anyway.",
+    "**Connection draining for deploys** turns the LB into the safety mechanism for zero-downtime releases. The sequence for rolling a backend: (1) flip its readiness endpoint to failing (or deregister it from service discovery) so the LB stops sending *new* connections -- crucially, the liveness signal stays green so orchestrators do not kill it; (2) enter a lameduck window (30-120s) where in-flight requests complete; for HTTP/2 and gRPC send GOAWAY so clients gracefully migrate multiplexed streams; for WebSockets either wait out a longer drain or ask clients to reconnect; (3) after the drain deadline, force-close stragglers and stop the process. The LB-side mirror of this is *slow start* on the way back in: a freshly returned backend gets a ramped weight (e.g., linear over 30s) so cold caches, empty connection pools, and JIT warm-up do not make it immediately the slowest node -- which passive health checking would then punish, causing a fresh ejection.\n\nWarning: draining interacts badly with naive autoscaling -- if scale-in terminates instances before the drain window elapses, users see connection resets that look like random network errors. Always wire the terminate hook to wait for the LB to confirm the target is drained.",
   ],
   code: [
     {
@@ -320,27 +325,52 @@ private:
       title: "Load Balancer Architecture Overview",
       kind: "architecture",
       caption:
-        "Multi-tier load balancing with L4 at the edge and L7 internally for content-based routing to different backend pools.",
-      mermaid: `graph TD
-    CLIENT["Clients"]
-    DNS["DNS with GSLB"]
-    L4["L4 Load Balancer - TCP Level"]
-    L7["L7 Load Balancer - HTTP Level"]
-    API["API Servers Pool"]
-    WEB["Web Servers Pool"]
-    WS["WebSocket Servers Pool"]
-    HC["Health Checker"]
-    SSL["SSL Termination"]
-    CLIENT --> DNS
-    DNS --> L4
-    L4 --> SSL
-    SSL --> L7
-    L7 -->|"/api/*"| API
-    L7 -->|"/static/*"| WEB
-    L7 -->|"/ws/*"| WS
-    HC -->|"Probe every 5s"| API
-    HC -->|"Probe every 5s"| WEB
-    HC -->|"Probe every 5s"| WS`,
+        "Layered production load balancing. Solid arrows show the normal request path: clients resolve via GSLB DNS to a BGP anycast VIP, edge routers ECMP-spray packets across active-active L4 LBs, which consistent-hash flows to L7 proxies that terminate TLS and route to healthy backend pools. Dashed arrows show the failover path (an L4 peer absorbing flows via consistent hashing, health-check ejection of a bad backend) and control-plane flows (config push, backend registration, active probing). The DSR option lets backends reply directly to clients, bypassing the LB on the response path.",
+      mermaid: `graph TB
+    CLIENTS["Clients"]
+    subgraph EDGE["Edge routing"]
+        DNS["GSLB DNS<br/>geo and health aware"]
+        VIP["BGP Anycast VIP<br/>same IP announced from every region"]
+        RTR["Edge routers<br/>ECMP by 5-tuple hash"]
+    end
+    subgraph L4TIER["L4 tier - packet rate, active-active"]
+        L4A["L4 LB A<br/>Maglev/IPVS-style consistent hashing<br/>stateless flow mapping"]
+        L4B["L4 LB B<br/>active-active peer<br/>same hash table, no state sync needed"]
+    end
+    subgraph L7TIER["L7 tier - request rate"]
+        L7A["Envoy/Nginx 1<br/>TLS termination, routing rules, retries"]
+        L7B["Envoy/Nginx 2<br/>TLS termination, routing rules, retries"]
+    end
+    subgraph POOLS["Backend pools"]
+        API["API pool<br/>healthy"]
+        WEB["Web pool<br/>healthy"]
+        BAD["api-7<br/>UNHEALTHY - ejected from pool"]
+    end
+    subgraph CTRL["Control plane"]
+        SD["Service discovery<br/>backend registration"]
+        CFG["Config service<br/>routing rules, weights"]
+        HC["Health checker<br/>active probes with hysteresis"]
+    end
+    CLIENTS -->|"1: resolve hostname"| DNS
+    DNS -->|"2: returns anycast VIP"| VIP
+    VIP --> RTR
+    CLIENTS -->|"3: TCP/QUIC to VIP"| RTR
+    RTR -->|"ECMP"| L4A
+    RTR -->|"ECMP"| L4B
+    L4A -->|"4: consistent hash on 5-tuple<br/>DSR or encap forward"| L7A
+    L4B --> L7B
+    L7A -->|"5: route by path/header, retry on failure"| API
+    L7A --> WEB
+    L7B --> API
+    L4B -.->|"FAILOVER: L4A dies, ECMP rehashes to B<br/>same consistent hash keeps flows alive"| L7A
+    L7B -.->|"FAILOVER: retry on healthy pool member"| WEB
+    SD --> CFG
+    CFG -.->|"push config"| L4A
+    CFG -.->|"push config"| L7A
+    HC -.->|"probe /healthz every 5s"| API
+    HC -.->|"3 fails: eject"| BAD
+    HC -.-> CFG
+    API -.->|"DSR option: response bypasses LB,<br/>straight to client"| CLIENTS`,
     },
     {
       title: "Health Check State Machine",
@@ -435,6 +465,22 @@ private:
       q: "How do you design a load balancer that handles 10 million concurrent connections?",
       a: "First, bypass the kernel network stack using DPDK or XDP to process packets in user space. The kernel's TCP stack adds significant overhead at this scale: context switches, socket buffer copies, and lock contention become bottlenecks. With DPDK, you can achieve line-rate packet processing on 100Gbps NICs. Second, optimize memory: each connection tracking entry consumes 128-256 bytes, so 10M connections need 1.3-2.6 GB of memory. Use pre-allocated memory pools to avoid allocation overhead. Third, use multi-core processing with RSS (Receive Side Scaling) to distribute packets across CPU cores by flow hash, and use per-core data structures to avoid lock contention. Fourth, implement connection pooling and multiplexing to the backend: 10M client connections do not require 10M backend connections -- with HTTP/2 and connection pooling, you might use only 10,000-100,000 backend connections. Fifth, use L4 (not L7) for this scale -- parsing HTTP at 10M connections is impractical on a single machine. Scale L7 horizontally behind an L4 tier.",
     },
+    {
+      q: "Walk me through the capacity math for a system with 10M concurrent connections and 1M new connections per second.",
+      a: "Split the problem by tier because they scale on different units. L4 scales on packet rate: 10M connections at ~10 packets/sec each is ~100M pps aggregate; a kernel-bypass L4 box (Maglev/Katran style) does ~10M pps, so ~10 machines, provisioned as 13-14 for N+2. Connection state is 128-256 bytes/entry, so 10M connections is 1.3-2.6 GB per box -- or effectively zero if forwarding is a stateless consistent hash of the 5-tuple. L7 scales on request rate and TLS handshake rate: at ~2 requests/sec per connection that is 20M req/s, and a tuned Envoy/Nginx node does 50-100K req/s, so ~200 machines -- roughly 15-20x the L4 count. The handshake term is the one people miss: 1M new TLS connections/sec at ~0.3ms CPU per ECDHE handshake is 300 CPU-cores of continuous crypto; session resumption cuts that by 80-90%. The structural conclusion: a thin, wide L4 tier (headers only, ~100ns per packet) in front of a horizontally scaled L7 tier (parse, terminate, allocate -- microseconds per request) -- which is why the L4 tier delivers roughly 10x the per-box throughput of L7.",
+      followUps: [
+        "How does TLS session resumption change the handshake math?",
+        "What changes in this estimate if the workload is long-lived WebSockets instead of short HTTP requests?",
+      ],
+    },
+    {
+      q: "How does a Maglev-style L4 load balancer survive the failure of one of its instances without dropping client connections?",
+      a: "Because forwarding is a deterministic pure function rather than per-instance state. Every Maglev instance independently builds an identical lookup table -- a prime-sized array where each backend claims slots via a deterministic permutation until the table is full, giving near-perfectly equal shares. To forward a packet, the LB hashes the connection 5-tuple, indexes the table, and sends the packet to that backend. When an instance dies, the upstream router's ECMP redistributes its packet flows to the surviving instances -- but those peers hash the same 5-tuple against the same table and reach the same backend, so mid-connection packets keep landing on the server that owns the TCP state. No connection-table replication is needed, which removes both the bandwidth cost and the failure modes of state sync. The remaining edge case is a backend-set change (not an LB failure): a small fraction of table entries remap, so implementations keep a local connection-tracking table as an optimization -- existing flows pin to their old backend, only new flows follow the updated table. This is the core reason modern L4 tiers run active-active behind ECMP instead of VRRP active-passive pairs.",
+      followUps: [
+        "Why does Maglev accept slightly more remap disruption than a classic hash ring?",
+        "What happens if ECMP rehashes flows at the same moment the backend set changes?",
+      ],
+    },
   ],
   mcqs: [
     {
@@ -519,6 +565,22 @@ private:
       front: "How does Anycast-based GSLB work?",
       back: "The same IP address is announced via BGP from multiple data centers. Routers naturally direct clients to the nearest announcement (shortest BGP path). Failover is automatic: when a DC withdraws its BGP announcement, traffic shifts to the next nearest DC within seconds. Faster than DNS-based GSLB which depends on TTL expiry.",
     },
+    {
+      front: "What is the power of two choices algorithm and why is it used?",
+      back: "Sample two backends uniformly at random and route to the less loaded one. O(1) cost, no global state, and maximum load drops from O(log n / log log n) for pure random to O(log log n). It avoids the herd problem where multiple independent LBs all pick the same 'least loaded' server. Default strategy in Envoy's least-request balancer.",
+    },
+    {
+      front: "Why does a Maglev L4 tier need no connection state synchronization?",
+      back: "Every instance independently computes an identical lookup table (prime-sized array filled by each backend's deterministic permutation). Forwarding = hash the 5-tuple, index the table. If an LB dies, ECMP shifts its flows to peers that compute the same backend from the same hash, so mid-connection packets still reach the server holding the TCP state.",
+    },
+    {
+      front: "Roughly how many L4 vs L7 machines for 10M concurrent connections at 1M new conn/s?",
+      back: "L4: ~100M pps aggregate (10 pkt/s per conn) at ~10M pps per kernel-bypass box = ~10 machines (provision 13-14). L7: ~20M req/s (2 req/s per conn) at 50-100K req/s per node = ~200 machines. Plus ~300 CPU-cores of ECDHE handshake work at 1M new conn/s before session resumption. L4 is ~10x per-box throughput of L7.",
+    },
+    {
+      front: "What is EWMA latency load balancing?",
+      back: "Each backend is scored by an exponentially weighted moving average of observed response latency, weighted by outstanding requests. Traffic automatically shifts away from backends that are slow but not yet failing (GC pause, noisy neighbor, cold cache) -- long before active health checks would eject them. Used by Envoy and Finagle.",
+    },
   ],
   exercises: [
     "**Design a multi-tier load balancing architecture**: You have 3 data centers, each with 50 backend servers of varying capacity. Design the full stack: GSLB for cross-DC routing, L4 LB at the edge of each DC, L7 LB for content routing, and backend server pools. Specify algorithms at each tier, health check intervals, failover behavior, and how you handle a full DC outage. Calculate the total number of health check probes per second across the system.",
@@ -538,6 +600,11 @@ private:
     "**High Availability**: Active-passive with VRRP (1-3s failover). Active-active with ECMP (sub-second failover, all LBs active). Cloud managed LBs handle HA transparently.",
     "**Connection Draining**: When removing a server, stop sending new connections but allow existing ones to finish within a timeout (30-60s). Force-close remaining connections after timeout. Essential for zero-downtime deployments.",
     "**Scale numbers**: L4 LB handles 10M+ concurrent connections. L7 LB handles 100K-1M concurrent connections. DPDK-based LBs achieve line-rate on 100Gbps NICs. Connection tracking entry: 128-256 bytes each.",
+    "**Capacity math**: 10M conns x ~10 pkt/s = 100M pps; at ~10M pps per kernel-bypass box that is ~10 L4 machines (provision 13-14 for N+2). Same traffic at ~2 req/s per conn = 20M req/s; at 50-100K req/s per Envoy node that is ~200 L7 machines. L4 is ~10x per-box throughput of L7 because it only hashes headers.",
+    "**TLS handshake budget**: 1M new conns/s x 0.3ms ECDHE = 300 CPU-cores of continuous crypto. Session resumption (tickets/0-RTT) removes 80-90%. Size L7 by request rate + handshake rate, never by idle concurrent connections.",
+    "**Power of two choices**: sample 2 random backends, pick the less loaded. O(1), no global state, max load drops to O(log log n). Fixes the least-connections herd problem across independent LB instances. EWMA latency scoring routes around slow-but-alive backends before health checks fire.",
+    "**Maglev statelessness**: identical lookup table computed independently on every L4 instance (prime-sized array, permutation slot filling). LB failure + ECMP rehash lands flows on a peer that computes the same backend -- connections survive with zero state sync. Local conn-tracking table pins existing flows across backend-set changes.",
+    "**DSR trade-offs**: response bypasses LB (90-99% egress saved) but needs L2 adjacency or IP-in-IP/GUE encap (MTU risk), VIP-on-loopback backend config, and forfeits TLS termination, retries, and response-based passive health signals. Standard for the L4 tier; L7 stays full-proxy.",
   ],
   cheatSheet: [
     "**L4 LB**: Operates on TCP/UDP packets. Uses NAT or DSR. 10M+ connections. Sub-ms latency. Blind to HTTP content.",
@@ -550,6 +617,11 @@ private:
     "**SSL offloading savings**: RSA-2048 handshake approximately equals 1ms CPU. 10K new TLS connections/sec equals 10 CPU-seconds/sec of crypto work offloaded from backends.",
     "**DSR benefit**: Response bypasses LB. Since response size is 10-100x request size, LB bandwidth drops by 90-99%.",
     "**GSLB failover time**: DNS-based is TTL-dependent, typically 30-60s. Anycast BGP-based is 1-5 seconds. Choose based on RTO requirements.",
+    "**Capacity rule of thumb**: L4 box ~10M pps (kernel bypass); L7 node ~50-100K req/s with TLS. 10M conns + 1M new conn/s => ~10 L4 boxes vs ~200 L7 nodes. Conn state: 128-256 B/entry => 1.3-2.6 GB per 10M conns.",
+    "**TLS handshake cost**: ECDHE ~0.3ms CPU; 1M new conn/s = 300 cores. Resumption cuts 80-90%.",
+    "**Power of two choices**: pick 2 random backends, route to less loaded. Max load O(log log n). Default in Envoy least-request.",
+    "**Maglev table**: prime-sized array, each backend fills slots by deterministic permutation. Forward = hash(5-tuple) mod table. All instances compute identical tables => LB failure needs no state sync.",
+    "**Drain sequence for deploys**: fail readiness (not liveness) -> lameduck 30-120s -> GOAWAY for h2/gRPC -> force-close stragglers. Re-entry uses slow-start weight ramp.",
   ],
   glossary: [
     {
@@ -693,6 +765,10 @@ private:
     "What are the challenges of load balancing gRPC traffic compared to REST?",
     "How do you implement blue-green and canary deployments using load balancer traffic splitting?",
     "What is the difference between a reverse proxy and a load balancer?",
+    "Why does the power of two choices algorithm beat both random assignment and global least-connections in multi-LB fleets?",
+    "How would you load balance long-lived gRPC streams where a single connection can carry wildly uneven load?",
+    "How do eBPF/XDP-based load balancers like Katran differ from DPDK-based designs like Maglev?",
+    "How should connection draining interact with autoscaling scale-in events to avoid dropped requests?",
   ],
   resources: [
     {
@@ -706,7 +782,7 @@ private:
       note: "Google's paper on their L4 load balancer handling millions of connections with consistent hashing and DPDK.",
     },
     {
-      label: "Designing Data-Intensive Applications - Ch. 6: Partitioning",
+      label: "Designing Data-Intensive Applications - Ch. 6: Partitioning", url: "https://dataintensive.net/",
       kind: "book",
       note: "Martin Kleppmann covers consistent hashing and request routing in the context of distributed data systems.",
     },

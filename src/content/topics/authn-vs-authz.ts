@@ -339,7 +339,7 @@ async function loginWithMFA(email: string, password: string, totpCode?: string) 
     "Timing-safe comparison for password verification (prevent timing attacks)",
   ],
   resources: [
-    { label: "OWASP Authentication Cheat Sheet", kind: "docs", note: "Comprehensive guide to authentication best practices including password storage and MFA." },
+    { label: "OWASP Authentication Cheat Sheet", url: "https://owasp.org/", kind: "docs", note: "Comprehensive guide to authentication best practices including password storage and MFA." },
     { label: "NIST SP 800-63B: Digital Identity Guidelines", kind: "docs", note: "US government standard for authentication assurance levels and authenticator requirements." },
     { label: "WebAuthn Guide (webauthn.guide)", kind: "article", note: "Interactive guide to implementing WebAuthn/FIDO2 passwordless authentication." },
     { label: "Auth0 Identity Fundamentals", kind: "docs", note: "Clear explanations of authentication vs authorization, SSO, MFA, and token-based auth." },

@@ -8,7 +8,8 @@ export const designUrlShortener: TopicContent = {
     "The read path (redirect) must be extremely fast. Use a cache (Redis) in front of the database to serve popular short URLs with sub-millisecond latency. Use 301 (permanent) or 302 (temporary) redirects based on whether you need analytics.",
   ],
   detailed: [
-    "## Requirements and Estimation\n\nFunctional: create short URL from long URL, redirect short URL to long URL, optional custom aliases, optional expiration, click analytics. Non-functional: low latency redirects (<100ms), high availability (redirects must never fail), eventual consistency is acceptable for analytics. Scale: assume 100M new URLs/month = ~40 URLs/second write, 100:1 read-to-write ratio = 4000 redirects/second. Storage: 100M URLs/month x 12 months x 5 years x 500 bytes = ~300GB. Cache: 20% of daily reads, ~4000 QPS x 86400 / 5 x 500B = ~35GB fits in one Redis node.",
+    "## Requirements\n\nFunctional: create a short URL from a long URL, redirect a short URL to its long URL, optional custom aliases, optional expiration, click analytics. Non-functional: low-latency redirects (p99 < 100ms), very high availability (a broken redirect is a broken link on the open web), and eventual consistency is acceptable for analytics but not for the redirect itself — once a short URL is returned to the user, it must resolve. Key insight: the redirect path is the product. Everything else (creation, analytics, dashboards) can degrade gracefully; redirects cannot.",
+    "## Capacity Estimation\n\nAlways do the arithmetic out loud — it drives every later design choice. Assume **100M new URLs/day** (a large, bit.ly-scale service).\n\n- **Write QPS**: 100,000,000 / 86,400 s ≈ **1,160 writes/second** (roughly 2,300/s at 2x peak).\n- **Read QPS**: with a **100:1 read-to-write ratio**, 1,160 × 100 ≈ **116,000 redirects/second** at peak — the system is overwhelmingly read-heavy.\n- **Key space**: 62^7 ≈ 3.5 trillion keys. At 100M/day ≈ 36.5B/year, 7 characters lasts 3.5T / 36.5B ≈ **~96 years**. Key exhaustion is never the bottleneck.\n- **Storage**: 100M/day × 365 × 5 years = **182.5B records**. At ~**500 bytes/record** (short key, long URL, timestamps, owner): 182.5B × 500B ≈ **91TB over 5 years** — modest for a sharded KV store, but too large and too hot for a single node.\n- **Cache sizing (80/20 rule)**: daily redirects = 100M × 100 = **10B requests/day**. Caching the hottest **20%** of URLs serves ~80%+ of traffic: 0.2 × 10B × 500B ≈ **1TB of cache**, i.e. a small Redis cluster (a handful of 128–256GB nodes), not a single instance.\n- **Bandwidth**: 116K redirects/s × ~500B response ≈ **~58MB/s egress** — negligible; this system is latency-bound, not bandwidth-bound.\n\nCommon mistake: quoting the averages and stopping. Interviewers want the conclusion: read-heavy (100:1) means the design centers on the cache and the redirect path, and 91TB means the database must be partitioned from day one.",
     "## Key Generation Approaches\n\n**Auto-increment + Base62**: use a global counter, convert each number to base62. Simple but creates a single point of failure and keys are predictable (sequential). Mitigate with multiple counter ranges (server 1 gets odd numbers, server 2 gets even). **Pre-generated Key Service (KGS)**: a service pre-generates random keys and stores them in a database with two tables: unused_keys and used_keys. When a new URL is created, take a key from unused_keys and move it to used_keys. The KGS can pre-load keys into memory for fast allocation. If a KGS server dies, those in-memory keys are lost (acceptable since the key space is huge). **Hash-based**: compute MD5 or SHA256 of the long URL, take the first 7 characters. Collisions are possible; check the database and rehash or append a counter. **Random**: generate a random 7-character base62 string, check for collision, retry. Collision probability is low with 3.5 trillion possible keys but increases over time.",
     "## System Architecture\n\n**Write path**: Client sends long URL to the API server. API server calls the Key Generation Service to get a unique short key. The mapping (shortKey -> longURL, createdAt, expiresAt, userId) is stored in a database (NoSQL like DynamoDB for simple key-value lookups, or PostgreSQL). The short URL is returned. **Read path**: User visits short.url/abc123. The API server checks Redis cache for the key. Cache hit: redirect immediately. Cache miss: query database, populate cache, redirect. Use an LRU eviction policy. **Analytics**: on each redirect, publish a click event (timestamp, short key, referrer, user agent, IP) to Kafka. A separate analytics service consumes events and aggregates them into a data warehouse. This keeps the redirect path fast by offloading analytics to an async pipeline.",
     "## 301 vs 302 Redirects\n\nHTTP 301 (Moved Permanently) tells the browser to cache the redirect and never hit the server again for that URL. Reduces server load but prevents click tracking since subsequent visits go directly to the destination. HTTP 302 (Found/Temporary) tells the browser to check with the server every time, enabling click analytics but increasing server load. Most URL shorteners use 302 because analytics (click counts, geographic distribution, referrer tracking) are a core feature. If analytics are not needed and you want to minimize load, use 301.",
@@ -31,11 +32,22 @@ export const designUrlShortener: TopicContent = {
       q: "How would you add click analytics without slowing down redirects?",
       a: "Use an async pipeline. On each redirect, the app server publishes a lightweight click event (shortKey, timestamp, IP, user-agent, referrer) to Kafka. The redirect returns immediately without waiting for the event to be processed. A separate analytics consumer reads from Kafka, enriches events (geo-lookup from IP, device parsing from user-agent), and writes aggregated data to a data warehouse or time-series database. Users query analytics through a separate API that reads from the warehouse. This decouples the latency-critical redirect from the data-intensive analytics processing.",
     },
+    {
+      q: "Walk me through the capacity estimation for a bit.ly-scale shortener.",
+      a: "Assume 100M new URLs/day. Writes: 100M / 86,400s ≈ 1,160/s. With a 100:1 read-to-write ratio, redirects are ~116,000/s at peak — so the system is read-dominated and the design must center on the redirect path. Storage: 100M/day × 365 × 5 years = 182.5B records; at ~500 bytes each that is ~91TB over 5 years, which mandates sharding. Key space: 62^7 ≈ 3.5T keys lasts ~96 years at this rate, so key length is not a constraint. Cache: by the 80/20 rule, caching the hottest 20% of the 10B daily redirects' targets (0.2 × 10B × 500B ≈ 1TB) serves 80%+ of reads from a small Redis cluster. The point of the exercise is the conclusions: cache-first read path, sharded storage, and no worry about key exhaustion.",
+    },
+    {
+      q: "How would Snowflake-style IDs work here, and how do they compare to a KGS?",
+      a: "A Snowflake ID is a 64-bit integer composed of a timestamp (~41 bits), a worker/datacenter ID (~10 bits), and a per-millisecond sequence (~12 bits). Each server generates globally unique IDs with zero coordination and no shared storage, and the ID base62-encodes to a short key. Compared to KGS: Snowflake removes the KGS as infrastructure to run and as a dependency on the write path, but its keys are longer (a 64-bit ID encodes to up to 11 base62 chars vs 7 for KGS) and they leak information — the timestamp reveals creation time and keys are roughly sortable, making enumeration easier. KGS gives short, fully random keys but is an extra service whose availability you must engineer (standbys, pre-fetched batches on app servers). Choose Snowflake when operational simplicity wins and key length/opacity doesn't matter; choose KGS when you want the shortest, unpredictable keys.",
+    },
   ],
   followUps: [
     "How do you generate codes without a central counter becoming a bottleneck?",
     "Why does the 301 vs 302 choice change your analytics story?",
     "How do you handle custom aliases and collisions?",
+    "A single link goes viral and receives 50K QPS — what breaks first and how do you fix it?",
+    "Where does the birthday paradox show up in hash-based key generation?",
+    "How would you take down a malicious short link that browsers have already cached?",
   ],
   mcqs: [
     {
@@ -106,7 +118,19 @@ export const designUrlShortener: TopicContent = {
     },
     {
       front: "How much storage does a URL shortener need for 5 years?",
-      back: "At 100M URLs/month: 100M x 12 x 5 = 6B URLs. At ~500 bytes per record (short key + long URL + metadata): 6B x 500B = ~3TB. Easily handled by a sharded database or a distributed key-value store.",
+      back: "At 100M URLs/day: 100M x 365 x 5 = 182.5B records. At ~500 bytes per record (short key + long URL + metadata): 182.5B x 500B = ~91TB. Mandates a sharded database or distributed key-value store — commonly range-sharded on the short key's first character.",
+    },
+    {
+      front: "What is the write and read QPS of a shortener at 100M new URLs/day?",
+      back: "Writes: 100M / 86,400s = ~1,160/s. Reads at a 100:1 read-to-write ratio: ~116,000 redirects/s at peak. Conclusion: the system is read-dominated, so the design centers on the cache and redirect path.",
+    },
+    {
+      front: "Why does hash-and-check key generation need a collision strategy from day one?",
+      back: "Truncating a hash to 7 base62 chars leaves 3.5T buckets, but by the birthday bound the first collision is expected after only ~sqrt(2 x 3.5T) = ~2.6M inserts. Every write must check for an existing key (or catch a unique-index violation) and rehash with a salt or appended counter on collision.",
+    },
+    {
+      front: "How do you handle a viral hot link in the cache layer?",
+      back: "A single hot key lands on one Redis shard and can saturate it. Mitigations: (1) in-process LRU cache on each redirect server with a short TTL, (2) replicate the value under N suffixed keys and read a random one to spread load, (3) push the hottest mappings to a CDN edge with a short TTL.",
     },
     {
       front: "What is a Key Generation Service (KGS)?",
@@ -121,6 +145,9 @@ export const designUrlShortener: TopicContent = {
     "**Understanding Base62 Encoding and Key Space Trade-offs**\n\nAt the heart of every URL shortener lies the *key generation mechanism*, and **base62 encoding** is the most widely adopted approach. Base62 maps integers to a compact alphanumeric representation using the character set `a-z`, `A-Z`, `0-9`. The encoding works by repeatedly dividing the number by 62 and mapping each remainder to a character. A **7-character key** yields `62^7 ≈ 3.5 trillion` unique combinations, while a **6-character key** gives `62^6 ≈ 56.8 billion`. The choice of key length is a *capacity planning decision*: shorter keys are more user-friendly but exhaust sooner. In practice, systems like **bit.ly** use 7 characters, providing decades of runway at high throughput. An important subtlety is **key predictability** — if you use a sequential counter fed into base62, an attacker can enumerate all URLs by incrementing the counter. Mitigations include *salting the counter*, using a **bijective shuffle** (e.g., Knuth multiplicative hashing), or switching to a **pre-generated key service (KGS)** that emits random keys.",
     "**Database Design and Caching Strategy**\n\nThe URL mapping store must handle two distinct workloads: *low-latency reads* (redirects) and *moderate-throughput writes* (URL creation). A **NoSQL key-value store** like DynamoDB or MongoDB is a natural fit because the access pattern is a simple `GET(shortKey) → longURL` lookup with no complex joins. The schema is straightforward: `{ shortKey: string, longURL: string, createdAt: Date, expiresAt?: Date, userId?: string, clickCount?: number }`. For the **caching layer**, Redis sits in front of the database using an **LRU eviction policy**. The *cache-aside* pattern is standard: on a read miss, fetch from the database, populate the cache, then redirect. A critical concern is **cache stampede** on popular URLs — when a hot key expires, thousands of concurrent requests hit the database simultaneously. Solutions include *probabilistic early expiration* (refresh the cache slightly before TTL), **request coalescing** (only one request fetches from DB while others wait), or using a *lock-based approach* with `SETNX` in Redis. Cache sizing follows the **80/20 rule**: caching 20% of daily traffic typically covers 80% of requests.",
     "**Distributed Key Generation and Consistency**\n\nIn a *multi-datacenter deployment*, key uniqueness becomes a distributed systems problem. The **KGS approach** handles this elegantly: a central service pre-generates millions of random keys and stores them in an `unused_keys` table. Each application server requests a **batch** (e.g., 10,000 keys) via an atomic `SELECT ... FOR UPDATE` followed by a `DELETE`, moving those keys to a `used_keys` table. Servers hand out keys from their in-memory batch with *zero database calls per URL creation*. If a server crashes, those in-memory keys are lost — an acceptable trade-off given the enormous key space. An alternative is **range-based allocation**: assign each server a non-overlapping ID range (server 1 gets 1-1M, server 2 gets 1M-2M, etc.) managed by a **ZooKeeper** or **etcd** coordinator. Each server independently converts its allocated IDs to base62 without any cross-server coordination. For **global consistency**, the redirect path only requires *read-after-write consistency* within the same datacenter where the URL was created. Cross-datacenter replication can be **asynchronous** with a small window where a newly created URL is not yet available in other regions — mitigated by routing the first redirect to the creation datacenter using a hint in the short key prefix.",
+    "**Base62 Counter vs Hash-and-Check: Two Philosophies of Uniqueness**\n\nThe deepest fork in the design is whether uniqueness is *guaranteed by construction* or *verified after generation*. The **counter + base62** family (including range allocation and Snowflake IDs) guarantees uniqueness by construction: every generated number is distinct, so encoding it to base62 can never collide, and writes need **no existence check** — a plain `INSERT`. The cost is coordination (who owns which range?) and predictability (sequential keys can be enumerated by crawlers scraping private links). The **hash-and-check** family (truncate MD5/SHA-256 of the long URL to 7 chars, or generate random keys) needs *no coordination at all* — any stateless server can generate a key — but must handle collisions.\n\nThe collision math matters. Truncating to 7 base62 characters leaves 3.5T buckets, and by the **birthday bound** you expect the first collision after roughly `sqrt(2 x 3.5T) ≈ 2.6M` inserts — early in the system's life, not a rare edge case. So hash-and-check must always implement a retry loop: check the DB (or a unique index violation), and on collision either append a per-attempt salt and rehash, or append a counter to the input. Under high write load this becomes a *read-before-write* on the write path, and retry storms are the failure mode as the key space fills.\n\nKey insight: KGS is the synthesis of both philosophies — keys are random (unpredictable, like hashes) but pre-generated and uniqueness-checked *offline*, so the online write path gets collision-free keys with zero checking, like a counter.\n\nCommon mistake: proposing plain MD5-truncation without describing collision handling. The interviewer will ask what happens when two URLs share a 7-char prefix — have the rehash-with-salt answer ready.",
+    "**The 301 vs 302 Decision Is Really a Caching-vs-Analytics Trade-off**\n\nThe redirect status code looks like trivia but encodes a real architectural choice about *where the cache lives*. **301 Moved Permanently** deputizes every browser as a cache node: after the first visit, the browser redirects locally and your servers never see that user again for that link. This is the cheapest possible scaling — but it is *irrevocable in practice* (browsers cache 301s aggressively, some indefinitely), so you lose per-click analytics, you cannot re-point or expire the link for returning visitors, and a mistakenly-shortened URL is very hard to fix. **302 Found** (or **307 Temporary Redirect**, which additionally preserves the HTTP method) keeps every click flowing through your servers: full analytics, instant link updates, working expiration and kill switches for malicious links — at the price of serving 100% of redirect traffic forever.\n\nIn practice: commercial shorteners (bit.ly, TinyURL) use 301 with `Cache-Control` headers tuned short, or 302 outright, because click analytics is the *revenue-generating feature* — the redirect is free, the data is the product. A purely internal shortener with no analytics requirement should prefer 301 to shed load.\n\nReal-world example: bit.ly returns 301 but with cache headers that limit how long browsers may cache it, recovering most analytics while still letting CDNs absorb repeat traffic — a middle path worth mentioning in an interview.",
+    "**Custom Aliases, Hot Links, and Abuse Handling**\n\n**Custom aliases** (short.url/my-brand) break the neat generated-key model because uniqueness now depends on *user input*, so a database check is unavoidable. Store aliases in the same table as generated keys with a `custom` flag and a **unique constraint on shortKey** — the constraint, not an application-level check, is the real guard, because two users can pass the \"is it free?\" check simultaneously and the race is only resolved by the database rejecting the second `INSERT`. Validate aliases against a **reserved-word blocklist** (`api`, `admin`, `login`, `static`) so user links can never shadow your own routes, and consider keeping custom aliases out of the base62 counter's namespace entirely (e.g., require a minimum length or a character the generator never emits) so a user cannot squat a key the generator is about to issue.\n\n**Hot links** are the other asymmetry: a single viral URL can receive a large share of all traffic. A normal Redis cluster shards by key, so one hot key lands on *one* node and saturates it. Mitigations, in escalating order: (1) an **in-process LRU cache** on each redirect server (even a 60-second TTL absorbs most of a spike), (2) **key replication** — write the hot value under `key#1..key#N` suffixes and have readers pick one at random, spreading load across N cache nodes, (3) push the hottest mappings to a **CDN edge** with a short TTL.\n\n**Abuse** is a first-class requirement for a public shortener: scan destination URLs against threat feeds (Google Safe Browsing) at creation time and asynchronously afterward, rate-limit creation per user/IP at the gateway, and keep a kill switch that flips a link to an interstitial warning page — one more reason 302-style server-mediated redirects are valuable.\n\nWarning: never reuse or recycle a short key that once pointed elsewhere. Old links live in emails and documents forever; re-pointing a recycled key silently sends historical traffic to the wrong destination.",
   ],
   code: [
     {
@@ -336,27 +363,53 @@ async function resolveURL(shortKey, dbLookup) {
     {
       title: "URL Shortener System Architecture",
       kind: "architecture",
-      caption: "Write path handles URL creation via KGS. Read path serves redirects through a Redis cache with DB fallback. Analytics events are published asynchronously to Kafka.",
+      caption: "Layered architecture: clients enter through a load balancer and rate limiter. The write path shortens URLs via one of three ID-generation strategies and persists the mapping. The read path serves redirects from Redis with a database fallback, and click events flow asynchronously through Kafka into the analytics warehouse.",
       mermaid: `graph TB
-    CLIENT["Client or Browser"]
-    LB["Load Balancer"]
-    API["API Servers"]
-    KGS["Key Generation Service"]
-    REDIS["Redis Cache - LRU"]
-    DB["MongoDB - URL Mappings"]
-    KAFKA["Kafka - Click Events"]
-    ANALYTICS["Analytics Consumer"]
-    DW["Data Warehouse"]
-    CLIENT --> LB
-    LB --> API
-    API -->|get unique key| KGS
-    KGS -->|batch allocate| DB
-    API -->|store mapping| DB
-    API -->|cache lookup| REDIS
-    REDIS -.->|cache miss| DB
-    API -->|publish click event| KAFKA
-    KAFKA --> ANALYTICS
-    ANALYTICS --> DW`,
+    subgraph Clients["Clients"]
+        WEB["Web Browser"]
+        MOB["Mobile App"]
+        APIC["API Consumer"]
+    end
+    subgraph Gateway["Gateway Layer"]
+        LB["Load Balancer"]
+        RL["Rate Limiter"]
+    end
+    subgraph WritePath["Write Path - Shorten"]
+        WS["Shorten Service"]
+        subgraph IDGen["ID Generation Options"]
+            B62["Base62 Counter<br/>range-allocated"]
+            KGS["Key Generation Service<br/>pre-generated keys"]
+            SNOW["Snowflake IDs<br/>timestamp + worker + seq"]
+        end
+    end
+    subgraph ReadPath["Read Path - Redirect"]
+        RS["Redirect Service"]
+    end
+    subgraph Async["Async Analytics"]
+        KAFKA["Kafka<br/>click events"]
+        AP["Analytics Pipeline<br/>enrich + aggregate"]
+    end
+    subgraph Data["Data Layer"]
+        REDIS["Redis Cache<br/>LRU, hot 20%"]
+        DB["Postgres or KV Store<br/>URL mappings, sharded"]
+        DW["Analytics Warehouse"]
+    end
+    WEB --> LB
+    MOB --> LB
+    APIC --> LB
+    LB --> RL
+    RL -->|"POST /shorten"| WS
+    RL -->|"GET /code"| RS
+    WS -->|"get unique id"| B62
+    WS -->|"get unique id"| KGS
+    WS -->|"get unique id"| SNOW
+    WS -->|"store mapping"| DB
+    RS -->|"1 - cache lookup"| REDIS
+    REDIS -.->|"2 - cache miss"| DB
+    DB -.->|"3 - populate cache"| REDIS
+    RS -->|"publish click event"| KAFKA
+    KAFKA --> AP
+    AP --> DW`,
     },
     {
       title: "URL Redirect Read Path",
@@ -514,27 +567,30 @@ async function resolveURL(shortKey, dbLookup) {
     "**Multi-Region Deployment Strategy**: Design a URL shortener that operates across **3 geographic regions** (US, EU, Asia). Address: (1) How to partition the key space so no two regions generate the same key, (2) How to replicate URL mappings so a URL created in the US can be resolved in Asia with *<50ms added latency*, (3) How to handle the *consistency window* during replication, and (4) How to route users to the nearest region using **GeoDNS**.",
   ],
   cheatSheet: [
-    "**Key space**: `62^7 ≈ 3.5 trillion` unique keys with 7-character base62 encoding. At 100M URLs/month, this lasts **~2,900 years** — key exhaustion is *never* the bottleneck.",
-    "**Storage estimate**: `100M URLs/month × 12 × 5 years × 500 bytes ≈ 3TB`. Use **range-based sharding** on the short key's first character for ~62 even partitions.",
-    "**Cache sizing**: Apply the **80/20 rule** — cache 20% of daily URLs. At 4,000 QPS redirects, that is `4000 × 86400 × 0.2 × 500B ≈ 35GB`, fitting in a single **Redis** node.",
-    "**Redirect choice**: Use `302 Found` for **analytics** (browser hits server every time). Use `301 Moved Permanently` to **reduce load** (browser caches redirect). Most shorteners use *302*.",
-    "**KGS batch size**: Each app server pre-loads **10,000 keys** into memory. At 40 writes/sec per server, a batch lasts ~4 minutes. Lost keys on crash are negligible vs. 3.5T total key space.",
-    "**Read-to-write ratio**: Typically **100:1** or higher. The system is *read-heavy*, so optimize the redirect path first: Redis cache → DB fallback → 302 redirect. Writes can tolerate higher latency.",
+    "**Traffic math (memorize the chain)**: `100M URLs/day ÷ 86,400s ≈ 1,160 writes/s`. With a `100:1` read:write ratio → `~116,000 redirects/s` at peak. The system is *read-dominated*.",
+    "**Key space**: `62^7 ≈ 3.5 trillion` unique keys with 7-character base62 encoding. At 100M URLs/day (`~36.5B/year`), this lasts **~96 years** — key exhaustion is *never* the bottleneck.",
+    "**Storage estimate**: `100M/day × 365 × 5 years × 500 bytes ≈ 91TB`. Shard from day one — **range-based sharding** on the short key's first character gives ~62 even partitions.",
+    "**Cache sizing**: Apply the **80/20 rule** — cache the hottest 20% of the `10B redirects/day`: `0.2 × 10B × 500B ≈ 1TB`, i.e. a small **Redis cluster**, serving 80%+ of reads.",
+    "**Redirect choice**: Use `302 Found` for **analytics** (browser hits server every time). Use `301 Moved Permanently` to **reduce load** (browser caches redirect, effectively forever). Most shorteners choose *302* because click data is the product.",
+    "**Key generation one-liner**: counter+base62 = unique by construction but predictable; hash-and-check = coordination-free but needs a collision retry loop (birthday bound ≈ `sqrt(2 × 62^7) ≈ 2.6M` inserts); **KGS** = random keys, uniqueness pre-checked offline; **Snowflake** = coordination-free unique 64-bit IDs, longer keys.",
+    "**KGS batch size**: Each app server pre-loads **10,000 keys** into memory via an atomic claim. At ~100 writes/s per server, a batch lasts ~100 seconds. Keys lost on crash are negligible vs. 3.5T total key space.",
+    "**Read-to-write ratio**: Typically **100:1** or higher. Optimize the redirect path first: Redis cache → DB fallback → 302 redirect → async Kafka click event. Never touch analytics storage on the redirect path.",
   ],
   revisionNotes: [
     "A URL shortener is fundamentally a **key-value mapping service** with a *write-light, read-heavy* workload. The three core decisions are: **key generation strategy** (KGS recommended for distributed systems), **storage engine** (NoSQL for simple lookups), and **caching layer** (Redis with LRU eviction). Always clarify the **redirect type** (301 vs. 302) based on analytics requirements.",
-    "**Capacity estimation** is a critical part of the interview answer. Memorize the key numbers: `62^7 = 3.5T keys`, `100M URLs/month` as a reasonable scale, `100:1 read-to-write ratio = 4,000 QPS redirects`, `~3TB storage for 5 years`, `~35GB cache for 20% of daily traffic`. These demonstrate quantitative thinking.",
+    "**Capacity estimation** is a critical part of the interview answer. Memorize the chain at 100M URLs/day scale: `100M / 86,400 ≈ 1,160 writes/s`, `100:1 read-to-write → ~116K redirects/s peak`, `62^7 ≈ 3.5T keys (≈96 years of runway)`, `182.5B records × 500B ≈ 91TB storage over 5 years`, and `80/20 rule → ~1TB cache` for the hot set. State the conclusions, not just the numbers: read-heavy → cache-first, 91TB → shard from day one.",
     "The **KGS pattern** is the preferred key generation approach in interviews. It *eliminates collision checking at write time*, works seamlessly in distributed environments via batch allocation, and tolerates server failures gracefully. Mention the `unused_keys` / `used_keys` table split and the atomic batch claim operation.",
     "For the **analytics pipeline**, always describe an *asynchronous design*: redirect returns immediately, click event is published to **Kafka**, consumed by a separate service, and aggregated into a **data warehouse**. This *decouples latency-critical redirects from data-intensive analytics*. Never block the redirect on analytics writes.",
     "**Common follow-up topics** to prepare: custom aliases (uniqueness check + reserved word blocklist), URL expiration (lazy + active deletion), rate limiting (token bucket per user/IP in Redis), abuse prevention (blocklist of malicious destinations, link preview/scanning), and **multi-region deployment** (key partitioning by region prefix, GeoDNS routing, async cross-region replication).",
+    "**Key generation is a two-family choice**: *unique by construction* (counter + base62, range allocation, Snowflake — no collision check, but coordination and/or predictability) vs *check after generation* (hash truncation, random keys — coordination-free but the birthday bound puts the first collision at ~2.6M inserts, so a retry loop is mandatory). **KGS** combines the strengths: random keys, uniqueness verified offline, collision-free online writes. Also prepare **hot-link handling** (in-process cache, key replication across shards, CDN edge) — a viral URL concentrating on one Redis shard is a favorite follow-up.",
   ],
   resources: [
     {
-      label: "System Design Interview — Alex Xu",
+      label: "System Design Interview — Alex Xu", url: "https://bytebytego.com/",
       kind: "book",
     },
     {
-      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      label: "Designing Data-Intensive Applications — Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
     },
   ],
@@ -568,6 +624,16 @@ async function resolveURL(shortKey, dbLookup) {
       term: "Click Analytics",
       definition:
         "Tracking and aggregating data about redirect events: total clicks, unique visitors, geographic distribution, referrers, devices, and time-series trends.",
+    },
+    {
+      term: "Snowflake ID",
+      definition:
+        "A 64-bit unique identifier composed of a timestamp, worker/datacenter ID, and per-millisecond sequence number. Lets each server generate globally unique IDs with zero coordination; base62-encodes to a (longer, roughly sortable) short key.",
+    },
+    {
+      term: "Birthday Bound",
+      definition:
+        "The probability result that random collisions in a space of size N are expected after roughly sqrt(2N) samples. For 7-char base62 keys (N ≈ 3.5T), the first collision is expected after only ~2.6M random keys — why hash-and-check schemes need a retry loop.",
     },
     {
       term: "Cache Stampede",

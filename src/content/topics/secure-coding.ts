@@ -220,11 +220,11 @@ Each layer assumes the previous one might fail. This is the core mindset of secu
   ],
   resources: [
     {
-      label: "OWASP Cheat Sheet Series",
+      label: "OWASP Cheat Sheet Series", url: "https://cheatsheetseries.owasp.org/",
       kind: "docs",
     },
     {
-      label: "OWASP Application Security Verification Standard (ASVS)",
+      label: "OWASP Application Security Verification Standard (ASVS)", url: "https://owasp.org/",
       kind: "docs",
     },
     {

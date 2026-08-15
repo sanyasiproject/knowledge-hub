@@ -420,9 +420,9 @@ subscription OnPostCreated {
     "Security: depth limiting, complexity analysis, persisted queries, resolver-level authorization.",
   ],
   resources: [
-    { label: "graphql.org — Official specification and documentation", kind: "docs", note: "The authoritative reference for the GraphQL spec, type system, and best practices." },
-    { label: "Apollo GraphQL documentation", kind: "docs", note: "Comprehensive guides for Apollo Server, Client, Federation, and Router." },
-    { label: "Learning GraphQL by Eve Porcello and Alex Banks", kind: "book", note: "Practical introduction covering schema design, resolvers, and client integration." },
+    { label: "graphql.org — Official specification and documentation", url: "https://graphql.org/learn/", kind: "docs", note: "The authoritative reference for the GraphQL spec, type system, and best practices." },
+    { label: "Apollo GraphQL documentation", url: "https://graphql.org/learn/", kind: "docs", note: "Comprehensive guides for Apollo Server, Client, Federation, and Router." },
+    { label: "Learning GraphQL by Eve Porcello and Alex Banks", url: "https://graphql.org/learn/", kind: "book", note: "Practical introduction covering schema design, resolvers, and client integration." },
     { label: "Production Ready GraphQL by Marc-Andre Giroux", kind: "book", note: "Advanced patterns for schema design, performance, security, and versioning at scale." },
     { label: "GraphQL Best Practices — GitHub Engineering Blog", kind: "article", note: "GitHub's experience building and scaling their GraphQL API." },
   ],

@@ -9,7 +9,9 @@ export const designSearchEngine: TopicContent = {
     "Scaling to billions of documents requires aggressive caching (result cache, posting-list cache, rendered-snippet cache), tiered indexing (hot tier for popular pages, cold tier for the long tail), and geographic distribution of serving clusters to minimize user-perceived latency.",
   ],
   detailed: [
-    "## Web Crawling at Scale\nThe crawler is a distributed system that starts from seed URLs, fetches pages, extracts links, and adds new URLs to the frontier queue. A politeness policy (robots.txt compliance, per-host rate limiting to 1 request per second) prevents overloading target servers. URL deduplication uses a Bloom filter or a consistent-hash-based distributed set to avoid re-crawling the same page. Freshness is maintained by re-crawling popular or frequently-changing pages more often (adaptive crawl scheduling). At Google's scale, the crawler processes roughly 50 billion pages, with the frontier queue itself requiring distributed storage. DNS resolution is a bottleneck at this scale, so crawlers maintain a local DNS cache with TTL-aware refresh. The fetched HTML is stored in a distributed file system (like GFS/Colossus) for offline indexing.",
+    "## Capacity Estimation: Back-of-Envelope Math\nBefore drawing any boxes, an interviewer expects you to size the problem, so anchor the design on concrete arithmetic. Storage: 1 billion pages x 100KB average page size = 100TB of raw HTML in the document store; with 3x replication that is 300TB. The inverted index typically compresses to about 30% of the text corpus, so roughly 100TB x 0.3 = 30TB of index, which at ~64GB of hot index per machine means about 500 index shards (30TB / 64GB ≈ 470, round up for headroom). Query load: at 50,000 queries/second peak with a 90% result-cache hit rate, only 50,000 x 0.1 = 5,000 QPS reach the index tier; because doc-partitioned queries fan out to every shard, each of the 500 shards also sees ~5,000 QPS (5,000 misses x 500 shards = 2.5M shard-requests/s in aggregate). Crawl rate: refreshing 1 billion pages monthly means 1,000,000,000 / (30 days x 86,400 s ≈ 2.6M seconds) ≈ 385 pages/second sustained; at 100KB per page that is ~38.5 MB/s (~300 Mbps) of sustained ingest bandwidth, comfortably parallelized across a few hundred fetcher threads. Key insight: the cache hit rate is the single biggest lever in the whole design — moving from 90% to 80% hit rate doubles the load on every one of the 500 shards simultaneously.",
+
+    "## Web Crawling at Scale\nThe crawler is a distributed system that starts from seed URLs, fetches pages, extracts links, and adds new URLs to the frontier queue. A politeness policy (robots.txt compliance, per-host rate limiting to 1 request per second) prevents overloading target servers. URL deduplication uses a Bloom filter or a consistent-hash-based distributed set to avoid re-crawling the same page. Freshness is maintained by re-crawling popular or frequently-changing pages more often (adaptive crawl scheduling). At Google's scale, the crawler processes roughly 50 billion pages, with the frontier queue itself requiring distributed storage. DNS resolution is a bottleneck at this scale, so crawlers maintain a local DNS cache with TTL-aware refresh. Content-level deduplication complements URL deduplication: an exact content hash (MD5/SHA of the body) catches identical pages served under different URLs, while simhash — a locality-sensitive fingerprint whose Hamming distance tracks document similarity — catches near-duplicates like mirrors and boilerplate-heavy reprints; pages within ~3 bits of an existing fingerprint are skipped before indexing. The fetched HTML is stored in a distributed file system (like GFS/Colossus) for offline indexing.",
 
     "## Inverted Index Construction\nThe indexer processes raw HTML by stripping tags, tokenizing text, applying stemming (Porter stemmer) and stop-word removal, and then building the inverted index. For each term, a postings list stores tuples of (docID, term-frequency, field-weights, positions). Positions enable phrase queries and proximity scoring. The index is built offline using MapReduce: the map phase emits (term, docID, tf, positions) pairs, and the reduce phase merges them into sorted postings lists. Index compression is critical; techniques like variable-byte encoding, PForDelta, and Elias-Fano encoding reduce the index size by 4-10x while still allowing fast sequential and skip-based access. The final index is sharded by document ID range across thousands of machines, with each shard holding a complete inverted index for its document subset.",
 
@@ -20,6 +22,12 @@ export const designSearchEngine: TopicContent = {
     "## Autocomplete and Spell Correction\nAutocomplete suggestions are served from a separate system that indexes popular queries from query logs. A trie (prefix tree) stores queries weighted by frequency, and a prefix lookup returns the top-k completions by aggregate popularity. For personalization, a secondary trie stores per-user query history. The trie is updated in near-real-time as new queries arrive. Spell correction uses a combination of edit-distance (Levenshtein), phonetic similarity (Soundex/Metaphone), and a noisy-channel model that combines a language model P(correction) with an error model P(typo|correction). At query time, candidate corrections are generated within edit distance 2 of each query term, scored, and the top suggestion is shown as 'Did you mean...' or applied automatically if confidence is high. Both autocomplete and spell correction must respond in under 50ms to feel instantaneous.",
   ],
   deepDive: [
+    "Posting list internals are where the inverted index earns its speed. Each term maps to a posting list sorted by docID, and because the list is sorted, you store deltas (gaps) instead of absolute IDs: the list `[1000, 1003, 1010, 1050]` becomes gaps `[1000, 3, 7, 40]`. Small gaps then encode into few bytes with varint (variable-byte) encoding — each byte carries 7 payload bits plus 1 continuation bit, so the gap 3 takes one byte instead of the 4-8 bytes a fixed-width docID needs. For example, a common term appearing in every 10th document has average gap 10, so almost every entry compresses to a single byte — roughly 4-8x smaller than uncompressed. Skip pointers make intersection fast on these long lists: every sqrt(n)-th entry stores a forward pointer with the docID at the target, so when intersecting a rare term (short list) with a common term (long list), the merge can leap over whole blocks of the long list whose max docID is below the candidate, turning a linear scan into near-logarithmic hops. Key insight: compression and skipping are in tension — you cannot skip into the middle of a delta-encoded stream, so engines compress in fixed blocks (e.g., 128 postings) and place skip data at block boundaries, which is exactly the layout Block-Max WAND exploits.",
+
+    "Sharding by document versus sharding by term is a classic trade-off, and document sharding wins for web search. In doc-sharding, each shard holds a complete mini-index over a slice of documents; in term-sharding, each shard holds the full posting lists for a slice of the vocabulary. Term-sharding looks attractive because a 3-term query touches only 3 shards instead of all 500 — but it fails in practice for three reasons. First, multi-term intersection requires shipping posting lists across the network: the shard owning `distributed` and the shard owning `systems` must exchange millions of docIDs before scoring can even begin, while a doc-shard intersects and scores entirely locally and returns only its top-k. Second, load is brutally skewed — the shard owning a hot term like `weather` melts while shards owning rare terms idle; doc-sharding spreads every query evenly across all shards. Third, updates are simpler: a new document touches exactly one doc-shard, but touches every term-shard whose vocabulary it mentions (hundreds). The price of doc-sharding is that every query fans out to every shard, which is why the deadline-based scatter-gather aggregator and the result cache are load-bearing parts of the design, not optimizations. In practice: every major web search engine (Google, Bing) and every mainstream search system (Elasticsearch, Solr, Vespa) is doc-sharded.",
+
+    "BM25 is best understood as three intuitions bolted together, not as a formula to memorize. The score for one term is IDF x (tf x (k1+1)) / (tf + k1 x (1 - b + b x docLen/avgDocLen)). Intuition one — rarity wins: IDF ≈ log(N/df) means matching `photosynthesis` (in 1M of 1B docs, IDF ≈ log(1000) ≈ 6.9) is worth vastly more than matching `the` (in nearly all docs, IDF ≈ 0), so common words contribute almost nothing. Intuition two — saturation: the tf/(tf+k1) shape means the 2nd occurrence of a term adds a lot, the 20th adds almost nothing; with k1=1.2, tf=1 gives ~0.45 of the maximum, tf=5 gives ~0.8, and tf=100 barely beats tf=10 — this is what defeats keyword stuffing. Intuition three — length fairness: the (1 - b + b x docLen/avgDocLen) denominator term inflates the effective tf requirement for long documents; with b=0.75, a document twice the average length needs roughly 1.75x the raw term frequency to score the same, so a focused 200-word page can outrank a rambling 20,000-word one. Common mistake: candidates recite the BM25 formula symbol-by-symbol but cannot answer 'what happens if I set b=0?' — the answer (length normalization disappears entirely, long documents dominate) demonstrates real understanding.",
+
     "Inverted index compression is a deep topic with real performance implications. Variable-byte encoding represents small gaps (the delta between consecutive docIDs in a postings list) in fewer bytes, but wastes bits on alignment. PForDelta packs blocks of 128 gaps using a base bit-width chosen to fit most values, with exceptions stored separately. Elias-Fano encoding is theoretically near-optimal for monotone sequences and supports O(1) random access, making it ideal for skip pointers. In practice, modern engines use a hybrid: PForDelta for dense postings lists (common terms) and Elias-Fano for sparse ones (rare terms). The choice of compression scheme affects not just space but query latency, because decompression speed determines how fast you can intersect postings lists for multi-term queries. Block-max WAND (Weak AND) is an optimization that skips entire blocks of postings that cannot possibly score high enough to enter the top-k, reducing the number of documents scored by 5-10x without affecting result quality.",
 
     "PageRank computation at web scale is a massive distributed systems problem. The link graph has billions of nodes and trillions of edges, requiring partitioned storage and message-passing computation. The basic algorithm initializes all pages with equal rank (1/N), then iteratively updates each page's rank as the sum of rank/out-degree contributions from all pages linking to it, with a damping factor (typically 0.85) that models the probability of the random surfer continuing to follow links versus jumping to a random page. Convergence typically requires 50-100 iterations, each of which scans the entire graph. Dead ends (pages with no outlinks) and spider traps (cycles that accumulate rank) are handled by the damping factor and by distributing dead-end rank evenly. Topic-Sensitive PageRank computes multiple PageRank vectors biased toward different topic categories, allowing the ranking to be personalized based on the query's topic. The computation uses frameworks like Pregel or GraphX that partition the graph across machines and exchange rank updates in supersteps.",
@@ -27,6 +35,10 @@ export const designSearchEngine: TopicContent = {
     "Fault tolerance and availability in a search serving system require careful design. Each index shard is replicated across multiple machines (typically 3 replicas) in different failure domains. If a replica fails, the query is routed to a surviving replica with minimal latency impact. The root aggregator uses a scatter-gather pattern with a deadline: if a shard does not respond within 50ms, the aggregator returns results from the shards that did respond, accepting slightly degraded recall. This is a deliberate trade-off of completeness for latency. Index updates (adding new or refreshed pages) use a dual-buffer scheme: queries are served from the active index while a new index is built offline. Once the new index is ready, an atomic swap makes it live. For real-time indexing of breaking news, a small in-memory real-time index is merged with the main index results at query time. Geographic replication across data centers ensures that users are served from the nearest cluster, reducing round-trip latency to under 20ms.",
 
     "The economics of search at scale are worth understanding for system design interviews. Serving a single query touches hundreds of machines (one per shard, plus aggregators, spell-checkers, ad servers, snippet generators). At 100,000 QPS, this means tens of millions of machine-operations per second. The cost of serving is dominated by CPU (for scoring and decompression) and memory (for caching posting lists and results). The index itself is tens of petabytes compressed. Keeping this infrastructure running costs hundreds of millions of dollars annually, which is why search is primarily an advertising-funded business. Design decisions are driven by cost-efficiency: tiered indexing puts the most-accessed pages in memory and relegates the long tail to SSD or disk. Approximate retrieval (using hashing or quantized embeddings) trades a small amount of recall for massive speedups. These trade-offs between cost, latency, and quality are central to the system design discussion.",
+
+    "Freshness tiers reconcile two facts: most of the web barely changes, and the pages users care most about change constantly. A single crawl-and-rebuild cadence is therefore always wrong — too slow for news, wastefully fast for a 2009 blog post. The solution is to classify pages into tiers with independent crawl and index pipelines. A real-time tier (news sites, trending topics, official feeds) is crawled within minutes and lands in a small in-memory index that merges with main results at query time. A daily tier (active blogs, product pages, forums) is re-crawled every 1-2 days into a rolling incremental index. A stable tier (the long tail — old articles, documentation, archives) is re-crawled every 30-90 days and lives in the big batch-built index. Tier assignment is learned, not static: the crawler compares each fetch against the stored content hash, estimates a per-page change rate (often modeled as a Poisson process), and promotes or demotes pages accordingly. Real-world example: when a breaking story hits, Google surfaces pages crawled minutes ago — those results come from the real-time tier riding alongside the batch index, not from any rebuild of the 100TB main index. Freshness also feeds ranking: for query classes flagged as time-sensitive (detected from spikes in query volume), recency becomes a heavy ranking feature, while for evergreen queries it is nearly ignored.",
+
+    "Typo tolerance rests on edit distance plus a probability model, engineered so the expensive part never runs on the hot path. Levenshtein distance counts the minimum single-character insertions, deletions, and substitutions between strings (Damerau-Levenshtein adds adjacent transposition, the most common real typo — `teh` -> `the` is distance 1). Roughly 80% of real misspellings are within edit distance 1 and ~98% within distance 2, so candidate generation stops at distance 2. The naive approach — scan the dictionary computing distance to every word — is far too slow, so real systems precompute: either generate all deletion-variants of dictionary words offline and look up deletion-variants of the query term at runtime (the SymSpell approach, turning correction into a handful of hash lookups), or walk a trie of the dictionary with a banded dynamic-programming row, pruning subtrees whose prefix distance already exceeds 2. Candidates are then ranked with the noisy-channel model P(correction) x P(typo|correction): the language model P(correction) comes from query-log frequencies, and the error model knows that keyboard-adjacent substitutions (m->n) and phonetic confusions are likelier than random ones. Key insight: context decides the final answer — `pizzza near me` autocorrects silently (high confidence, no valid alternative), but `sarah conner` only shows a 'did you mean' suggestion because the typed form might be a real name; the confidence threshold for silent correction is tuned on click-through data.",
   ],
   code: [
     {
@@ -295,23 +307,56 @@ private:
       title: "Search Engine High-Level Architecture",
       kind: "architecture",
       caption:
-        "End-to-end flow from web crawling through indexing and serving, showing the major subsystems and data stores.",
-      mermaid: `graph LR
-    Crawler["Web Crawler"] --> Store["Document Store"]
-    Store --> Indexer["Indexer - MapReduce"]
-    Indexer --> InvIndex["Inverted Index Shards"]
-    Indexer --> LinkGraph["Link Graph"]
-    LinkGraph --> PR["PageRank Compute"]
-    PR --> RankDB["Rank Store"]
-    User["User Query"] --> FE["Frontend / API"]
-    FE --> QP["Query Processor"]
-    QP --> Scatter["Scatter to Shards"]
-    Scatter --> InvIndex
-    InvIndex --> Gather["Gather + Merge"]
-    RankDB --> Gather
-    Gather --> Rerank["Re-Ranker ML Model"]
-    Rerank --> Snippet["Snippet Generator"]
-    Snippet --> FE`,
+        "Layered architecture: the offline crawl-process-index pipeline flows top to bottom, and the online query path enters the serving layer, checks the result cache, and fans out to the same index shards on a miss. The online query path is numbered 1-7; the offline crawl/index pipeline is numbered C1-C9.",
+      mermaid: `graph TB
+    subgraph CRAWL["Crawling Layer"]
+        FRONTIER["URL Frontier<br/>priority + per-host politeness"]
+        FETCHERS["Fetcher Fleet<br/>DNS cache, robots.txt"]
+        CDEDUP["Content Dedup<br/>content hash / simhash"]
+        FRONTIER -->|"C1. dispatch URLs"| FETCHERS
+        FETCHERS -->|"C2. fetched pages"| CDEDUP
+    end
+    subgraph PROC["Processing Layer"]
+        PARSER["Parser<br/>HTML strip + tokenize"]
+        LINKEX["Link Extractor"]
+        PRJOBS["PageRank Computation<br/>iterative batch jobs"]
+        CDEDUP -->|"C3. unique content"| PARSER
+        PARSER -->|"C4. extract links"| LINKEX
+        LINKEX -->|"C5. link graph"| PRJOBS
+    end
+    subgraph IDX["Indexing Layer"]
+        BUILDER["Inverted Index Builder<br/>delta + varint compression"]
+        DOCSTORE["Document Store<br/>raw text for snippets"]
+        SHARD1["Index Shard 1"]
+        SHARDN["Index Shard N"]
+        PARSER -->|"C6. store raw text"| DOCSTORE
+        PARSER -->|"C7. tokens"| BUILDER
+        BUILDER -->|"C8. publish index"| SHARD1
+        BUILDER -->|"C8. publish index"| SHARDN
+        PRJOBS -->|"C9. merge scores"| SHARD1
+        PRJOBS -->|"C9. merge scores"| SHARDN
+    end
+    subgraph SERVE["Serving Layer"]
+        QSVC["Query Service"]
+        QPARSE["Query Parsing +<br/>Spell Correction"]
+        SCORING["Per-Shard Scoring<br/>BM25 + PageRank"]
+        AGGREG["Aggregator +<br/>ML Re-ranker"]
+    end
+    subgraph CACHE["Cache Layer"]
+        QCACHE["Query Result Cache<br/>90 percent hit rate"]
+    end
+    LINKEX -.->|"new URLs"| FRONTIER
+    USER["User"] -->|"1. search query"| QSVC
+    QSVC -->|"2. check cache"| QCACHE
+    QCACHE -->|"3. miss"| QPARSE
+    QPARSE -->|"4. fan-out"| SHARD1
+    QPARSE -->|"4. fan-out"| SHARDN
+    SHARD1 -->|"5. matching postings"| SCORING
+    SHARDN -->|"5. matching postings"| SCORING
+    SCORING -->|"6. per-shard top-k"| AGGREG
+    DOCSTORE -.->|"snippets"| AGGREG
+    AGGREG -->|"7. ranked results"| QSVC
+    AGGREG -.->|"fill"| QCACHE`,
     },
     {
       title: "Query Processing Sequence",
@@ -508,6 +553,23 @@ private:
         "What happens to ranking quality when a page has no PageRank because it was just discovered?",
       ],
     },
+    {
+      q: "Would you shard the inverted index by document or by term? Defend your choice.",
+      a: "Shard by document. In doc-sharding, each shard holds a complete inverted index over a slice of the corpus; a query fans out to all shards, each intersects and scores its local postings entirely in-memory, and returns only its top-k (a few KB) to the aggregator. In term-sharding, each shard owns the full posting lists for a slice of the vocabulary, so a query touches only the shards owning its terms — which sounds cheaper, but breaks down in three ways. First, multi-term queries require intersecting posting lists that live on different machines, forcing you to ship millions of docIDs across the network before any scoring can happen; doc-sharding keeps intersection local. Second, term popularity follows a power law, so the shard owning a hot head term becomes a permanent hotspot while rare-term shards idle; doc-sharding spreads every query uniformly. Third, indexing a new document touches exactly one doc-shard but potentially hundreds of term-shards. The cost of doc-sharding — every query hits every shard — is mitigated by the result cache (absorbing ~90% of queries before fan-out) and per-shard deadlines in the aggregator. This is why Google, Elasticsearch, Solr, and Vespa all doc-shard.",
+      followUps: [
+        "At what corpus size or query pattern might term-sharding actually win?",
+        "How does the choice interact with the result cache and tail latency?",
+        "How would you rebalance doc-shards when adding machines?",
+      ],
+    },
+    {
+      q: "Do the capacity estimation for a search engine over 1 billion pages serving 50K QPS at peak.",
+      a: "Storage: 1B pages x 100KB average = 100TB of raw HTML; with 3x replication, 300TB in the document store. The inverted index compresses to roughly 30% of the text corpus, so ~30TB of index. If each shard machine serves ~64GB of hot index from memory, that is 30TB / 64GB ≈ 470 shards — call it 500 with headroom, times 3 replicas = 1,500 index-serving machines. Query load: 50K QPS peak with a 90% result-cache hit rate means only 5K QPS reach the index tier; since doc-partitioned queries fan out to every shard, each shard also sees ~5K QPS (2.5M shard-requests/s aggregate), which is why the cache hit rate is the most sensitive number in the design — dropping to 80% doubles load on every shard at once. Crawl: refreshing 1B pages monthly requires 1B / 2.6M seconds ≈ 385 pages/s sustained, or ~38.5 MB/s (~300 Mbps) of ingest bandwidth — modest network-wise, but at 1 req/s per host politeness, you need wide domain diversity in the frontier to sustain it. Always state assumptions (page size, cache hit rate, per-machine memory) before the arithmetic; interviewers grade the reasoning, not the exact totals.",
+      followUps: [
+        "How do these numbers change at 10B pages or if average page size doubles?",
+        "Where would you spend money first: more cache, more replicas, or more shards?",
+      ],
+    },
   ],
   mcqs: [
     {
@@ -592,6 +654,26 @@ private:
       front: "What is the noisy-channel model for spell correction?",
       back: "It models a typo as: user intended query Q, which passed through a noisy channel producing the observed misspelling M. The correction maximizes P(Q|M) = P(M|Q) * P(Q), where P(M|Q) is the error model (probability of the specific typo given edit operations) and P(Q) is the language model (probability of the candidate being a real query). Candidates are generated within edit distance 1-2.",
     },
+    {
+      front: "What are skip pointers in a posting list?",
+      back: "Forward pointers stored every sqrt(n) entries (or at compressed block boundaries) that record the docID at the jump target. During intersection of a short list with a long one, the merge skips whole blocks of the long list whose maximum docID is below the current candidate, turning a linear scan into near-logarithmic hops. They must align with compression block boundaries because you cannot decode into the middle of a delta-encoded stream.",
+    },
+    {
+      front: "How does delta + varint encoding compress a posting list?",
+      back: "Because postings are sorted by docID, you store gaps between consecutive IDs instead of absolute values: [1000, 1003, 1010] becomes [1000, 3, 7]. Varint then encodes each gap in as few bytes as possible (7 payload bits + 1 continuation bit per byte), so a gap of 3 takes one byte instead of 4-8. Common terms have small average gaps, so their long lists compress best — typically 4-8x overall.",
+    },
+    {
+      front: "What is simhash and why do crawlers use it?",
+      back: "A locality-sensitive fingerprint where similar documents produce fingerprints with small Hamming distance. Crawlers compute a simhash of each fetched page and skip pages within ~3 bits of an existing fingerprint, catching near-duplicates (mirrors, boilerplate reprints) that exact content hashing misses. Exact hashes catch identical bodies; simhash catches the near-identical ones.",
+    },
+    {
+      front: "What are freshness tiers in a search index?",
+      back: "Pages are split by change rate into a real-time tier (crawled within minutes, served from a small in-memory index — news, trending topics), a daily tier (re-crawled every 1-2 days, incremental index), and a stable tier (every 30-90 days, big batch index). Per-page change rates are learned by comparing content hashes across fetches. Results from all tiers are merged at query time.",
+    },
+    {
+      front: "Key capacity numbers for 1B pages at 50K QPS?",
+      back: "Raw HTML: 1B x 100KB = 100TB (300TB at 3x replication). Inverted index: ~30% of corpus = 30TB, so ~500 shards at 64GB hot index each. Query load: 90% cache hit leaves 5K QPS hitting the index; full fan-out means each shard also sees ~5K QPS. Crawl: monthly refresh of 1B pages = ~385 pages/s ≈ 38.5 MB/s sustained ingest.",
+    },
   ],
   exercises: [
     "Design a URL frontier for a distributed crawler that handles 1 billion URLs. Specify the data structure, sharding strategy, priority scheme (important pages first), and politeness enforcement. Estimate the memory and storage requirements.",
@@ -611,6 +693,11 @@ private:
     "Spell correction: noisy-channel model maximizes P(M|Q) * P(Q). Generate candidates within edit distance 2. Score using language model from query logs. Auto-correct if confidence > threshold, else show 'Did you mean...'.",
     "Fault tolerance: 3 replicas per shard in different failure domains. Aggregator enforces 50ms deadline; proceeds without slow shards. Hedged requests to reduce p99 latency. Geographic replication for <20ms user RTT.",
     "Result caching: top 20% of queries = 60% of traffic. LRU cache at aggregator absorbs repeated queries. Posting list cache in shard memory for hot terms. Snippet cache avoids re-reading document store.",
+    "Capacity math to recite: 1B pages x 100KB = 100TB raw (300TB at 3x replication); index ≈ 30% of corpus = 30TB ≈ 500 shards at 64GB each; 50K QPS x 10% cache miss = 5K QPS per shard after full fan-out; monthly refresh of 1B pages = 385 pages/s ≈ 38.5 MB/s ingest.",
+    "Doc-sharding beats term-sharding because: intersection stays local (no shipping posting lists over the network), load spreads evenly (term popularity is power-law skewed), and a new doc touches one shard instead of hundreds. Cost: every query fans out to all shards — absorbed by the result cache and per-shard deadlines.",
+    "Posting list encoding: sort by docID, store gaps (delta encoding), compress gaps with varint (7 payload bits + 1 continuation bit per byte). Skip pointers every sqrt(n) entries let intersection leap over blocks. Compress in fixed blocks (128 postings) so skips land on block boundaries.",
+    "Freshness tiers: real-time tier (minutes, in-memory index, news), daily tier (1-2 days, incremental), stable tier (30-90 days, batch index). Per-page change rate learned from content-hash comparison drives tier assignment. Query-time merge unifies tiers.",
+    "Typo tolerance: Damerau-Levenshtein distance, candidates within distance 2 (covers ~98% of typos). Precompute deletion variants (SymSpell) or banded DP over a trie — never scan the dictionary. Rank via noisy channel P(correction) x P(typo|correction); silent autocorrect only above a confidence threshold.",
   ],
   cheatSheet: [
     "Inverted Index: term -> sorted list of (docID, TF, positions). Core data structure. Enables sub-second lookup over billions of docs.",
@@ -623,6 +710,11 @@ private:
     "Autocomplete: trie of query logs, prefix lookup, top-k by frequency. Precompute top-k at each node. Sub-50ms latency.",
     "Caching layers: result cache (LRU at aggregator), postings cache (in-memory on shard), snippet cache. Hit rate follows power law.",
     "Scale numbers: 50B pages crawled, 20-40TB index, 100K+ QPS, <200ms end-to-end latency, thousands of index shards, 3x replication.",
+    "Capacity math: 1B pages x 100KB = 100TB raw; index ≈ 30% = 30TB ≈ 500 shards; 50K QPS x 10% miss = 5K QPS/shard after fan-out; monthly refresh = 385 pages/s ≈ 38.5 MB/s.",
+    "Sharding: shard by DOCUMENT, not term — local intersection, even load, single-shard writes. Term-sharding hotspots on head terms and ships posting lists over the network.",
+    "Freshness tiers: real-time (minutes, in-memory) / daily (incremental) / stable (30-90 day batch). Change rate learned per page from content hashes; results merged at query time.",
+    "Dedup: URL-level via Bloom filter; content-level via exact hash + simhash (Hamming distance <= 3 bits = near-duplicate, skip).",
+    "Typo tolerance: candidates within edit distance 2, generated via precomputed deletion variants; ranked by noisy channel; autocorrect silently only above confidence threshold.",
   ],
   glossary: [
     {
@@ -668,10 +760,13 @@ private:
     "How would you design a search engine for a specific vertical (e.g., e-commerce product search) vs. general web search?",
     "What changes would you make to support voice queries and conversational search?",
     "How would you detect and handle SEO spam, link farms, and adversarial content?",
+    "How would you add semantic (embedding-based) retrieval alongside the inverted index, and when should each path win?",
+    "How would you design multi-language search — per-language indices, analyzers, and cross-language ranking?",
+    "How would you A/B test a ranking change safely at 50K QPS without degrading the user experience?",
   ],
   resources: [
     {
-      label: "Introduction to Information Retrieval - Manning, Raghavan, Schutze",
+      label: "Introduction to Information Retrieval - Manning, Raghavan, Schutze", url: "https://nlp.stanford.edu/IR-book/",
       kind: "book",
       note: "The definitive textbook covering inverted indices, scoring, evaluation, and web search. Freely available online from Stanford.",
     },
@@ -681,12 +776,12 @@ private:
       note: "The original Google paper describing PageRank, the crawler, and the index architecture. Essential reading for search engine design.",
     },
     {
-      label: "Apache Lucene / Elasticsearch Documentation",
+      label: "Apache Lucene / Elasticsearch Documentation", url: "https://www.elastic.co/guide/index.html",
       kind: "docs",
       note: "Production-grade inverted index and search library. Study its segment-based architecture, BM25 implementation, and near-real-time indexing for practical search system design.",
     },
     {
-      label: "Designing Data-Intensive Applications - Martin Kleppmann, Chapter 3",
+      label: "Designing Data-Intensive Applications - Martin Kleppmann, Chapter 3", url: "https://dataintensive.net/",
       kind: "book",
       note: "Covers storage engines, indexing structures (B-trees, LSM-trees, SSTables), and how they relate to search index construction and serving.",
     },

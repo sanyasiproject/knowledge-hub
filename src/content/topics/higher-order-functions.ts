@@ -605,11 +605,11 @@ safeComputation = (\\x -> safeDivide 100 x) >=> (\\y -> safeDivide y 2)`
     "Implement a `pipe` function in C++ (C++17 or later) that composes N unary functions left-to-right using **fold expressions**. Demonstrate it with a pipeline that takes a `std::string`, converts to lowercase, removes non-alphanumeric characters, and reverses the result. Compare the readability and performance to an equivalent imperative loop.",
   ],
   resources: [
-    { label: "MDN - Array.prototype.reduce()", kind: "docs", note: "Definitive reference for JavaScript's reduce with examples and edge cases" },
-    { label: "Professor Frisby's Mostly Adequate Guide to Functional Programming", kind: "book", note: "Free online book covering HOFs, composition, functors, and monads in JavaScript" },
-    { label: "Learn You a Haskell for Great Good!", kind: "book", note: "Gentle introduction to Haskell covering currying, HOFs, and type classes" },
+    { label: "MDN - Array.prototype.reduce()", url: "https://developer.mozilla.org/", kind: "docs", note: "Definitive reference for JavaScript's reduce with examples and edge cases" },
+    { label: "Professor Frisby's Mostly Adequate Guide to Functional Programming", url: "https://mostly-adequate.gitbook.io/mostly-adequate-guide", kind: "book", note: "Free online book covering HOFs, composition, functors, and monads in JavaScript" },
+    { label: "Learn You a Haskell for Great Good!", url: "https://learnyouahaskell.com/", kind: "book", note: "Gentle introduction to Haskell covering currying, HOFs, and type classes" },
     { label: "Composing Software by Eric Elliott", kind: "article", note: "Blog series on function composition, transducers, and functional patterns in JavaScript" },
-    { label: "Rich Hickey - Transducers (Strange Loop 2014)", kind: "video", note: "Original talk introducing transducers and the rationale behind composable algorithmic transformations" }
+    { label: "Rich Hickey - Transducers (Strange Loop 2014)", url: "https://www.youtube.com/watch?v=6mTbuzafcII", kind: "video", note: "Original talk introducing transducers and the rationale behind composable algorithmic transformations" }
   ],
 
   glossary: [

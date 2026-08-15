@@ -467,15 +467,15 @@ ready to send over TCP"]
     "SNI (Server Name Indication): client sends hostname in ClientHello (plaintext in TLS 1.2/1.3; ECH encrypts it)",
   ],
   resources: [
-    { label: "RFC 8446 — TLS 1.3", kind: "docs", note: "The definitive specification for TLS 1.3. Dense but authoritative — read sections 2 (overview) and 4 (handshake protocol) first." },
+    { label: "RFC 8446 — TLS 1.3", url: "https://www.rfc-editor.org/rfc/rfc8446", kind: "docs", note: "The definitive specification for TLS 1.3. Dense but authoritative — read sections 2 (overview) and 4 (handshake protocol) first." },
     { label: "Bulletproof TLS and PKI by Ivan Ristic", kind: "book", note: "Comprehensive guide to deploying TLS correctly. Covers cipher suite selection, certificate management, and common pitfalls." },
     { label: "The Illustrated TLS 1.3 Connection", kind: "article", note: "Interactive, byte-by-byte walkthrough of a TLS 1.3 handshake at tls13.xargs.org. Excellent for visual learners." },
     { label: "The Illustrated TLS 1.2 Connection", kind: "article", note: "Companion to the TLS 1.3 version at tls.ulfheim.net. Useful for understanding the differences between 1.2 and 1.3." },
     { label: "Qualys SSL Labs — SSL Server Test", kind: "docs", note: "Free online tool that grades a server's TLS configuration. Tests protocol versions, cipher suites, certificate chain, and known vulnerabilities." },
     { label: "Mozilla Server Side TLS Guidelines", kind: "docs", note: "Regularly updated recommended TLS configurations (Modern, Intermediate, Old) with ready-to-use configs for nginx, Apache, HAProxy." },
     { label: "Certificate Transparency — How CT Works", kind: "article", note: "Google's explainer on Certificate Transparency: why it exists, how logs work, and how monitors detect mis-issuance." },
-    { label: "Cloudflare Learning Center — TLS", kind: "article", note: "Accessible articles covering TLS fundamentals, handshake mechanics, and HTTPS. Good starting point for beginners." },
-    { label: "HKDF paper (RFC 5869)", kind: "paper", note: "The key derivation function used in TLS 1.3 for deriving handshake and application traffic keys from the shared secret." },
+    { label: "Cloudflare Learning Center — TLS", url: "https://www.cloudflare.com/learning/", kind: "article", note: "Accessible articles covering TLS fundamentals, handshake mechanics, and HTTPS. Good starting point for beginners." },
+    { label: "HKDF paper (RFC 5869)", url: "https://www.rfc-editor.org/rfc/rfc5869", kind: "paper", note: "The key derivation function used in TLS 1.3 for deriving handshake and application traffic keys from the shared secret." },
   ],
   glossary: [
     { term: "TLS (Transport Layer Security)", definition: "A cryptographic protocol that secures communication over a network by providing encryption, integrity, and authentication. Successor to SSL." },

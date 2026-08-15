@@ -155,11 +155,11 @@ HLC provides: causal ordering (like Lamport clocks), closeness to real time (phy
   ],
   resources: [
     {
-      label: "Time, Clocks, and the Ordering of Events — Leslie Lamport, 1978",
+      label: "Time, Clocks, and the Ordering of Events — Leslie Lamport, 1978", url: "https://lamport.azurewebsites.net/pubs/time-clocks.pdf",
       kind: "paper",
     },
     {
-      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      label: "Designing Data-Intensive Applications — Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
     },
   ],

@@ -13,7 +13,23 @@ export const designGoogleDocs: TopicContent = {
 
 A collaborative document editor must solve four problems simultaneously: (1) extremely low-latency local editing -- the user must never wait for the server before seeing their own keystrokes; (2) convergence -- all clients must reach the same document state; (3) intent preservation -- if Alice inserts at position 5 while Bob deletes position 3, Alice's character should appear at the correct shifted position; (4) scalability -- the system must support millions of documents with dozens of concurrent editors each.
 
-The architecture follows a client-server model. Each client maintains a local copy of the document and applies operations optimistically. Operations are sent to a central collaboration server over a persistent WebSocket connection. The server serializes operations into a total order, transforms them as needed, and broadcasts the transformed operations to all other clients. A separate storage layer persists snapshots and revision deltas to a distributed database (Google uses Colossus/Bigtable internally; an external design would use something like Cloud Spanner or DynamoDB).`,
+The architecture follows a client-server model. Each client maintains a local copy of the document and applies operations optimistically. Operations are sent to a central collaboration server over a persistent WebSocket connection. The server serializes operations into a total order, transforms them as needed, and broadcasts the transformed operations to all other clients. A separate storage layer persists snapshots and revision deltas to a distributed database (Google uses Colossus/Bigtable internally; an external design would use something like Cloud Spanner or DynamoDB).
+
+Key insight: every document is sharded to exactly one authoritative session server at a time. That single server owns the op sequencer and transform engine for the document, which makes convergence trivial to reason about -- there is one total order per document, established in one place.`,
+
+    `## Capacity Estimation
+
+Back-of-envelope math grounds the design and shows why per-document single-writer sequencing scales.
+
+**Write throughput.** Assume 10M concurrent active editors worldwide, each producing ~1 operation/second while typing (keystrokes are batched into ops). That is 10M ops/s globally. Each op is ~100 bytes (component list, base revision, author, doc ID), so op-log ingest is 10M x 100 B = 1 GB/s, or roughly 86 TB/day of raw operation log across the fleet.
+
+**Log growth and compaction.** Raw logs are compacted aggressively: a snapshot is taken every N ops (say N = 1,000). A 100 KB document snapshot every 1,000 ops replaces ~100 KB of log with one snapshot plus a short tail, and old deltas beyond the history-retention window are merged. Effective retained storage is closer to a few TB/day after compaction and compression.
+
+**Why one server per document works.** A document rarely has more than ~50 simultaneous collaborators. At 50 editors x 1 op/s, a single document sees at most ~50 ops/s -- trivial for a single-threaded sequencer that does an O(pending) transform and one log append per op. The load problem is horizontal, not vertical: with an average of ~2 editors per active document, 10M editors means ~5M active documents producing ~10M ops/s in aggregate. If one session server sustains ~10K ops/s, it can own ~5,000 active documents, so the fleet needs on the order of 1,000 session servers -- sharded by document ID via consistent hashing, with a directory service mapping docId to its current authoritative server.
+
+**Fan-out.** Each accepted op is broadcast to the other collaborators: 10M ops/s x ~1-2 recipients on average = 10-20M messages/s across the WebSocket gateway tier -- this is why presence and broadcast go through a pub/sub fan-out layer rather than the sequencer itself.
+
+Common mistake: candidates try to make the OT engine itself distributed or multi-leader per document. That reintroduces the notoriously hard TP2 correctness problem. Scale across documents (millions of independent shards), never within one document.`,
 
     `## Operational Transformation (OT)
 
@@ -49,6 +65,18 @@ Version history is presented as a timeline of named revisions. Each revision rec
 Access control uses a capabilities-based model: each document has an ACL listing viewers, commenters, and editors. The collaboration server checks permissions on every incoming operation. Link-sharing generates a capability token embedded in the URL. For enterprise deployments, the ACL integrates with an organization's identity provider (SAML/OIDC), and audit logs track all access and edits for compliance.`,
   ],
   deepDive: [
+    `## Transform Intuition: A Concrete Two-User Example
+
+The transform function exists to answer one question: "this operation was created against an older document -- where should it land now?" Walk through the canonical two-user insert case.
+
+Both Alice and Bob start from the document "CAT" at revision 5. Alice types 'H' at position 1, intending "CHAT". Concurrently, Bob types 'S' at position 3, intending "CATS". Both apply locally and optimistically: Alice sees "CHAT", Bob sees "CATS".
+
+Alice's op reaches the server first and becomes revision 6; the document is now "CHAT". Bob's Insert(3, 'S') then arrives, stamped base=5 -- it was created before Bob saw Alice's insert. Applying it verbatim to "CHAT" would produce "CHAST": Bob's 'S' lands inside the word instead of at the end, silently corrupting his intent. So the server transforms: Alice inserted at position 1, which is at or before Bob's position 3, so every position at or after 1 shifted right by one. Bob's op becomes Insert(4, 'S'), the document becomes "CHATS", and the transformed op is broadcast. Alice's client applies Insert(4, 'S') to its "CHAT" and also gets "CHATS". Bob's client receives Alice's Insert(1, 'H') and transforms it against his own pending op (no shift needed since 1 < 3), turning his "CATS" into "CHATS".
+
+Key insight: transformation is symmetric bookkeeping about position shifts. An insert before your position pushes you right; a delete before your position pulls you left; everything after your position is irrelevant. All of OT's apparent complexity is making this bookkeeping exhaustive (every op-type pair) and consistent (same answer no matter which side transforms).
+
+Common mistake: forgetting the tie-break when two users insert at the exact same position. Without a deterministic rule (e.g., lower client ID takes the earlier slot), Alice's client and Bob's client can order the two characters differently and permanently diverge while both believe they are in sync.`,
+
     `## OT Transform Functions in Detail
 
 The correctness of OT hinges on the transform function satisfying **Transformation Property 1 (TP1)**: for any two concurrent operations a and b on the same document state, applying a then T(b, a) must produce the same state as applying b then T(a, b). For the insert/delete model:
@@ -82,6 +110,42 @@ Offline editing introduces unbounded divergence: a user may edit for hours witho
 For OT-based systems, the reconnection protocol works as follows: (1) the client sends its last known server revision number and its queue of local operations; (2) the server identifies all operations that occurred since that revision; (3) the server transforms the client's queued operations against the server's operations (in order); (4) the server applies the transformed client operations and broadcasts them; (5) the client receives any operations it missed and transforms them against its local state. If the divergence is too large (thousands of operations), the server may instead send the latest snapshot and ask the client to diff its local state against it.
 
 CRDT-based systems handle offline editing more gracefully because operations are designed to merge associatively and commutatively. The client simply sends its accumulated operations on reconnect, and every replica merges them without a central transformation step. However, the trade-off is that the merged result may contain surprises (e.g., two users independently rewrote the same paragraph, and the CRDT interleaves their characters). Most CRDT systems detect such large-scale conflicts and present them to the user for manual resolution rather than attempting automatic merging.`,
+
+    `## OT vs CRDT: An Honest Comparison
+
+Neither approach dominates; each is the right answer to a different deployment question. Be suspicious of any framing where one is simply "better".
+
+**Why Google Docs uses OT with a central server.** Docs already requires a server for persistence, permissions, search indexing, and export -- so "no central server" buys nothing. Given a server, centralized OT (Jupiter) only needs TP1, operations stay tiny (position + content, ~100 bytes), the document in memory is just the text plus formatting spans with zero per-character metadata, and rich-text semantics (bold ranges, lists, tables, suggestions) map cleanly onto the retain/insert/delete component model. The server is also the natural enforcement point for permissions and the natural producer of an ordered revision log for history.
+
+**When CRDTs win.** CRDTs earn their overhead when there is no reliable central sequencer: true peer-to-peer sync, end-to-end-encrypted documents where the server must not read content, local-first apps that must merge weeks of offline edits, and multi-device sync without coordination. They also decouple availability from any single server -- a CRDT replica can always accept writes.
+
+**The honest costs.** CRDT text carries per-character (or per-run) unique IDs plus tombstones; a heavily edited document can hold several times its visible size in metadata, and tombstone garbage collection is only safe once every replica has observed the deletion -- hard when replicas can stay offline indefinitely. Yjs-style block encoding makes the overhead practical, not free. On the OT side, the costs are the mandatory server, the difficulty of proving transform functions correct for every op-type pair (many published OT algorithms were later shown buggy), and long-offline rebases that grow linearly with divergence.
+
+In practice: modern systems blur the line. Figma runs CRDT-style merge rules through a central server anyway (for permissions and ordering); several editors ship OT online with a CRDT-like local queue for offline. Choose OT when you have a server and rich text; choose CRDTs when offline/P2P/E2EE is a product requirement, and budget for the metadata.`,
+
+    `## Permission Enforcement at the Operation Level
+
+Access control in a collaborative editor cannot stop at "can this user open the document" -- it must be enforced on every operation, at the single authoritative session server, because that is the only chokepoint every mutation passes through.
+
+When a client connects, the gateway authenticates the session and the doc session server loads the document's ACL (owner, editors, commenters, viewers) into memory, subscribing to ACL-change events. Each incoming op is checked against the cached role: viewers' ops are rejected outright; commenters may only produce comment-service mutations, never document ops; editors pass. The check is a map lookup, so per-op enforcement costs nanoseconds -- there is no excuse to skip it.
+
+The interesting case is a mid-session downgrade: an editor is demoted to viewer while ops are in flight. The permissions service publishes the change; the session server updates its cache and rejects the in-flight ops with a permission error carrying the current revision. The client must then roll back its optimistic local applications -- this is why clients keep unacknowledged ops in a buffer with enough information to invert them. There is an unavoidable race window of one propagation delay; the invariant that matters is that nothing enters the canonical op log after the server has observed the revocation, because the log is the document.
+
+Warning: never enforce permissions only at the gateway or client. The gateway is a connection router that should stay ACL-free, and the client is untrusted by definition. The op log must record the authenticated author of every op anyway (for history and audit), so the session server already has everything it needs to authorize.
+
+Real-world example: Google Docs additionally scopes link-sharing with capability tokens and, for Workspace enterprise tenants, mirrors every accepted op's metadata into audit logs -- op-level enforcement is what makes "who changed this and were they allowed to" answerable.`,
+
+    `## Cold Start: Loading a Document from Snapshot Plus Replay Tail
+
+When the first client opens a cold document, no session server owns it yet. The directory service assigns one (consistent hashing on docId), and that server must materialize the in-memory document before accepting ops.
+
+The load path is: (1) fetch document metadata and ACL; (2) fetch the latest snapshot, which records the full document content and the revision number it represents, say revision 41,000; (3) read the op log tail -- every op after 41,000, at most N ops if snapshots are taken every N ops -- and replay it in order to reach the head revision; (4) start accepting client connections and ops. With N = 1,000 ops of ~100 bytes and a ~100 KB snapshot, the whole load is a few hundred KB and low single-digit milliseconds of replay -- fast enough that users never perceive cold start.
+
+Key insight: the snapshot interval N is precisely the knob that trades write amplification against cold-start latency. Small N means frequent snapshot writes but a tiny replay tail; large N means cheap steady-state writes but slow, memory-hungry cold starts. N in the hundreds-to-thousands range keeps both costs negligible for text documents.
+
+The same machinery serves three other features for free. Version history reconstructs any revision by loading the nearest earlier snapshot and replaying forward to the target. Failover is just a cold start on a new server: because every accepted op was durably appended to the log before being ACKed, the replacement server replays to the exact head revision and clients resubmit any unACKed ops. And compaction runs in the background, writing fresh snapshots and letting old log segments (beyond the history retention policy) be archived to cheaper storage.
+
+Common mistake: ACKing an op to the client before the log append is durable. If the session server then crashes, the replacement replays a log that is missing an op the client believes was accepted -- the client and server permanently disagree on revision numbers. Durability before acknowledgment is non-negotiable; the in-memory document is a cache, the log is the truth.`,
   ],
   code: [
     {
@@ -426,35 +490,62 @@ public:
     {
       title: "High-Level Architecture",
       kind: "architecture",
-      caption: "Core components of a collaborative document editing system",
+      caption:
+        "Layered architecture: every edit flows client -> gateway -> the document's single authoritative session server (transform + sequence) -> broadcast to other clients and append to the op log",
       mermaid: `graph TB
-    Client1[Client A<br/>Local Doc Copy]
-    Client2[Client B<br/>Local Doc Copy]
-    Client3[Client C<br/>Local Doc Copy]
+    subgraph ClientsLayer["Clients"]
+        CA["Editor A<br/>local op buffer<br/>optimistic apply"]
+        CB["Editor B<br/>local op buffer<br/>optimistic apply"]
+        CC["Editor C<br/>local op buffer<br/>optimistic apply"]
+    end
 
-    WS[WebSocket Gateway<br/>Connection Management]
-    CS[Collaboration Server<br/>OT Engine]
-    PS[Presence Service<br/>Cursor & Selection]
+    subgraph GatewayLayer["Gateway"]
+        LB["Load Balancer"]
+        WSG["WebSocket Gateway<br/>sticky connections<br/>routes by docId"]
+    end
 
-    RS[Revision Store<br/>Deltas & Snapshots]
-    DS[Document Store<br/>Metadata & ACLs]
-    Cache[Cache Layer<br/>Hot Documents]
+    subgraph CoreLayer["Collaboration Core"]
+        DSS["Doc Session Service<br/>each doc sharded to ONE<br/>authoritative server"]
+        OTE["OT Transform Engine<br/>transform vs concurrent ops"]
+        SEQ["Op Sequencer<br/>assigns revision numbers"]
+    end
 
-    Client1 <-->|WebSocket| WS
-    Client2 <-->|WebSocket| WS
-    Client3 <-->|WebSocket| WS
+    subgraph PersistLayer["Persistence"]
+        OPLOG["Op Log Store<br/>append-only revisions"]
+        SNAP["Snapshot Store<br/>periodic compaction"]
+        META["Document Metadata DB<br/>title, owner, sharing"]
+    end
 
-    WS <--> CS
-    WS <--> PS
+    subgraph PresenceLayer["Presence"]
+        PRS["Presence Service<br/>cursors, selections,<br/>who is online"]
+        PUBSUB["Pub/Sub Fanout"]
+    end
 
-    CS <--> RS
-    CS <--> Cache
-    DS <--> Cache
+    subgraph SupportLayer["Supporting Services"]
+        ACL["Permissions / ACL Service<br/>checked per operation"]
+        CMT["Comments Service<br/>anchored to doc ranges"]
+        OFF["Offline Sync and<br/>Export Pipeline"]
+    end
 
-    subgraph Storage
-        RS
-        DS
-    end`,
+    CA -->|"1 - edit op + base revision"| LB
+    CB <--> LB
+    CC <--> LB
+    LB <--> WSG
+    WSG -->|"2 - route to doc session"| DSS
+    DSS --> OTE
+    OTE --> SEQ
+    SEQ -->|"3 - append canonical op"| OPLOG
+    OPLOG -.->|"every N ops"| SNAP
+    SEQ -->|"4 - ACK + broadcast"| WSG
+    WSG -->|"5 - transformed op"| CB
+    WSG -->|"5 - transformed op"| CC
+    DSS -->|"authorize each op"| ACL
+    DSS --> META
+    WSG <--> PRS
+    PRS <--> PUBSUB
+    DSS --> CMT
+    OFF --> OPLOG
+    OFF --> SNAP`,
     },
     {
       title: "OT Client State Machine",
@@ -555,6 +646,22 @@ public:
       q: "How do presence indicators (cursors, selections) work without polluting the document revision history?",
       a: "Presence state is treated as ephemeral data, separate from the durable document model. Each client periodically broadcasts its cursor position and selection range over the WebSocket channel as lightweight messages (e.g., {userId, cursorPos, selectionStart, selectionEnd, color}). These messages are forwarded to other clients but never persisted to the revision store. When a remote document operation arrives, each client locally transforms all known cursor positions using the same OT transform logic applied to the document. This keeps cursors in sync with the document state. Presence messages are sent at a throttled rate (e.g., 10Hz) to avoid flooding the network. When a user disconnects, the server broadcasts a 'leave' event so other clients can remove that user's cursor.",
     },
+    {
+      q: "Isn't routing every edit of a document through a single server a scalability bottleneck? Walk through the numbers.",
+      a: "No, because the bottleneck analysis is per document, and per-document load is tiny. A document rarely has more than ~50 simultaneous collaborators, and an active editor produces roughly 1 operation/second, so the busiest realistic document sees ~50 ops/s -- trivial for one single-threaded sequencer doing a transform and a log append per op. The scale problem is horizontal: 10M concurrent editors at ~2 editors per active document means ~5M independent active documents producing ~10M ops/s in aggregate. You shard documents across session servers with consistent hashing on docId (a directory service maps docId to its current owner); if one server sustains ~10K ops/s it owns ~5,000 active documents, so ~1,000 servers cover the fleet. The single-writer-per-document design is what makes correctness easy (one total order, only TP1 needed) precisely because documents are small independent shards. Making the OT engine itself distributed or multi-leader would reintroduce the TP2 problem for essentially no capacity benefit.",
+      followUps: [
+        "What happens when a session server crashes while owning 5,000 documents?",
+        "How would you handle one pathological document with 10,000 concurrent editors (e.g., a public link goes viral)?",
+      ],
+    },
+    {
+      q: "A client opens a document that no server currently has in memory. What happens, and how do you keep this fast?",
+      a: "The directory service assigns the document to a session server (consistent hashing on docId). That server performs a cold start: load metadata and the ACL, fetch the latest snapshot (full content plus the revision number it represents), then read and replay the op log tail -- all ops after the snapshot revision -- to reach head. Only then does it accept connections and ops. Speed comes from bounding the tail: if a snapshot is taken every N ops (say 1,000), replay is at most 999 ops of ~100 bytes each, so the whole load is a few hundred KB and a few milliseconds. The snapshot interval N is the tuning knob: smaller N means more snapshot-write amplification but faster cold starts. The same snapshot-plus-tail machinery gives you version history (replay to any past revision), crash failover (the replacement server replays the durable log to the exact head, since every op is appended before it is ACKed), and background compaction. The key correctness rule is durability before acknowledgment -- ACKing an op that is not yet in the log means a failover loses an edit the client believes was accepted.",
+      followUps: [
+        "How do you pick the snapshot interval for very large documents (100 MB books)?",
+        "How do clients resynchronize after the failover -- what do they resend?",
+      ],
+    },
   ],
   mcqs: [
     {
@@ -639,6 +746,18 @@ public:
       front: "How is version history stored efficiently?",
       back: "Two-tier storage: periodic full snapshots (every N revisions) plus individual deltas between snapshots. To reconstruct any version: load the nearest prior snapshot, replay deltas forward. Auto-grouping combines nearby edits by the same author (e.g., 30-second windows) into named revisions for the UI timeline.",
     },
+    {
+      front: "Why does routing all edits of one document through a single server scale?",
+      back: "Per-doc load is tiny: rarely >50 collaborators at ~1 op/s each = ~50 ops/s, trivial for one sequencer. Scale is horizontal across ~millions of independent active docs, sharded by docId (consistent hashing + directory service). Single-writer per doc keeps one total order, so only TP1 is needed.",
+    },
+    {
+      front: "What happens on cold start when a document is opened on a fresh session server?",
+      back: "Load metadata + ACL, fetch the latest snapshot (content + its revision number), replay the op-log tail (at most N ops if snapshots are taken every N) to reach head, then accept connections. Same machinery gives version history, crash failover, and compaction. Rule: log append must be durable before the op is ACKed.",
+    },
+    {
+      front: "How are permissions enforced during live editing?",
+      back: "At the authoritative doc session server, per operation: it caches the ACL, checks the author's role on every incoming op, and subscribes to ACL-change events. On mid-session downgrade it rejects in-flight ops; the client rolls back its optimistic edits. Never rely on gateway- or client-side checks alone.",
+    },
   ],
   exercises: [
     "Implement a basic OT server in your language of choice that handles Insert and Delete operations from two clients. Verify convergence by having both clients apply the same concurrent operations in different orders and checking that the final documents match.",
@@ -658,6 +777,10 @@ public:
     "Version history uses snapshot + delta storage. Snapshots taken every N revisions; any version is reconstructed by loading nearest snapshot and replaying deltas forward.",
     "Offline reconnection: client sends buffered ops + last known revision. Server transforms buffered ops against all ops since that revision. For large divergence, server may send a fresh snapshot instead.",
     "Access control: per-document ACL with viewer/commenter/editor roles. Collaboration server checks permissions on every incoming operation. Link-sharing uses capability tokens in URLs.",
+    "Sharding: each document is owned by exactly ONE authoritative session server (consistent hashing on docId + directory service). Correctness is easy because there is one total order per doc; scale comes from millions of independent doc shards.",
+    "Capacity anchors: 10M concurrent editors x ~1 op/s = 10M ops/s; ~100 B/op = ~1 GB/s log ingest (~86 TB/day raw, compacted via snapshots). Max ~50 collaborators/doc = ~50 ops/s/doc -- trivial for one sequencer.",
+    "Cold start = load latest snapshot + replay op-log tail (at most N ops if snapshotting every N). Same machinery powers version history, failover, and compaction. Never ACK an op before its log append is durable.",
+    "Mid-session permission downgrade: session server subscribes to ACL changes, rejects in-flight ops after revocation; client rolls back optimistic edits. Enforce at the session server, never only at gateway or client.",
   ],
   cheatSheet: [
     "OT core: transform(op1, op2) returns op1' adjusted for op2 having been applied first. Must satisfy TP1 for convergence.",
@@ -670,6 +793,11 @@ public:
     "Offline sync (OT): queue ops locally, on reconnect send queue + base revision, server transforms against missed ops.",
     "Offline sync (CRDT): just send accumulated ops -- commutative by design, no server-side transformation needed.",
     "Selective undo: inverse(userOp) transformed against all subsequent ops = correct undo in collaborative context.",
+    "Sharding: docId -> one authoritative session server (consistent hashing + directory). Scale across docs, never within one doc.",
+    "Capacity: 10M editors x 1 op/s x 100 B = 1 GB/s op-log ingest; ~50 ops/s max per doc; ~1,000 session servers at ~10K ops/s each.",
+    "Cold start: snapshot(rev R) + replay ops (R, head]. Snapshot every N ops bounds replay; N trades write amplification vs cold-start latency.",
+    "Durability rule: append op to log BEFORE ACK. In-memory doc is a cache; the op log is the truth.",
+    "Op-level authz: session server caches ACL, checks every op, subscribes to revocation events; rejected in-flight ops trigger client rollback.",
   ],
   glossary: [
     {
@@ -798,6 +926,9 @@ public:
     "How would you design the commenting and suggestion system (like Google Docs comments) on top of the OT/CRDT document model?",
     "How do you handle image and media embedding in a collaborative document, where the payload is large and binary rather than text operations?",
     "How would you add end-to-end encryption to a collaborative document editor while still supporting real-time OT on the server?",
+    "A session server crashes while owning thousands of active documents -- design the failover path and explain what clients must resend to resynchronize.",
+    "One document goes viral with 10,000 concurrent viewers and 500 editors -- how do you keep the single-writer sequencer alive (read-only fanout tiers, edit throttling, follower replicas)?",
+    "How would you choose the snapshot interval N for documents that range from 1 KB notes to 100 MB books, and what breaks if N is uniform?",
   ],
   resources: [
     {
@@ -806,7 +937,7 @@ public:
       note: "Comprehensive overview of OT history, algorithms (dOPT, Jupiter, GOT), and the TP1/TP2 properties with examples.",
     },
     {
-      label: "Designing Data-Intensive Applications -- Martin Kleppmann",
+      label: "Designing Data-Intensive Applications -- Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
       note: "Chapter 9 covers consistency and consensus; Chapter 5 covers replication. Kleppmann also authored Automerge, a prominent CRDT library.",
     },

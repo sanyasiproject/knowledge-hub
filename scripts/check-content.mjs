@@ -50,15 +50,31 @@ build(SRC);
 
 const load = (rel) => import(pathToFileURL(path.join(OUT, rel)).href);
 
-const { allTopics, findTopicBySlug } = await load("data/taxonomy/index.js");
-const { CONTENT } = await load("content/index.js");
-const { AREAS, AREA_MAP } = await load("interview/index.js");
-const { TRACKS } = await load("interview/tracks.js");
-
 const errors = [];
 const warnings = [];
 const err = (m) => errors.push(m);
 const warn = (m) => warnings.push(m);
+
+const { allTopics, findTopicBySlug } = await load("data/taxonomy/index.js");
+const { AREAS, AREA_MAP } = await load("interview/index.js");
+const { TRACKS } = await load("interview/tracks.js");
+const { INTERVIEW_META, TRACK_LINKS } = await load("interview/meta.js");
+
+/*
+ * The app loads content lazily via import.meta.glob (filename = slug), so
+ * there is no static registry to import. Rebuild the same slug → content map
+ * here from the files themselves — each topic file has exactly one export.
+ */
+const CONTENT = {};
+for (const f of fs.readdirSync(path.join(OUT, "content/topics")).sort()) {
+  if (!f.endsWith(".js")) continue;
+  const mod = await load(`content/topics/${f}`);
+  const values = Object.values(mod);
+  if (values.length !== 1) {
+    errors.push(`content/topics/${f} must have exactly one export (has ${values.length})`);
+  }
+  CONTENT[f.replace(/\.js$/, "")] = values[0] ?? {};
+}
 
 /* ---------- taxonomy ↔ content ---------- */
 
@@ -110,6 +126,12 @@ for (const [slug, c] of Object.entries(CONTENT)) {
     if (!d.mermaid) warn(`${slug}: diagrams[${i}] ("${d.title}") has no mermaid source`);
   });
 
+  (c.resources ?? []).forEach((r, i) => {
+    if (r.url && !/^https:\/\/[^\s"]+$/.test(r.url)) {
+      err(`${slug}: resources[${i}] ("${r.label}") has a malformed url: ${r.url}`);
+    }
+  });
+
   for (const section of ["followUps", "resources", "animations"]) {
     if (!c[section] || c[section].length === 0) warn(`${slug}: no ${section}`);
   }
@@ -156,6 +178,27 @@ for (const track of TRACKS) {
   if (Math.abs(sum - track.minutes) > track.minutes * 0.15) {
     warn(`track "${track.slug}": blocks total ${sum} min but budget says ${track.minutes} min`);
   }
+}
+
+/* ---------- home-page interview meta must match the real data ---------- */
+
+{
+  const qaCount = AREAS.reduce((n, a) => n + a.qa.length, 0);
+  const decisionCount = AREAS.reduce((n, a) => n + a.decisions.length, 0);
+  if (INTERVIEW_META.areas !== AREAS.length)
+    err(`interview/meta.ts: areas is ${INTERVIEW_META.areas}, actual ${AREAS.length}`);
+  if (INTERVIEW_META.questions !== qaCount)
+    err(`interview/meta.ts: questions is ${INTERVIEW_META.questions}, actual ${qaCount}`);
+  if (INTERVIEW_META.decisions !== decisionCount)
+    err(`interview/meta.ts: decisions is ${INTERVIEW_META.decisions}, actual ${decisionCount}`);
+  for (const link of TRACK_LINKS) {
+    const track = TRACKS.find((t) => t.slug === link.slug);
+    if (!track) err(`interview/meta.ts: TRACK_LINKS names unknown track "${link.slug}"`);
+    else if (track.title !== link.title || track.icon !== link.icon)
+      err(`interview/meta.ts: TRACK_LINKS entry for "${link.slug}" is out of sync with tracks.ts`);
+  }
+  if (TRACK_LINKS.length !== TRACKS.length)
+    err(`interview/meta.ts: TRACK_LINKS has ${TRACK_LINKS.length} tracks, actual ${TRACKS.length}`);
 }
 
 /* ---------- no browser storage ---------- */

@@ -371,10 +371,10 @@ await server.connect(transport);`,
     "For production: implement health checks, rate limiting, graceful shutdown, structured logging, and horizontal scaling for HTTP transport servers.",
   ],
   resources: [
-    { label: "Model Context Protocol Specification", kind: "docs", note: "The official MCP spec at modelcontextprotocol.io covering protocol messages, transports, capabilities, and lifecycle." },
+    { label: "Model Context Protocol Specification", url: "https://modelcontextprotocol.io/", kind: "docs", note: "The official MCP spec at modelcontextprotocol.io covering protocol messages, transports, capabilities, and lifecycle." },
     { label: "MCP TypeScript SDK (modelcontextprotocol/typescript-sdk)", kind: "repo", note: "Official TypeScript SDK on GitHub with McpServer, Server, transports, and examples." },
     { label: "MCP Python SDK (modelcontextprotocol/python-sdk)", kind: "repo", note: "Official Python SDK on GitHub with FastMCP, decorators, and transport implementations." },
-    { label: "Building MCP Servers - Anthropic Documentation", kind: "docs", note: "Anthropic's guide to building MCP servers with step-by-step tutorials and best practices." },
+    { label: "Building MCP Servers - Anthropic Documentation", url: "https://docs.anthropic.com/", kind: "docs", note: "Anthropic's guide to building MCP servers with step-by-step tutorials and best practices." },
     { label: "MCP Inspector", kind: "repo", note: "Interactive debugging tool for MCP servers. Install via `npx @modelcontextprotocol/inspector`." },
   ],
   glossary: [

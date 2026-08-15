@@ -10,12 +10,15 @@ export const designDistributedCache: TopicContent = {
   ],
   detailed: [
     "## Why Distribute a Cache?\n\nA single-node in-memory cache like a standalone Redis instance can serve ~100K-200K ops/sec with sub-millisecond p99 latency, but it has hard limits: memory is bounded by the host (typically 64-256 GB), and a single point of failure means a cold restart drops your entire working set. A distributed cache partitions data across N nodes, multiplying both memory capacity and throughput linearly. The trade-off is network hops (100-200 microseconds per intra-datacenter round trip) and coordination complexity for operations like invalidation. The decision to distribute should be driven by concrete capacity math: if your working set is 400 GB and a single node holds 64 GB, you need at least 7 nodes (leaving headroom for fragmentation).",
+    "## Capacity Estimation: Do the Math First\n\nEvery distributed cache design should start with three numbers: working set size, peak QPS, and replication factor. Work through a concrete example: a 1 TB working set on nodes with 64 GB RAM. After reserving ~50% for replication buffers, fragmentation (jemalloc typically wastes 10-30%), copy-on-write during snapshots, and OS overhead, each node offers ~32 GB of usable cache memory. That gives 1 TB / 32 GB = 32 shards minimum just for capacity. Now check throughput: at 2M reads/sec peak and ~100K ops/sec per node, you need 2M / 100K = 20 nodes for QPS — so memory, not CPU, is the binding constraint here and 32 shards suffices for both. With replication factor 2 (one replica per primary), total node count doubles to 64 and raw memory provisioned is 64 nodes x 64 GB = 4 TB to serve a 1 TB working set — a 4x multiplier that surprises people who only budget for the data. Key insight: always compute both the memory-driven and QPS-driven node counts and take the maximum, then multiply by the replication factor. Common mistake: sizing nodes at 90%+ memory utilization; a full resync after failover needs replication output buffers that can transiently consume gigabytes, and eviction churn near maxmemory adds CPU overhead and latency spikes. In practice: target ~70% steady-state memory utilization and re-run the math whenever the working set grows 2x.",
     "## Consistent Hashing and Data Placement\n\nConsistent hashing maps both keys and nodes onto a hash ring (typically using a 2^32 or 2^128 space). A key is assigned to the first node encountered clockwise on the ring from the key's hash position. Without virtual nodes, data distribution is uneven because real nodes cluster on the ring. Virtual nodes solve this by mapping each physical node to 100-200 points on the ring, smoothing the distribution to within 5-10% variance. When a node joins, it takes ownership of key ranges from its neighbors; when it leaves, its ranges are redistributed. The critical property is that only ~1/N keys are remapped, unlike modular hashing where adding a node remaps nearly every key. Redis Cluster uses 16,384 hash slots (a fixed ring) assigned to nodes, while Memcached relies on client-side consistent hashing.",
     "## Eviction Policies and Memory Management\n\nWhen memory reaches the configured limit (maxmemory in Redis), the eviction policy determines which keys to discard. LRU (Least Recently Used) evicts entries not accessed for the longest time; Redis approximates this by sampling 5 keys and evicting the oldest, avoiding the overhead of a true doubly-linked-list LRU. LFU (Least Frequently Used) tracks access frequency with a logarithmic counter plus a decay factor, keeping genuinely popular keys even if they have a brief idle period. TTL-based expiration runs independently: Redis uses a combination of lazy deletion (check on access) and periodic sampling (10 times/sec, checking 20 random keys with TTL). A common production pattern combines TTL for correctness (stale data limit) with LRU/LFU as a safety net when memory is full. Memory fragmentation is a hidden cost; Redis reports mem_fragmentation_ratio, and values above 1.5 indicate significant wasted memory that may require a restart or active defragmentation.",
     "## Cache Integration Patterns\n\nCache-aside (lazy loading) is the most common: the application checks the cache, on miss it queries the database, then populates the cache. This is simple but risks thundering herd on popular keys (N concurrent requests all miss and all hit the database). Write-through writes to both cache and database synchronously in the same request path, guaranteeing consistency but adding latency to every write (typically 2-5 ms for the cache write plus the database write). Write-behind (write-back) buffers writes in the cache and asynchronously flushes to the database in batches, reducing write latency and database load but risking data loss if the cache node crashes before the flush. Read-through is like cache-aside but the cache itself fetches from the database on a miss, simplifying application code at the cost of coupling the cache to the data source. The choice depends on your read/write ratio: cache-aside suits read-heavy workloads (90%+ reads), write-behind suits write-heavy workloads with tolerance for eventual consistency.",
     "## Replication and Fault Tolerance\n\nRedis Cluster uses asynchronous primary-replica replication: writes go to the primary, which streams them to replicas. On primary failure, a replica is promoted via a Raft-like consensus among the remaining primaries (requiring a majority). The replication lag window (typically 1-10 ms) means acknowledged writes can be lost during failover. To mitigate this, Redis supports WAIT command to block until N replicas acknowledge the write, but this adds latency. The CAP trade-off is explicit: Redis Cluster chooses availability and partition tolerance, sacrificing consistency during network partitions. For use cases requiring stronger consistency, you layer application-level safeguards like cache stampede protection, distributed locks with fencing tokens, or treating the cache as purely a performance optimization that can always be rebuilt from the source of truth.",
   ],
   deepDive: [
+    "Why 100-200 virtual nodes is the sweet spot comes down to variance math versus metadata cost. With V virtual nodes per physical node, the standard deviation of load across nodes shrinks roughly with 1/sqrt(V): at V=1 a node can easily own 3-5x its fair share of the keyspace; at V=100 the imbalance drops to roughly 10%; at V=200 to roughly 5-7%. Beyond that, returns diminish while costs grow linearly: each vnode is a ring entry, so a 100-node cluster with 200 vnodes each means 20,000 sorted ring positions that every client must store and binary-search (fine) but also rebuild and re-gossip on every topology change (less fine at scale). Rebalancing cost is where vnodes really pay off. When a node with V vnodes leaves, its keyspace is split into V slices that land on up to V different successors, so the load spreads across the whole cluster instead of doubling one unlucky neighbor. Concretely: in a 20-node cluster holding 640 GB, losing one node moves ~32 GB; with V=1 that entire 32 GB lands on a single successor (which may then OOM and cascade), while with V=150 each surviving node absorbs ~1.7 GB. Key insight: virtual nodes do not reduce how much data moves (still ~1/N of the keyspace), they control where it moves — spreading both the memory hit and the resync network traffic evenly. Cassandra defaults to 256 vnodes per node and Riak to 64 for exactly this reason.",
+    "Redis Cluster deliberately replaced the continuous hash ring with 16,384 fixed hash slots, and understanding why is a great interview differentiator. Every key maps to a slot via CRC16(key) mod 16384, and each primary owns a contiguous or arbitrary set of slots. The slot count is a compromise: the cluster heartbeat gossip messages carry a slot-ownership bitmap, and 16,384 slots fit in 2 KB (16384 bits / 8), keeping gossip packets small even for the ~1000-node practical ceiling, while still giving fine-grained rebalancing units (a 100-node cluster averages ~164 slots per node). Topology propagates via gossip: each node pings a few random peers per second exchanging node liveness and slot maps, so there is no central coordinator to fail — contrast this with Memcached, which has no server-side clustering at all and pushes consistent hashing entirely into the client (Ketama), meaning servers never talk to each other and a topology change is just a client config update with no data migration. Client redirection uses two responses: MOVED means the slot has permanently migrated (client should update its cached slot map and retry the new node), while ASK means the slot is mid-migration (client retries the target node for this one request only, prefixed with ASKING, without updating its map). Hash tags let you force multi-key operations into one slot: only the substring inside braces is hashed, so user:{1234}:profile and user:{1234}:sessions land on the same node and support MGET or transactions. Common mistake: treating MOVED and ASK as interchangeable — permanently updating the slot map on an ASK response causes clients to ping-pong requests during a slot migration.",
     "Hot keys are the silent killer of distributed cache systems. A single key receiving 50K+ requests per second (a viral tweet, a flash sale product, a global config entry) saturates the CPU of the shard owning that key, creating a bottleneck that no amount of horizontal scaling fixes because the key maps to exactly one node. The mitigation strategies form a hierarchy: first, add a local in-process cache (Caffeine, Guava) with a 1-5 second TTL to absorb repeated reads without network hops. Second, use request coalescing (Go's singleflight pattern) so that concurrent cache misses for the same key result in a single backend fetch. Third, for extreme cases, replicate the hot key to multiple shards by appending a random suffix (key_0 through key_7) and having clients randomly choose one, spreading load across 8 nodes. Each layer adds complexity: local caches create consistency windows, coalescing adds latency variance for waiters, and key replication multiplies invalidation cost.",
     "Cache stampede (thundering herd) occurs when a popular key expires and hundreds of concurrent requests simultaneously miss the cache, overwhelming the database. The standard solutions are probabilistic early recomputation (each request has a small chance of refreshing the key before it expires, proportional to remaining TTL), locking (only one request fetches the value while others wait or serve stale data), and stale-while-revalidate (serve the expired value while asynchronously refreshing). In practice, combining short-TTL stale serving with a background refresh thread works best for high-traffic keys. The math matters: if a key is accessed 10K times/sec and TTL is 60 seconds, the expected number of concurrent misses at expiration is proportional to the fetch latency times the request rate. A 50ms database query means ~500 simultaneous cache misses, which can spike database CPU from 20% to 100% in a single TTL cycle.",
     "Memory management at scale involves more than setting maxmemory. Redis uses jemalloc by default, which allocates in size classes (8, 16, 32, ... bytes), meaning a 40-byte value occupies a 48-byte allocation, wasting 20%. For small values, Redis hash ziplist encoding stores up to 128 fields in a compact, CPU-cache-friendly format that uses 10x less memory than regular hash tables. The trade-off is O(N) access within the ziplist versus O(1) for a hash table, but for N < 128 the linear scan is faster due to cache locality. At cluster scale, memory accounting must include replication buffers (output-buffer-limit for replicas can consume gigabytes during full resyncs), Lua script memory, client connection buffers (each client uses ~16 KB minimum), and key expiry metadata. A production rule of thumb is to provision 1.5x the expected data size to account for fragmentation, buffers, and overhead.",
@@ -351,26 +354,60 @@ private:
       title: "Distributed Cache Cluster Architecture",
       kind: "architecture",
       caption:
-        "Clients route requests through a consistent hash ring to cache shards, each with a replica for failover. Cache misses fall through to the database.",
-      mermaid: `graph LR
-    Client1["Client 1"] --> LB["Load Balancer"]
-    Client2["Client 2"] --> LB
-    Client3["Client 3"] --> LB
-    LB --> App1["App Server 1"]
-    LB --> App2["App Server 2"]
-    LB --> App3["App Server 3"]
-    App1 --> HR["Hash Ring Router"]
-    App2 --> HR
-    App3 --> HR
-    HR --> S1["Shard 1 Primary"]
-    HR --> S2["Shard 2 Primary"]
-    HR --> S3["Shard 3 Primary"]
-    S1 --> R1["Shard 1 Replica"]
-    S2 --> R2["Shard 2 Replica"]
-    S3 --> R3["Shard 3 Replica"]
-    S1 -.->|"miss"| DB["Database"]
-    S2 -.->|"miss"| DB
-    S3 -.->|"miss"| DB`,
+        "Layered view of a Redis-Cluster-like cache. Smart clients hash keys locally on a consistent hash ring with virtual nodes and connect directly to the owning shard (read path, solid). Cluster topology propagates via gossip or a config service. On primary failure, the replica is promoted and clients update their slot map (failover path, dashed). Persistence and monitoring are optional supporting tiers. Steps 1-3 trace the primary read path; F1/F2 trace the failover path.",
+      mermaid: `graph TB
+    subgraph CL["Client Tier"]
+        C1["App Server 1<br/>smart client"]
+        C2["App Server 2<br/>smart client"]
+        HR["Consistent Hash Ring<br/>150 vnodes per node<br/>hash key to shard"]
+        C1 -->|"1. hash key"| HR
+        C2 --> HR
+    end
+
+    subgraph CO["Coordination Tier"]
+        GS["Cluster Topology<br/>gossip protocol or<br/>config service"]
+    end
+
+    subgraph CT["Cache Tier"]
+        subgraph SH1["Shard 1 - slots 0-5460"]
+            P1["Primary 1"]
+            R1["Replica 1"]
+            P1 -->|"async repl"| R1
+        end
+        subgraph SH2["Shard 2 - slots 5461-10922"]
+            P2["Primary 2"]
+            R2["Replica 2"]
+            P2 -->|"async repl"| R2
+        end
+        subgraph SH3["Shard 3 - slots 10923-16383"]
+            P3["Primary 3"]
+            R3["Replica 3"]
+            P3 -->|"async repl"| R3
+        end
+    end
+
+    subgraph PS["Persistence Tier - optional"]
+        AOF["AOF log +<br/>RDB snapshots"]
+        DB["Source-of-truth DB<br/>repopulate on miss"]
+    end
+
+    subgraph MO["Monitoring"]
+        MON["Metrics: hit rate,<br/>evictions, repl lag,<br/>p99 latency"]
+    end
+
+    HR -->|"2. read: GET key<br/>direct to owner"| P1
+    HR --> P2
+    HR --> P3
+    GS -.->|"F2. slot map updates"| HR
+    P1 -.-> GS
+    P2 -.-> GS
+    P3 -.-> GS
+    R1 -.->|"F1. failover:<br/>promote to primary"| P1
+    P1 -.->|"3. miss:<br/>repopulate from DB"| DB
+    P2 --> AOF
+    P1 --> MON
+    P2 --> MON
+    P3 --> MON`,
     },
     {
       title: "Cache-Aside Read Flow",
@@ -550,6 +587,24 @@ private:
         "How would you perform a rolling upgrade without downtime?",
       ],
     },
+    {
+      q: "You need to cache a 1 TB working set with a replication factor of 2 on 64 GB nodes. Walk through the capacity math.",
+      a: "First derive usable memory per node: from 64 GB, reserve for the OS, jemalloc fragmentation (10-30% overhead), replication output buffers, and copy-on-write memory during RDB snapshots or full resyncs. A safe planning number is ~50% usable, so 32 GB per node. Capacity-driven shard count: 1 TB / 32 GB = 32 primary shards. Then check the throughput dimension: if peak load is 2M ops/sec and a node sustains ~100K ops/sec, you need 20 nodes for QPS — memory is the binding constraint, so 32 shards covers both. Replication factor 2 doubles the fleet to 64 nodes total, and total provisioned RAM is 64 x 64 GB = 4 TB for a 1 TB working set — a 4x raw-memory multiplier. Also verify the blast radius: with 32 shards, losing one node makes ~3% of the keyspace briefly unavailable and shifts its QPS to a promoted replica, so per-node headroom must absorb that. Finally sanity-check per-key overhead: 1 TB of 1 KB values is ~1 billion keys, and at ~70 bytes of metadata per key that is ~70 GB of pure overhead — small values make the overhead ratio dramatically worse, which is why sizing by value count matters as much as by bytes.",
+      followUps: [
+        "How does the math change if average value size drops from 1 KB to 100 bytes?",
+        "Why should you plan for only ~70% steady-state memory utilization?",
+        "When does QPS rather than memory become the binding constraint?",
+      ],
+    },
+    {
+      q: "Explain how Redis Cluster routes requests with 16,384 slots, and what MOVED and ASK redirections mean.",
+      a: "Redis Cluster maps every key to one of 16,384 slots via CRC16(key) mod 16384; each primary owns a subset of slots, and topology spreads via gossip rather than a central coordinator. The slot count is a deliberate trade-off: the slot bitmap in heartbeat messages is 16384/8 = 2 KB, small enough to gossip cheaply, yet granular enough that a 100-node cluster averages ~164 slots per node for fine-grained rebalancing. Smart clients bootstrap by fetching the slot-to-node map and thereafter route each command directly to the owning primary with zero proxy hops. When a client hits the wrong node, it gets one of two redirections. MOVED means the slot now permanently lives elsewhere: the client should update its cached slot map and retry against the new owner. ASK means the slot is in the middle of a live migration: some keys are on the source, some already on the target, so the client retries just this one request on the target (prefixed with the ASKING command) without updating its map, because unmigrated keys are still served by the source. Multi-key commands only work when all keys hash to the same slot, which is why hash tags exist: only the substring in braces is hashed, so orders:{user42}:pending and orders:{user42}:done colocate. Contrast with Memcached: no server-side clustering, no slots, no redirections — clients do Ketama consistent hashing themselves and servers are entirely unaware of each other, which is simpler but offers no replication, failover, or live resharding.",
+      followUps: [
+        "Why did Redis choose 16,384 slots instead of 65,536 or a continuous ring?",
+        "What happens to multi-key commands like MGET across slots?",
+        "How do hash tags risk creating data skew if overused?",
+      ],
+    },
   ],
   mcqs: [
     {
@@ -624,6 +679,18 @@ private:
       front: "What is the ziplist optimization in Redis?",
       back: "For small hashes (up to 128 fields by default), Redis uses a compact sequential memory layout called ziplist instead of a hash table. This uses ~10x less memory and is faster for small N due to CPU cache locality, despite O(N) access versus O(1) for a hash table.",
     },
+    {
+      front: "Why does Redis Cluster use exactly 16,384 hash slots?",
+      back: "The slot-ownership bitmap travels in every gossip heartbeat; 16,384 bits = 2 KB, small enough to gossip cheaply at the ~1000-node practical cluster ceiling, yet granular enough for fine-grained rebalancing (~164 slots per node in a 100-node cluster). Keys map to slots via CRC16(key) mod 16384.",
+    },
+    {
+      front: "What is the difference between MOVED and ASK redirections in Redis Cluster?",
+      back: "MOVED: the slot permanently lives on another node; the client updates its cached slot map and retries there. ASK: the slot is mid-migration; the client retries only this request on the target (prefixed with ASKING) without updating its map, since unmigrated keys still live on the source.",
+    },
+    {
+      front: "How many nodes do you need to cache 1 TB with replication factor 2 on 64 GB machines?",
+      back: "Usable memory is ~50% of RAM (fragmentation, replication buffers, copy-on-write) = 32 GB/node. 1 TB / 32 GB = 32 primary shards; RF=2 doubles it to 64 nodes and 4 TB of raw provisioned RAM. Always take max(memory-driven, QPS-driven) node count, then multiply by the replication factor.",
+    },
   ],
   exercises: [
     "Implement a consistent hash ring with virtual nodes and write a test that adds 3 physical nodes, inserts 10,000 keys, then removes one node and verifies that only approximately 1/3 of keys changed their assigned node.",
@@ -643,6 +710,9 @@ private:
     "Redis replication is asynchronous: 1-10ms lag means writes can be lost during failover. WAIT command provides synchronous replication at the cost of latency. Redis Cluster is AP in CAP terms.",
     "Memory management: provision 1.5x expected data size for fragmentation and buffers. Monitor mem_fragmentation_ratio (alert above 1.5). Use ziplist encoding for small hashes to save 10x memory.",
     "Performance targets: single Redis node handles 100K-200K ops/sec, sub-millisecond p99 intra-AZ. Pipelining (10-50 commands per batch) amortizes network RTT. Connection pooling (16-32 connections per node) avoids connection setup overhead.",
+    "Capacity math template: usable memory ~50% of node RAM (fragmentation, buffers, copy-on-write). Shards = max(working set / usable per node, peak QPS / per-node QPS). Total nodes = shards x replication factor. 1 TB on 64 GB nodes with RF=2 = 64 nodes, 4 TB raw RAM.",
+    "Virtual node math: load imbalance shrinks ~1/sqrt(V); V=100-200 gives 5-10% variance. Vnodes do not reduce data moved (~1/N) but spread it across all survivors instead of one neighbor, preventing cascade OOM.",
+    "Redis Cluster routing: CRC16(key) mod 16384 slots; slot bitmap is 2 KB in gossip heartbeats. MOVED = permanent migration, update slot map. ASK = one-shot redirect during live migration, do NOT update map. Hash tags {tag} colocate keys for multi-key ops.",
   ],
   cheatSheet: [
     "Consistent hashing: hash(key) -> ring position -> first node clockwise. Virtual nodes smooth distribution. Adding a node remaps ~1/N keys.",
@@ -655,6 +725,10 @@ private:
     "Latency budget: intra-AZ RTT ~0.1ms, cross-AZ ~0.5-1ms, cross-region ~30-100ms. Keep cache in same AZ as app for sub-ms p99.",
     "Pipeline: batch 10-50 commands to amortize RTT. Throughput jumps from 10K to 500K+ ops/sec per connection. Trade-off: higher per-request latency for batch.",
     "Monitor: hit rate (target >95%), eviction rate, memory fragmentation, replication lag, connected clients, slow log (commands >10ms).",
+    "Sizing formula: nodes = max(ceil(data / usable RAM), ceil(QPS / 100K)) x replication factor. Usable RAM ~50% of physical; target 70% steady-state utilization.",
+    "MOVED vs ASK: MOVED = slot permanently moved, update slot map and retry. ASK = mid-migration one-off redirect, send ASKING + retry target, keep old map.",
+    "Redis Cluster vs Memcached: Redis = server-side slots, gossip, replication, failover, persistence. Memcached = dumb servers, client-side Ketama hashing, no replication, simpler and slightly faster per-op for pure LRU caching.",
+    "Vnode rule of thumb: 100-200 vnodes per node keeps load variance within 5-10%; losing a node spreads its ~1/N keyspace across all survivors (~1/N^2 each) instead of one neighbor.",
   ],
   glossary: [
     {
@@ -700,20 +774,23 @@ private:
     "Compare the memory efficiency and performance characteristics of Redis versus Memcached for a cache-only use case at 500GB scale.",
     "How would you implement a tiered caching architecture with L1 (in-process), L2 (distributed), and L3 (CDN) layers?",
     "What strategies would you use to warm a cold cache after a full cluster restart without overwhelming the database?",
+    "If average value size dropped from 1 KB to 100 bytes at the same total data volume, how would per-key metadata overhead change your capacity plan?",
+    "During a live slot migration in Redis Cluster, how do MOVED and ASK redirections keep clients correct, and what breaks if a client mishandles ASK?",
+    "When would you pick Memcached with client-side Ketama hashing over Redis Cluster, and what operational features do you give up?",
   ],
   resources: [
     {
-      label: "Redis Cluster Specification",
+      label: "Redis Cluster Specification", url: "https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/",
       kind: "docs",
       note: "Official documentation covering hash slots, replication, failover, and resharding in Redis Cluster.",
     },
     {
-      label: "Designing Data-Intensive Applications by Martin Kleppmann",
+      label: "Designing Data-Intensive Applications by Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
       note: "Chapters 5-6 cover replication, partitioning, and consistent hashing with rigorous treatment of trade-offs.",
     },
     {
-      label: "Consistent Hashing and Random Trees (Karger et al., 1997)",
+      label: "Consistent Hashing and Random Trees (Karger et al., 1997)", url: "https://www.cs.princeton.edu/courses/archive/fall09/cos518/papers/chash.pdf",
       kind: "article",
       note: "The original paper introducing consistent hashing, foundational for understanding distributed cache data placement.",
     },

@@ -701,7 +701,7 @@ buildUser().then(console.log); // { name: "Alice", age: 30 }`,
   ],
   resources: [
     {
-      label: "Learn You a Haskell -- Functors, Applicatives, and Monads",
+      label: "Learn You a Haskell -- Functors, Applicatives, and Monads", url: "https://learnyouahaskell.com/",
       kind: "book",
       note: "Gentle, illustrated introduction to the typeclass hierarchy with Haskell examples.",
     },

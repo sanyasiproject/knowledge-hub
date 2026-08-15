@@ -7,6 +7,7 @@ import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { Card, Pill, cx } from "../components/ui/primitives";
 import { Inline } from "../components/content/RichText";
 import { NotFound } from "./NotFound";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 const DEPTHS: Depth[] = ["Core", "Intermediate", "Advanced"];
 
@@ -173,6 +174,7 @@ type View = "revise" | "qa" | "one-pager";
 export function InterviewArea() {
   const { areaSlug } = useParams();
   const area = areaSlug ? getArea(areaSlug) : undefined;
+  usePageTitle(area?.title);
 
   const [view, setView] = useState<View>("revise");
   const [depthFilter, setDepthFilter] = useState<Depth | "all">("all");

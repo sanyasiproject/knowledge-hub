@@ -18,6 +18,12 @@ export const designMessageQueue: TopicContent = {
 
     "## Persistence, Retention, and Log Compaction\nKafka persists all messages to disk as an append-only log, achieving throughput of 1-2 million messages per second per broker for small messages by exploiting sequential writes and OS page cache. Retention can be time-based (e.g., 7 days) or size-based (e.g., 500 GB per partition). Log compaction is an alternative retention policy that keeps only the latest value for each key, turning the topic into a changelog suitable for materialized views or state reconstruction. Segments are the physical storage unit: active segments receive writes while closed segments are eligible for compaction or deletion. Zero-copy transfer via `sendfile()` lets brokers serve consumers without copying data through userspace, reducing CPU usage by up to 50%.",
 
+    "## Replication, ISR, and Unclean Leader Election\nEvery partition has one leader replica and N-1 followers spread across brokers (replication factor 3 is the production standard). Followers continuously fetch from the leader; those caught up within `replica.lag.time.max.ms` (default 30s) form the In-Sync Replica set (ISR). With `acks=all` and `min.insync.replicas=2`, a produce request succeeds only after at least 2 ISR members have the record, so the cluster tolerates one broker failure with zero data loss. When a leader dies, the controller elects a new leader from the ISR — a clean election that loses nothing. The dangerous knob is `unclean.leader.election.enable`: if true, an out-of-sync replica can become leader when no ISR member survives, restoring availability but silently discarding every record the dead leader had that the new leader did not.\nKey insight: unclean leader election is the CAP theorem made concrete — enabling it chooses availability over consistency; disabling it (the default since Kafka 0.11) means the partition stays offline until an ISR replica returns.\nCommon mistake: setting min.insync.replicas equal to the replication factor. Then a single broker restart makes the partition unwritable, because the ISR can no longer satisfy the minimum. Use RF=3 with min.insync.replicas=2.",
+
+    "## Ordering Guarantees and Key-Based Partitioning\nA distributed log gives strict ordering only within a single partition — there is no global order across a topic. Producers achieve business-level ordering by choosing a partition key: the default partitioner hashes the key (murmur2) so all messages with the same key land in the same partition and are consumed in append order. For example, keying by `order_id` guarantees that ORDER_CREATED, ORDER_PAID, and ORDER_SHIPPED for one order are processed in sequence, even though events for different orders interleave freely. Producer retries can still reorder messages within a partition unless `enable.idempotence=true` (which also caps `max.in.flight.requests.per.connection` at 5 with sequence-number checks).\nCommon mistake: choosing a low-cardinality key (like country code) creates hot partitions — one partition takes most of the traffic while others idle, capping throughput at a single leader's capacity regardless of how many brokers you add.\nIn practice: if you need total ordering across all messages, you are forced to a single partition (single-consumer throughput ceiling) — a strong signal to redesign the requirement around per-entity ordering instead.",
+
+    "## Pull vs Push: Kafka vs RabbitMQ\nKafka consumers pull: they issue fetch requests at their own pace, which gives natural backpressure, cheap batching, and the ability to replay history by rewinding an offset — the broker keeps data regardless of consumption. RabbitMQ pushes messages to consumers (with a prefetch window as flow control) and deletes them once acked, which gives lower per-message latency for lightly loaded task queues and rich routing via exchanges (direct, topic, fanout, headers), but no replay and much lower throughput per node (~30-50K msg/s vs 1M+). Choose RabbitMQ-style brokers for work distribution, RPC, and complex routing with modest volume; choose a log-based system like Kafka for event streaming, fan-out to many independent consumer groups, high throughput, and replayability.\nKey insight: the deepest difference is who owns the cursor — in Kafka the consumer owns its offset (broker is a dumb, fast log); in RabbitMQ the broker tracks per-message delivery state, which is exactly what makes it flexible for routing and expensive at scale.",
+
     "## Backpressure, DLQs, and Failure Handling\nBackpressure prevents fast producers from overwhelming slow consumers. In Kafka, consumers pull messages at their own pace, providing natural backpressure. RabbitMQ can apply credit-based flow control to publishers when queues grow beyond thresholds. Dead letter queues capture messages that fail processing after a configurable retry count (typically 3-5 retries with exponential backoff). The DLQ preserves the original message, headers, and failure metadata for later inspection and reprocessing. Circuit breakers can pause consumption when downstream services are unhealthy, and rate limiters can smooth bursty traffic. Monitoring consumer lag (the gap between the latest produced offset and the latest committed offset) is critical: lag growing over time indicates the consumer cannot keep up and may need horizontal scaling or processing optimization.",
   ],
 
@@ -28,7 +34,9 @@ export const designMessageQueue: TopicContent = {
 
     "Partition assignment strategies profoundly affect throughput uniformity and rebalance impact. The range assignor distributes partitions alphabetically, which can create imbalance when topic counts are not divisible by consumer counts. The round-robin assignor distributes more evenly but reshuffles many partitions on rebalance. The sticky assignor minimizes movement by reassigning only the partitions from departed consumers. The cooperative sticky assignor goes further by performing incremental rebalances: instead of revoking all partitions and reassigning, it only revokes the partitions that need to move, allowing other partitions to continue being consumed during the rebalance. This reduces rebalance pauses from the entire rebalance duration (potentially seconds) to just the time needed to transfer a few partitions (typically tens of milliseconds).",
 
-    "When designing a message queue system at scale, capacity planning requires concrete numbers. A single Kafka broker can handle 500K-2M messages/sec depending on message size (1 KB baseline). Network bandwidth is often the bottleneck: a 10 Gbps NIC supports roughly 1.2 GB/s, which at 1 KB messages is 1.2M msg/s before replication. With replication factor 3, the effective write throughput per broker drops to roughly 400K msg/s. Disk throughput for sequential writes on modern NVMe SSDs is 2-3 GB/s, rarely the bottleneck. Consumer throughput depends on deserialization and processing cost but typically ranges from 50K-500K msg/s per consumer thread. For a system targeting 10M msg/s, you need roughly 25-30 brokers, 300+ partitions per topic, and consumer groups sized to match. Memory sizing: plan 6-8 GB heap per broker plus OS page cache (the more the better, ideally enough to cache the active segment of hot partitions).",
+    "Capacity planning for a message queue is an arithmetic exercise, and interviewers expect you to show the numbers. Ingest: 1M msg/s x 1 KB per message = 1 GB/s of raw write bandwidth. With replication factor 3, the cluster absorbs 3 GB/s of writes (1 GB/s from producers + 2 GB/s of inter-broker replication traffic). Add read traffic: 2 consumer groups reading everything doubles egress to 2 GB/s, so total cluster network is roughly 5 GB/s. A 10 Gbps NIC delivers ~1.2 GB/s, so budgeting brokers at ~50% NIC utilization (~600 MB/s each) gives 5 GB/s / 0.6 GB/s = ~9 brokers minimum; provision 12 for failure headroom. Storage: 7-day retention at 1 GB/s = 86,400 s/day x 7 days x 1 GB/s = ~605 TB of raw data, x3 replication = ~1.8 PB cluster-wide, or ~150 TB per broker across 12 brokers — before compression, which typically cuts this 3-4x (LZ4/Zstd), landing at ~40-50 TB per broker. Partition count comes from the consumer side: if one consumer thread sustains 10K msg/s, you need 1M / 10K = 100 consumers, hence at least 100 partitions; over-provision 2-3x (200-300 partitions) because adding partitions later breaks key-to-partition mapping. Memory: 6-8 GB JVM heap per broker, with the remaining RAM (64-128 GB) left to the OS page cache so tail reads never touch disk. Disk is rarely the bottleneck — sequential writes on NVMe do 2-3 GB/s — the network and replication fan-out are.",
+
+    "Consumer group rebalancing is where message queue designs feel their operational pain, and the protocol choice matters. The eager (stop-the-world) protocol, used by the range and round-robin assignors, revokes ALL partitions from ALL consumers at the start of every rebalance: every consumer stops, rejoins the group, waits for the leader to compute assignments, and only then resumes. For a group with hundreds of partitions and stateful consumers, this pause can last seconds to minutes and shows up as a latency cliff on every deploy or pod restart. The cooperative (incremental) protocol fixes this with a two-phase approach: consumers keep their current partitions during the rebalance, the assignor computes which partitions must actually move, only those are revoked in a first rebalance, and a second rebalance assigns them to their new owners — unaffected partitions never stop. Complementary mechanisms reduce rebalance frequency itself: static group membership (group.instance.id) lets a restarting consumer reclaim its old partitions within session.timeout.ms without triggering any rebalance, which is essential on Kubernetes where pods restart routinely. Tune session.timeout.ms (how long before a silent consumer is evicted) against max.poll.interval.ms (how long processing one batch may take) — misconfiguring the latter is a classic cause of rebalance storms, where a slow consumer is repeatedly evicted, triggers a rebalance, rejoins, and gets evicted again.",
   ],
 
   code: [
@@ -447,31 +455,59 @@ public:
     {
       title: "Message Queue Architecture",
       kind: "architecture",
-      caption: "High-level architecture showing producers, broker cluster with partitioned topics, consumer groups, and dead letter queue.",
-      mermaid: `graph LR
-    P1["Producer 1"] --> B1["Broker 1"]
-    P2["Producer 2"] --> B2["Broker 2"]
-    P3["Producer 3"] --> B3["Broker 3"]
-
-    subgraph Cluster["Broker Cluster"]
-        B1 --> T1P0["Topic-A Partition 0 Leader"]
-        B1 --> T1P1["Topic-A Partition 1 Follower"]
-        B2 --> T1P1L["Topic-A Partition 1 Leader"]
-        B2 --> T1P2["Topic-A Partition 2 Follower"]
-        B3 --> T1P2L["Topic-A Partition 2 Leader"]
-        B3 --> T1P0F["Topic-A Partition 0 Follower"]
+      caption: "Layered architecture: producers batch and send with acks=all through the ISR; the broker cluster stores partitioned, replicated append-only logs served via page cache; a controller (KRaft or ZooKeeper) coordinates leadership; consumer groups fetch, commit offsets to an internal topic, and route poison messages to a DLQ. Steps 1-2 trace the produce path; C1-C3 trace the consume path (C3 only for poison messages).",
+      mermaid: `graph TB
+    subgraph Producers["Producer Layer"]
+        PR1["Producer 1<br/>batch + compress"]
+        PR2["Producer 2<br/>key-based partitioning"]
     end
 
-    T1P0 --> CG1C1["Consumer Group 1 - Consumer A"]
-    T1P1L --> CG1C2["Consumer Group 1 - Consumer B"]
-    T1P2L --> CG1C3["Consumer Group 1 - Consumer C"]
+    subgraph Cluster["Broker Cluster"]
+        subgraph TopicA["Topic orders (3 partitions, RF=3)"]
+            subgraph BR1["Broker 1"]
+                P0L["P0 Leader<br/>append-only segments"]
+                P1F["P1 Follower"]
+            end
+            subgraph BR2["Broker 2"]
+                P1L["P1 Leader<br/>append-only segments"]
+                P2F["P2 Follower"]
+            end
+            subgraph BR3["Broker 3"]
+                P2L["P2 Leader<br/>append-only segments"]
+                P0F["P0 Follower"]
+            end
+        end
+        CACHE["OS page cache + zero-copy sendfile"]
+        OFFT["Internal topic __consumer_offsets"]
+    end
 
-    T1P0 --> CG2C1["Consumer Group 2 - Consumer X"]
-    T1P1L --> CG2C1
-    T1P2L --> CG2C2["Consumer Group 2 - Consumer Y"]
+    subgraph Coord["Coordination Layer"]
+        CTRL["Controller (KRaft quorum or ZooKeeper)<br/>leader election, ISR tracking, metadata"]
+    end
 
-    CG1C1 -->|"Failed messages"| DLQ["Dead Letter Queue"]
-    CG1C2 -->|"Failed messages"| DLQ`,
+    subgraph Consumers["Consumer Layer"]
+        subgraph CG1["Consumer Group A"]
+            C1["Consumer 1"]
+            C2["Consumer 2"]
+        end
+        CG2["Consumer Group B<br/>independent offsets"]
+    end
+
+    DLQ["Dead Letter Queue topic<br/>failed after max retries"]
+
+    PR1 -->|"1. produce batch, acks=all"| P0L
+    PR2 -->|"1. produce batch, acks=all"| P1L
+    P0L -.->|"2. replicate (ISR)"| P0F
+    P1L -.->|"2. replicate (ISR)"| P1F
+    P2L -.->|"2. replicate (ISR)"| P2F
+    CTRL -.->|"elect leaders, track ISR"| TopicA
+    P0L --- CACHE
+    C1 -->|"C1. fetch from offset"| P0L
+    C2 -->|"C1. fetch from offset"| P1L
+    CG2 -->|"fetch independently"| P2L
+    C1 -->|"C2. commit offsets"| OFFT
+    C2 -->|"C2. commit offsets"| OFFT
+    C1 -->|"C3. poison message after retries"| DLQ`,
     },
     {
       title: "Message Production and Consumption Flow",
@@ -678,6 +714,24 @@ public:
         "What are the performance implications of compaction on a busy broker?",
       ],
     },
+    {
+      q: "Walk me through the capacity estimation for a queue ingesting 1 million messages per second with 7-day retention.",
+      a: "Start with bandwidth: 1M msg/s x 1 KB = 1 GB/s of producer ingest. Replication factor 3 turns that into 3 GB/s of cluster write traffic (1 GB/s in from producers plus 2 GB/s broker-to-broker replication). If two consumer groups each read the full stream, add 2 GB/s egress, so ~5 GB/s total. A 10 Gbps NIC gives ~1.2 GB/s; at a safe 50% utilization per broker that is ~600 MB/s, so you need at least 9 brokers — provision ~12 for failover headroom. Storage: 1 GB/s x 86,400 s x 7 days is roughly 605 TB of raw data; x3 replication is ~1.8 PB, about 150 TB per broker on 12 brokers, cut to ~40-50 TB each with 3-4x batch compression. Partition count is driven by consumer parallelism: if a consumer thread handles 10K msg/s, you need 100 consumers, so at least 100 partitions — provision 200-300 because increasing partitions later remaps keys. Finish with memory: 6-8 GB heap per broker and the rest of RAM to page cache so tailing consumers never hit disk.",
+      followUps: [
+        "How does compression change the network math versus the storage math?",
+        "What changes if consumers routinely replay old data instead of tailing?",
+        "How would tiered storage (offloading closed segments to S3) alter the design?",
+      ],
+    },
+    {
+      q: "A leader broker fails and no in-sync replica is available. What are your options and their trade-offs?",
+      a: "This is the unclean leader election decision. Option 1: keep unclean.leader.election.enable=false (the default). The partition stays offline until an ISR member — or the recovered leader — comes back. You choose consistency: no acknowledged message is ever lost, but the partition is unavailable, producers block or fail, and lag builds. Option 2: enable unclean leader election, letting an out-of-sync follower become leader. The partition is immediately available, but every record the dead leader had beyond the follower's log-end offset is silently lost, and consumers may see offsets rewind. The right choice depends on the data: payment or inventory events demand consistency (stay offline, page an operator), while metrics or clickstream data can tolerate a small loss for availability. The best answer also mentions prevention: with acks=all and min.insync.replicas=2 on RF=3, this scenario requires two simultaneous broker failures, and rack-aware replica placement makes correlated failures much less likely.",
+      followUps: [
+        "How does min.insync.replicas interact with acks to define the durability contract?",
+        "Why is rack-aware (or AZ-aware) replica placement important here?",
+        "How does KRaft change controller failover compared with ZooKeeper?",
+      ],
+    },
   ],
 
   mcqs: [
@@ -764,6 +818,22 @@ public:
       front: "How does Kafka achieve high write throughput?",
       back: "Append-only sequential writes to segment files, OS page cache utilization, batched production, message compression (LZ4/Zstd), and zero-copy reads. A single broker can handle 1-2 million messages per second.",
     },
+    {
+      front: "What is the ISR and how does it relate to acks=all?",
+      back: "The In-Sync Replica set is the followers caught up with the leader within replica.lag.time.max.ms. acks=all succeeds once min.insync.replicas ISR members have the record; only ISR members are eligible for clean leader election.",
+    },
+    {
+      front: "What is unclean leader election and its trade-off?",
+      back: "Allowing an out-of-sync replica to become leader when no ISR member is available. It restores availability but loses every acknowledged record the dead leader had beyond the new leader's log. Disabled by default (consistency over availability).",
+    },
+    {
+      front: "Eager vs cooperative rebalancing?",
+      back: "Eager (stop-the-world) revokes all partitions from all consumers on any membership change. Cooperative sticky revokes only partitions that actually move, so unaffected partitions keep flowing — pauses drop from seconds to milliseconds.",
+    },
+    {
+      front: "Quick capacity math for 1M msg/s at 1 KB with 7-day retention?",
+      back: "1 GB/s ingest; x3 replication = 3 GB/s cluster writes; storage = 1 GB/s x 604,800 s = ~605 TB raw, ~1.8 PB replicated, ~3-4x less after compression. Partitions >= target consumer count (e.g., 100 consumers at 10K msg/s each).",
+    },
   ],
 
   exercises: [
@@ -785,6 +855,10 @@ public:
     "Dead letter queues capture poison messages after max retries (typically 3-5 with exponential backoff). DLQs preserve original message, headers, and failure metadata for debugging.",
     "Backpressure: Kafka consumers pull at their own pace (natural backpressure). RabbitMQ uses credit-based flow control. Monitor consumer lag to detect consumers falling behind.",
     "Capacity planning: 10M msg/s at 1 KB = 10 GB/s raw. With replication factor 3, need ~25-30 brokers with 10 Gbps NICs. Partition count should be 3-10x consumer count for headroom.",
+    "Worked example: 1M msg/s x 1 KB = 1 GB/s ingest; RF=3 makes it 3 GB/s of writes; 7-day retention = ~605 TB raw, ~1.8 PB replicated, cut 3-4x by compression. Partitions = target consumer count x 2-3 headroom.",
+    "Unclean leader election trades consistency for availability: enabled, an out-of-sync replica can lead and acknowledged messages are lost; disabled (default), the partition stays offline until an ISR replica returns.",
+    "Rebalancing: eager protocol pauses the whole group (stop-the-world); cooperative sticky only pauses partitions that move. Static group membership (group.instance.id) avoids rebalances entirely on restarts.",
+    "Push vs pull: RabbitMQ pushes with prefetch flow control, deletes on ack, excels at routing and task queues (~30-50K msg/s). Kafka consumers pull and own their offsets, enabling replay, fan-out, and 1M+ msg/s per broker.",
   ],
 
   cheatSheet: [
@@ -798,6 +872,10 @@ public:
     "Segment size (log.segment.bytes, default 1 GB) controls file count and compaction granularity. Smaller segments = faster compaction but more file handles.",
     "Retention: time-based (log.retention.hours), size-based (log.retention.bytes), or compaction (log.cleanup.policy=compact). Combine time + compact for changelog topics.",
     "DLQ pattern: try processing, on failure retry with exponential backoff (1s, 2s, 4s), after max retries publish to DLQ topic with error metadata. Alert on DLQ growth.",
+    "Capacity quick math: msg/s x msg size = ingest GB/s; x RF for cluster writes; x seconds of retention for raw storage; divide by 3-4 for compression. Brokers = total bandwidth / (NIC x 50%).",
+    "Durability contract: acks=all + min.insync.replicas=2 + RF=3 tolerates one broker loss with zero data loss. Never set min.insync.replicas equal to RF (one restart blocks writes).",
+    "unclean.leader.election.enable=false (default) = consistency (partition offline until ISR returns); true = availability (out-of-sync replica leads, acknowledged data lost). Decide per topic by data criticality.",
+    "Rebalance tuning: use cooperative sticky assignor; set group.instance.id for static membership on Kubernetes; keep max.poll.interval.ms above worst-case batch time to avoid rebalance storms.",
   ],
 
   glossary: [
@@ -845,16 +923,19 @@ public:
     "How would you implement exactly-once delivery across multiple downstream systems (e.g., database + cache + search index)?",
     "What are the trade-offs between a message queue and a streaming processing framework like Kafka Streams or Apache Flink?",
     "How do you migrate from one message queue system to another (e.g., RabbitMQ to Kafka) without downtime?",
+    "When would you enable unclean leader election, and how would you quantify the data-loss risk for stakeholders?",
+    "How would you design priority messaging on top of a log-based queue that has no native priority support?",
+    "How does tiered storage (offloading closed segments to object storage) change retention economics and replay behavior?",
   ],
 
   resources: [
     {
-      label: "Designing Data-Intensive Applications by Martin Kleppmann",
+      label: "Designing Data-Intensive Applications by Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
       note: "Chapter 11 covers stream processing and message queues in depth, including exactly-once semantics and log-based messaging.",
     },
     {
-      label: "Apache Kafka Documentation",
+      label: "Apache Kafka Documentation", url: "https://kafka.apache.org/documentation/",
       kind: "docs",
       note: "Official documentation covering architecture, configuration, and operations. Essential reference for production deployments.",
     },
@@ -864,7 +945,7 @@ public:
       note: "Comprehensive guide covering Kafka internals, producer/consumer APIs, Kafka Streams, and operational best practices.",
     },
     {
-      label: "Jay Kreps - The Log: What every software engineer should know about real-time data's unifying abstraction",
+      label: "Jay Kreps - The Log: What every software engineer should know about real-time data's unifying abstraction", url: "https://engineering.linkedin.com/distributed-systems/log-what-every-software-engineer-should-know-about-real-time-datas-unifying",
       kind: "article",
       note: "Foundational article by Kafka's co-creator explaining the append-only log as the core abstraction for data systems.",
     },

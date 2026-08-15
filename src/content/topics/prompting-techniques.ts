@@ -457,11 +457,11 @@ console.log(result);
   ],
   resources: [
     {
-      label: "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models — Wei et al., 2022",
+      label: "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models — Wei et al., 2022", url: "https://arxiv.org/abs/2201.11903",
       kind: "paper",
     },
     {
-      label: "ReAct: Synergizing Reasoning and Acting in Language Models — Yao et al., 2022",
+      label: "ReAct: Synergizing Reasoning and Acting in Language Models — Yao et al., 2022", url: "https://arxiv.org/abs/2210.03629",
       kind: "paper",
     },
   ],

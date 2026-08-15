@@ -285,7 +285,7 @@ return rows"]`,
     "WINDOW w AS (PARTITION BY dept ORDER BY salary) — named window",
   ],
   resources: [
-    { label: "PostgreSQL Documentation — Window Functions", kind: "docs", note: "Official reference with all built-in window functions." },
+    { label: "PostgreSQL Documentation — Window Functions", url: "https://www.postgresql.org/docs/current/", kind: "docs", note: "Official reference with all built-in window functions." },
     { label: "Modern SQL — Window Functions", kind: "article", note: "Excellent tutorial on window functions and frames." },
     { label: "SQL Window Functions Cheat Sheet — LearnSQL", kind: "article", note: "Visual guide to all window function types." },
     { label: "SQL Performance Explained — Markus Winand", kind: "book", note: "How window functions are executed and optimized." },

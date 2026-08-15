@@ -816,15 +816,15 @@ pub mod auth {
 
   resources: [
     { label: "Effective Java by Joshua Bloch", kind: "book", note: "Items 15-17 cover minimizing accessibility, using accessor methods, and minimizing mutability" },
-    { label: "On the Criteria To Be Used in Decomposing Systems into Modules (Parnas, 1972)", kind: "paper", note: "The foundational paper on information hiding that motivated encapsulation in OOP" },
+    { label: "On the Criteria To Be Used in Decomposing Systems into Modules (Parnas, 1972)", url: "https://www.win.tue.nl/~wstomv/edu/2ip30/references/criteria_for_modularization.pdf", kind: "paper", note: "The foundational paper on information hiding that motivated encapsulation in OOP" },
     { label: "Clean Code by Robert C. Martin", kind: "book", note: "Chapter 6 contrasts objects (encapsulated behavior) with data structures (exposed data)" },
     { label: "The Pragmatic Programmer by Hunt & Thomas", kind: "book", note: "Discusses decoupling and the Law of Demeter in the context of encapsulation" },
     { label: "Rust By Example - Visibility", kind: "docs", note: "Demonstrates Rust's module-level visibility system with pub, pub(crate), pub(super)" },
-    { label: "MDN: Private class features", kind: "docs", note: "Comprehensive documentation on ECMAScript #private fields, methods, and static members" },
+    { label: "MDN: Private class features", url: "https://developer.mozilla.org/", kind: "docs", note: "Comprehensive documentation on ECMAScript #private fields, methods, and static members" },
     { label: "C++ Core Guidelines C.133-C.139", kind: "docs", note: "Guidelines on encapsulation, access control, and the Pimpl idiom" },
     { label: "Python Descriptor HowTo Guide", kind: "docs", note: "Explains the descriptor protocol underlying @property, __get__, __set__, __delete__" },
     { label: "Java Platform Module System (JPMS) specification", kind: "docs", note: "Official specification for Java's module-level encapsulation system" },
-    { label: "Refactoring by Martin Fowler", kind: "book", note: "Covers code smells related to broken encapsulation: Feature Envy, Inappropriate Intimacy, Message Chains" }
+    { label: "Refactoring by Martin Fowler", url: "https://martinfowler.com/", kind: "book", note: "Covers code smells related to broken encapsulation: Feature Envy, Inappropriate Intimacy, Message Chains" }
   ],
 
   glossary: [

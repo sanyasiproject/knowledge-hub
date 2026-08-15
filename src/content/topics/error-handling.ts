@@ -596,7 +596,7 @@ private:
     { label: "Release It! by Michael Nygard", kind: "book", note: "Definitive guide to stability patterns: Circuit Breaker, Timeouts, Bulkheads, and Fail Fast" },
     { label: "Effective Java, Items 69-77", kind: "book", note: "Joshua Bloch's guidelines on exceptions: checked vs unchecked, custom hierarchies, and common pitfalls" },
     { label: "Railway Oriented Programming (Scott Wlaschin)", kind: "video", note: "Functional approach to error handling using Result types and composition" },
-    { label: "resilience4j documentation", kind: "docs", note: "Production-grade circuit breaker, retry, rate limiter, and bulkhead library for Java" }
+    { label: "resilience4j documentation", url: "https://resilience4j.readme.io/", kind: "docs", note: "Production-grade circuit breaker, retry, rate limiter, and bulkhead library for Java" }
   ],
 
   glossary: [

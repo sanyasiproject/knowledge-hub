@@ -295,7 +295,7 @@ Container image security extends beyond vulnerability scanning to encompass the 
   ],
   resources: [
     {
-      label: "Docker documentation — Dockerfile best practices",
+      label: "Docker documentation — Dockerfile best practices", url: "https://docs.docker.com/",
       kind: "docs",
     },
     {

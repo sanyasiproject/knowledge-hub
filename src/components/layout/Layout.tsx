@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { allTopics, hubStats, searchTopics, topicPath } from "../../data/taxonomy";
 import type { SearchHit } from "../../data/taxonomy";
@@ -193,27 +193,43 @@ export function Layout({ children }: { children: React.ReactNode }) {
         >
           &#x2630;
         </button>
-        <Link to="/" className="flex items-center gap-2 font-extrabold">
-          <span className="text-xl">&#x1F9ED;</span>
-          <span className="hidden sm:inline text-slate-900 dark:text-white">SE Knowledge Hub</span>
+        <Link to="/" className="flex items-center gap-2.5 font-extrabold">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-indigo-500 text-base shadow-sm shadow-brand-500/30">
+            &#x1F9ED;
+          </span>
+          <span className="hidden font-display tracking-tight text-slate-900 dark:text-white sm:inline">
+            SE Knowledge Hub
+          </span>
         </Link>
         <div className="mx-2 flex-1">
           <SearchTrigger onClick={() => setSearchOpen(true)} />
         </div>
-        <Link
+        <NavLink
           to="/interview"
-          className="hidden rounded-lg px-2.5 py-1.5 text-sm font-semibold text-brand-600 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-900/30 sm:inline-block"
+          className={({ isActive }) =>
+            `hidden rounded-lg px-2.5 py-1.5 text-sm font-semibold sm:inline-block ${
+              isActive
+                ? "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-200"
+                : "text-brand-600 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-900/30"
+            }`
+          }
           title="Interview Prep — last-minute revision"
         >
           Interview
-        </Link>
-        <Link
+        </NavLink>
+        <NavLink
           to="/paths"
-          className="hidden rounded-lg px-2.5 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200 sm:inline-block"
+          className={({ isActive }) =>
+            `hidden rounded-lg px-2.5 py-1.5 text-sm font-medium sm:inline-block ${
+              isActive
+                ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            }`
+          }
           title="Learning Paths"
         >
           Paths
-        </Link>
+        </NavLink>
         <button
           onClick={() => {
             const topics = allTopics();

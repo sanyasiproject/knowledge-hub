@@ -693,7 +693,7 @@ production use"]`,
       note: "The definitive reference that coined the test double taxonomy (dummy, stub, spy, mock, fake).",
     },
     {
-      label: "Mocks Aren't Stubs — Martin Fowler",
+      label: "Mocks Aren't Stubs — Martin Fowler", url: "https://martinfowler.com/",
       kind: "article",
       note: "Classic essay explaining the distinction between classical (state) and mockist (interaction) testing styles.",
     },

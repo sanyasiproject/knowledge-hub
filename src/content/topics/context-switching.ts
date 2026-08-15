@@ -371,9 +371,9 @@ void coroutine_resume(Coroutine *co) {
     "XSAVE/XRSTOR: fast save/restore of extended register state (SSE, AVX, etc.)",
   ],
   resources: [
-    { label: "Operating Systems: Three Easy Pieces", kind: "book", note: "Chapter 6 covers mechanism of context switching with clear diagrams." },
+    { label: "Operating Systems: Three Easy Pieces", url: "https://pages.cs.wisc.edu/~remzi/OSTEP/", kind: "book", note: "Chapter 6 covers mechanism of context switching with clear diagrams." },
     { label: "Linux Kernel Development (Robert Love)", kind: "book", note: "Chapter 3 explains process management and context switching in Linux." },
-    { label: "xv6 source code", kind: "repo", note: "The swtch.S and proc.c files show a minimal, readable context-switch implementation." },
+    { label: "xv6 source code", url: "https://github.com/mit-pdos/xv6-riscv", kind: "repo", note: "The swtch.S and proc.c files show a minimal, readable context-switch implementation." },
     { label: "lmbench - Context Switch Benchmark", kind: "repo", note: "Standard tool for measuring context-switch latency on Unix systems." },
     { label: "Measuring Context Switch Time", kind: "article", note: "Detailed methodology for accurate context-switch benchmarking." },
     { label: "How Does a Context Switch Work (LiveOverflow)", kind: "video", note: "Visual explanation of the low-level mechanics of context switching." },

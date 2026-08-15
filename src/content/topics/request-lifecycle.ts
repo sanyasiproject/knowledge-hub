@@ -309,10 +309,10 @@ int main() {
     "Debug latency: curl -w '%{time_namelookup} %{time_connect} %{time_appconnect} %{time_starttransfer}'",
   ],
   resources: [
-    { label: "High Performance Browser Networking (Ilya Grigorik)", kind: "book", note: "Free online — the definitive resource on the network layers of the web." },
-    { label: "MDN: How the Web Works", kind: "docs", note: "Clear walkthrough of client-server interaction." },
-    { label: "HTTP/2 RFC 9113", kind: "paper", note: "The specification for HTTP/2." },
-    { label: "What happens when you type google.com (GitHub repo)", kind: "repo", note: "A collaboratively built, extremely detailed answer to the classic question." },
+    { label: "High Performance Browser Networking (Ilya Grigorik)", url: "https://hpbn.co/", kind: "book", note: "Free online — the definitive resource on the network layers of the web." },
+    { label: "MDN: How the Web Works", url: "https://developer.mozilla.org/", kind: "docs", note: "Clear walkthrough of client-server interaction." },
+    { label: "HTTP/2 RFC 9113", url: "https://www.rfc-editor.org/rfc/rfc9113", kind: "paper", note: "The specification for HTTP/2." },
+    { label: "What happens when you type google.com (GitHub repo)", url: "https://github.com/alex/what-happens-when", kind: "repo", note: "A collaboratively built, extremely detailed answer to the classic question." },
   ],
   glossary: [
     { term: "TTFB", definition: "Time to First Byte — the elapsed time from sending a request to receiving the first byte of the response." },

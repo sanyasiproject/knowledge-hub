@@ -290,7 +290,7 @@ aws ecs create-service \\
   ],
 
   resources: [
-    { label: "AWS Well-Architected — Performance Efficiency Pillar", kind: "docs", note: "Official guidance on selecting and optimizing compute resources across EC2, Lambda, and containers" },
+    { label: "AWS Well-Architected — Performance Efficiency Pillar", url: "https://aws.amazon.com/architecture/well-architected/", kind: "docs", note: "Official guidance on selecting and optimizing compute resources across EC2, Lambda, and containers" },
     { label: "Amazon Builders' Library: Avoiding insurmountable queue backlogs", kind: "article", note: "Deep dive into Lambda concurrency, queue processing patterns, and backpressure handling" },
     { label: "AWS re:Invent — Advanced EC2 Networking (NET403)", kind: "video", note: "Covers placement groups, ENA, EFA, and network bandwidth allocation across instance families" },
     { label: "Firecracker: Lightweight Virtualization for Serverless (NSDI '20)", kind: "paper", note: "The academic paper behind Lambda's micro-VM technology — explains Firecracker's design and security model" },

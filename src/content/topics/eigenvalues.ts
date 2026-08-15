@@ -355,7 +355,7 @@ int main() {
     "PCA: center data → covariance → eigendecompose → top-k eigenvectors",
   ],
   resources: [
-    { label: "3Blue1Brown — Eigenvectors and Eigenvalues", kind: "video", note: "Stunning visual explanation of what eigenvalues mean geometrically." },
+    { label: "3Blue1Brown — Eigenvectors and Eigenvalues", url: "https://www.3blue1brown.com/", kind: "video", note: "Stunning visual explanation of what eigenvalues mean geometrically." },
     { label: "MIT 18.06 Lecture 21 — Eigenvalues (Gilbert Strang)", kind: "video", note: "Rigorous university lecture covering theory and computation." },
     { label: "The Matrix Cookbook", kind: "paper", note: "Comprehensive reference for matrix identities, derivatives, and eigenvalue properties." },
     { label: "NumPy linalg.eig / eigh documentation", kind: "docs", note: "API reference for computing eigenvalues in Python; eigh is optimized for symmetric matrices." },

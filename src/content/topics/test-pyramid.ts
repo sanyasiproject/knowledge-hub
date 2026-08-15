@@ -533,7 +533,7 @@ heavy maintenance cost"]
       note: "The original source of the Test Pyramid concept, covering practical agile testing strategies.",
     },
     {
-      label: "The Practical Test Pyramid by Ham Vocke (Martin Fowler's blog)",
+      label: "The Practical Test Pyramid by Ham Vocke (Martin Fowler's blog)", url: "https://martinfowler.com/",
       kind: "article",
       note: "Detailed exploration of the test pyramid with modern examples in Java and JavaScript, including practical advice for each layer.",
     },

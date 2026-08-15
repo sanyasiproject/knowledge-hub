@@ -421,7 +421,7 @@ kubectl run curlpod --rm -it --image=curlimages/curl --restart=Never -- \\
   ],
   resources: [
     {
-      label: "Kubernetes documentation — Services, Load Balancing, Networking",
+      label: "Kubernetes documentation — Services, Load Balancing, Networking", url: "https://kubernetes.io/docs/",
       kind: "docs",
     },
   ],

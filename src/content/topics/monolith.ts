@@ -776,7 +776,7 @@ int main() {
 
   resources: [
     {
-      label: "MonolithFirst — Martin Fowler",
+      label: "MonolithFirst — Martin Fowler", url: "https://martinfowler.com/",
       kind: "article",
     },
     {

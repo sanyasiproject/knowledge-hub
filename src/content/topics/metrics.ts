@@ -139,11 +139,11 @@ export const metrics: TopicContent = {
   ],
   resources: [
     {
-      label: "Site Reliability Engineering — Google",
+      label: "Site Reliability Engineering — Google", url: "https://sre.google/sre-book/table-of-contents/",
       kind: "book",
     },
     {
-      label: "Prometheus documentation — instrumentation best practices",
+      label: "Prometheus documentation — instrumentation best practices", url: "https://prometheus.io/docs/",
       kind: "docs",
     },
   ],

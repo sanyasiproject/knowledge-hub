@@ -345,7 +345,7 @@ int main() {
     "Refresh flow: access expired → POST /auth/refresh { refreshToken } → new access + refresh",
   ],
   resources: [
-    { label: "RFC 7519 — JSON Web Token", kind: "paper", note: "The JWT specification." },
+    { label: "RFC 7519 — JSON Web Token", url: "https://www.rfc-editor.org/rfc/rfc7519", kind: "paper", note: "The JWT specification." },
     { label: "jwt.io", kind: "docs", note: "Interactive JWT decoder and debugger." },
     { label: "Auth0: JWT Handbook", kind: "book", note: "Free e-book covering JWT in depth." },
     { label: "Critical vulnerabilities in JSON Web Token libraries", kind: "article", note: "Tim McLean's article on algorithm confusion attacks." },

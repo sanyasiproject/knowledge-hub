@@ -485,7 +485,7 @@ public:
   ],
   resources: [
     {
-      label: "LeetCode Linked List Study Plan",
+      label: "LeetCode Linked List Study Plan", url: "https://leetcode.com/",
       kind: "article",
       note: "Curated problem set covering reversal, cycle detection, merge, and advanced pointer techniques.",
     },

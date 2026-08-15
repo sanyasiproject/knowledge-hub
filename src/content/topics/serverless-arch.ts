@@ -648,7 +648,7 @@ module.exports.handler = middy(baseHandler)
       kind: "docs",
     },
     {
-      label: "Serverless Architectures — Martin Fowler / Mike Roberts",
+      label: "Serverless Architectures — Martin Fowler / Mike Roberts", url: "https://martinfowler.com/",
       kind: "article",
     },
   ],

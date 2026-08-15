@@ -139,7 +139,7 @@ This decoupling enables independent deployment, scaling, and evolution of servic
   ],
   resources: [
     {
-      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      label: "Designing Data-Intensive Applications — Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
     },
     {
@@ -147,7 +147,7 @@ This decoupling enables independent deployment, scaling, and evolution of servic
       kind: "book",
     },
     {
-      label: "martinfowler.com — architecture and pattern articles",
+      label: "martinfowler.com — architecture and pattern articles", url: "https://martinfowler.com/",
       kind: "article",
     },
   ],

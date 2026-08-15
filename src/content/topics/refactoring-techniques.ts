@@ -727,7 +727,7 @@ public class ReportGenerator {
 
   resources: [
     {
-      label: "Refactoring (2nd Ed.) by Martin Fowler",
+      label: "Refactoring (2nd Ed.) by Martin Fowler", url: "https://martinfowler.com/",
       kind: "book",
       note: "The definitive catalog of refactoring techniques with JavaScript examples.",
     },
@@ -737,7 +737,7 @@ public class ReportGenerator {
       note: "Essential guide to getting untested legacy code under test so you can safely refactor it.",
     },
     {
-      label: "Refactoring Guru -- Refactoring Techniques",
+      label: "Refactoring Guru -- Refactoring Techniques", url: "https://refactoring.guru/",
       kind: "article",
       note: "Free online catalog with visual explanations of all major refactoring techniques.",
     },
@@ -747,12 +747,12 @@ public class ReportGenerator {
       note: "Covers naming, function design, and code structure principles that motivate refactoring.",
     },
     {
-      label: "Martin Fowler -- Refactoring Catalog (refactoring.com)",
+      label: "Martin Fowler -- Refactoring Catalog (refactoring.com)", url: "https://martinfowler.com/",
       kind: "docs",
       note: "Online companion to the book with technique descriptions and mechanics.",
     },
     {
-      label: "Refactoring with Martin Fowler (YouTube talk)",
+      label: "Refactoring with Martin Fowler (YouTube talk)", url: "https://martinfowler.com/",
       kind: "video",
       note: "Conference talk demonstrating live refactoring with running tests.",
     },

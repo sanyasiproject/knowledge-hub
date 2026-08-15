@@ -474,10 +474,10 @@ Slots 10923-16383]
     "CONFIG SET min-replicas-to-write N — reject writes without N replicas",
   ],
   resources: [
-    { label: "Redis Cluster Specification", kind: "docs", note: "Official protocol specification covering hash slots, gossip, failover, and resharding." },
+    { label: "Redis Cluster Specification", url: "https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/", kind: "docs", note: "Official protocol specification covering hash slots, gossip, failover, and resharding." },
     { label: "Redis Sentinel Documentation", kind: "docs", note: "Setup, configuration, and client integration guide for Sentinel." },
     { label: "Redis Cluster Tutorial", kind: "docs", note: "Step-by-step guide to creating and operating a Redis Cluster." },
-    { label: "Designing Data-Intensive Applications — Chapter 6", kind: "book", note: "Martin Kleppmann's coverage of partitioning, replication, and consensus relevant to Redis Cluster." },
+    { label: "Designing Data-Intensive Applications — Chapter 6", url: "https://dataintensive.net/", kind: "book", note: "Martin Kleppmann's coverage of partitioning, replication, and consensus relevant to Redis Cluster." },
     { label: "Redis source: cluster.c", kind: "repo", note: "Core cluster implementation: gossip, failover election, slot migration, MOVED/ASK handling." },
     { label: "Redis Cluster and Sentinel in Production (Redis Day talk)", kind: "video", note: "Practical deployment lessons, failure scenarios, and operational tips." },
   ],

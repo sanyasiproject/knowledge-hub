@@ -635,7 +635,7 @@ int main() {
       note: "Comprehensive guide to reactive streams in JavaScript, showing how Observer extends into a full reactive programming model.",
     },
     {
-      label: "Refactoring Guru - Observer Pattern",
+      label: "Refactoring Guru - Observer Pattern", url: "https://refactoring.guru/",
       kind: "article",
       note: "Visual guide with UML, real-world analogies, and implementations in multiple languages.",
     },

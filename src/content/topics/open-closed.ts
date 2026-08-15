@@ -431,7 +431,7 @@ const pipeline = new Pipeline()
   resources: [
     { label: "Object-Oriented Software Construction by Bertrand Meyer", kind: "book", note: "The original source of OCP, with the inheritance-based formulation." },
     { label: "Clean Architecture by Robert C. Martin", kind: "book", note: "Chapter 8 covers OCP with the polymorphic abstraction interpretation." },
-    { label: "Refactoring.Guru -- Open/Closed Principle", kind: "article", note: "Visual explanation with before/after code examples." },
+    { label: "Refactoring.Guru -- Open/Closed Principle", url: "https://refactoring.guru/", kind: "article", note: "Visual explanation with before/after code examples." },
     { label: "Design Patterns: Elements of Reusable Object-Oriented Software (GoF)", kind: "book", note: "Strategy and Template Method patterns that enable OCP." },
     { label: "The Open-Closed Principle (Robert C. Martin, 1996)", kind: "paper", note: "Martin's seminal article reframing OCP around polymorphic abstraction." }
   ],

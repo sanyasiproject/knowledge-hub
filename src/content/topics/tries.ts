@@ -488,8 +488,8 @@ node exists? use it : create it"]
     "Longest common prefix of all words: walk trie from root while node has exactly one child and is not end.",
   ],
   resources: [
-    { label: "LeetCode 208 - Implement Trie (Prefix Tree)", kind: "docs", note: "The canonical trie implementation problem." },
-    { label: "LeetCode 212 - Word Search II", kind: "docs", note: "Classic trie + DFS backtracking on a 2D board." },
+    { label: "LeetCode 208 - Implement Trie (Prefix Tree)", url: "https://leetcode.com/", kind: "docs", note: "The canonical trie implementation problem." },
+    { label: "LeetCode 212 - Word Search II", url: "https://leetcode.com/", kind: "docs", note: "Classic trie + DFS backtracking on a 2D board." },
     { label: "Algorithms, 4th Edition by Sedgewick & Wayne - Chapter 5.2: Tries", kind: "book", note: "Covers R-way tries, TSTs, and character-based string symbol tables." },
     { label: "Introduction to Algorithms (CLRS) - Chapter 12 supplement on tries", kind: "book", note: "Theoretical foundations and analysis of trie data structures." },
     { label: "Aho & Corasick, 'Efficient String Matching: An Aid to Bibliographic Search' (1975)", kind: "paper", note: "The original paper on multi-pattern matching using trie automata." },

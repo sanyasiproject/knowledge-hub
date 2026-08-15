@@ -556,7 +556,7 @@ int main() {
       note: "Original Adapter pattern description with class adapter and object adapter variants.",
     },
     {
-      label: "Refactoring Guru - Adapter Pattern",
+      label: "Refactoring Guru - Adapter Pattern", url: "https://refactoring.guru/",
       kind: "article",
       note: "Visual UML diagrams and code examples in multiple languages, with comparisons to related patterns.",
     },

@@ -213,10 +213,10 @@ ORDER BY pg_relation_size(indexrelid) DESC;`
     "REINDEX INDEX idx — rebuild a bloated index",
   ],
   resources: [
-    { label: "Use The Index, Luke — Markus Winand", kind: "article", note: "The best free resource on SQL indexing. Covers B-trees, composite indexes, and query plans." },
-    { label: "PostgreSQL Documentation — Indexes", kind: "docs", note: "Comprehensive reference for all PostgreSQL index types." },
+    { label: "Use The Index, Luke — Markus Winand", url: "https://use-the-index-luke.com/", kind: "article", note: "The best free resource on SQL indexing. Covers B-trees, composite indexes, and query plans." },
+    { label: "PostgreSQL Documentation — Indexes", url: "https://www.postgresql.org/docs/current/", kind: "docs", note: "Comprehensive reference for all PostgreSQL index types." },
     { label: "Database Internals — Alex Petrov", kind: "book", note: "Deep dive into B-tree variants, LSM trees, and storage engine internals." },
-    { label: "Designing Data-Intensive Applications, Ch. 3", kind: "book", note: "Storage and retrieval — B-trees vs LSM trees." },
+    { label: "Designing Data-Intensive Applications, Ch. 3", url: "https://dataintensive.net/", kind: "book", note: "Storage and retrieval — B-trees vs LSM trees." },
   ],
   glossary: [
     { term: "B+ tree", definition: "A balanced tree structure where internal nodes hold keys and pointers, and leaf nodes hold keys and row pointers linked sequentially." },

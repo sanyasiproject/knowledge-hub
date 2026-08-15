@@ -661,7 +661,7 @@ int main() {
   ],
   resources: [
     {
-      label: "Competitive Programmer's Handbook by Antti Laaksonen",
+      label: "Competitive Programmer's Handbook by Antti Laaksonen", url: "https://cses.fi/book/book.pdf",
       kind: "book",
       note: "Chapters on segment trees, Fenwick trees, and Union-Find with clear explanations and contest-style examples.",
     },

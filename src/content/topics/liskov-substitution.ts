@@ -470,7 +470,7 @@ function migrateFlyingAnimals(flyers: Flyable[]): void {
     { label: "A Behavioral Notion of Subtyping (Liskov & Wing, 1994)", kind: "paper", note: "The foundational paper formalizing behavioral subtyping with the history list constraint." },
     { label: "Clean Architecture by Robert C. Martin", kind: "book", note: "Chapter 9 covers LSP with practical examples and its role in architecture." },
     { label: "Object-Oriented Software Construction by Bertrand Meyer", kind: "book", note: "Design by Contract formalism that underpins LSP's precondition/postcondition rules." },
-    { label: "Refactoring.Guru -- Liskov Substitution Principle", kind: "article", note: "Visual explanation with code examples of violations and fixes." }
+    { label: "Refactoring.Guru -- Liskov Substitution Principle", url: "https://refactoring.guru/", kind: "article", note: "Visual explanation with code examples of violations and fixes." }
   ],
   glossary: [
     { term: "Liskov Substitution Principle (LSP)", definition: "Objects of a supertype must be replaceable with objects of any subtype without altering program correctness." },

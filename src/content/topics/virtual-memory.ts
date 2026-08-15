@@ -461,7 +461,7 @@ read-only"]`,
     "Linux: /proc/meminfo, /proc/pid/smaps, vmstat, free -h for VM diagnostics",
   ],
   resources: [
-    { label: "Operating Systems: Three Easy Pieces (OSTEP)", kind: "book", note: "Free online. Chapters 13-23 cover virtual memory comprehensively with excellent clarity." },
+    { label: "Operating Systems: Three Easy Pieces (OSTEP)", url: "https://pages.cs.wisc.edu/~remzi/OSTEP/", kind: "book", note: "Free online. Chapters 13-23 cover virtual memory comprehensively with excellent clarity." },
     { label: "Operating System Concepts (Silberschatz)", kind: "book", note: "Chapters 9-10 cover virtual memory, demand paging, and page replacement algorithms." },
     { label: "Computer Systems: A Programmer's Perspective (CS:APP)", kind: "book", note: "Chapter 9 provides the programmer's view of virtual memory with x86 specifics." },
     { label: "Intel 64 and IA-32 Software Developer's Manual, Vol. 3A", kind: "docs", note: "Chapter 4 covers x86-64 paging architecture in complete detail." },

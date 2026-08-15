@@ -169,7 +169,7 @@ export const dockerNetworking: TopicContent = {
   ],
   resources: [
     {
-      label: "Docker documentation — networking overview",
+      label: "Docker documentation — networking overview", url: "https://docs.docker.com/",
       kind: "docs",
     },
   ],

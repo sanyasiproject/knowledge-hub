@@ -522,11 +522,11 @@ console.log(
   ],
   resources: [
     {
-      label: "Site Reliability Engineering — Google",
+      label: "Site Reliability Engineering — Google", url: "https://sre.google/sre-book/table-of-contents/",
       kind: "book",
     },
     {
-      label: "The Site Reliability Workbook — Google",
+      label: "The Site Reliability Workbook — Google", url: "https://sre.google/workbook/table-of-contents/",
       kind: "book",
     },
     {

@@ -458,7 +458,7 @@ const resumed = db.orders.watch(pipeline, {
     { label: "MongoDB Manual", kind: "docs", note: "Official reference for all MongoDB features, operators, and best practices." },
     { label: "MongoDB University (free courses)", kind: "video", note: "Free self-paced courses covering development, administration, and aggregation." },
     { label: "CouchDB: The Definitive Guide", kind: "book", note: "Comprehensive guide to CouchDB architecture, replication, and MapReduce views." },
-    { label: "Designing Data-Intensive Applications — Ch. 2 & 3", kind: "book", note: "Martin Kleppmann covers document model trade-offs and storage engine internals." },
+    { label: "Designing Data-Intensive Applications — Ch. 2 & 3", url: "https://dataintensive.net/", kind: "book", note: "Martin Kleppmann covers document model trade-offs and storage engine internals." },
     { label: "MongoDB Blog: Schema Design Patterns", kind: "article", note: "Series covering attribute pattern, bucket pattern, outlier pattern, and more." },
     { label: "PouchDB project", kind: "repo", note: "JavaScript database inspired by CouchDB that syncs — demonstrates the CouchDB replication protocol in the browser." },
   ],

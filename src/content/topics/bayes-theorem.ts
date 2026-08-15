@@ -465,12 +465,12 @@ int main() {
   ],
   resources: [
     {
-      label: "Think Bayes by Allen Downey",
+      label: "Think Bayes by Allen Downey", url: "https://allendowney.github.io/ThinkBayes2/",
       kind: "book",
       note: "Free computational introduction to Bayesian statistics using Python. Covers practical examples from medical testing to sports analytics.",
     },
     {
-      label: "3Blue1Brown - Bayes' theorem (YouTube)",
+      label: "3Blue1Brown - Bayes' theorem (YouTube)", url: "https://www.3blue1brown.com/",
       kind: "video",
       note: "Excellent visual explanation of Bayes' theorem with intuitive geometric representations.",
     },

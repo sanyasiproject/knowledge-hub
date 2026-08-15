@@ -620,7 +620,7 @@ app.listen(3000, () => console.log("RAG server on :3000"));`,
 
   resources: [
     {
-      label: "Retrieval-Augmented Generation for Knowledge-Intensive NLP — Lewis et al., 2020",
+      label: "Retrieval-Augmented Generation for Knowledge-Intensive NLP — Lewis et al., 2020", url: "https://arxiv.org/abs/2005.11401",
       kind: "paper",
     },
     {
@@ -628,7 +628,7 @@ app.listen(3000, () => console.log("RAG server on :3000"));`,
       kind: "docs",
     },
     {
-      label: "LangChain documentation — retrieval",
+      label: "LangChain documentation — retrieval", url: "https://python.langchain.com/docs/",
       kind: "docs",
     },
   ],

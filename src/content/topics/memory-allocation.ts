@@ -481,7 +481,7 @@ int main() {
     "Common sizes: glibc min alloc = 32 bytes (64-bit). Alignment = 16 bytes on x86-64.",
   ],
   resources: [
-    { label: "Operating Systems: Three Easy Pieces (OSTEP)", kind: "book", note: "Chapter 17 covers free-space management with clear diagrams of allocation strategies." },
+    { label: "Operating Systems: Three Easy Pieces (OSTEP)", url: "https://pages.cs.wisc.edu/~remzi/OSTEP/", kind: "book", note: "Chapter 17 covers free-space management with clear diagrams of allocation strategies." },
     { label: "Computer Systems: A Programmer's Perspective (CS:APP)", kind: "book", note: "Chapter 9.9 covers dynamic memory allocation, including an implicit free-list allocator implementation." },
     { label: "jemalloc documentation", kind: "docs", note: "Comprehensive documentation of jemalloc's arena, bin, and tcache architecture." },
     { label: "tcmalloc design doc", kind: "article", note: "Google's design document explaining tcmalloc's three-tier architecture." },

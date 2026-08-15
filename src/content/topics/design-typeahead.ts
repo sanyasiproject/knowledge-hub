@@ -9,15 +9,21 @@ export const designTypeahead: TopicContent = {
   ],
   detailed: [
     "## Trie Data Structure for Prefix Search\n\nA trie stores strings character by character, with each edge labeled by a character and each node representing a prefix. For typeahead, we augment each node with the top-k suggestions for that prefix -- this is the critical optimization that avoids traversing the entire subtree on every query. When a user types 'app', we traverse root->a->p->p and immediately return the pre-computed top-k suggestions stored at that node (e.g., 'apple', 'application', 'app store'). Without pre-computed top-k, we would need to DFS the entire subtree (potentially millions of nodes for short prefixes like 'a'), which is far too slow for sub-100ms responses. The trade-off is memory: storing top-10 suggestions at every node multiplies memory usage by roughly 10x compared to a bare trie. A compressed trie (radix tree or Patricia trie) merges single-child chains into single nodes, reducing node count by 50-80% for natural language data. For example, the words 'application' and 'apple' share the prefix 'appl' as a single compressed edge rather than four separate nodes.",
+    "## Capacity Estimation and Back-of-Envelope Math\n\nStart every typeahead design with the arithmetic, because the numbers dictate the architecture. Assume 5 billion searches per day and that each search generates about 4 typeahead requests after debouncing (a 6-character query with a 150ms debounce fires roughly 3-5 requests, not 6). That is 5B * 4 = 20B suggestion requests per day. Dividing by 86,400 seconds gives 20,000,000,000 / 86,400 ≈ 230K QPS average. Peak traffic is typically 3x average, so provision for roughly 700K QPS at peak. For storage: with 100M unique suggestion phrases at an average of 30 bytes each, raw phrase data is about 3 GB; a radix-compressed trie with precomputed top-10 (storing suggestion IDs, not full strings, at each node) lands in the 50-100 GB range -- large for one box but comfortable across 10-20 shards holding 5-10 GB each fully in memory. Key insight: precomputed top-K is what makes 700K QPS feasible -- each read is O(prefix length) pointer hops (typically 2-5) plus returning a stored list, so a single in-memory shard can serve 100K+ QPS, and the edge cache absorbs 70-90% of traffic before it ever reaches a shard. Bandwidth: a response of 10 suggestions at ~50 bytes each plus JSON overhead is about 1 KB, so 230K QPS ≈ 230 MB/s aggregate egress, well within CDN territory. Daily log volume for the offline pipeline: 20B requests * ~100 bytes per log line ≈ 2 TB/day of raw logs to aggregate.",
     "## Ranking and Scoring Algorithms\n\n**Frequency-based ranking** is the simplest: count how many times each query has been searched and sort by count. The problem is that this favors historically popular queries over emerging trends. **Exponential decay** solves this by weighting recent searches more heavily: `score = count * decay^(now - lastSearchTime)`, where decay is a factor like 0.99 per hour. A query searched 1000 times a year ago scores lower than one searched 100 times today. **Personalized ranking** incorporates the user's own search history: if the user frequently searches for 'python programming', typing 'py' should rank this highly even if 'python snake' is globally more popular. The scoring function combines signals: `finalScore = w1 * globalFrequency + w2 * recencyScore + w3 * personalScore + w4 * contextScore`, where context might include the user's current location, time of day, or the page they are on. Weights are tuned via A/B testing and machine learning models. For trending queries, a separate detector identifies queries whose frequency has spiked in the last hour and boosts their score temporarily.",
     "## System Architecture and Scaling\n\nThe typeahead service sits behind a CDN or edge cache for the most common prefixes. When a request arrives, it first checks the edge cache (Redis or Memcached) -- cache hit rates of 70-90% are common because query prefix distributions follow a power law (Zipf's distribution). On cache miss, the request goes to a trie server. The trie is partitioned by prefix range across multiple shards: shard 1 handles prefixes starting with a-f, shard 2 handles g-m, and so on. Each shard holds its portion of the trie entirely in memory for O(L) lookup time where L is the prefix length. For read scaling, each shard is replicated across multiple read replicas in each region. A typical deployment uses 26 shards (one per letter) with 3 replicas each, totaling 78 trie servers per region. At Google's scale, the trie contains billions of entries and requires hundreds of servers, but the architecture remains the same. The API gateway routes requests to the correct shard based on the first character of the prefix, or uses consistent hashing for more granular partitioning.",
     "## Real-Time Updates and Data Pipeline\n\n**Offline pipeline**: Every 24 hours, a MapReduce/Spark job processes search logs to compute global query frequencies, applies filtering (remove offensive content, low-quality queries, spelling corrections), and builds a new immutable trie. This trie is serialized, compressed (typically 40-60% compression with LZ4), and distributed to all trie servers via a pull mechanism. **Online updates**: Between daily rebuilds, trending queries and corrections need to be reflected quickly. A streaming pipeline (Kafka + Flink) processes the real-time search event stream, detects trending queries (frequency spike detection using sliding window counters), and pushes updates to a small mutable trie layer on each server. At query time, results from both the base trie and the delta trie are merged and re-ranked. The delta trie is small (thousands of entries vs billions in the base trie), so it can be safely mutated with a read-write lock. Every few hours, the delta is merged into the base trie to prevent unbounded growth.",
+    "## Trie with Precomputed Top-K vs Elasticsearch Prefix Queries\n\nInterviewers often ask why not just use Elasticsearch, so know both sides. Elasticsearch offers `match_phrase_prefix`, `edge_ngram` analyzers, and a completion suggester; the completion suggester is itself an in-memory FST (finite state transducer), which is conceptually the same idea as a compressed trie with weights. Using ES buys you operational maturity, replication, fuzzy matching, and filtering out of the box -- a strong choice for mid-scale products (millions of documents, tens of thousands of QPS). The custom trie service wins at extreme scale: it eliminates the query parsing, scoring, and coordination overhead of a general-purpose engine, guarantees O(prefix length) reads with precomputed top-K, and gives you full control over the memory layout (succinct encodings, memory-mapped snapshots). Common mistake: proposing an edge_ngram index without acknowledging its write amplification -- indexing 'apple' as 'a', 'ap', 'app', 'appl', 'apple' multiplies index size by average word length, which is exactly the same space-for-speed trade-off as precomputed top-K, just hidden inside the search engine. In practice: start with the ES completion suggester, and migrate to a dedicated sharded trie service only when p99 latency or index rebuild cost forces the issue.",
+    "## Sharding the Trie and the Hot-Shard Problem\n\nA 50-100 GB trie must be partitioned, and the naive scheme -- one shard per first letter -- creates severe skew because letter frequencies follow a power law (in English, prefixes starting with 's', 't', and 'c' carry far more traffic than 'x' or 'z'). Better: partition by prefix range weighted by observed traffic, so ranges are uneven in the alphabet but even in load (for example a-e, f-l, m-r, s-z might become a-c, d-h, i-r, s, t-z with 's' getting its own shard). The deeper problem is short prefixes: single-character prefixes like 'a' or 's' receive enormous traffic and their top-K lists change slowly, so do not serve them from the trie at all. Key insight: serve 1-2 character prefixes entirely from a Redis hot-prefix cache (at most 26 + 26*26 = 702 entries for lowercase Latin) refreshed every few minutes -- this removes the hottest keys from the shards and turns the hot-shard problem into a trivial cache. For routing, the gateway holds a small in-memory range map (prefix range to shard address) versioned alongside the trie snapshots, so resharding is just publishing a new map. Replicate each shard 3x per region for reads and failure tolerance; because the trie snapshot is immutable, replicas never diverge and any replica can serve any read.",
+    "## Filtering, Safety, and Policy Layer\n\nEvery suggestion shown to a user is effectively content your product publishes, so filtering is a first-class component, not an afterthought. Apply filtering at two stages. First, at build time: the trie builder runs the aggregated candidate list through a blocklist (profanity, slurs, illegal content), policy classifiers (violence, adult content, harassment of named individuals), and quality filters (misspellings below a threshold, queries seen from too few distinct users -- which also protects privacy by never suggesting one user's unique query). Second, at serve time: a fast in-memory check (hash set or bloom filter over normalized suggestion text) catches anything that slipped through or was blocklisted after the snapshot was built, and this filter must be hot-reloadable within minutes because trending events surface new abusive queries faster than any daily rebuild. Real-world example: Google removes autocomplete predictions that violate its policies on hate, violence, and personal information, and pairs automated filtering with a user reporting mechanism that feeds the blocklist. Warning: the trending overlay is the most dangerous path -- it is designed to surface queries quickly, which is exactly what coordinated abuse exploits, so trending candidates need stricter thresholds (minimum distinct-user counts, classifier checks) before they are ever shown.",
     "## Multi-Language and Special Considerations\n\n**Multi-language support** requires handling different character sets (Latin, CJK, Arabic, Devanagari), input methods (pinyin for Chinese, romaji for Japanese), and word boundaries. For Chinese typeahead, the trie must support pinyin-to-character mapping: the prefix 'bei' should suggest 'Beijing' in both pinyin and characters. This is implemented as a parallel trie indexed by romanized input that maps to the original-script suggestions. **Fuzzy matching** handles typos: if a user types 'amazn', the system should still suggest 'amazon'. Edit distance computation (Levenshtein distance) is expensive -- O(m*n) per candidate. In practice, use a BK-tree or precomputed edit-distance-1 variants stored in the trie. **Offensive content filtering** runs a bloom filter or hash set check on every suggestion before returning it. The filter is updated daily and can be hot-reloaded. **Privacy** is critical: do not suggest other users' private searches. Only suggest from a curated corpus of public queries, product names, and trending topics.",
   ],
   deepDive: [
     "**Trie memory optimization** is essential for production systems. A naive trie for 1 billion unique queries with an average length of 20 characters would consume roughly 200 GB of memory (20 nodes per query * 10 bytes per node minimum). Compression techniques reduce this dramatically. **Compressed trie (radix tree)**: merge chains of single-child nodes into a single node with a multi-character edge label. This reduces node count by 50-80%. **Array-mapped trie**: instead of hash maps for children, use a sorted array of (character, childPointer) pairs, saving 40-60 bytes per node from hash map overhead. **Succinct tries** (like LOUDS encoding) represent the trie structure in 2 bits per node plus the edge labels, achieving near-information-theoretic minimum space. For a trie with 100 million nodes, LOUDS uses roughly 25 MB for structure alone. **Memory-mapped files**: instead of loading the entire trie into heap memory, memory-map the serialized trie file. The OS pages in only the accessed portions, reducing resident memory. This works well because access patterns are skewed -- most queries hit a small subset of the trie.",
     "**Serving latency breakdown** for a typeahead request shows where to optimize. Total budget: 100ms. Network round-trip (client to edge server): 10-30ms. Edge cache lookup: 1ms. Trie traversal: 0.01ms (trivial -- just following L character pointers). Top-k merge from pre-computed lists: 0.05ms. Personalization re-ranking: 1-5ms. Response serialization and network return: 5-10ms. The bottleneck is rarely the trie itself -- it is the network latency and any machine learning models in the ranking pipeline. This is why edge deployment (running trie servers in CDN points of presence) is critical for achieving sub-50ms total latency. Client-side optimizations also matter: debouncing (only send a request 100-200ms after the user stops typing), request cancellation (abort the previous in-flight request when a new character is typed), and local caching (cache results for previously typed prefixes in the browser's memory).",
     "**Trending detection and real-time ranking** requires a separate analytics pipeline. The detector compares the current query rate against the expected baseline rate (computed from the same time window in previous weeks). If `current_rate > baseline_rate * threshold` (e.g., threshold = 3x), the query is flagged as trending. False positives are managed by requiring the elevated rate to persist for at least 5 minutes. Once a trending query is detected, its score in the trie is temporarily boosted by a multiplier (e.g., 2x) that decays over hours. The implementation uses a sliding window counter per query in Redis: increment on each search, count the window every minute, compare against the precomputed baseline. At scale, this cannot be done for every query -- only for queries exceeding a minimum frequency threshold (e.g., 10 searches per minute). The streaming pipeline (Kafka -> Flink) handles this aggregation, outputting trending query updates every 30 seconds to the trie servers.",
+    "**Versioned snapshot deployment** is how the base trie is updated without downtime or partial states. The offline pipeline (query logs -> Kafka -> Spark/Flink aggregation -> trie builder) emits an immutable, self-contained snapshot: serialized trie segments per shard, a manifest with version number, shard-range map, checksums, and build metadata. Snapshots land in an object store (S3/GCS); shard servers poll or receive a push notification, download their segment, memory-map it, warm the hottest prefixes, and then atomically flip a pointer from the old snapshot to the new one -- readers in flight finish on the old version (a simple RCU-style scheme, since snapshots are read-only there is no locking). Key insight: immutability is what makes the whole serving tier simple -- no write path on the hot servers means no locks, no compaction, no replica divergence, and rollback is just re-pointing at the previous version. The manifest version also flows into cache keys (edge cache entries are tagged with the snapshot version), so a bad snapshot can be rolled back without serving stale-poisoned cache entries. Canary the rollout: deploy the new snapshot to one replica per shard, compare suggestion quality metrics (CTR on suggestions, empty-result rate) against the fleet for 15-30 minutes, then roll fleet-wide. In practice: teams keep the last 3-5 snapshot versions on disk so rollback is seconds, not a rebuild.",
+    "**Trending delta overlay mechanics** deserve precision because merging two ranked lists correctly is subtle. The overlay holds short-window counts (for example 5-minute and 1-hour sliding windows maintained by Flink) for queries whose recent rate significantly exceeds baseline. At query time the suggestion service fetches top-K from the base trie shard and top-M (M is small, like 3) trending candidates matching the prefix from the overlay, then merges: trending scores must be mapped onto the same scale as base scores, typically by expressing both as estimated near-term probability of the user wanting that completion. A common scheme: `mergedScore = max(baseScore, trendBoost * recentRate / expectedRate)` with the boost decaying over hours so a spike ages out naturally even if the stream lags. Deduplicate by normalized query text (case-folded, whitespace-collapsed, Unicode NFC) because the same query often exists in both structures. Common mistake: letting the overlay bypass the filtering layer -- trending candidates must pass the same blocklist and stricter distinct-user thresholds, otherwise coordinated typing campaigns can push abusive suggestions live within minutes. Size the overlay small (tens of thousands of entries) so it fits in a per-server hash map keyed by prefix; if it grows beyond that, the aggregation thresholds are too loose.",
     "**Client-side architecture** is half the battle for a good typeahead experience. The client should implement: (1) **Debouncing** with a 150-200ms delay -- do not send a request on every keystroke, wait for a pause. (2) **Request cancellation** using AbortController: when the user types a new character, abort the previous in-flight HTTP request to avoid out-of-order responses. (3) **Local prefix cache**: if the user typed 'app' and received suggestions, and then types 'appl', first filter the cached 'app' results locally for the prefix 'appl' before sending a new request. This provides instant results while the server request is in flight. (4) **Keyboard navigation**: arrow keys move selection up/down, Enter selects, Escape dismisses. (5) **Accessibility**: ARIA attributes (role='combobox', aria-autocomplete='list', aria-expanded), screen reader announcements when suggestions appear or change. (6) **Rate limiting on the client**: never send more than 10 requests per second, even without debouncing, to protect the server from keystroke floods.",
   ],
   code: [
@@ -453,32 +459,51 @@ private:
       title: "Typeahead System Architecture",
       kind: "architecture",
       caption:
-        "Multi-tier architecture with edge caching, partitioned trie servers, and a data pipeline for offline rebuilds and real-time updates.",
-      mermaid: `graph TD
-    CLIENT["Client with debounce"]
-    CDN["Edge Cache - Redis"]
-    GATEWAY["API Gateway"]
-    SHARD1["Trie Shard a-f"]
-    SHARD2["Trie Shard g-m"]
-    SHARD3["Trie Shard n-s"]
-    SHARD4["Trie Shard t-z"]
-    DELTA["Delta Trie - trending"]
-    LOGS["Search Logs"]
-    SPARK["Spark Daily Rebuild"]
-    KAFKA["Kafka Stream"]
-    FLINK["Flink Trending Detector"]
-    CLIENT --> CDN
-    CDN -->|Cache miss| GATEWAY
-    GATEWAY --> SHARD1
-    GATEWAY --> SHARD2
-    GATEWAY --> SHARD3
-    GATEWAY --> SHARD4
-    SHARD1 --> DELTA
-    LOGS --> SPARK
-    SPARK -->|Daily trie build| SHARD1
+        "Layered architecture: debounced clients hit the edge cache first; misses flow to the suggestion service, which fans out to sharded trie stores with precomputed top-K and merges a real-time trending overlay. The offline pipeline rebuilds versioned trie snapshots from query logs.",
+      mermaid: `graph TB
+    subgraph CLIENTS["Clients"]
+        BROWSER["Browser / Mobile App<br/>debounce 150-200ms<br/>cancel in-flight requests"]
+        LCACHE["Client-side prefix cache<br/>filter locally on prefix extension"]
+    end
+    subgraph EDGE["Edge Layer"]
+        CDN["CDN / Edge cache<br/>popular prefixes, TTL 60s<br/>70-90% hit rate on Zipf traffic"]
+    end
+    subgraph SERVING["Serving Layer"]
+        GW["API Gateway / Load Balancer<br/>routes by prefix range"]
+        SVC["Suggestion Service<br/>merge, dedupe, re-rank"]
+        REDIS["Redis hot-prefix cache<br/>1-2 char prefixes served here"]
+        SH1["Trie Shard 1<br/>prefix range a-f<br/>precomputed top-K per node"]
+        SH2["Trie Shard 2<br/>prefix range g-m<br/>precomputed top-K per node"]
+        SH3["Trie Shard 3<br/>prefix range n-z<br/>precomputed top-K per node"]
+    end
+    subgraph TREND["Trending Overlay"]
+        TSTORE["Short-window counters<br/>5-min sliding windows<br/>delta trie merged at query time"]
+    end
+    subgraph OFFLINE["Offline Pipeline"]
+        LOGS["Query Logs"]
+        KAFKA["Kafka"]
+        AGG["Aggregation Jobs<br/>Spark / Flink<br/>frequency + decay scoring"]
+        BUILDER["Trie Builder<br/>top-K precompute<br/>blocklist filtering"]
+        SNAP["Versioned Snapshot Store<br/>blue-green deployment"]
+    end
+    BROWSER --> LCACHE
+    BROWSER -->|"1. GET /suggest?q=prefix"| CDN
+    CDN -->|"2. cache miss"| GW
+    GW -->|"3."| SVC
+    SVC -->|"4a. hot prefix"| REDIS
+    SVC -->|"4b. route by range"| SH1
+    SVC --> SH2
+    SVC --> SH3
+    TSTORE -->|"5. merge trending delta"| SVC
+    BROWSER -.->|"search events"| LOGS
     LOGS --> KAFKA
-    KAFKA --> FLINK
-    FLINK -->|Trending updates| DELTA`,
+    KAFKA --> AGG
+    KAFKA -.->|"real-time counts"| TSTORE
+    AGG --> BUILDER
+    BUILDER --> SNAP
+    SNAP -.->|"load new version"| SH1
+    SNAP -.-> SH2
+    SNAP -.-> SH3`,
     },
     {
       title: "Typeahead Query Flow",
@@ -528,7 +553,7 @@ private:
       title: "Trie Data Pipeline",
       kind: "architecture",
       caption:
-        "Two-tier update pipeline with daily offline rebuild from search logs and real-time trending detection for the delta trie.",
+        "Two-tier update pipeline with daily offline rebuild from search logs and real-time trending detection for the delta trie. Edge labels 1-7 trace the daily offline rebuild stages; R1-R3 trace the real-time trending branch.",
       mermaid: `graph LR
     SEARCH["Search Events"]
     KAFKA["Kafka"]
@@ -541,16 +566,16 @@ private:
     DIST["Distribute to Shards"]
     TRENDING["Trending Detector"]
     DELTA["Delta Trie Update"]
-    SEARCH --> KAFKA
-    KAFKA --> HDFS
-    KAFKA --> FLINK
-    HDFS --> SPARK
-    SPARK --> FILTER
-    FILTER --> BUILD
-    BUILD --> SERIAL
-    SERIAL --> DIST
-    FLINK --> TRENDING
-    TRENDING --> DELTA`,
+    SEARCH -->|"1. log event"| KAFKA
+    KAFKA -->|"2. archive"| HDFS
+    KAFKA -->|"R1. stream"| FLINK
+    HDFS -->|"3. daily batch read"| SPARK
+    SPARK -->|"4. aggregate counts"| FILTER
+    FILTER -->|"5. clean candidates"| BUILD
+    BUILD -->|"6. trie with top-K"| SERIAL
+    SERIAL -->|"7. snapshot"| DIST
+    FLINK -->|"R2. windowed rates"| TRENDING
+    TRENDING -->|"R3. push delta"| DELTA`,
     },
   ],
   interviewQA: [
@@ -584,6 +609,22 @@ private:
       followUps: [
         "How do you handle the case where local filtering produces different results than the server?",
         "What is the optimal debounce interval and how would you A/B test it?",
+      ],
+    },
+    {
+      q: "Walk me through the capacity estimation for a Google-scale typeahead system.",
+      a: "Start from search volume: 5 billion searches per day. Each search generates roughly 4 suggestion requests after debouncing (not one per keystroke), giving 20 billion requests per day. Divide by 86,400 seconds: about 230K QPS average, and with a 3x peak factor, roughly 700K QPS at peak. Storage: 100 million unique phrases at 30 bytes average is only 3 GB raw, but a trie with precomputed top-10 per node (storing suggestion IDs rather than duplicated strings) grows to roughly 50-100 GB -- too big for one machine, comfortable across 10-20 in-memory shards of 5-10 GB each. Read cost per request is O(prefix length), typically 2-5 pointer hops plus returning a precomputed list, so a single shard sustains 100K+ QPS. The edge cache absorbs 70-90% of traffic because prefixes are Zipf-distributed, so shards see perhaps 70-200K QPS at peak collectively -- easily handled with 3 replicas per shard. Bandwidth: ~1 KB per response means about 230 MB/s aggregate at average load. The offline pipeline must process about 2 TB of logs daily for the rebuild. The takeaway to state explicitly: the math shows the system is read-dominated and cache-friendly, which justifies the immutable-snapshot, precomputed-top-K architecture.",
+      followUps: [
+        "How does the estimate change if you cannot debounce (e.g., a native keyboard integration)?",
+        "How would you size the Redis hot-prefix cache from these numbers?",
+      ],
+    },
+    {
+      q: "Why not just use Elasticsearch for autocomplete instead of building a custom trie service?",
+      a: "Elasticsearch is often the right answer at mid-scale, and saying so shows judgment. Its completion suggester is backed by an in-memory FST -- conceptually a weighted compressed trie -- and gives you replication, fuzzy matching, filtering, and operational tooling for free. The alternatives within ES, match_phrase_prefix and edge_ngram indexing, are worse for this use case: prefix queries do expensive term expansion at query time, and edge_ngram inflates the index by roughly the average word length because every prefix of every term is indexed (the same space-for-speed trade as precomputed top-K, hidden in the engine). A custom sharded trie service wins when you need extreme scale or tight tail latency: no query parsing or scoring overhead, guaranteed O(prefix length) reads, custom memory layout (succinct encodings, memory-mapped versioned snapshots), and full control over the merge with a trending overlay and personalization layer. It costs you an offline build pipeline, snapshot deployment machinery, and shard routing that ES would otherwise provide. A good answer sequences it: prototype and mid-scale on the ES completion suggester; migrate to a dedicated trie tier when p99 latency, rebuild cost, or index size forces it.",
+      followUps: [
+        "What does the ES completion suggester use internally and what are its limits?",
+        "How would you migrate live traffic from ES to a custom trie tier safely?",
       ],
     },
     {
@@ -671,6 +712,22 @@ private:
       back: "Range partitioning by prefix: shard 1 handles a-f, shard 2 handles g-m, etc. Each shard holds its trie portion entirely in memory. Route by first character. Replicate each shard for read scaling. Use blue-green deployment for daily rebuilds. Alternative: consistent hashing on first 2-3 chars for more even distribution.",
     },
     {
+      front: "What is the back-of-envelope QPS for a 5B-searches/day typeahead?",
+      back: "5B searches * ~4 debounced requests each = 20B requests/day. 20B / 86,400s ≈ 230K QPS average; with a 3x peak factor, ~700K QPS peak. Reads are O(prefix length) thanks to precomputed top-K, and the edge cache absorbs 70-90%, so the shard tier sees only a fraction of this.",
+    },
+    {
+      front: "How do you solve the hot-shard problem for short prefixes?",
+      back: "Do not serve 1-2 character prefixes from the trie at all. There are at most 26 + 676 = 702 such lowercase Latin prefixes; keep their top-K lists in a Redis hot-prefix cache refreshed every few minutes. This removes the highest-traffic keys from the shards, leaving traffic-weighted prefix-range partitioning to balance the rest.",
+    },
+    {
+      front: "How are trie snapshots deployed safely to the serving fleet?",
+      back: "The builder emits immutable versioned snapshots (segments + manifest with checksums) to object storage. Shards download, memory-map, warm hot prefixes, then atomically flip a pointer -- no locks since snapshots are read-only. Canary one replica per shard on quality metrics; rollback is re-pointing to the previous version. Edge-cache keys carry the snapshot version.",
+    },
+    {
+      front: "Trie service vs Elasticsearch completion suggester -- when each?",
+      back: "ES completion suggester (an in-memory weighted FST) is ideal to mid-scale: replication, fuzzy matching, filtering for free. A custom sharded trie wins at extreme scale: O(prefix length) reads without query-engine overhead, custom memory layout, and control over trending/personalization merging -- at the cost of owning the build pipeline and snapshot deployment.",
+    },
+    {
       front: "What are the four key client-side optimizations for typeahead?",
       back: "1. Debounce (150-200ms wait after last keystroke). 2. Request cancellation (AbortController for superseded requests). 3. Local prefix cache (filter cached results before server response). 4. Keyboard navigation with ARIA accessibility. Together: 70-80% fewer requests, no out-of-order responses, instant feedback.",
     },
@@ -693,6 +750,11 @@ private:
     "**Partitioning**: Range-based by prefix (a-f, g-m, etc.) or consistent hash on first 2-3 chars. Each shard fully in memory. Replicate for reads. Blue-green deploy for daily rebuilds.",
     "**Multi-language**: CJK needs parallel tries (pinyin + characters). Unicode normalization (NFC). IME-aware prefix matching. Per-language trie services with language detection routing.",
     "**Fuzzy matching**: Edit-distance-1 variants precomputed and stored in trie. Or use BK-tree for edit distance queries. Memory overhead of 5-10x for variant storage. Alternative: use n-gram index for approximate matching.",
+    "**Capacity math**: 5B searches/day * 4 requests each = 20B/day ≈ 230K QPS avg, ~700K peak (3x). 100M phrases: ~3GB raw, 50-100GB as trie with top-K -> 10-20 shards of 5-10GB in memory. ~1KB per response -> ~230MB/s egress. ~2TB/day logs into the rebuild pipeline.",
+    "**Hot-shard fix**: 1-2 char prefixes (at most 702 lowercase Latin combos) carry the most traffic but change slowly -- serve them from a Redis hot-prefix cache refreshed every few minutes, never from the trie shards.",
+    "**Snapshot deployment**: immutable versioned snapshots in object store; shards download, memory-map, warm, then atomically flip a pointer (RCU-style). Canary one replica per shard on quality metrics; keep last 3-5 versions for instant rollback. Tag edge-cache keys with snapshot version.",
+    "**Filtering**: build-time blocklist + classifiers + minimum distinct-user threshold (privacy), plus a hot-reloadable serve-time hash-set/bloom check. Trending overlay needs stricter thresholds -- it is the fastest abuse path.",
+    "**Trie vs Elasticsearch**: ES completion suggester = weighted FST, great to mid-scale; edge_ngram inflates index by avg word length. Custom trie tier wins on tail latency, memory layout control, and trending/personalization merge -- but you own the pipeline and deployment machinery.",
   ],
   cheatSheet: [
     "**Trie search complexity**: O(L) with pre-computed top-K. Without pre-computation: O(L + subtreeSize) -- unacceptable for short prefixes.",
@@ -705,6 +767,11 @@ private:
     "**Serialization**: Trie to disk with LZ4 compression: 40-60% compression ratio. Memory-map for partial loading. Blue-green swap: build on standby, switch atomically.",
     "**Request cancellation**: AbortController.abort() on new keystroke. Prevents stale responses from overwriting fresh ones. Critical for correctness and reduced bandwidth.",
     "**Accessibility**: role='combobox', aria-autocomplete='list', aria-expanded='true/false', aria-activedescendant for current selection. Announce result count to screen readers.",
+    "**QPS math**: 5B searches/day * 4 requests = 20B/day; 20B / 86,400s ≈ 230K QPS avg; * 3 peak factor ≈ 700K QPS peak.",
+    "**Trie size**: 100M phrases * 30B ≈ 3GB raw; with top-10 IDs per node ≈ 50-100GB; shard into 10-20 * 5-10GB in-memory shards.",
+    "**Hot prefixes**: 26 + 26*26 = 702 possible 1-2 char lowercase prefixes -- serve all from Redis, refresh every few minutes, keep them off the shards.",
+    "**Snapshot flip**: download -> mmap -> warm -> atomic pointer swap; readers finish on old version; rollback = re-point to previous snapshot.",
+    "**Trending merge**: mergedScore = max(baseScore, boost * recentRate/expectedRate), boost decays over hours; dedupe on normalized text; trending must pass filtering.",
   ],
   glossary: [
     {
@@ -841,6 +908,10 @@ private:
     "How would you implement typeahead for a code editor (IDE) versus a web search engine?",
     "What machine learning techniques can improve typeahead suggestion ranking beyond frequency?",
     "How do you A/B test changes to a typeahead system without degrading user experience?",
+    "How would the design change for autocomplete over private data (e.g., a user's own documents or emails)?",
+    "How do you prevent coordinated abuse from pushing offensive queries into trending suggestions?",
+    "How would you shrink the trie to run on-device for offline autocomplete?",
+    "What consistency guarantees do suggestion snapshots need across shards and regions?",
   ],
   resources: [
     {

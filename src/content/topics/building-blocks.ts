@@ -2,17 +2,44 @@ import type { TopicContent } from "../types";
 
 export const buildingBlocks: TopicContent = {
   quickSummary: [
-    "Load balancers distribute traffic across multiple servers to ensure no single server is overwhelmed. They operate at Layer 4 (TCP/UDP, fast but limited) or Layer 7 (HTTP, enables content-based routing). Common algorithms: round-robin, least connections, consistent hashing.",
-    "Caches store frequently accessed data in fast storage (memory) to reduce latency and database load. Redis and Memcached are the most common distributed caches. Key concerns: cache invalidation, eviction policies (LRU, LFU), and cache stampede prevention.",
-    "CDNs (Content Delivery Networks) serve static and cached content from edge servers geographically close to users, reducing latency and offloading origin servers. Push CDNs receive content proactively; pull CDNs fetch on first request and cache.",
-    "Message queues decouple producers from consumers, enabling asynchronous processing, load leveling, and fault tolerance. Key choices: RabbitMQ (traditional broker), Kafka (distributed log), SQS (managed queue).",
+    "Real system design is done from a catalog of well over 100 proven technologies — load balancers, caches, databases, queues, search engines, schedulers, observability stacks — and the core skill is picking the right tool for each need, not memorizing one architecture. This page is that catalog: category by category, the leading tools and how to choose between them.",
+    "Load balancers distribute traffic across multiple servers to ensure no single server is overwhelmed. They operate at Layer 4 (TCP/UDP, fast but limited) or Layer 7 (HTTP, enables content-based routing). Common algorithms: round-robin, least connections, consistent hashing. Leading tools: Nginx, HAProxy, Envoy, AWS ALB/NLB.",
+    "Caches store frequently accessed data in fast storage (memory) to reduce latency and database load. Redis and Memcached are the most common distributed caches; CloudFront, Cloudflare, Akamai, and Fastly cache at the edge. Key concerns: cache invalidation, eviction policies (LRU, LFU), and cache stampede prevention.",
+    "Message queues and event streams decouple producers from consumers, enabling asynchronous processing, load leveling, and fault tolerance. Key choices: RabbitMQ (traditional broker), Kafka (distributed log), SQS (managed queue), Pulsar and NATS for specialized needs.",
+    "Storage is polyglot: PostgreSQL/MySQL for relational data, MongoDB/DynamoDB/Cassandra for NoSQL patterns, Elasticsearch for search, S3 for objects, InfluxDB for time-series. Almost every large system combines several — each chosen for its access pattern.",
   ],
   detailed: [
-    "## Load Balancers\n\nLoad balancers sit between clients and servers, distributing requests to maintain performance and availability. **Layer 4 (L4)** balancers route based on IP and port, operating at the transport layer. They are fast (no payload inspection) but cannot make decisions based on request content. **Layer 7 (L7)** balancers inspect HTTP headers, URLs, and cookies, enabling content-based routing (e.g., /api/* to API servers, /static/* to CDN), sticky sessions, and SSL termination. **Algorithms**: Round-robin (simple, even distribution), Weighted round-robin (more traffic to stronger servers), Least connections (route to the server with fewest active connections), IP hash (same client always hits the same server, useful for session affinity), Consistent hashing (minimizes redistribution when servers are added/removed). Health checks detect unhealthy servers and remove them from the pool. Common tools: Nginx, HAProxy, AWS ALB/NLB.",
-    "## Caches as System Components\n\nCaching appears at every layer of a system: **Browser cache** (HTTP Cache-Control headers), **CDN cache** (edge caching), **Application cache** (in-process, e.g., Caffeine), **Distributed cache** (Redis, Memcached), **Database cache** (query cache, buffer pool). In system design, 'the cache' usually means a distributed cache like Redis sitting between application servers and the database. Key design decisions: **Eviction policy** (LRU evicts least recently used, LFU evicts least frequently used, TTL expires after a fixed time). **Cache invalidation** (the hardest problem): write-through (update cache on write), write-behind (async update), cache-aside (invalidate on write, populate on read). **Cache stampede**: when a popular key expires and hundreds of requests simultaneously hit the database. Mitigate with: locking (only one request fetches), probabilistic early expiration, or background refresh.",
-    "## Content Delivery Networks\n\nA CDN is a globally distributed network of edge servers that cache content close to users. **Pull CDN**: content is fetched from the origin on the first request to an edge and cached with a TTL. Subsequent requests are served from the edge. Good for frequently accessed content; cold starts have origin latency. **Push CDN**: content is proactively pushed to edges before any request. Good for large, infrequently changing files. CDNs handle: static assets (JS, CSS, images, videos), API response caching (with appropriate Cache-Control headers), and even dynamic content acceleration (optimized routes between edge and origin). Key concepts: **Origin server** (your server), **Edge server** (CDN node), **TTL** (how long content is cached), **Cache invalidation/purge** (force refresh), **Origin shield** (intermediate cache layer to protect origin). Providers: CloudFront, Cloudflare, Akamai, Fastly.",
-    "## Message Queues and Event Streaming\n\nMessage queues enable asynchronous communication between services. A **producer** sends messages to a queue; a **consumer** reads and processes them independently. Benefits: decoupling (producer doesn't know about consumers), load leveling (queue absorbs traffic spikes), fault tolerance (messages persist if consumers are down), scalability (add more consumers to increase throughput). **RabbitMQ**: traditional message broker with exchanges, queues, and routing keys. Supports complex routing patterns (fanout, topic, direct). Messages are removed after acknowledgment. **Apache Kafka**: distributed commit log. Messages are appended to partitioned topics and retained for a configurable period. Consumers track their offset, enabling replay. Excellent for event streaming, log aggregation, and high-throughput pipelines. **SQS**: AWS managed queue with standard (at-least-once, best-effort ordering) and FIFO (exactly-once, strict ordering) modes. Choose based on: throughput needs (Kafka >> RabbitMQ), ordering guarantees, replay requirements, and operational complexity.",
-    "## Databases as Building Blocks\n\nDifferent database types serve different access patterns. **Relational (PostgreSQL, MySQL)**: ACID transactions, joins, strong consistency. Use for structured data with relationships. **Document (MongoDB, DynamoDB)**: flexible schemas, nested objects, horizontal scaling. Use for semi-structured data, catalogs, user profiles. **Key-Value (Redis, DynamoDB)**: sub-millisecond lookups by key. Use for caching, sessions, feature flags. **Wide-Column (Cassandra, HBase)**: high write throughput, time-series data, distributed by design. **Graph (Neo4j)**: relationships are first-class. Use for social networks, recommendations, fraud detection. **Search (Elasticsearch)**: inverted index for full-text search and analytics. In system design, you often combine multiple databases: PostgreSQL for the core data model, Redis for caching, Elasticsearch for search, and Kafka + a data warehouse for analytics. This is the polyglot persistence pattern.",
+    "## The Catalog Mindset: Why There Are 100+ Tools\n\nSystem design is component selection, not invention. Every mature system is assembled from a shared industry catalog: something terminates traffic, something caches, something stores durable state, something moves messages, something processes data, something watches it all. Each category has 3-6 leading technologies that dominate real production systems and interviews, and each exists because it makes a different trade-off — throughput vs. flexibility, consistency vs. availability, managed convenience vs. control.\n\nHow to use this catalog:\n- **Start from the need, not the tool.** \"I need sub-millisecond reads of hot data\" leads to Redis; \"I heard Kafka is cool\" leads to trouble.\n- **Know the default per category.** Interviewers expect a sensible first pick (PostgreSQL, Redis, Kafka, S3, Kubernetes) and a reason you would deviate.\n- **Know one alternative and when it wins.** Memcached over Redis for pure cache simplicity; RabbitMQ over Kafka for task routing.\n\nKey insight: Naming a specific tool with a specific reason (\"Redis with LRU eviction, cache-aside, 5-minute TTL\") scores far higher than a generic box labeled \"cache\".\n\nCommon mistake: Treating the catalog as a checklist and adding every category to every design. Each component adds an operational burden, a failure mode, and a consistency boundary — earn each box on the diagram.",
+
+    "## Load Balancing & Traffic Management\n\nThe problem: one server cannot absorb all traffic, and clients need a stable entry point while backends come and go. A load balancer sits between clients and servers, spreads requests, detects unhealthy backends via health checks, and removes them from rotation.\n\nThe leading technologies:\n- **Nginx** — the default software L7 balancer and reverse proxy; battle-tested, config-file driven, also serves static content.\n- **HAProxy** — the performance benchmark for L4/L7 software balancing; extremely efficient, rich health-checking, favored at high connection counts.\n- **Envoy** — the modern cloud-native proxy: dynamic configuration via APIs (xDS), first-class gRPC/HTTP2 support, deep observability; the data plane under Istio and many API gateways.\n- **AWS ALB / NLB** — managed balancers. ALB is L7 (path/host routing, WebSockets); NLB is L4 (millions of connections, static IPs, ultra-low latency).\n- **Cloudflare** — balances and shields at the global edge, absorbing DDoS before traffic reaches your infrastructure.\n\n**L4 vs L7**: L4 routes on IP and port — microsecond-fast, protocol-agnostic, content-blind. L7 terminates the connection and parses HTTP — enabling path-based routing, header injection, SSL termination, and sticky sessions at the cost of ~1-5ms. **Algorithms**: round-robin (default), weighted round-robin (heterogeneous servers), least connections (uneven request cost), IP hash (session affinity), consistent hashing (stateful backends and caches).\n\nIn practice: production edges layer these — Cloudflare or an L4 NLB out front for raw absorption, L7 ALBs or Nginx/Envoy behind it for smart routing.\n\nHow to choose: managed cloud (ALB/NLB) unless you need portability or exotic routing; Nginx/HAProxy for self-managed simplicity; Envoy when you need dynamic config and mesh-grade telemetry.",
+
+    "## API Gateways & Service Mesh\n\nThe problem: once you have many services, every one needs authentication, rate limiting, request routing, retries, and TLS — and duplicating that logic in each service is a maintenance disaster. Two components centralize it: an **API gateway** governs *north-south* traffic (clients to your system); a **service mesh** governs *east-west* traffic (service to service).\n\nThe leading technologies:\n- **Kong** — open-source gateway built on Nginx; plugin architecture for auth, rate limiting, transformations.\n- **Apigee** (Google) — enterprise API management: monetization, developer portals, analytics, heavy governance.\n- **AWS API Gateway** — fully managed; pairs naturally with Lambda; per-request pricing that gets expensive at very high volume.\n- **Istio** — the most featureful service mesh: Envoy sidecars plus a control plane giving mTLS, traffic splitting, retries, and telemetry without touching application code.\n- **Linkerd** — the lightweight mesh: fewer features, dramatically simpler to operate, ultra-light Rust proxies.\n\nHow to choose: every public API should sit behind a gateway — pick managed (AWS API Gateway) by default, Kong for portability/self-hosting, Apigee for enterprise API-program governance. A mesh is only justified at tens of services when mTLS-everywhere, canary traffic splitting, or uniform retries become painful to hand-roll; prefer Linkerd for simplicity, Istio for power.\n\nCommon mistake: Proposing Istio for a five-service system. A mesh adds a sidecar to every pod and a control plane to operate — below a few dozen services, a gateway plus client-side retry libraries is almost always enough.",
+
+    "## Caching: In-Memory Stores & CDN Edge\n\nThe problem: databases are milliseconds away and expensive to scale for reads; most workloads re-read the same hot data constantly. Caches put that data in memory (or at the edge) and absorb the read load.\n\nThe leading technologies:\n- **Redis** — the default distributed cache and much more: rich data structures (hashes, sorted sets, streams), persistence, replication, Lua scripting, pub/sub. Also serves sessions, leaderboards, rate limiters, and distributed locks.\n- **Memcached** — a deliberately simple multi-threaded key-value cache. No persistence, no data structures — just very fast, memory-efficient string caching.\n- **CDN edge caches** — **CloudFront** (AWS-native), **Cloudflare** (edge network plus security), **Akamai** (largest enterprise footprint), **Fastly** (instant purge, edge compute). They cache static assets and cacheable API responses at hundreds of points of presence near users.\n\n**Cache patterns**: cache-aside (app reads cache, falls back to DB, populates on miss — the default), write-through (synchronous dual write, consistent but slower), write-behind (async flush, fast but lossy on crash), refresh-ahead (proactively renew hot keys before TTL expiry). **Eviction**: LRU is the general-purpose default; LFU for skewed access; always pair with TTLs.\n\nWarning: Cache stampede — a hot key expires and thousands of requests hit the database at once. Mitigate with a fetch mutex, probabilistic early expiration, or background refresh plus stale-while-revalidate.\n\nHow to choose: Redis unless you have a reason not to — Memcached only wins for pure ephemeral caching where its multi-threaded simplicity and lower memory overhead matter. A CDN is nearly free leverage for any user-facing system: put one in front before scaling origins.",
+
+    "## Relational Databases\n\nThe problem: most business data is structured, interrelated, and needs correctness guarantees — orders that reference users, payments that must not double-apply. Relational databases give you ACID transactions, joins, constraints, and 50 years of query optimization.\n\nThe leading technologies:\n- **PostgreSQL** — the default answer in modern system design: strict standards compliance, JSONB for semi-structured data, full-text search, rich indexing (B-tree, GIN, BRIN, geospatial), extensions like PostGIS and TimescaleDB.\n- **MySQL** — enormous deployed base, excellent replication story, historically the web-scale workhorse (Facebook, YouTube, Uber all scaled on it).\n- **Amazon Aurora** — MySQL/Postgres-compatible with a cloud-native storage layer: 6-way replicated storage, up to 15 read replicas, fast failover — managed scaling without changing your SQL.\n- **Google Spanner / CockroachDB** — distributed SQL: horizontally scalable, strongly consistent across regions. Spanner uses TrueTime atomic clocks; CockroachDB is the open-source, run-anywhere equivalent.\n\nHow to choose: start with PostgreSQL. Choose Aurora when you are on AWS and want managed read scaling and failover. Reach for Spanner/CockroachDB only when you genuinely need multi-region writes with serializable consistency — they cost more in latency (consensus on every write) and money.\n\nKey insight: A single well-indexed PostgreSQL instance with read replicas comfortably serves the vast majority of businesses. In an interview, exhausting vertical scaling, read replicas, and caching before proposing sharding shows judgment; jumping straight to distributed SQL shows the opposite.",
+
+    "## NoSQL Databases: Pick by Data Shape\n\nThe problem: not all data is relational, and not all workloads tolerate a single-node write master. NoSQL databases each relax something (joins, schema, strong consistency) to win something (scale, flexibility, latency). Pick by data shape and access pattern:\n\n- **Document — MongoDB**: JSON-like documents with flexible schemas and secondary indexes. Great for catalogs, user profiles, content — entities read and written as a unit.\n- **Wide-column — Cassandra / ScyllaDB**: LSM-tree, masterless, linearly scalable writes with tunable consistency. Built for write-heavy, partition-keyed workloads: activity feeds, sensor data, messaging history. ScyllaDB is the C++ rewrite delivering the same model with far lower latencies.\n- **Key-value — DynamoDB**: fully managed, single-digit-millisecond reads at any scale, pay-per-request. The catch: you must know your access patterns up front and model your table around them.\n- **Key-value in-memory — Redis**: doubles as a database for sessions, counters, and ephemeral state.\n- **Graph — Neo4j**: relationships are first-class; traversals like friends-of-friends or fraud-ring detection that would take brutal recursive SQL run naturally in Cypher.\n- **Time-series — InfluxDB / TimescaleDB**: optimized for timestamped writes, time-bucketed queries, downsampling, and retention policies — metrics, IoT, financial ticks. TimescaleDB is a Postgres extension, so you keep SQL.\n\nCommon mistake: Choosing NoSQL because \"it scales\" while your data is relational and fits on one node. You give up joins and transactions and get nothing back. NoSQL is a targeted answer to a specific access pattern, not a modernity badge.\n\nHow to choose: name the access pattern first. \"Key lookup at massive scale, known queries\" → DynamoDB. \"Write-heavy time-ordered feed\" → Cassandra. \"Flexible nested entities\" → MongoDB. \"Traverse relationships\" → Neo4j. \"Metrics over time\" → a time-series store.",
+
+    "## Search Engines\n\nThe problem: databases answer exact-match and range queries; they cannot rank fuzzy text matches, tolerate typos, facet results, or score relevance. A `LIKE '%term%'` query cannot use a normal index and full-scans the table. Search engines solve this with an **inverted index** — a map from each term to the documents containing it.\n\nThe leading technologies:\n- **Elasticsearch** — the de-facto standard: distributed, near-real-time full-text search plus aggregations; also the backbone of the ELK logging stack.\n- **OpenSearch** — AWS's Apache-licensed fork of Elasticsearch; effectively the same design, the default on AWS.\n- **Apache Solr** — the older Lucene-based veteran; still strong in enterprise and faceted catalog search.\n- **Algolia** — search-as-a-service: instant (<10ms) results, typo tolerance, brilliant developer experience — you trade control and pay per usage.\n- **Typesense** — open-source, instant-search focused alternative to Algolia; simple to run, great for site and app search.\n\nIn practice: the search engine is always a *secondary* index, not the source of truth. The primary database owns the data; a pipeline (CDC via Debezium and Kafka, or dual writes) keeps the search index in sync, and the index is rebuildable from the source at any time.\n\nHow to choose: Elasticsearch/OpenSearch as the general-purpose default and for log analytics; Algolia or Typesense when the need is user-facing instant search and you would rather buy than operate; Solr mostly when it is already installed.",
+
+    "## Messaging & Streaming\n\nThe problem: synchronous calls couple services — if the email provider is slow, checkout is slow. Messaging decouples producers from consumers, absorbs spikes, and survives consumer downtime. The fundamental split is **queue vs stream**: a queue delivers each message to *one* competing consumer and deletes it after acknowledgment (task distribution); a stream appends events to a durable, replayable log that *many* consumer groups read independently at their own offsets (event distribution).\n\nThe leading technologies:\n- **Apache Kafka** — the default event stream: partitioned commit log, per-partition ordering, consumer groups, replay, retention from hours to forever. Millions of messages per second.\n- **RabbitMQ** — the classic broker: exchanges and bindings give rich routing (direct, topic, fanout, headers), per-message acks, priorities, dead-letter queues. Ideal for task queues and RPC-style work distribution.\n- **AWS SQS / SNS** — managed queue and managed fanout. SQS standard is at-least-once, best-effort order; SQS FIFO adds strict ordering and dedup. SNS fans one message out to many SQS queues, Lambdas, or webhooks. Zero operations.\n- **Google Pub/Sub** — GCP's managed global messaging, autoscaling, at-least-once.\n- **Apache Pulsar** — Kafka's ambitious rival: compute/storage separation (BookKeeper), native multi-tenancy and geo-replication, both queue and stream semantics in one system.\n- **NATS** — tiny, blazing-fast cloud-native messaging for service-to-service communication; JetStream adds persistence.\n\nHow to choose: default to SQS/SNS for background jobs when managed simplicity wins; Kafka when multiple consumers need the same events, replay matters, or throughput is extreme; RabbitMQ for complex routing and per-message control; Pulsar for multi-tenant/geo-replicated platforms; NATS for lightweight internal messaging.\n\nCommon mistake: Using Kafka as a job queue. Selective acknowledgment, per-message retry, and delayed delivery are queue features — Kafka's offset model fights you on all three.",
+
+    "## Object & File Storage\n\nThe problem: images, videos, backups, ML datasets, and logs do not belong in a database — they are large, immutable blobs that need cheap, durable, infinitely scalable storage addressed by key rather than by path on a disk.\n\nThe leading technologies:\n- **Amazon S3** — the industry standard and the API everyone else imitates: 11 nines of durability, lifecycle tiers (Standard → Infrequent Access → Glacier), versioning, event notifications, pre-signed URLs.\n- **Google Cloud Storage (GCS)** and **Azure Blob Storage** — the equivalents on the other clouds.\n- **MinIO** — S3-compatible object storage you run yourself; the standard answer for on-prem or Kubernetes-native object storage.\n- **HDFS** — the Hadoop distributed filesystem; historically the substrate for big-data processing, now largely displaced by object stores, but still common in legacy analytics estates.\n\nThe standard upload pattern: the client asks your API for a **pre-signed URL**, uploads the file directly to S3 (bypassing your servers entirely), and your API stores only the object key and metadata in the database. Downloads go through a CDN in front of the bucket.\n\nKey insight: Object storage plus CDN removes your servers from the file path entirely — your app handles kilobytes of metadata while S3 and CloudFront move the gigabytes.\n\nHow to choose: your cloud's native object store, full stop; MinIO when you must self-host. Never store blobs in the database, and never serve them from application servers.",
+
+    "## Batch & Stream Processing\n\nThe problem: raw events and records must become aggregates, features, reports, and derived tables. Two modes: **batch** (process a bounded dataset on a schedule — high throughput, high latency) and **stream** (process events continuously as they arrive — low latency, harder semantics around time and state).\n\nThe leading technologies:\n- **Apache Spark** — the batch default: in-memory distributed compute, SQL/DataFrame APIs, MLlib; Spark Structured Streaming adds micro-batch streaming. The backbone of most data platforms (often via Databricks).\n- **Apache Flink** — the true-streaming default: event-at-a-time processing, event-time semantics with watermarks, exactly-once state, sophisticated windowing. Picks up where micro-batching falls short.\n- **Hadoop MapReduce** — the original big-data framework; disk-bound between stages and now essentially legacy, but its map/shuffle/reduce model underlies everything since.\n- **Kafka Streams** — a Java library, not a cluster: stream processing embedded in your service, state backed by Kafka itself. Perfect for transformations and joins on Kafka topics without new infrastructure.\n\nHow to choose: Spark for batch analytics and ML pipelines; Flink when per-event latency and event-time correctness matter (fraud detection, real-time aggregation); Kafka Streams for moderate-scale processing that should live inside an existing service; MapReduce only in a legacy discussion.\n\nIn practice: most companies run both modes — streaming for dashboards and alerts on fresh data, nightly batch for the authoritative numbers — and modern lakehouse architectures work to unify them.",
+
+    "## Workflow Orchestration & Scheduling\n\nThe problem: real work is multi-step — \"charge the card, then reserve inventory, then email a receipt, and undo everything if step two fails.\" Something must run steps in order, retry failures, survive crashes mid-flow, and show humans what state everything is in.\n\nThe leading technologies:\n- **cron / Kubernetes CronJobs** — the primitive: run a command on a schedule. CronJobs add containerization, retries, and concurrency policy. No dependencies between jobs, no backfill, no UI.\n- **Apache Airflow** — the data-engineering standard: DAGs defined in Python, scheduling, backfills, retries, and a UI showing every run. Built for periodic batch pipelines.\n- **Temporal** — durable execution for application workflows: you write the workflow as ordinary code, Temporal persists every step, and a workflow can sleep for 30 days, survive worker crashes and deploys, and resume exactly where it left off. The modern answer to sagas, order fulfillment, onboarding flows, and human-in-the-loop processes.\n\nHow to choose: a single scheduled task → cron/CronJob. Scheduled *data* pipelines with dependencies and backfill → Airflow (or its younger rivals Dagster/Prefect). Long-running, must-not-lose-state *application* logic → Temporal.\n\nReal-world example: an e-commerce order flow — payment, inventory, shipping label, notification, with compensation on failure — is a saga. Hand-rolling it with queues and state flags is error-prone; as a Temporal workflow it is a single readable function with durability handled by the platform.",
+
+    "## Coordination & Service Discovery\n\nThe problem: distributed systems need somewhere to agree — who is the leader, what is the current config, which instances are alive, who holds the lock. This demands a small, strongly consistent, highly available store built on a consensus protocol (Raft or ZAB/Paxos-family).\n\nThe leading technologies:\n- **Apache ZooKeeper** — the veteran: znode tree, ephemeral nodes for liveness, watches for change notification. Historically coordinated Kafka, HBase, and Hadoop — though Kafka has now replaced it with its own Raft implementation (KRaft).\n- **etcd** — Raft-based key-value store, best known as **Kubernetes' brain**: every object in a cluster lives in etcd. Simple gRPC/HTTP API, leases, watches.\n- **Consul** — HashiCorp's service-discovery-first tool: service registry with built-in health checking, DNS interface, KV store, and mesh features via Consul Connect.\n\nHow to choose: you rarely deploy these directly anymore — you inherit etcd with Kubernetes and get discovery from the platform (Kubernetes Services/DNS) or the mesh. Deploy Consul when you need cross-platform discovery spanning VMs and containers; keep ZooKeeper where legacy systems demand it.\n\nKey insight: These stores hold coordination *metadata* — kilobytes of leases, locks, and config — never application data. They are optimized for consistency, not throughput, and putting real data in them is a classic outage story.",
+
+    "## Containers, Orchestration & Serverless\n\nThe problem: software must run identically across laptops and production, pack efficiently onto machines, restart when it dies, and scale with load. Containers solve packaging; orchestrators solve running fleets of them.\n\nThe leading technologies:\n- **Docker** — the container standard: image format, registry, runtime. \"Works on my machine\" becomes \"ships as an image.\"\n- **Kubernetes** — the orchestration standard: declarative desired state, self-healing, service discovery, rolling deploys, autoscaling (HPA), config/secret management. Enormous power, real operational cost.\n- **AWS ECS / Fargate** — simpler managed orchestration; Fargate removes node management entirely. The pragmatic choice for AWS shops that do not need the Kubernetes ecosystem.\n- **Serverless — AWS Lambda** (and Cloud Functions/Azure Functions) — no servers at all: event-driven functions, scale-to-zero, pay-per-invocation. Trade-offs: cold starts, execution time limits, and costs that exceed containers under sustained heavy load.\n\nHow to choose: spiky or event-driven glue (file uploaded → resize; queue message → process) → Lambda. Steady long-running services on AWS with a small team → ECS/Fargate. Large fleets, multi-cloud, or platform teams → Kubernetes.\n\nCommon mistake: Recommending Kubernetes for a three-service startup. The orchestrator should match team size and service count — Kubernetes solves problems you may not have yet, at an operational price you pay immediately.",
+
+    "## Realtime Delivery to Clients\n\nThe problem: HTTP is request-response — the server cannot spontaneously tell a browser or phone that something happened. Chat, live dashboards, collaborative editing, and notifications all need server-initiated delivery.\n\nThe options, in escalating capability:\n- **Long polling** — the client holds a request open until data arrives or a timeout, then immediately re-requests. Works through every proxy; wasteful at scale. The compatibility fallback.\n- **Server-Sent Events (SSE)** — a one-way server-to-client stream over plain HTTP with automatic reconnection built into the browser. Perfect for feeds, tickers, live dashboards, and LLM token streaming.\n- **WebSockets** — a persistent bidirectional TCP connection. The answer for chat, multiplayer games, and collaborative editing. The cost: every connection holds server memory, and load balancers must support long-lived connections; horizontal scaling needs a pub/sub backplane (typically Redis) so a message published on one node reaches sockets on another.\n- **Push services — FCM (Firebase Cloud Messaging) and APNs (Apple Push Notification service)** — the *only* way to reach a mobile app that is not running. Your server sends to Google/Apple, which deliver to the device.\n\nHow to choose: one-way updates → SSE (simpler than you think you need). Bidirectional interaction → WebSockets. Offline mobile users → FCM/APNs, always. Ancient proxy environments → long polling.\n\nIn practice: a chat system uses all of these at once — WebSockets for online users, FCM/APNs for offline ones, and Redis pub/sub or Kafka fanning messages out across the WebSocket server fleet.",
+
+    "## Observability: Metrics, Logs, Traces\n\nThe problem: in a distributed system you cannot attach a debugger to production. Observability is built on three pillars — **metrics** (numeric time-series: latency, error rate, saturation), **logs** (structured event records), and **traces** (one request's path across every service).\n\nThe leading technologies:\n- **Prometheus** — the metrics standard: pull-based scraping, a powerful query language (PromQL), alerting via Alertmanager. The default in Kubernetes environments.\n- **Grafana** — the dashboard layer over Prometheus and nearly everything else; its ecosystem adds Loki (logs) and Tempo (traces).\n- **Datadog** — the managed all-in-one: metrics, logs, traces, and APM in one SaaS. Superb experience, famously large bills at scale.\n- **ELK stack (Elasticsearch, Logstash, Kibana)** — the classic self-hosted log aggregation pipeline: ship, index, search, visualize.\n- **OpenTelemetry (OTel)** — the vendor-neutral instrumentation standard: one SDK emits metrics, logs, and traces to any backend. Instrument once, choose vendors later.\n- **Jaeger** — open-source distributed tracing: visualize a request's journey and find which hop burned the latency budget.\n- **Sentry** — application error tracking: exceptions grouped, deduplicated, and tied to releases and source lines.\n\nHow to choose: instrument with OpenTelemetry regardless of backend. Then Prometheus + Grafana + Loki + Jaeger if self-hosting; Datadog if buying; Sentry for error tracking either way.\n\nKey insight: In an interview, mentioning the golden signals — latency, traffic, errors, saturation — and *where you would alert* on them signals production maturity more than naming tools does.",
+
+    "## Rate Limiting & Resilience\n\nThe problem: without protection, one abusive client or one slow dependency takes down the whole system. Two families of defense: **rate limiting** rejects excess load at the boundary; **resilience patterns** stop failures from cascading between services.\n\nRate limiting algorithms and where they run:\n- **Token bucket** — the practical default: tokens refill at a steady rate, each request spends one, bursts up to bucket size are allowed. **Leaky bucket** smooths to a constant outflow; **sliding window** counters give accurate per-window limits.\n- Implementations: **Nginx** (`limit_req`), **Envoy** (local and global rate limit filters), API gateways (Kong, AWS API Gateway have it built in), and **Redis-based distributed limiters** — atomic Lua scripts (or Redis Cell) maintaining shared counters so limits hold across all app instances.\n\nResilience patterns:\n- **Circuit breaker** — after N consecutive failures to a dependency, stop calling it (open), periodically probe (half-open), recover (closed). **Resilience4j** is the standard Java library (successor to Netflix Hystrix); Envoy and meshes do it at the proxy layer; Polly serves .NET.\n- **Timeouts and retries with exponential backoff plus jitter** — every remote call needs a deadline; retries must back off randomly or they synchronize into retry storms.\n- **Bulkheads** — partition thread pools/connections per dependency so one slow downstream cannot exhaust shared resources.\n- **Load shedding and graceful degradation** — under overload, drop low-priority work and serve cached or partial responses rather than failing everything.\n\nCommon mistake: Retrying without a circuit breaker or jitter. A struggling service receives 3x traffic from synchronized retries at the exact moment it can least afford it — retries turn a slowdown into an outage.\n\nHow to choose: rate limit at the gateway with Redis for shared state; put timeouts and jittered retries on every remote call; add circuit breakers (Resilience4j or mesh-level) on every dependency that can hurt you.",
   ],
   animations: [
     {
@@ -49,6 +76,107 @@ export const buildingBlocks: TopicContent = {
       ],
     },
   ],
+  comparison: {
+    columns: ["Need", "Reach for", "Leading tech", "Watch out for"],
+    rows: [
+      [
+        "Spread traffic across servers",
+        "Load balancer (L4 for speed, L7 for routing)",
+        "Nginx, HAProxy, Envoy, AWS ALB/NLB, Cloudflare",
+        "Health checks and connection draining; L7 adds ms of latency",
+      ],
+      [
+        "One front door for APIs (auth, quotas, routing)",
+        "API gateway; service mesh for east-west traffic",
+        "Kong, Apigee, AWS API Gateway, Istio, Linkerd",
+        "Gateway becomes a single point of failure; mesh is overkill under ~20 services",
+      ],
+      [
+        "Sub-millisecond reads of hot data",
+        "Distributed in-memory cache",
+        "Redis, Memcached",
+        "Invalidation bugs, stampedes, treating cache as source of truth",
+      ],
+      [
+        "Serve static content near users",
+        "CDN edge cache",
+        "CloudFront, Cloudflare, Akamai, Fastly",
+        "Stale content after deploys; purge/versioning strategy needed",
+      ],
+      [
+        "Transactions, joins, structured data",
+        "Relational database",
+        "PostgreSQL, MySQL, Aurora, Spanner/CockroachDB",
+        "Vertical write ceiling; distributed SQL pays consensus latency per write",
+      ],
+      [
+        "Flexible schema or massive key-based scale",
+        "NoSQL matched to data shape",
+        "MongoDB, Cassandra/ScyllaDB, DynamoDB, Neo4j, InfluxDB",
+        "No joins; access patterns must be known up front (especially DynamoDB)",
+      ],
+      [
+        "Full-text search, relevance, facets",
+        "Search engine as a secondary index",
+        "Elasticsearch, OpenSearch, Solr, Algolia, Typesense",
+        "Sync lag from the source of truth; never make it the primary store",
+      ],
+      [
+        "Distribute tasks to one worker each",
+        "Message queue",
+        "RabbitMQ, AWS SQS, Google Pub/Sub",
+        "At-least-once delivery means consumers must be idempotent",
+      ],
+      [
+        "Many consumers replaying an event history",
+        "Event stream (durable log)",
+        "Kafka, Pulsar, Kinesis, NATS JetStream",
+        "Partition-key ordering only; operational weight of a cluster",
+      ],
+      [
+        "Store images, video, backups, big blobs",
+        "Object storage plus CDN",
+        "S3, GCS, Azure Blob, MinIO, HDFS",
+        "Never store blobs in the DB or serve them from app servers",
+      ],
+      [
+        "Transform large datasets or live event flows",
+        "Batch or stream processing engine",
+        "Spark, Flink, Kafka Streams, Hadoop MapReduce",
+        "Batch is high-latency; streaming needs event-time and exactly-once care",
+      ],
+      [
+        "Multi-step workflows with retries and state",
+        "Workflow orchestrator",
+        "Airflow, Temporal, cron, Kubernetes CronJobs",
+        "Airflow is for data pipelines, Temporal for app logic — do not swap them",
+      ],
+      [
+        "Leader election, locks, service discovery",
+        "Strongly consistent coordination store",
+        "ZooKeeper, etcd, Consul",
+        "Metadata only — tiny consistent store, never application data",
+      ],
+      [
+        "Package and run service fleets",
+        "Containers plus an orchestrator, or serverless",
+        "Docker, Kubernetes, ECS/Fargate, AWS Lambda",
+        "Kubernetes ops cost; Lambda cold starts and duration limits",
+      ],
+      [
+        "Push updates to connected or offline clients",
+        "Realtime channel matched to direction",
+        "WebSockets, SSE, long polling, FCM/APNs",
+        "WebSockets need sticky routing and a Redis/Kafka fan-out backplane",
+      ],
+      [
+        "See inside production; survive dependency failure",
+        "Observability stack plus resilience patterns",
+        "Prometheus, Grafana, Datadog, OpenTelemetry, Jaeger, Sentry, Resilience4j",
+        "Unbounded retries without circuit breakers turn slowdowns into outages",
+      ],
+    ],
+  },
   interviewQA: [
     {
       q: "When would you choose a Layer 4 load balancer over a Layer 7?",
@@ -66,10 +194,25 @@ export const buildingBlocks: TopicContent = {
       q: "How do you decide which database type to use in a system design?",
       a: "Start with the access patterns: (1) If you need ACID transactions and joins across related entities, use relational (PostgreSQL). (2) If the schema varies per record or you need to store nested objects, use document (MongoDB). (3) If you need sub-millisecond key lookups for caching or sessions, use key-value (Redis). (4) If you have massive write throughput or time-series data, use wide-column (Cassandra). (5) If relationships are the primary query dimension (friends-of-friends, shortest path), use graph (Neo4j). (6) If you need full-text search, use a search engine (Elasticsearch). Most systems use 2-3 database types. The primary data store is usually relational, with Redis for caching and possibly Elasticsearch for search.",
     },
+    {
+      q: "There are 100+ tools in the ecosystem — how do you actually pick one in an interview?",
+      a: "Use a three-step frame: (1) **Name the need in workload terms** — reads vs writes per second, data size, latency budget, consistency requirement, fan-out shape. (2) **Map the need to a category, then pick the category default**: relational store → PostgreSQL, cache → Redis, event stream → Kafka, object storage → S3, orchestration → Kubernetes, metrics → Prometheus. Defaults are defensible because they are what most real companies run. (3) **Deviate only with a named reason**: 'DynamoDB instead of Postgres because access is pure key-value at millions of QPS and we want zero ops'; 'Memcached instead of Redis because we need nothing but ephemeral string caching and want multi-threaded simplicity.' Interviewers are not testing tool trivia — they are testing whether your choice traces back to a requirement. Saying 'Postgres, and here is what would make me switch' beats naming an exotic tool you cannot justify.",
+    },
+    {
+      q: "When should you use Elasticsearch instead of SQL LIKE queries?",
+      a: "Use LIKE for small tables and simple prefix matching — `LIKE 'abc%'` can use a B-tree index and is perfectly fine. Switch to Elasticsearch when you need: (1) infix/fuzzy matching — `LIKE '%term%'` cannot use a standard index and full-scans the table; (2) relevance ranking — SQL returns matches, not *best* matches; (3) linguistic analysis — stemming ('running' matches 'run'), synonyms, stop words; (4) typo tolerance and autocomplete; (5) faceted navigation with counts per category. Elasticsearch's inverted index maps each term to matching documents, making these operations fast at scale. The cost is real: a second system to operate, and a sync pipeline (CDC or dual writes) from the source-of-truth database, with eventual-consistency lag. Middle ground worth mentioning: PostgreSQL's built-in full-text search (tsvector/GIN) covers moderate needs without new infrastructure.",
+    },
+    {
+      q: "A teammate proposes adding Kafka, Redis, and Elasticsearch to a new product with 1,000 users. How do you respond?",
+      a: "Push back with the complexity-cost argument. Every component adds: an operational burden (deployment, upgrades, monitoring, on-call knowledge), a failure mode (Redis down — is the site down or just slow?), a consistency boundary (cache invalidation bugs, search index lag), and cognitive load for every future engineer. At 1,000 users, a single PostgreSQL instance handles the queries (with proper indexes), pg_trgm or tsvector covers search, and a simple jobs table or managed queue covers async work. The mature framing: name the trigger that would justify each component — 'we add Redis when p99 read latency exceeds our SLO and the top queries are cache-friendly; we add Kafka when a second consumer needs the event feed; we add Elasticsearch when search relevance becomes a product requirement.' This shows the interviewer you understand YAGNI applies to architecture, and that components are earned by measured need, not anticipated scale.",
+    },
   ],
   followUps: [
     "Which building block would you remove first if cost mattered more than latency?",
     "What does adding a queue buy you, and what does it cost in debuggability?",
+    "Your design uses PostgreSQL, Redis, Kafka, and Elasticsearch — what keeps all four consistent with each other, and where can they disagree?",
+    "For each managed service in your design (SQS, DynamoDB, Lambda), what is the self-hosted equivalent and when would the switch be worth it?",
+    "At what team size or service count does a service mesh start paying for its complexity?",
   ],
   mcqs: [
     {
@@ -130,8 +273,32 @@ export const buildingBlocks: TopicContent = {
       back: "Push CDN: you proactively upload content to edge servers. Better for large, static, infrequently changing files. Pull CDN: edge fetches from origin on first request, then caches. Better for dynamic content and high-traffic sites. Pull is more common.",
     },
     {
-      front: "What are the key differences between Kafka and RabbitMQ?",
-      back: "Kafka: distributed log, high throughput, message replay, consumer groups, long retention. RabbitMQ: traditional broker, complex routing, per-message ack, priority queues, simpler ops. Kafka for event streaming/pipelines; RabbitMQ for task queues.",
+      front: "Kafka vs RabbitMQ",
+      back: "Kafka = replayable partitioned log for event streaming at huge throughput; RabbitMQ = flexible-routing broker for task queues with per-message acks.",
+    },
+    {
+      front: "Redis vs Memcached",
+      back: "Redis = rich data structures, persistence, replication, pub/sub — the default. Memcached = simple multi-threaded string cache — pick it only for pure ephemeral caching.",
+    },
+    {
+      front: "Queue vs event stream",
+      back: "Queue (SQS, RabbitMQ): each message goes to ONE consumer and is deleted after ack — task distribution. Stream (Kafka): events persist in a log; MANY consumer groups read independently and can replay — event distribution.",
+    },
+    {
+      front: "ZooKeeper vs etcd",
+      back: "Both are strongly consistent coordination stores for locks, leader election, and config. ZooKeeper = older, ZAB protocol, legacy big-data ecosystem. etcd = Raft, simpler API, the datastore inside Kubernetes.",
+    },
+    {
+      front: "S3 vs filesystem for user uploads",
+      back: "S3: 11 nines durability, infinite scale, pre-signed direct uploads, CDN-friendly, lifecycle tiering. Filesystem: ties files to one server, breaks horizontal scaling, you own backups. Object storage wins for essentially all blob workloads.",
+    },
+    {
+      front: "Airflow vs Temporal",
+      back: "Airflow = scheduled data pipelines (DAGs, backfills, batch ETL). Temporal = durable application workflows (sagas, order flows) that survive crashes and can sleep for days mid-execution.",
+    },
+    {
+      front: "WebSockets vs SSE vs push notifications",
+      back: "WebSockets: bidirectional, for chat/games/collab. SSE: one-way server-to-client over HTTP, simpler, for feeds and dashboards. FCM/APNs: the only way to reach a mobile app that is not running.",
     },
     {
       front: "What is an origin shield in a CDN?",
@@ -143,17 +310,52 @@ export const buildingBlocks: TopicContent = {
     },
     {
       front: "When would you use a wide-column database?",
-      back: "For high write throughput, time-series data, and distributed workloads. Examples: Cassandra, HBase. Good for: IoT sensor data, activity logs, messaging at scale. Trade-off: limited query flexibility compared to relational databases.",
+      back: "For high write throughput, time-series data, and distributed workloads. Examples: Cassandra, HBase, ScyllaDB. Good for: IoT sensor data, activity logs, messaging at scale. Trade-off: limited query flexibility compared to relational databases.",
+    },
+    {
+      front: "What is a circuit breaker?",
+      back: "A resilience pattern: after N failures to a dependency, stop calling it (open state), periodically probe (half-open), resume when healthy (closed). Prevents cascading failures and retry storms. Libraries: Resilience4j (Java), Polly (.NET); also built into Envoy/service meshes.",
     },
   ],
   resources: [
     {
-      label: "System Design Interview — Alex Xu",
+      label: "System Design Interview — Alex Xu", url: "https://bytebytego.com/",
       kind: "book",
     },
     {
-      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      label: "Designing Data-Intensive Applications — Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
+      note: "The definitive text on storage engines, replication, and stream processing trade-offs.",
+    },
+    {
+      label: "Apache Kafka documentation — design section", url: "https://kafka.apache.org/documentation/",
+      kind: "docs",
+      note: "Explains the log abstraction, partitioning, and consumer groups from first principles.",
+    },
+    {
+      label: "Redis documentation — data types and caching patterns", url: "https://redis.io/docs/latest/",
+      kind: "docs",
+      note: "Authoritative reference for eviction policies, TTLs, and Redis data structures.",
+    },
+    {
+      label: "AWS Well-Architected Framework", url: "https://aws.amazon.com/architecture/well-architected/",
+      kind: "docs",
+      note: "How AWS itself frames choosing between its managed building blocks.",
+    },
+    {
+      label: "The Google SRE Book — chapters on handling overload and cascading failures", url: "https://sre.google/sre-book/table-of-contents/",
+      kind: "book",
+      note: "The canonical treatment of load shedding, retries, and resilience at scale.",
+    },
+    {
+      label: "Envoy proxy documentation — architecture overview", url: "https://www.envoyproxy.io/docs",
+      kind: "docs",
+      note: "The best modern explanation of L4/L7 proxying, health checking, and circuit breaking.",
+    },
+    {
+      label: "Martin Kleppmann — 'Turning the database inside-out'",
+      kind: "video",
+      note: "Why event logs (Kafka) became the backbone of modern data architectures.",
     },
   ],
   glossary: [
@@ -171,6 +373,46 @@ export const buildingBlocks: TopicContent = {
       term: "Message Queue",
       definition:
         "A middleware component that enables asynchronous communication between services by temporarily storing messages until consumers process them.",
+    },
+    {
+      term: "Event Stream",
+      definition:
+        "A durable, append-only log of events (e.g., a Kafka topic) that multiple consumer groups read independently at their own pace, with the ability to replay history.",
+    },
+    {
+      term: "API Gateway",
+      definition:
+        "A single managed entry point for client-to-system (north-south) API traffic, centralizing authentication, rate limiting, routing, and request transformation. Examples: Kong, Apigee, AWS API Gateway.",
+    },
+    {
+      term: "Service Mesh",
+      definition:
+        "An infrastructure layer (typically sidecar proxies plus a control plane, e.g., Istio or Linkerd) that handles service-to-service (east-west) concerns — mTLS, retries, traffic splitting, telemetry — without application code changes.",
+    },
+    {
+      term: "Object Storage",
+      definition:
+        "Flat, key-addressed storage for immutable blobs (images, video, backups) with very high durability and effectively unlimited scale. Examples: S3, GCS, Azure Blob, MinIO.",
+    },
+    {
+      term: "Inverted Index",
+      definition:
+        "The core data structure of search engines: a map from each term to the list of documents containing it, enabling fast full-text search, relevance ranking, and faceting.",
+    },
+    {
+      term: "Circuit Breaker",
+      definition:
+        "A resilience pattern that stops calls to a failing dependency after repeated errors (open state), probes periodically (half-open), and resumes when healthy — preventing cascading failures.",
+    },
+    {
+      term: "Token Bucket",
+      definition:
+        "The most common rate-limiting algorithm: tokens accumulate at a fixed rate up to a bucket capacity; each request consumes one, allowing controlled bursts while enforcing an average rate.",
+    },
+    {
+      term: "OpenTelemetry",
+      definition:
+        "The vendor-neutral standard for instrumenting applications to emit metrics, logs, and traces, decoupling instrumentation from the observability backend that stores and visualizes the data.",
     },
     {
       term: "Consistent Hashing",
@@ -192,6 +434,11 @@ export const buildingBlocks: TopicContent = {
       definition:
         "The process of decrypting TLS/SSL-encrypted traffic at the load balancer, so backend servers handle unencrypted traffic. Reduces compute load on application servers.",
     },
+    {
+      term: "Durable Execution",
+      definition:
+        "A workflow model (e.g., Temporal) where every step of a long-running process is persisted, so the workflow survives crashes and deploys and resumes exactly where it left off.",
+    },
   ],
 
   deepDive: [
@@ -200,6 +447,20 @@ export const buildingBlocks: TopicContent = {
     "## Cache Hierarchies and Invalidation Strategies in Depth\n\nCaching is not a single layer -- it is a **hierarchy**, and understanding where each layer sits is critical for designing low-latency systems. The hierarchy from closest to the user to closest to the data source is: *browser cache* (controlled by `Cache-Control` and `ETag` headers) -> *CDN edge cache* -> *API gateway cache* -> *application-level in-process cache* (e.g., `std::unordered_map` in C++ or Guava/Caffeine in Java) -> *distributed cache* (Redis, Memcached) -> *database buffer pool*. Each layer trades **freshness** for **speed**.\n\nThe three canonical write strategies are:\n- **Cache-aside (lazy loading)**: the application checks the cache first; on a miss, it reads from the DB and populates the cache. On writes, the application updates the DB and *invalidates* (deletes) the cache key. Simple but vulnerable to race conditions if two writers invalidate simultaneously.\n- **Write-through**: every write goes to both the cache and the DB synchronously. Guarantees consistency but adds write latency.\n- **Write-behind (write-back)**: writes go to the cache immediately; a background process asynchronously flushes to the DB. Lowest write latency but risks data loss if the cache node fails before flushing.\n\nThe hardest problem is **invalidation**. TTL-based expiration is simple but allows stale reads. Event-driven invalidation (publish a cache-bust event on every DB write) is more precise but adds infrastructure complexity. For hot keys, consider **refresh-ahead**: a background thread proactively refreshes the cache entry *before* the TTL expires, so no request ever sees a miss.",
 
     "## Message Queues vs. Event Streams: Choosing the Right Abstraction\n\nMessage queues and event streams solve overlapping but fundamentally different problems. A **message queue** (RabbitMQ, SQS) implements the *competing consumers* pattern: a message is delivered to **one** consumer, acknowledged, and removed. This is ideal for **task distribution** -- e.g., sending emails, processing image uploads, executing background jobs. If a consumer fails, the message is redelivered to another consumer. The queue acts as a *buffer* that absorbs traffic spikes.\n\nAn **event stream** (Kafka, Kinesis) implements the *publish-subscribe log* pattern: events are **appended** to an immutable, ordered log partitioned by key. Multiple **consumer groups** can each read the entire stream independently, at their own pace. Events are *retained* for a configurable period (days, weeks, or forever with compaction), enabling **replay** -- a new consumer can start from the beginning and rebuild its state. This is the foundation of *event sourcing* and *CQRS* architectures.\n\nKey decision factors:\n- **Do multiple independent services need the same data?** -> Event stream (each gets its own consumer group)\n- **Do you need message replay or audit trails?** -> Event stream\n- **Is ordering critical within a partition key?** -> Kafka guarantees per-partition ordering; SQS FIFO guarantees per-group ordering\n- **Do you need complex routing (fanout, topic-based)?** -> RabbitMQ excels with its exchange/binding model\n- **Is operational simplicity paramount?** -> SQS (fully managed, no clusters to maintain)",
+
+    "## Kafka vs RabbitMQ vs SQS: The Three-Way Decision\n\nThis is the single most common head-to-head in system design interviews, and the answer hinges on three questions. **Question 1 — how many readers?** If exactly one service should process each message (send this email, resize this image), you want queue semantics: RabbitMQ or SQS. If several services independently need every event (order-placed feeds fulfillment, analytics, and fraud detection), you want Kafka's consumer groups over one shared log. **Question 2 — do you ever need to re-read?** Kafka retains events for days or forever; a bug fixed on Tuesday can replay Monday's events. Queues delete on acknowledgment — history is gone. Replay, audit, and event sourcing all point to Kafka. **Question 3 — who operates it?** SQS is zero-ops and effectively infinitely elastic; RabbitMQ is a cluster you run (or pay Amazon MQ to run); self-managed Kafka is a serious operational commitment — which is why MSK and Confluent Cloud exist.\n\nDecision shortcuts:\n- Background jobs on AWS, no replay needed -> **SQS** (add SNS for fanout)\n- Complex routing, priorities, per-message TTLs, request-reply -> **RabbitMQ**\n- Event backbone, multiple consumers, replay, > ~100k msg/s -> **Kafka**\n\nCommon mistake: Choosing Kafka for a simple work queue. Kafka has no per-message acknowledgment (only offsets), no built-in delayed delivery, and no selective retry — a consumer that fails one message blocks its whole partition unless you build dead-letter machinery yourself. SQS gives you all three for free.",
+
+    "## Redis vs Memcached: When the Simple Tool Wins\n\nThe default answer is Redis, so the interesting skill is knowing when Memcached is genuinely the better pick. **Redis** is single-threaded per core for command execution but offers a huge feature surface: strings, hashes, lists, sets, sorted sets, streams, geospatial indexes; optional persistence (RDB snapshots, AOF logs); replication and Redis Cluster; Lua scripting for atomic multi-step operations; pub/sub; and building blocks for rate limiters and distributed locks. **Memcached** is multi-threaded, stores only strings, has no persistence and no replication, and uses a slab allocator with very low per-key memory overhead.\n\nChoose Memcached when ALL of these hold: the workload is pure cache (loss is harmless), values are simple strings/serialized blobs, and you want maximum throughput per node with the simplest possible operational story — multi-threading lets one big Memcached node use every core, where Redis needs multiple shards.\n\nChoose Redis when ANY of these hold: you need data structures (leaderboard = sorted set, session = hash), persistence or replication, atomic operations beyond get/set, pub/sub, or you want one tool to also serve as a lightweight database.\n\nIn practice: Facebook's Memcached fleet is the famous counterexample that proves the rule — at extreme scale with a pure look-aside cache pattern, Memcached's simplicity is a feature. Nearly everyone else consolidates on Redis because one well-understood tool serving five roles beats two tools serving six.",
+
+    "## Postgres vs MongoDB vs Cassandra vs DynamoDB: The Storage Decision\n\nFrame this decision along three axes: data shape, scale model, and operational model. **PostgreSQL** — relational, single-node writes (scaled with read replicas), the strongest consistency and query flexibility: joins, transactions, constraints, and JSONB when parts of the schema are fluid. Default until proven otherwise. **MongoDB** — document model, flexible schema, horizontal scale via sharding, multi-document transactions since 4.0 (with performance costs). Wins when entities are naturally self-contained documents read and written whole, and schema evolves fast. **Cassandra** — masterless wide-column store with LSM storage: every node accepts writes, linear scale into hundreds of nodes, tunable consistency (ONE/QUORUM/ALL). Wins for relentless write-heavy, partition-keyed workloads — feeds, telemetry, message history. The price: no joins, no ad-hoc queries; tables are designed per query. **DynamoDB** — managed key-value/document with single-digit-millisecond latency at any scale, per-request pricing, zero servers. Wins when access patterns are known, stable, and key-based; hurts when product requirements shift and your single-table design no longer matches the questions being asked.\n\nDecision shortcuts:\n- Transactions, joins, evolving ad-hoc queries -> **PostgreSQL**\n- Self-contained documents, fast-evolving schema -> **MongoDB**\n- Extreme sustained writes, time-ordered data, multi-DC -> **Cassandra**\n- Known key-based access, serverless ops, AWS -> **DynamoDB**\n\nKey insight: The question is not 'which database is best' but 'which failure mode can you live with' — Postgres runs out of vertical write headroom, Mongo tempts you into schema chaos, Cassandra locks you into your queries, DynamoDB locks you into your access patterns and your cloud.",
+
+    "## Elasticsearch vs Database LIKE: Why Search Is a Separate System\n\nA `WHERE title LIKE '%phone%'` query cannot use a B-tree index — a B-tree indexes from the start of the string, and a leading wildcard forces a full table scan of every row. At small scale nobody notices; at millions of rows the query takes seconds and pins the database CPU. And even if it were fast, SQL gives you *matching*, not *ranking*: no relevance scores, no stemming ('running' should match 'run'), no typo tolerance, no facet counts.\n\nElasticsearch inverts the problem: at index time, each document is analyzed — tokenized, lowercased, stemmed — and each resulting term is mapped to the documents containing it (the **inverted index**). A search becomes a lookup of a few terms plus a ranking pass (BM25 scoring), returning the top results in milliseconds regardless of corpus size.\n\nWhat this costs you:\n- **A second system**: cluster sizing, shard management, version upgrades, monitoring.\n- **A sync pipeline**: the database remains the source of truth; changes flow to the index via CDC (Debezium -> Kafka -> indexer) or dual writes. There is always some lag — search is eventually consistent by construction.\n- **Rebuild discipline**: the index must be re-creatable from the source at any time, because mappings change and clusters fail.\n\nIn practice: escalate in steps. Prefix search on an indexed column -> plain `LIKE 'abc%'`. Moderate full-text needs -> PostgreSQL tsvector with a GIN index, or the pg_trgm extension for fuzzy matching — no new infrastructure. Product-grade relevance, facets, typo tolerance at scale -> Elasticsearch/OpenSearch, or buy it (Algolia/Typesense) if operating a cluster is not worth it.",
+
+    "## S3 vs Filesystem: Why Object Storage Won\n\nStoring uploads on the application server's disk feels natural and fails immediately at scale, for a compounding list of reasons. **Scaling**: the moment you run two app servers behind a load balancer, a file written to server A is a 404 on server B. **Durability**: one disk is one failure domain; S3 replicates every object across at least three availability zones for eleven nines of durability. **Elasticity**: disks fill and must be resized; S3 has no capacity to manage at all. **Delivery**: files on an app server consume its bandwidth and worker processes; objects in S3 sit behind CloudFront and never touch your compute. **Cost**: S3 lifecycle policies migrate cold objects to Infrequent Access and Glacier tiers automatically.\n\nThe canonical upload flow: client asks your API for a **pre-signed URL** -> client uploads directly to S3 with it -> S3 fires an event (SQS/Lambda) -> your system records metadata (object key, size, owner) in the database. Your servers never handle file bytes in either direction.\n\nWhen a filesystem is still right: POSIX semantics (partial writes, appends, file locking), sub-millisecond local access (scratch space, ML training data staged locally), or shared-volume legacy software — that is what EFS/NFS-style services are for. And **HDFS** persists in legacy analytics estates where compute-data locality mattered, though cloud object storage plus decoupled compute (Spark on S3) has largely replaced it.\n\nCommon mistake: Storing images as BLOBs in the database. It bloats backups, poisons the buffer pool with cold bytes, and turns cheap CDN traffic into expensive database reads — store the object in S3 and the key in the database.",
+
+    "## ZooKeeper vs etcd: Coordination Stores Compared\n\nBoth solve the same narrow, hard problem: a small, strongly consistent store that a distributed system can trust for leader election, locks, membership, and configuration — built on consensus (ZooKeeper's ZAB, etcd's Raft), so they keep working through minority node failures. **ZooKeeper** is the veteran: a filesystem-like tree of znodes, *ephemeral* nodes that vanish when a client's session dies (the liveness primitive), *sequential* nodes for fair queuing and election, and watches for change notification. It carried the Hadoop-era ecosystem — HBase, SolrCloud, and famously Kafka. **etcd** is the modern equivalent: a flat key-value space with leases (the ephemeral analogue), streaming watches over gRPC, and MVCC revisions — best known as the datastore inside **Kubernetes**, where every cluster object lives.\n\nHow the choice actually plays out today:\n- You inherit **etcd** by running Kubernetes; you almost never deploy it separately.\n- You keep **ZooKeeper** where legacy dependencies demand it — and that list is shrinking: Kafka's KRaft mode replaced ZooKeeper with an internal Raft quorum, removing its most famous use case.\n- You choose **Consul** when the real need is service discovery across VMs and containers, since it bundles a registry, health checks, and a DNS interface.\n\nKey insight: In an interview, the strongest move is often noting you do not need a coordination store at all — Kubernetes gives you discovery and leader election primitives, and managed services (DynamoDB conditional writes, Redis Redlock with caveats) cover simple locking. Reach for raw ZooKeeper/etcd only when you are *building* infrastructure, not using it.",
+
+    "## When NOT to Add a Component: YAGNI as an Architecture Skill\n\nEvery box you add to the diagram is a claim that its benefit exceeds its cost, and the costs are systematically underestimated. Each new component brings: **operational surface** (deployment, upgrades, patching, monitoring, on-call runbooks), **new failure modes** (what happens when Redis is down — is the site broken or merely slower? did anyone test that path?), **consistency boundaries** (cache vs DB, search index vs source of truth — every pair can now disagree), **cognitive load** (every future engineer must understand it), and **debugging distance** (a request that once touched one process now crosses six, and the bug is in the seams).\n\nThe discipline is to name the trigger before adding the tool:\n- No cache until measured read latency or DB load breaches a target — and the top queries are actually cache-friendly.\n- No Kafka until a second consumer genuinely needs the event feed — a jobs table or SQS covers one consumer.\n- No microservices/mesh until team count, not traffic, forces service boundaries.\n- No Elasticsearch until search relevance is a product requirement Postgres full-text cannot meet.\n- No Kubernetes while ECS/Fargate or a PaaS covers your deployment needs with a fraction of the ops.\n\nReal-world example: a boring stack — one PostgreSQL instance, a monolith on a few servers behind an ALB, S3 plus CloudFront, and SQS for background jobs — comfortably serves millions of users. Companies like Basecamp and Stack Overflow famously ran enormous traffic on deliberately small architectures.\n\nIn practice: interviewers reward sequencing. Present the simple design first, then say what measurement would trigger each addition. 'Here is the v1; Redis enters when p99 exceeds 200ms; Kafka enters when analytics needs the order feed' demonstrates judgment that a fully-loaded diagram never can.",
 
     "## Database Internals: Storage Engines and Index Structures\n\nUnderstanding *how* databases store and retrieve data helps you make better schema and indexing decisions. The two dominant storage engine paradigms are **B-tree** and **LSM-tree**. B-tree engines (used by PostgreSQL, MySQL/InnoDB) maintain a balanced tree of pages on disk. Reads are fast (O(log n) page reads), but writes require in-place updates and potentially page splits. LSM-tree engines (used by Cassandra, RocksDB, LevelDB) write to an in-memory buffer (`memtable`), which periodically flushes to sorted immutable files (`SSTables`) on disk. Reads may need to check multiple SSTables (mitigated by Bloom filters), but writes are sequential and very fast. **Rule of thumb**: B-tree for read-heavy workloads; LSM-tree for write-heavy workloads.\n\nIndex types matter enormously:\n- **B-tree index**: the default. Great for equality and range queries (`WHERE age BETWEEN 20 AND 30`)\n- **Hash index**: O(1) lookups but no range queries. Used internally by `std::unordered_map` in C++ and by some in-memory databases\n- **Inverted index**: maps terms to document IDs. The foundation of Elasticsearch and full-text search\n- **Geospatial index** (R-tree, geohash): enables queries like `find all restaurants within 5km`\n\nIn system design interviews, always state which indexes you would create and *why*. A missing index on a high-cardinality column in a hot query path is one of the most common performance mistakes in production systems.",
   ],
@@ -557,23 +818,79 @@ kafka-console-consumer.sh --bootstrap-server kafka:9092 \\
 
   diagrams: [
     {
-      title: "System Building Blocks Network",
-      kind: "network",
-      caption: "Core infrastructure components and how they interconnect: clients, load balancer, app servers, cache, DB, CDN, and message queue.",
-      mermaid: `graph LR
-    Client["Client"] --> CDN["CDN Edge"]
-    Client --> LB["Load Balancer"]
-    CDN --> LB
-    LB --> App1["App Server 1"]
-    LB --> App2["App Server 2"]
-    App1 --> Cache["Redis Cache"]
-    App2 --> Cache
-    App1 --> DB["Primary DB"]
-    App2 --> DB
-    DB --> Replica["Read Replica"]
-    App1 --> MQ["Message Queue"]
-    App2 --> MQ
-    MQ --> Worker["Background Worker"]`,
+      title: "Where Each Building Block Sits",
+      kind: "architecture",
+      caption: "The full technology catalog placed in its architectural layer: edge, gateway, application, cache, messaging, data, processing, and the observability plane watching everything. Numbered edges (1-7) follow one request from DNS resolution down to the relational database; unnumbered edges are alternate routes or background pipelines.",
+      mermaid: `graph TB
+    subgraph EDGE["Edge Layer"]
+        CDN["Cloudflare / CloudFront<br/>CDN edge cache"]
+        DNS["Route 53<br/>DNS and geo-routing"]
+        NLB["AWS NLB / HAProxy<br/>L4 load balancer"]
+    end
+    subgraph GATEWAY["Gateway Layer"]
+        ALB["Nginx / ALB / Envoy<br/>L7 load balancer"]
+        APIGW["Kong / AWS API Gateway<br/>auth, rate limits, routing"]
+    end
+    subgraph APP["Application Layer"]
+        SVC1["Order Service<br/>Kubernetes / ECS"]
+        SVC2["User Service<br/>Kubernetes / ECS"]
+        FN["AWS Lambda<br/>event-driven functions"]
+        WS["WebSocket / SSE servers<br/>realtime delivery"]
+        MESH["Istio / Linkerd<br/>service mesh sidecars"]
+    end
+    subgraph CACHE["Cache Layer"]
+        REDIS["Redis<br/>hot data, sessions, rate limits"]
+        MEMC["Memcached<br/>ephemeral object cache"]
+    end
+    subgraph MSG["Messaging Layer"]
+        KAFKA["Kafka<br/>event stream"]
+        MQ["RabbitMQ / SQS<br/>task queue"]
+        PUSH["FCM / APNs<br/>mobile push"]
+    end
+    subgraph DATA["Data Layer"]
+        PG["PostgreSQL / Aurora<br/>relational source of truth"]
+        NOSQL["DynamoDB / Cassandra / MongoDB<br/>NoSQL by access pattern"]
+        ES["Elasticsearch<br/>search index"]
+        S3["S3 / GCS / MinIO<br/>object storage"]
+        TS["InfluxDB / TimescaleDB<br/>time-series"]
+    end
+    subgraph PROC["Processing Layer"]
+        SPARK["Spark<br/>batch analytics"]
+        FLINK["Flink / Kafka Streams<br/>stream processing"]
+        AIR["Airflow / Temporal<br/>workflow orchestration"]
+    end
+    subgraph OBS["Observability Plane"]
+        PROM["Prometheus + Grafana<br/>metrics and dashboards"]
+        OTEL["OpenTelemetry + Jaeger<br/>distributed tracing"]
+        LOGS["ELK / Datadog<br/>log aggregation"]
+    end
+    DNS -->|"1. resolve + geo-route"| CDN
+    CDN -->|"2. cache miss"| NLB
+    NLB -->|"3. L4 forward"| ALB
+    ALB -->|"4. L7 route"| APIGW
+    APIGW -->|"5. authenticated request"| SVC1
+    APIGW --> SVC2
+    APIGW --> FN
+    ALB --> WS
+    MESH --- SVC1
+    MESH --- SVC2
+    SVC1 -->|"6. check cache"| REDIS
+    SVC2 --> MEMC
+    SVC1 -->|"7. cache miss: query"| PG
+    SVC2 --> NOSQL
+    SVC1 --> KAFKA
+    SVC2 --> MQ
+    KAFKA --> ES
+    KAFKA --> FLINK
+    FLINK --> TS
+    SPARK --> S3
+    AIR --> SPARK
+    KAFKA --> WS
+    MQ --> PUSH
+    SVC1 --> S3
+    SVC1 -.-> PROM
+    SVC2 -.-> OTEL
+    KAFKA -.-> LOGS`,
     },
     {
       title: "Cache-Aside Request Flow",
@@ -630,27 +947,43 @@ kafka-console-consumer.sh --bootstrap-server kafka:9092 \\
     "Design a URL shortening service on paper. Specify which building blocks you would use: load balancer type and algorithm, caching layer (what to cache, eviction policy, TTL), database type and schema, and CDN strategy. Justify each choice. Then estimate the storage and throughput requirements for 100M URLs with a 100:1 read-to-write ratio.",
     "Implement a dead-letter queue pattern: create a producer-consumer system where failed messages (after 3 retries with exponential backoff) are moved to a separate dead-letter queue for manual inspection. Use C++ threads and condition variables for the concurrency model.",
     "Compare write-through, write-behind, and cache-aside patterns by implementing all three in a small C++ program with an in-memory cache and a simulated database (a `std::map`). Measure latency and consistency trade-offs under concurrent reads and writes.",
+    "Take three product briefs — a chat app, an analytics dashboard, and a photo-sharing service — and for each, walk the full catalog (load balancing, gateway, cache, database, search, messaging, storage, processing, realtime, observability) writing one line per category: the tool you would pick and the one-sentence reason. Then mark which categories you would deliberately SKIP at launch and what metric would trigger adding them.",
   ],
 
   cheatSheet: [
+    "**Load balancing**: spread traffic → Nginx/HAProxy self-hosted, ALB/NLB on AWS, Envoy for cloud-native. L4 for speed, L7 for routing; round-robin default, least-connections for uneven work, consistent hashing for stateful backends.",
+    "**API gateway / mesh**: one front door for APIs → AWS API Gateway (managed) or Kong (portable); service-to-service mTLS and retries at scale → Linkerd (simple) or Istio (powerful), only past ~20 services.",
+    "**Caching**: hot reads → Redis (default; data structures, persistence) or Memcached (pure ephemeral cache); static content near users → CloudFront/Cloudflare CDN. Cache-aside + LRU + TTL is the standard combo.",
+    "**Relational DB**: structured data with transactions → PostgreSQL (default), Aurora for managed AWS scaling, Spanner/CockroachDB only for true multi-region strong consistency.",
+    "**NoSQL**: documents → MongoDB; extreme writes/time-ordered → Cassandra/ScyllaDB; key-value at scale, zero ops → DynamoDB; relationships → Neo4j; metrics over time → InfluxDB/TimescaleDB.",
+    "**Search**: full-text, relevance, facets → Elasticsearch/OpenSearch (self-run) or Algolia/Typesense (buy); Postgres tsvector for moderate needs; never make the search index the source of truth.",
+    "**Messaging**: background jobs → SQS (managed) or RabbitMQ (routing control); event backbone with replay and many consumers → Kafka; lightweight internal messaging → NATS.",
+    "**Object storage**: blobs (images, video, backups) → S3/GCS/Azure Blob, MinIO self-hosted; pre-signed URL uploads + CDN downloads; never blobs in the DB.",
+    "**Processing**: batch analytics → Spark; low-latency event-time streaming → Flink; in-service stream transforms → Kafka Streams.",
+    "**Workflow**: one scheduled task → cron/K8s CronJob; data pipelines with backfill → Airflow; durable multi-step app workflows (sagas) → Temporal.",
+    "**Coordination**: locks, leader election, discovery → etcd (comes with Kubernetes), Consul for cross-platform discovery, ZooKeeper for legacy; metadata only, never app data.",
+    "**Compute**: containers → Docker everywhere; orchestration → Kubernetes (large/platform teams) or ECS/Fargate (simpler AWS); spiky event-driven glue → Lambda.",
+    "**Realtime**: bidirectional (chat, games) → WebSockets + Redis pub/sub backplane; one-way feeds → SSE; offline mobile → FCM/APNs; legacy fallback → long polling.",
+    "**Observability**: instrument with OpenTelemetry; metrics → Prometheus + Grafana; logs → ELK/Loki; traces → Jaeger; errors → Sentry; buy-it-all option → Datadog.",
+    "**Resilience**: rate limit at the gateway (token bucket, Redis-backed for shared state); timeouts + jittered exponential backoff on every remote call; circuit breakers (Resilience4j / Envoy) on every dependency.",
     "**L4 vs L7 LB**: L4 = transport layer (IP+port, fast, protocol-agnostic). L7 = application layer (HTTP headers/URL, content-based routing, SSL termination). Use L4 for raw throughput, L7 for smart routing.",
-    "**Cache eviction**: LRU (least recently used) -- best general-purpose. LFU (least frequently used) -- better for skewed access patterns. TTL -- simple time-based expiry. Combine LRU + TTL in practice.",
     "**Cache write strategies**: Cache-aside (app manages cache, most common). Write-through (sync write to both, consistent but slow writes). Write-behind (async flush to DB, fast but risks data loss).",
-    "**Consistent hashing**: Maps servers and keys to a ring. Adding/removing a server only remaps ~1/N keys. Use 100-200 virtual nodes per server for even distribution.",
-    "**CDN types**: Pull CDN (fetch on first request, cache with TTL) -- good for high-traffic dynamic content. Push CDN (proactively upload) -- good for large static files. Pull is more common.",
-    "**Kafka vs RabbitMQ**: Kafka = distributed log, replay, consumer groups, high throughput. RabbitMQ = traditional broker, complex routing, per-message ack. Kafka for events, RabbitMQ for tasks.",
-    "**Database selection by access pattern**: Relational (joins, ACID) -> PostgreSQL. Document (flexible schema) -> MongoDB. Key-value (sub-ms lookups) -> Redis. Wide-column (high write throughput) -> Cassandra. Graph (relationships) -> Neo4j. Search -> Elasticsearch.",
+    "**Kafka vs RabbitMQ vs SQS**: Kafka = replayable log, many consumers, huge throughput. RabbitMQ = rich routing, per-message ack. SQS = zero-ops managed queue. Events → Kafka; tasks → SQS/RabbitMQ.",
     "**Storage engines**: B-tree (PostgreSQL, MySQL) = fast reads, in-place updates. LSM-tree (Cassandra, RocksDB) = fast sequential writes, compaction overhead on reads. B-tree for read-heavy, LSM for write-heavy.",
   ],
 
   revisionNotes: [
-    "Load balancers are the front door of your system. L4 for speed and protocol-agnostic routing, L7 for content-aware routing. Most architectures use both: L4 at the edge, L7 for application routing. Always mention health checks.",
-    "Caching exists at every layer (browser, CDN, app, distributed cache, DB buffer pool). In system design, 'the cache' usually means Redis between app servers and the DB. Always discuss eviction policy (LRU), TTL, and invalidation strategy.",
+    "System design is selection from a shared catalog: every category (traffic, gateway, cache, relational, NoSQL, search, messaging, storage, processing, workflow, coordination, compute, realtime, observability, resilience) has a default tool and 2-3 alternatives. Know the default, know one alternative, know the trigger for switching.",
+    "Load balancers are the front door of your system. L4 (NLB, HAProxy) for speed and protocol-agnostic routing, L7 (ALB, Nginx, Envoy) for content-aware routing. Most architectures use both: L4 at the edge, L7 for application routing. Always mention health checks.",
+    "Caching exists at every layer (browser, CDN, app, distributed cache, DB buffer pool). In system design, 'the cache' usually means Redis between app servers and the DB. Always discuss eviction policy (LRU), TTL, and invalidation strategy. Redis is the default; Memcached only for pure ephemeral string caching.",
     "Cache stampede is a top interview topic. Three solutions: mutex/lock (only one fetches), probabilistic early expiration (stagger refreshes), background refresh (proactive). Mention stale-while-revalidate as a bonus.",
-    "CDNs are not just for static files. They handle API response caching, DDoS protection, SSL termination, and dynamic content acceleration. Origin shield reduces origin load by acting as an intermediate cache.",
-    "Message queues (RabbitMQ, SQS) are for task distribution with competing consumers. Event streams (Kafka) are for pub-sub with replay and multiple consumer groups. Know when to use each and be able to justify your choice.",
-    "Polyglot persistence is the norm in large systems. PostgreSQL for core data, Redis for caching, Elasticsearch for search, Kafka for event streaming. Always explain why each database type was chosen based on access patterns.",
+    "CDNs are not just for static files. They handle API response caching, DDoS protection, SSL termination, and dynamic content acceleration. Origin shield reduces origin load by acting as an intermediate cache. Providers: CloudFront, Cloudflare, Akamai, Fastly.",
+    "Queue vs stream is the fundamental messaging distinction: queues (SQS, RabbitMQ) deliver each message to one competing consumer for task distribution; streams (Kafka) keep a replayable log that many consumer groups read independently. Kafka for events and pipelines, SQS/RabbitMQ for jobs. Do not use Kafka as a job queue.",
+    "Storage decisions follow data shape: PostgreSQL default; MongoDB for documents; Cassandra for extreme partition-keyed writes; DynamoDB for known key-based access with zero ops; Neo4j for graph traversals; InfluxDB/TimescaleDB for time-series; Elasticsearch as a synced secondary search index; S3 for all blobs (pre-signed uploads, CDN downloads).",
+    "Polyglot persistence is the norm in large systems. PostgreSQL for core data, Redis for caching, Elasticsearch for search, Kafka for event streaming, S3 for objects. Always explain why each was chosen based on access patterns — and how they stay in sync (CDC, invalidation).",
     "Consistent hashing is essential for distributed caches and partitioned databases. Virtual nodes solve the uneven distribution problem. Key insight: adding/removing a server only affects ~1/N of the keys, unlike modulo hashing which remaps almost everything.",
+    "The higher-order platform picks: Kubernetes (or ECS/Fargate for simplicity, Lambda for event-driven glue) to run things; Airflow for data pipelines vs Temporal for durable app workflows; etcd/ZooKeeper/Consul only hold coordination metadata; OpenTelemetry + Prometheus/Grafana/Jaeger (or Datadog) to see inside; token-bucket rate limits and circuit breakers (Resilience4j, Envoy) to stay up when dependencies fail.",
+    "Knowing when NOT to add a component is a scored skill. Each box costs operations, failure modes, consistency boundaries, and cognitive load. Present the simple design first, then name the measurable trigger for each addition ('Redis when p99 > 200ms', 'Kafka when a second consumer needs the feed').",
     "In system design interviews, always specify your building blocks explicitly: LB type and algorithm, cache layer and eviction policy, database type and indexes, queue/stream choice. Vague answers like 'add a cache' lose points -- say 'Redis with LRU eviction and 5-minute TTL using cache-aside pattern.'",
   ],
 };

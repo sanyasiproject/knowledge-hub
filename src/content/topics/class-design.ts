@@ -123,7 +123,7 @@ export const classDesign: TopicContent = {
       kind: "book",
     },
     {
-      label: "Refactoring — Martin Fowler",
+      label: "Refactoring — Martin Fowler", url: "https://martinfowler.com/",
       kind: "book",
     },
   ],

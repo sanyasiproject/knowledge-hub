@@ -555,7 +555,7 @@ trait DetailedSummary: Summary + std::fmt::Display {
     { label: "Go Proverbs — Accept Interfaces, Return Structs", kind: "article", note: "Rob Pike's design philosophy on Go interfaces and why they should be small." },
     { label: "The Rust Programming Language — Traits Chapter", kind: "docs", note: "Official Rust book covering trait definitions, default implementations, trait bounds, and trait objects." },
     { label: "Java Sealed Classes JEP 409", kind: "docs", note: "The JDK Enhancement Proposal explaining sealed classes and interfaces, their motivation, and exhaustive pattern matching." },
-    { label: "TypeScript Handbook — Interfaces", kind: "docs", note: "Official documentation on TypeScript's structural type system and interface declarations." },
+    { label: "TypeScript Handbook — Interfaces", url: "https://www.typescriptlang.org/docs/handbook/intro.html", kind: "docs", note: "Official documentation on TypeScript's structural type system and interface declarations." },
     { label: "Design Patterns (GoF) — Strategy, Observer, and Template Method", kind: "book", note: "Patterns that demonstrate the power of programming to interfaces rather than implementations." },
   ],
   glossary: [

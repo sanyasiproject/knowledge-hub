@@ -468,8 +468,8 @@ async function publishOutboxEvents(): Promise<void> {
   ],
   resources: [
     { label: "Kafka Exactly-Once Semantics (KIP-98)", kind: "docs", note: "The original Kafka proposal for transactional messaging" },
-    { label: "Designing Data-Intensive Applications (Ch. 11)", kind: "book", note: "Martin Kleppmann's coverage of stream processing guarantees" },
-    { label: "Transactional Outbox Pattern - microservices.io", kind: "article", note: "Chris Richardson's canonical description of the pattern" },
+    { label: "Designing Data-Intensive Applications (Ch. 11)", url: "https://dataintensive.net/", kind: "book", note: "Martin Kleppmann's coverage of stream processing guarantees" },
+    { label: "Transactional Outbox Pattern - microservices.io", url: "https://microservices.io/patterns/index.html", kind: "article", note: "Chris Richardson's canonical description of the pattern" },
     { label: "Debezium Documentation", kind: "docs", note: "CDC tool commonly used with the outbox pattern" },
     { label: "You Cannot Have Exactly-Once Delivery - Bravenewgeek", kind: "article", note: "Tyler Treat's influential blog post on delivery semantics" },
     { label: "Two Generals Problem - Wikipedia", kind: "article", note: "Background on the impossibility result underlying delivery guarantees" },

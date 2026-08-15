@@ -490,7 +490,7 @@ roleRef:
   ],
   resources: [
     {
-      label: "Kubernetes documentation — Concepts",
+      label: "Kubernetes documentation — Concepts", url: "https://kubernetes.io/docs/",
       kind: "docs",
     },
     {

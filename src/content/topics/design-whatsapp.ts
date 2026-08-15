@@ -10,12 +10,20 @@ export const designWhatsapp: TopicContent = {
   ],
   detailed: [
     "## High-Level Architecture\n\nWhatsApp's architecture is organized into several layers: connection servers, message routing, transient storage, media storage, and auxiliary services (presence, push notifications, key distribution). Connection servers maintain persistent TCP/TLS connections with clients using a custom binary protocol derived from XMPP. Each connection server handles hundreds of thousands of concurrent connections, and consistent hashing maps each user's phone number hash to a primary connection server. A global load balancer distributes initial connections, and DNS-based geo-routing directs users to the nearest data center. The message routing layer uses an internal pub/sub system: when user A sends a message to user B, A's connection server publishes to a routing service that looks up B's connection server in a distributed registry (backed by Mnesia or a similar in-memory store) and forwards the message. If B is offline, the message is persisted in a per-user queue in a high-throughput database. WhatsApp historically ran on Erlang/OTP, leveraging its lightweight process model to handle millions of concurrent connections with low latency and high fault tolerance.",
+    "## Capacity Estimation: Working the Numbers\n\nStart every WhatsApp design with back-of-envelope math, because the numbers dictate the architecture.\n\n### Message throughput\n\n- 2B users, ~100B messages/day.\n- 100,000,000,000 / 86,400 s ≈ **1.16M messages/second average**.\n- Peak factor ×3 (evening hours, New Year's Eve spikes) → design for **~3.5M messages/second**.\n- Each message generates ~3 additional small frames (server ack, delivery receipt, read receipt), so the gateway tier actually handles **~10-14M frames/second at peak**.\n\n### Connection fleet\n\n- Assume 1B concurrently connected devices (roughly half the user base online at any moment).\n- WhatsApp famously ran **~1-2M persistent connections per server** on FreeBSD + Erlang, each connection costing only ~2KB of memory in an Erlang process.\n- 1,000,000,000 / 1,500,000 ≈ **~700 gateway servers** for the entire connected fleet — a strikingly small number, which is why the Erlang connection model is the headline fact of this design.\n\n### Offline queue storage\n\n- Assume 25% of destined recipients are offline at send time → ~25B messages/day pass through the offline queue.\n- Average encrypted payload ~1KB incl. metadata → **~25TB/day of transient queue writes**.\n- Messages are deleted on delivery ack; median residency is minutes, so steady-state queue size is a few TB replicated ×3 — small enough that a Cassandra/HBase-style cluster of a few dozen nodes suffices.\n\n### Media\n\n- If ~5% of messages carry media at ~200KB average: 5B × 200KB = **~1PB/day into blob storage**, which is why media must bypass the messaging path and go straight to S3/CDN.\n\nKey insight: messaging is a small-payload, high-fanout, connection-bound problem. The bottleneck is concurrent connections and per-message fan-out work, not storage — the store-and-forward model keeps data at rest tiny because delivered messages are deleted.\n\nCommon mistake: sizing a permanent message database for 100B messages/day. WhatsApp does not durably store delivered messages server-side; history lives in the client's local SQLite database.",
+    "## Acknowledgments: What the Ticks Actually Mean\n\nThe tick marks are a visible contract about which hop has acknowledged the message, and interviewers love asking exactly where each one fires.\n\n- **Single grey tick (sent)**: the sender's gateway durably accepted the message and returned a server ack. The recipient may know nothing yet. If you kill the sender's app now, the message still delivers.\n- **Double grey tick (delivered)**: the recipient's *device* wrote the message to its local store and sent a delivery ack back through the routing layer. The user may not have seen it.\n- **Double blue tick (read)**: the recipient opened the conversation; the client emits a read receipt (a watermark, not per-message, to save traffic).\n\nEach receipt is itself a tiny message flowing the reverse path, deduplicated by message ID, with monotonic state transitions (Sent → Delivered → Read, never backward).\n\nFor example, if Bob's phone is off, Alice sees a single tick indefinitely: the server has the ciphertext queued, but no device ack exists yet.\n\nIn practice: read receipts are batched as a per-conversation watermark timestamp — \"everything up to T is read\" — turning O(messages) receipts into O(1) per chat open.\n\nCommon mistake: saying the single tick means \"delivered to the recipient's server region\" or similar. It means exactly one thing: the origin server accepted and persisted the message.",
     "## Message Delivery Pipeline and Ordering\n\nThe message lifecycle follows these steps: (1) the sender's client encrypts the message using the Signal Protocol session with the recipient, (2) the encrypted payload is sent over the persistent connection to the sender's connection server, (3) the server assigns a server-side timestamp and unique message ID, (4) the routing layer forwards the message to the recipient's connection server or enqueues it for offline delivery, (5) the recipient's connection server pushes the message to the client, (6) the client sends a delivery acknowledgment back, (7) the server removes the message from the queue and forwards the delivery receipt to the sender. Message ordering within a conversation uses the server-assigned timestamp combined with a per-conversation sequence counter. Since messages between two users always flow through deterministic routing, ordering is straightforward. For reliability, the system uses at-least-once delivery semantics with client-side deduplication based on message ID. If the delivery acknowledgment is lost, the server will retry delivery, and the client silently drops duplicates. The retry policy uses exponential backoff with jitter, starting at 1 second and capping at 5 minutes.",
     "## End-to-End Encryption Design\n\nWhatsApp implements the Signal Protocol for E2EE. Each device generates a long-term Identity Key pair (Curve25519), a medium-term Signed Pre-Key (rotated weekly), and a batch of one-time Pre-Keys (ephemeral Curve25519 pairs uploaded to the server). When Alice wants to message Bob for the first time, she fetches Bob's public key bundle from the key distribution server and performs the X3DH key agreement: she computes four ECDH shared secrets using combinations of her Identity Key, an ephemeral key, and Bob's Identity Key, Signed Pre-Key, and one-time Pre-Key. These four secrets are fed into HKDF to derive a shared root key that initializes the Double Ratchet. The Double Ratchet then derives a new symmetric key for every message, providing forward secrecy (compromising one key does not reveal past messages) and break-in recovery (future keys are safe even if current state is compromised). The server stores only public keys and encrypted message blobs; it never sees plaintext. Key verification uses a Safety Number, a hash of both parties' Identity Keys displayed as a QR code or 60-digit number that users can compare out-of-band.",
     "## Group Messaging and Sender Keys\n\nGroup chats initially used pairwise Signal sessions, meaning a message to a 256-member group required 255 separate encryptions. This was CPU-intensive and bandwidth-heavy. The Sender Keys optimization addresses this: when a user joins a group, each existing member sends that user a Sender Key message (encrypted via the pairwise session). The Sender Key contains a symmetric chain key and a signing key. To send a group message, the sender encrypts once with their Sender Key chain (which ratchets forward after each message) and signs the ciphertext. The server fans out this single ciphertext to all group members, who decrypt with the sender's Sender Key. When a member leaves, all remaining members generate new Sender Keys and redistribute them, ensuring the departed member cannot decrypt future messages. Group membership changes trigger key rotation. The server enforces group size limits (1024 members) and rate limits on group creation and membership changes to prevent abuse.",
     "## Media, Presence, and Push Notifications\n\nMedia handling is designed so that large files never transit through the message routing layer. The sender generates a random 256-bit AES key and a random IV, encrypts the media file (image, video, document) using AES-256-CBC, computes an HMAC-SHA256 over the ciphertext, and uploads the encrypted blob to a CDN. The sender then sends a regular E2EE message containing the CDN URL, AES key, IV, HMAC, and a thumbnail (also encrypted). The recipient downloads from the CDN, verifies the HMAC, and decrypts locally. Media files are stored with a TTL (typically 30 days on server) and re-uploaded if needed. Presence (online, last seen, typing) is managed by a dedicated presence service. Clients send heartbeats every 10 seconds; absence of a heartbeat for 30 seconds triggers an offline transition. Typing indicators are ephemeral events sent only to users currently viewing the conversation and are rate-limited to one event per 3 seconds. Push notifications for offline users are sent via APNs (iOS) and FCM (Android). The push payload contains only metadata (sender ID, message count) and never the message content, preserving E2EE guarantees.",
+    "## Trace: One 1:1 Message End-to-End\n\nWalking a single message through the system is the fastest way to prove you understand the design.\n\n1. Alice types \"hi\" to Bob. Her client generates a client-side message ID (device ID + monotonic counter), derives the next message key from her Double Ratchet chain with Bob, and encrypts.\n2. The ciphertext frame goes out over her existing persistent TCP/TLS connection to her chat gateway (no new connection, no HTTP handshake — this is why latency is ~100ms).\n3. The gateway persists the message and returns a server ack → **single grey tick**.\n4. The messaging service asks the session registry (Redis/Mnesia-style in-memory map): \"which gateway holds Bob's connection?\"\n5. **Online path**: registry returns gateway G7; the message is forwarded to G7, which pushes it down Bob's open socket. Bob's client stores it in local SQLite, decrypts, and sends a delivery ack → **double grey tick** for Alice.\n6. **Offline path**: registry has no entry for Bob; the message is written to Bob's per-user queue in the Cassandra/HBase-style store, and the push bridge sends a content-free APNs/FCM notification (\"You have a new message\"). When Bob reconnects, his client syncs with a last-message-ID cursor, drains the queue in batches, acks, and the server deletes the queued entries.\n7. Bob opens the chat → read receipt watermark flows back → **blue ticks**.\n\nKey insight: the server never touched plaintext at any step; it routed opaque blobs and bookkept acknowledgments.",
+    "## Trace: One Group Message End-to-End\n\nGroup delivery adds one encryption step and a server-side fan-out, and the division of labor is exactly what interviewers probe.\n\n1. Alice sends to a 200-member group. Her client encrypts **once** with her Sender Key chain (symmetric ratchet) and signs the ciphertext — not 199 pairwise encryptions.\n2. The single ciphertext travels to her gateway with the group ID.\n3. The group service resolves the membership list (cached, backed by the metadata store) and hands the messaging service 199 delivery tasks — **fan-out happens server-side on ciphertext**, which is safe because every member already holds Alice's Sender Key.\n4. For each member, the same online/offline branch as 1:1 applies: forward to their gateway if connected, else enqueue + push. A group send is effectively 199 independent 1:1 deliveries of identical bytes.\n5. Delivery and read receipts are aggregated: the group UI shows \"delivered to all / read by all\" only when every member's watermark has advanced, and receipts are batched to avoid an O(N×M) receipt storm.\n6. If a member is removed, every remaining member rotates their Sender Key and redistributes it over pairwise Signal sessions before the next message — the removed member can never decrypt future traffic.\n\nFor example, a 100-message burst in a 1024-member group generates ~100K delivery tasks but only 100 encryptions on the sender's phone — that asymmetry is the entire point of Sender Keys.\n\nCommon mistake: proposing client-side fan-out (sender uploads N copies). That burns the sender's battery and bandwidth O(N) and breaks on flaky mobile uplinks; server-side fan-out of a single signed ciphertext is strictly better once Sender Keys exist.",
   ],
   deepDive: [
+    "## E2EE Key Hierarchy and Threat Model\n\nUnderstanding *which key defends against what* is the difference between reciting Signal and reasoning about it. The hierarchy, from most to least permanent: **Identity Key** (Curve25519, generated at install, the device's cryptographic identity — compromise means full impersonation, which is why Safety Number verification hashes both identity keys), **Signed Pre-Key** (rotated weekly, signed by the identity key so a malicious server cannot substitute its own), **One-Time Pre-Keys** (a batch of ~100 uploaded to the server, each consumed by exactly one session initiation — they let Alice start a session while Bob is offline, the asynchronous property that makes mobile messaging work), then per-session **root/chain/message keys** from the Double Ratchet, and **Sender Keys** for groups. The defensive framing per property: *forward secrecy* (ratchet deletes message keys after use) protects past messages if a device is seized today; *break-in recovery* (DH ratchet re-randomizes on each turn) protects future messages after a temporary compromise ends; *deniability* (X3DH produces no signature over message content) means transcripts cannot cryptographically prove authorship to a third party. The server's honest-but-curious threat is neutralized because it stores only public keys and ciphertext; the remaining attack surface is the key distribution step itself — a malicious server could hand Alice a fake bundle for Bob, which is exactly what out-of-band Safety Number comparison detects.\n\nKey insight: E2EE moves the trust boundary from the server to the key-distribution step. Every remaining attack on WhatsApp's crypto is some variant of \"trick a client into encrypting to the wrong public key.\"\n\nWarning: in an interview, keep this defensive and conceptual — explain what the protocol protects against, not how to attack it.",
+    "## Message Ordering and Idempotency\n\nExactly-once delivery is impossible over a lossy network, so WhatsApp builds an exactly-once *illusion* from at-least-once delivery plus idempotent receivers. The client generates the message ID (device ID + monotonically increasing counter, e.g. `3EB0-9F4A-000042`) *before* first transmission — this is the idempotency key. If the server ack is lost and the client retransmits, the server recognizes the duplicate ID and acks without re-enqueueing; if server-side delivery retries race a slow device ack, the recipient recognizes the duplicate ID in its local SQLite store and silently drops it. Ordering is layered: within one sender-recipient pair, the sender's counter plus FIFO per-user queues give natural order; across senders in a group, the server timestamp at the sender's gateway is the tiebreaker, and clients render by that timestamp while tolerating late arrivals (a message can slot in above newer ones after a sync). WhatsApp deliberately chooses **per-conversation causal-ish ordering, not global ordering** — there is no consensus round per message, because a Paxos/Raft commit per message at 3.5M msg/s would be absurd. The Double Ratchet adds a second ordering constraint: message keys are derived sequentially from a chain, so out-of-order arrival forces the receiver to fast-forward the chain and cache skipped message keys (bounded, ~1000) to decrypt stragglers later.\n\nKey insight: idempotency key generated at the *client* is what makes every retry safe end-to-end; a server-assigned ID cannot deduplicate the first hop's retransmissions.\n\nCommon mistake: proposing Lamport clocks or a global sequencer for chat ordering. Per-conversation ordering with client counters plus server timestamps is sufficient, and users tolerate (and rarely notice) cross-sender interleaving anomalies.",
+    "## Group Fan-Out: Server-Side vs Client-Side\n\nWho makes the N copies of a group message is a genuine trade-off, and WhatsApp's answer differs from, say, iMessage's. **Client-side fan-out** (sender encrypts pairwise and uploads N ciphertexts) maximizes cryptographic isolation — no shared group key exists — but costs the sender O(N) CPU, O(N) uplink bandwidth on the weakest link in the system (a mobile radio), and fails partially when the upload dies at member 130 of 256. **Server-side fan-out** (sender uploads one blob, server replicates to N queues) costs O(1) at the sender and moves replication to the datacenter where bandwidth is cheap, but requires all members to share a decryption capability — hence Sender Keys. WhatsApp uses pairwise (client-side) crypto only for the *key distribution* messages and server-side fan-out for the *content*. The remaining costs: membership changes are the expensive operation (leave → N-1 new Sender Keys, each distributed pairwise → O(N²) messages in the worst churn case), which motivates the 1024-member cap and batched rotations; and the server learns group metadata (who is in which group, message timing/sizes) even though content is opaque — a deliberate, documented trade-off. For very large fan-out (Channels/broadcast at 1M+ followers), the model flips again to a pub/sub tree with relaxed encryption guarantees, because per-follower queues stop making sense.\n\nIn practice: WhatsApp caps groups at 1024 because Sender Key rotation cost and receipt aggregation both scale with N; communities and channels use different delivery primitives rather than stretching the group machinery.",
+    "## Media Pipeline: Encrypt-Then-Upload and Thumbnails\n\nThe media path is a textbook 'separate the control plane from the data plane' design. Sending a 40MB video: (1) the client transcodes/compresses locally, (2) generates a random 256-bit AES key + IV, encrypts with AES-256-CBC, computes HMAC-SHA256 over the ciphertext (encrypt-then-MAC), (3) uploads the encrypted blob over HTTPS directly to blob storage (S3-style) fronted by a CDN — never through the chat gateways, whose Erlang processes are tuned for thousands of tiny frames, not megabyte streams, (4) sends a normal E2EE chat message containing only the tiny control record: blob URL, AES key, IV, HMAC, file hash, size, and an encrypted ~10KB thumbnail. The recipient renders the thumbnail instantly from the message itself (this is why you see a blurry preview before the download finishes), then fetches the ciphertext from the nearest CDN edge, verifies the HMAC before decrypting (reject-then-decrypt prevents padding-oracle-style games), and decrypts locally. Two clever optimizations: **deduplication by ciphertext hash** — when the same encrypted blob is forwarded, clients re-send only the key record and the CDN serves the already-uploaded blob, so a viral video is stored once, not a million times; and **TTL-based garbage collection** (~30 days) with client-triggered re-upload if a late reader requests expired media.\n\nKey insight: the CDN can cache and dedupe aggressively precisely because it only ever sees ciphertext — E2EE and CDN economics coexist because the key travels on a different channel than the bytes.\n\nCommon mistake: sending media through the message routing layer 'for simplicity'. That turns a 1KB-frame system into a mixed workload, destroys gateway memory behavior, and is the first thing an interviewer will flag.",
     "## Signal Protocol: Double Ratchet Internals\n\nThe Double Ratchet combines a Diffie-Hellman ratchet with a symmetric key ratchet. Each time a message is sent or received, the symmetric chain ratchets forward using HMAC-based key derivation: the current chain key is fed into HMAC-SHA256 to produce both the next chain key and a message key. The message key encrypts that specific message and is then deleted. The DH ratchet advances when the conversation turn changes: if Alice was sending and now Bob replies, Bob includes a new ephemeral DH public key in his message header. Alice performs a DH computation with this new key and her current ratchet key, deriving a new root key and new sending/receiving chain keys. This means that even if an attacker compromises the current chain state, they can only decrypt messages until the next DH ratchet step, which re-randomizes all derived keys. The protocol handles out-of-order messages by allowing the receiver to store skipped message keys (up to a configurable maximum, typically 1000) indexed by the DH ratchet generation and chain index. This is critical for unreliable mobile networks where UDP-like reordering can occur at the application layer. The protocol also supports header encryption: the DH ratchet public key and chain index in the message header are encrypted with a header key derived from the previous root key, preventing metadata leakage about the ratchet state.",
     "## Consistent Hashing and Connection Server Routing\n\nWhatsApp routes users to connection servers using consistent hashing on the user's phone number. The hash ring is divided into virtual nodes (typically 150-200 vnodes per physical server) to ensure even distribution. When a connection server joins or leaves the cluster, only 1/N of the key space is remapped, minimizing disruption. Each user's primary connection server is the first node clockwise from their hash position, with the next two nodes serving as replicas for the user's offline message queue. The routing registry (historically Mnesia in Erlang, a distributed in-memory database with strong consistency within a data center) maps each online user to their connection server's address. Lookups are sub-millisecond. Cross-data-center routing uses a federation layer: each data center maintains its own hash ring and routing registry, and a global directory service (updated asynchronously with ~1 second propagation delay) maps user ID ranges to data centers. When user A in DC-East messages user B in DC-West, the routing layer detects the cross-DC case and forwards via a dedicated inter-DC message bus with TLS encryption and message batching for throughput optimization. Failure detection uses a phi-accrual failure detector that adapts its suspicion threshold based on historical heartbeat intervals, reducing false positives during network jitter.",
     "## Offline Message Queue and Multi-Device Sync\n\nOffline messages are stored in a per-user queue backed by a log-structured storage engine optimized for sequential writes and prefix scans. Each queue entry contains the encrypted message blob, server timestamp, message ID, and sender ID. The queue is partitioned by user ID hash, and each partition is replicated across three storage nodes using chain replication for strong consistency. When a user reconnects, the client sends a sync request containing the last received message ID (or server timestamp) for each conversation. The server scans the queue and streams all messages newer than the cursor, batching them into chunks of 50 messages for flow control. The client acknowledges each batch, and the server deletes acknowledged messages. For multi-device support (WhatsApp Web, WhatsApp Desktop), each linked device maintains its own encryption session with every contact. The primary phone acts as the encryption oracle during initial device linking via QR code: it re-encrypts message history for the new device. Once linked, each device independently maintains Signal Protocol sessions and receives messages directly. However, the primary phone must be online periodically to keep the linked devices active, enforced by a 14-day timeout. Message history sync between devices uses the primary phone as the source of truth, streaming encrypted history to linked devices over a local encrypted channel during initial setup.",
@@ -319,24 +327,62 @@ public:
       title: "WhatsApp High-Level Architecture",
       kind: "architecture",
       caption:
-        "End-to-end message flow from sender to recipient through WhatsApp infrastructure",
-      mermaid: `graph LR
-    Client_A[Client A] -->|TLS/TCP| LB[Load Balancer]
-    LB --> CS1[Connection Server 1]
-    LB --> CS2[Connection Server 2]
-    CS1 --> Router[Message Router]
-    CS2 --> Router
-    Router --> MQ[Message Queue]
-    MQ --> CS2
-    MQ --> OffQ[Offline Queue DB]
-    Router --> Registry[Routing Registry]
-    CS1 --> KDS[Key Distribution Server]
-    CS2 --> KDS
-    Client_A --> CDN[Media CDN]
-    CDN --> Client_B[Client B]
-    Client_B -->|TLS/TCP| LB
-    OffQ --> Push[Push Notification Service]
-    Push -->|APNs/FCM| Client_B`,
+        "Layered architecture showing the online delivery path (sender gateway to recipient gateway, numbered 1-7) and the offline path (persist to per-user queue plus push notification, numbered O1-O5). Media and key exchange bypass the message routing layer entirely.",
+      mermaid: `graph TB
+    subgraph CL["Clients"]
+        SND["Sender App<br/>local SQLite store + E2E keys"]
+        RCV["Recipient App<br/>local SQLite store + E2E keys"]
+    end
+    subgraph EDGE["Edge / Gateway"]
+        LB1["L4 Load Balancer<br/>DNS geo-routing"]
+        GW1["Chat Gateway 1<br/>Erlang, XMPP-derived protocol<br/>persistent TCP connections"]
+        GW2["Chat Gateway 2<br/>1-2M connections per box"]
+    end
+    subgraph SVC["Services"]
+        REG["Session / Connection Registry"]
+        MSG["Messaging Service<br/>routing + receipts"]
+        GRP["Group Service<br/>membership + fan-out"]
+        PRS["Presence / Last-Seen Service"]
+        MED["Media Service"]
+        PSH["Push Notification Bridge"]
+    end
+    subgraph ASYNC["Async"]
+        OFQ["Per-User Offline Message Queues"]
+        KFK["Kafka<br/>async pipelines: receipts,<br/>metrics, abuse signals"]
+    end
+    subgraph DATA["Data"]
+        CAS["Cassandra / HBase-style store<br/>offline queue + metadata"]
+        RDS["Redis<br/>session registry cache"]
+        BLB["S3 / Blob Store<br/>media encrypted client-side"]
+    end
+    subgraph SEC["Security"]
+        KEYS["Signal Key Server<br/>identity keys + prekey bundles"]
+    end
+    subgraph EXT["External"]
+        APNS["APNs / FCM"]
+    end
+
+    SND -->|"1. TLS over TCP"| LB1
+    LB1 -->|"2. route to gateway"| GW1
+    RCV ---|"persistent connection"| GW2
+    SND -.->|"fetch prekey bundle X3DH"| KEYS
+    GW1 -->|"3. ciphertext message"| MSG
+    MSG -->|"4. where is recipient?"| REG
+    REG -->|"5. session lookup"| RDS
+    MSG -->|"6. online path: forward"| GW2
+    GW2 -->|"7. push over open socket"| RCV
+    MSG -->|"O1. offline path: enqueue"| OFQ
+    OFQ -->|"O2. persist"| CAS
+    OFQ -->|"O3. notify"| PSH
+    PSH -->|"O4. push request"| APNS
+    APNS -.->|"O5. wake device, no content"| RCV
+    MSG --> KFK
+    GW1 --> GRP
+    GRP -->|"fan out ciphertext per member"| MSG
+    GW1 --> PRS
+    SND -->|"upload encrypted blob"| MED
+    MED --> BLB
+    RCV -.->|"download + decrypt locally"| MED`,
     },
     {
       title: "Message Delivery Sequence",
@@ -464,6 +510,30 @@ public:
       q: "How does WhatsApp handle media sharing while maintaining end-to-end encryption?",
       a: "Media files are too large to send through the message routing layer, so WhatsApp decouples media encryption from media transport. The sender generates a random 256-bit AES key and a random initialization vector, encrypts the media file locally using AES-256-CBC, computes an HMAC-SHA256 integrity tag over the ciphertext, and uploads the encrypted blob to a CDN. The sender then sends a regular E2EE message through the normal message path containing the CDN URL, the AES key, the IV, the HMAC, the file size, and an encrypted thumbnail for preview. The recipient downloads the encrypted blob from the CDN, verifies the HMAC to ensure integrity, and decrypts locally. The CDN never sees the plaintext because it only handles ciphertext. Media files on the CDN have a TTL (typically 30 days) and are garbage-collected after expiry. If a recipient tries to access expired media, the app requests the sender to re-upload.",
     },
+    {
+      q: "Walk me through the capacity estimation for WhatsApp. What are the key numbers and what do they imply architecturally?",
+      a: "Start from 2B users and ~100B messages/day. Dividing by 86,400 seconds gives ~1.16M messages/second average; applying a peak factor of 3 means designing for ~3.5M messages/second, and since every message spawns roughly three receipt frames (server ack, delivered, read), the gateways see 10M+ frames/second at peak. For connections, assume ~1B concurrently online devices; at WhatsApp's famous 1-2M persistent connections per Erlang server, the entire connected fleet needs only ~700 gateway boxes. Offline storage is small because it is transient: if 25% of recipients are offline, ~25B messages/day hit the queue at ~1KB each, about 25TB/day of writes, but median queue residency is minutes and entries are deleted on ack, so steady-state data at rest is a few TB replicated three ways. Media dominates raw bytes (5% of messages at ~200KB is ~1PB/day), which is exactly why it goes directly to blob storage/CDN and never through the chat path. The architectural implications: the system is connection-bound and fan-out-bound, not storage-bound; optimize for cheap persistent connections and fast in-memory routing lookups, and keep delivered messages off the server entirely.",
+      followUps: [
+        "How would the numbers change if you had to support server-stored full message history?",
+        "What breaks first if traffic grows 10x: gateways, the routing registry, or the offline queue?",
+      ],
+    },
+    {
+      q: "How does WhatsApp guarantee a message is neither lost nor duplicated, given retries at every hop?",
+      a: "It layers at-least-once delivery with idempotent receivers keyed on a client-generated message ID. The sender's client creates the ID (device ID plus a monotonic counter) before first transmission, so if the server ack is lost and the client retransmits, the server recognizes the duplicate and acks without re-enqueueing. Downstream, if the server retries delivery because a device ack was slow, the recipient's client finds the ID already in its local SQLite store and silently drops the duplicate. Durability comes from persisting the message at the gateway before acking (single tick), replicating the offline queue across nodes, and only deleting queue entries after an explicit device ack. The result is an exactly-once illusion built from at-least-once transport plus deduplication, which is the standard answer for any messaging system: true exactly-once across a lossy network is impossible, but idempotency makes retries harmless. The critical detail interviewers look for is that the idempotency key must be generated at the client, because a server-assigned ID cannot deduplicate retransmissions on the first hop.",
+      followUps: [
+        "Where exactly can a duplicate still surface to the user, and why is it acceptable?",
+        "How does the Double Ratchet complicate out-of-order and duplicate handling?",
+      ],
+    },
+    {
+      q: "How does WhatsApp's multi-device architecture work without breaking end-to-end encryption?",
+      a: "Each linked device (phone, WhatsApp Web, Desktop) is a first-class cryptographic endpoint with its own identity key and its own Signal sessions with every contact — there is no shared private key and the server never proxies plaintext. When Alice sends to Bob, her client actually encrypts the message separately for each of Bob's registered devices (and for her own other devices, so her Web session shows her sent messages), fanning out per-device ciphertexts. Device linking is bootstrapped by the primary phone: scanning the QR code establishes a secure channel over which the phone vouches for the new device's identity key and streams encrypted history to it. The companion device list is signed by the primary phone's key, so the server cannot silently attach a surveillance device — clients verify the signed device list before encrypting to it, and contacts see a security notification when the list changes. Trade-offs to mention: per-device fan-out multiplies encryption and delivery cost by the device count (capped at 4-5 companions), and consistency across devices relies on each device independently receiving and acking its copy from its own per-device queue.",
+      followUps: [
+        "Why did WhatsApp move from the phone-as-proxy model to true multi-device?",
+        "How do read receipts and typing indicators stay consistent across a user's devices?",
+      ],
+    },
   ],
   mcqs: [
     {
@@ -548,6 +618,18 @@ public:
       front: "How does WhatsApp detect and limit spam without reading message content?",
       back: "Since E2EE prevents content inspection, spam detection relies on behavioral signals: abnormal message volume, rapid contact enumeration, sending to many non-contacts, account age, and device fingerprinting. ML models classify accounts using these signals. Forwarded message counters limit viral spread.",
     },
+    {
+      front: "What is the headline capacity math for WhatsApp?",
+      back: "100B messages/day / 86,400s = ~1.16M msg/s average, ~3.5M/s at 3x peak. ~1B concurrent connections at 1-2M per Erlang server means only ~700 gateway boxes. Offline queue writes ~25TB/day but transient (deleted on delivery ack); media ~1PB/day goes straight to blob storage/CDN.",
+    },
+    {
+      front: "Why must the message idempotency key be generated by the client, not the server?",
+      back: "The first hop (client to server) can also be retried when the server ack is lost. Only an ID that exists before first transmission lets the server recognize that retransmission as a duplicate. Server-assigned IDs would create a new message per retry on that hop.",
+    },
+    {
+      front: "How does true multi-device work without a shared private key?",
+      back: "Every linked device has its own identity key and its own Signal sessions. Senders encrypt each message separately for each of the recipient's devices (and their own other devices). The primary phone signs the device list, so the server cannot secretly attach a device; contacts' clients verify the list before encrypting.",
+    },
   ],
   exercises: [
     "Design the offline message queue: define the data schema (message ID, user ID, encrypted blob, timestamp, retry count), choose a storage engine (LSM-tree vs B-tree), define the replication strategy (chain replication vs Raft), and calculate storage requirements for 500 million offline users each with an average of 50 pending messages of 1KB each.",
@@ -567,6 +649,11 @@ public:
     "Offline queue uses log-structured storage with chain replication across 3 nodes. Sync on reconnect uses last-message-ID cursor with batched delivery of 50 messages per chunk.",
     "Presence via 10-second heartbeats, 30-second offline timeout. Typing indicators are ephemeral, rate-limited to 1 per 3 seconds, sent only to active conversation viewers.",
     "Spam detection without content: behavioral signals (volume, contact patterns, account age, device fingerprint). Forwarded messages tracked with counter; 5+ forwards restricted to 1 chat at a time.",
+    "Capacity math: 100B msgs / 86,400s ≈ 1.16M msg/s average, ~3.5M/s peak (×3); ~1B concurrent connections / 1.5M per box ≈ ~700 gateway servers; offline queue ~25TB/day transient writes, deleted on ack.",
+    "Idempotency: client-generated message ID (device ID + monotonic counter) makes every retry safe — server dedups on enqueue, recipient dedups against local SQLite. Exactly-once illusion from at-least-once + dedup.",
+    "Fan-out split: pairwise (client-side) crypto for Sender Key distribution only; server-side fan-out of one signed ciphertext for content. Client-side content fan-out wastes O(N) mobile uplink.",
+    "Multi-device: each device has its own identity key and Signal sessions; sender encrypts per device; device list signed by primary phone so the server cannot inject a hidden device.",
+    "Named tech map: Erlang/FreeBSD gateways, Mnesia/Redis-style session registry, Cassandra/HBase-style offline queue, Kafka-style async pipelines, S3 + CDN for client-encrypted media, APNs/FCM push bridge.",
   ],
   cheatSheet: [
     "Protocol: custom binary over TCP/TLS (XMPP-derived). WebSocket as fallback. Full-duplex persistent connections.",
@@ -579,6 +666,9 @@ public:
     "Storage: Erlang/Mnesia for routing state, LSM-based store for offline queues, CDN for media. Messages deleted after delivery.",
     "Scale numbers: ~2B users, ~100B msgs/day, 2M connections/server, ~2KB/connection, 1024 max group size.",
     "Anti-spam: behavioral ML (no content access), forwarding counter with 5+ restriction, phone verification, device attestation.",
+    "Capacity: 100B/day ≈ 1.16M msg/s avg, ~3.5M/s peak; ~700 gateways at 1.5M conns each; queue writes ~25TB/day but transient; media ~1PB/day to blob store.",
+    "Idempotency key = client-generated message ID; at-least-once transport + dedup at server and recipient = exactly-once illusion. Ordering is per-conversation, never global.",
+    "Multi-device: per-device identity keys and sessions, sender encrypts per device, signed device list blocks server-injected devices, 4-5 companion cap.",
   ],
   glossary: [
     {
@@ -615,6 +705,26 @@ public:
       term: "Mnesia",
       definition:
         "An Erlang-native distributed real-time database that stores data in-memory with optional disk persistence. WhatsApp uses it for the routing registry that maps online users to their connection server addresses.",
+    },
+    {
+      term: "Prekey Bundle",
+      definition:
+        "The set of public keys (Identity Key, Signed Pre-Key, one One-Time Pre-Key) a client uploads to the server so that others can initiate an E2EE session with it asynchronously, even while it is offline. Fetching a bundle is the first step of X3DH.",
+    },
+    {
+      term: "Idempotency Key",
+      definition:
+        "A client-generated unique identifier (device ID plus monotonic counter in WhatsApp) attached to a message before first transmission, allowing every hop to detect and discard retried duplicates. It converts at-least-once delivery into an exactly-once illusion.",
+    },
+    {
+      term: "Fan-Out",
+      definition:
+        "Replicating one logical message into N physical deliveries, one per recipient or device. WhatsApp performs fan-out server-side on ciphertext (enabled by Sender Keys for groups and per-device sessions for multi-device), keeping the sender's cost O(1).",
+    },
+    {
+      term: "Break-In Recovery",
+      definition:
+        "The Double Ratchet property that a temporarily compromised session heals itself: the next DH ratchet turn re-randomizes the root key, so an attacker who captured current state cannot decrypt messages after the next key exchange.",
     },
   ],
   animations: [
@@ -708,6 +818,9 @@ public:
     "How would you design a system to detect and prevent account takeover via SIM swap attacks on the phone verification system?",
     "How would you implement encrypted search over message history without the server indexing plaintext?",
     "How would you scale presence and typing indicators for a user with 10,000 contacts, most of whom are online simultaneously?",
+    "How would you design broadcast Channels with millions of followers, and why does the per-user offline queue model stop working there?",
+    "How would you handle a region-wide gateway datacenter outage so that 100M affected users reconnect without a thundering herd?",
+    "How would you add message reactions and edits while preserving E2EE and the existing receipt model?",
   ],
   resources: [
     {
@@ -721,7 +834,7 @@ public:
       note: "Detailed specification of X3DH key agreement and Double Ratchet algorithm by Open Whisper Systems.",
     },
     {
-      label: "Designing Data-Intensive Applications by Martin Kleppmann",
+      label: "Designing Data-Intensive Applications by Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
       note: "Chapters on replication, partitioning, and stream processing directly applicable to WhatsApp's message routing and storage architecture.",
     },

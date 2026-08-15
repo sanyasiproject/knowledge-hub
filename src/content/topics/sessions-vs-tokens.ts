@@ -363,10 +363,10 @@ function hashToken(token: string): string {
     "Sliding timeout (inactivity) + absolute timeout (max duration)",
   ],
   resources: [
-    { label: "OWASP Session Management Cheat Sheet", kind: "docs", note: "Comprehensive guide to secure session management including cookie attributes and timeout policies." },
+    { label: "OWASP Session Management Cheat Sheet", url: "https://owasp.org/", kind: "docs", note: "Comprehensive guide to secure session management including cookie attributes and timeout policies." },
     { label: "Auth0: Token Best Practices", kind: "article", note: "Detailed guide on access tokens, refresh tokens, rotation, and storage." },
     { label: "The Ultimate Guide to Handling JWTs on Frontend Clients", kind: "article", note: "Hasura blog post covering token storage, XSS vs CSRF, and the BFF pattern." },
-    { label: "RFC 6749: OAuth 2.0 Authorization Framework", kind: "docs", note: "The specification that defines access tokens, refresh tokens, and grant types." },
+    { label: "RFC 6749: OAuth 2.0 Authorization Framework", url: "https://oauth.net/2/", kind: "docs", note: "The specification that defines access tokens, refresh tokens, and grant types." },
   ],
   glossary: [
     { term: "Session", definition: "Server-side storage of user state, identified by a session ID stored in a cookie. Stateful and immediately revocable." },

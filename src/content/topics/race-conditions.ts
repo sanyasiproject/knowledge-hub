@@ -757,7 +757,7 @@ int main() {
       note: "The foundational paper describing the vector-clock-based algorithm used by TSan to detect data races at runtime with low false-positive rates.",
     },
     {
-      label: "Is Parallel Programming Hard, And, If So, What Can You Do About It? by Paul McKenney",
+      label: "Is Parallel Programming Hard, And, If So, What Can You Do About It? by Paul McKenney", url: "https://mirrors.edge.kernel.org/pub/linux/kernel/people/paulmck/perfbook/perfbook.html",
       kind: "book" as const,
       note: "Free online book covering advanced synchronization, RCU, memory barriers, and lock-free programming from a Linux kernel perspective.",
     },

@@ -139,11 +139,11 @@ A **headers exchange** routes based on message header attributes instead of the 
   ],
   resources: [
     {
-      label: "RabbitMQ documentation — exchanges and routing",
+      label: "RabbitMQ documentation — exchanges and routing", url: "https://www.rabbitmq.com/docs",
       kind: "docs",
     },
     {
-      label: "Enterprise Integration Patterns — Hohpe & Woolf",
+      label: "Enterprise Integration Patterns — Hohpe & Woolf", url: "https://www.enterpriseintegrationpatterns.com/",
       kind: "book",
     },
   ],

@@ -392,11 +392,11 @@ async function callInternalAPI(endpoint: string) {
     "Implicit flow is deprecated — always use Auth Code + PKCE",
   ],
   resources: [
-    { label: "RFC 6749: OAuth 2.0 Authorization Framework", kind: "docs", note: "The core OAuth 2.0 specification defining grant types, tokens, and endpoints." },
-    { label: "RFC 7636: PKCE for OAuth 2.0", kind: "docs", note: "The PKCE extension specification for securing public clients." },
-    { label: "OpenID Connect Core 1.0 Specification", kind: "docs", note: "The OIDC specification adding authentication to OAuth 2.0." },
-    { label: "OAuth 2.0 Simplified (oauth.com)", kind: "article", note: "Aaron Parecki's clear, practical guide to OAuth 2.0 flows and best practices." },
-    { label: "The OAuth 2.0 Authorization Framework: Bearer Token Usage (RFC 6750)", kind: "docs", note: "How to use bearer tokens in HTTP requests." },
+    { label: "RFC 6749: OAuth 2.0 Authorization Framework", url: "https://oauth.net/2/", kind: "docs", note: "The core OAuth 2.0 specification defining grant types, tokens, and endpoints." },
+    { label: "RFC 7636: PKCE for OAuth 2.0", url: "https://oauth.net/2/", kind: "docs", note: "The PKCE extension specification for securing public clients." },
+    { label: "OpenID Connect Core 1.0 Specification", url: "https://openid.net/developers/how-connect-works/", kind: "docs", note: "The OIDC specification adding authentication to OAuth 2.0." },
+    { label: "OAuth 2.0 Simplified (oauth.com)", url: "https://oauth.net/2/", kind: "article", note: "Aaron Parecki's clear, practical guide to OAuth 2.0 flows and best practices." },
+    { label: "The OAuth 2.0 Authorization Framework: Bearer Token Usage (RFC 6750)", url: "https://oauth.net/2/", kind: "docs", note: "How to use bearer tokens in HTTP requests." },
   ],
   glossary: [
     { term: "OAuth 2.0", definition: "An authorization framework that enables third-party applications to access resources on behalf of a user without receiving their credentials." },

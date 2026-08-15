@@ -617,17 +617,17 @@ int main() {
   ],
   resources: [
     {
-      label: "RFC 791 - Internet Protocol (IPv4 specification)",
+      label: "RFC 791 - Internet Protocol (IPv4 specification)", url: "https://www.rfc-editor.org/rfc/rfc791",
       kind: "docs",
       note: "The foundational specification defining IPv4 packet format, addressing, and fragmentation.",
     },
     {
-      label: "RFC 4291 - IP Version 6 Addressing Architecture",
+      label: "RFC 4291 - IP Version 6 Addressing Architecture", url: "https://www.rfc-editor.org/rfc/rfc4291",
       kind: "docs",
       note: "Defines IPv6 address types (unicast, multicast, anycast), scopes, and text representation rules.",
     },
     {
-      label: "RFC 1918 - Address Allocation for Private Internets",
+      label: "RFC 1918 - Address Allocation for Private Internets", url: "https://www.rfc-editor.org/rfc/rfc1918",
       kind: "docs",
       note: "Defines the three private IPv4 address ranges (10/8, 172.16/12, 192.168/16) and their usage guidelines.",
     },
@@ -652,7 +652,7 @@ int main() {
       note: "Open-source subnet calculator with VLSM support, useful for verifying manual calculations.",
     },
     {
-      label: "RFC 4632 - CIDR: The Internet Address Assignment and Aggregation Plan",
+      label: "RFC 4632 - CIDR: The Internet Address Assignment and Aggregation Plan", url: "https://www.rfc-editor.org/rfc/rfc4632",
       kind: "docs",
       note: "Best current practice document explaining CIDR motivation, allocation strategies, and route aggregation.",
     },

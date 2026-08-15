@@ -137,11 +137,11 @@ export const rebasing: TopicContent = {
   ],
   resources: [
     {
-      label: "Pro Git — Rebasing chapter",
+      label: "Pro Git — Rebasing chapter", url: "https://git-scm.com/book",
       kind: "book",
     },
     {
-      label: "Git reference documentation",
+      label: "Git reference documentation", url: "https://git-scm.com/docs",
       kind: "docs",
     },
   ],

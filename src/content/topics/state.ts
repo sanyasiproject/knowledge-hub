@@ -566,7 +566,7 @@ product selected"]
   ],
   resources: [
     { label: "Design Patterns: Elements of Reusable Object-Oriented Software (GoF)", kind: "book", note: "Chapter on State pattern -- the original and authoritative description." },
-    { label: "Refactoring.Guru -- State Pattern", kind: "article", note: "Visual explanation with code examples in multiple languages." },
+    { label: "Refactoring.Guru -- State Pattern", url: "https://refactoring.guru/", kind: "article", note: "Visual explanation with code examples in multiple languages." },
     { label: "XState Documentation", kind: "docs", note: "Modern JavaScript/TypeScript library implementing statecharts with visualization tools." },
     { label: "Head First Design Patterns", kind: "book", note: "Approachable coverage of State pattern with a gumball machine example." },
     { label: "Statecharts: A Visual Formalism for Complex Systems (David Harel, 1987)", kind: "paper", note: "The foundational paper on hierarchical state machines." }

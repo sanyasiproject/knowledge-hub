@@ -276,7 +276,7 @@ aws ec2 describe-snapshots \\
 
   resources: [
     { label: "AWS Storage Blog: S3 strong consistency deep dive", kind: "article", note: "Technical explanation of how AWS achieved strong consistency for S3 without performance compromise" },
-    { label: "AWS Well-Architected — Storage Lens and optimization", kind: "docs", note: "Official guidance on storage right-sizing, tiering strategies, and cost optimization across S3, EBS, and EFS" },
+    { label: "AWS Well-Architected — Storage Lens and optimization", url: "https://aws.amazon.com/architecture/well-architected/", kind: "docs", note: "Official guidance on storage right-sizing, tiering strategies, and cost optimization across S3, EBS, and EFS" },
     { label: "AWS re:Invent — Deep dive on Amazon S3 (STG204)", kind: "video", note: "Covers S3 internals, performance optimization, security features, and access patterns at scale" },
     { label: "Amazon Builders' Library: Using S3 as a data lake foundation", kind: "article", note: "Architectural patterns for S3-based data lakes including partitioning, formats (Parquet, ORC), and query engines" },
     { label: "AWS EBS CSI Driver GitHub repository", kind: "repo", note: "Kubernetes CSI driver for EBS — essential for persistent volumes in EKS clusters" }

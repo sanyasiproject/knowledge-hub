@@ -307,7 +307,7 @@ export async function research(question: string): Promise<string> {
     { label: "AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation", kind: "paper", note: "Microsoft Research paper introducing the AutoGen framework for multi-agent conversation patterns" },
     { label: "OpenAI Swarm (Experimental)", kind: "repo", note: "Lightweight multi-agent orchestration framework demonstrating handoffs and routines patterns" },
     { label: "Multi-Agent Debate Improves LLM Reasoning (Du et al.)", kind: "paper", note: "Research showing that multi-agent debate significantly improves mathematical and strategic reasoning accuracy" },
-    { label: "Building Effective Agents - Anthropic", kind: "article", note: "Anthropic's guide to agent architectures including orchestrator-workers and evaluator-optimizer patterns" },
+    { label: "Building Effective Agents - Anthropic", url: "https://docs.anthropic.com/", kind: "article", note: "Anthropic's guide to agent architectures including orchestrator-workers and evaluator-optimizer patterns" },
     { label: "Andrew Ng's Multi-Agent Design Patterns", kind: "video", note: "Lecture covering reflection, tool use, planning, and multi-agent collaboration as agentic design patterns" },
     { label: "LangChain Multi-Agent Architectures Blog", kind: "article", note: "Practical comparison of supervisor, hierarchical, and custom multi-agent patterns with LangGraph examples" }
   ],

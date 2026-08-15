@@ -277,9 +277,9 @@ cqlsh> SELECT * FROM users WHERE id = 1;
   ],
   resources: [
     { label: "Brewer's Conjecture and the Feasibility of Consistent, Available, Partition-Tolerant Web Services", kind: "paper", note: "The original 2002 proof by Gilbert and Lynch." },
-    { label: "CAP Twelve Years Later: How the 'Rules' Have Changed (Brewer, 2012)", kind: "paper", note: "Brewer's own clarification of how CAP should be applied." },
-    { label: "Designing Data-Intensive Applications, Ch. 9", kind: "book", note: "Martin Kleppmann's thorough treatment of consistency and consensus." },
-    { label: "Jepsen.io", kind: "repo", note: "Kyle Kingsbury's distributed systems correctness testing — tests real databases against their consistency claims." },
+    { label: "CAP Twelve Years Later: How the 'Rules' Have Changed (Brewer, 2012)", url: "https://www.infoq.com/articles/cap-twelve-years-later-how-the-rules-have-changed/", kind: "paper", note: "Brewer's own clarification of how CAP should be applied." },
+    { label: "Designing Data-Intensive Applications, Ch. 9", url: "https://dataintensive.net/", kind: "book", note: "Martin Kleppmann's thorough treatment of consistency and consensus." },
+    { label: "Jepsen.io", url: "https://jepsen.io/analyses", kind: "repo", note: "Kyle Kingsbury's distributed systems correctness testing — tests real databases against their consistency claims." },
   ],
   glossary: [
     { term: "Linearizability", definition: "The strongest consistency model: all operations appear to execute atomically in some total order consistent with real time." },

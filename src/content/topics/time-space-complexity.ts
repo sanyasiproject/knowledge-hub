@@ -356,8 +356,8 @@ O(nk) time O(n+k) space"]`,
   ],
   resources: [
     { label: "Introduction to Algorithms (CLRS) — Chapters 3-4", kind: "book", note: "The gold standard reference for asymptotic notation, recurrences, and the Master theorem." },
-    { label: "MIT 6.006 Lecture on Asymptotic Analysis", kind: "video", note: "Erik Demaine's lecture clearly explains Big-O, Omega, Theta with visual examples." },
-    { label: "Big-O Cheat Sheet (bigocheatsheet.com)", kind: "article", note: "Quick reference for time and space complexities of common algorithms and data structures." },
+    { label: "MIT 6.006 Lecture on Asymptotic Analysis", url: "https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-spring-2020/", kind: "video", note: "Erik Demaine's lecture clearly explains Big-O, Omega, Theta with visual examples." },
+    { label: "Big-O Cheat Sheet (bigocheatsheet.com)", url: "https://www.bigocheatsheet.com/", kind: "article", note: "Quick reference for time and space complexities of common algorithms and data structures." },
     { label: "Algorithm Design Manual by Skiena — Chapter 2", kind: "book", note: "Practical approach to algorithm analysis with real-world examples and war stories." },
   ],
   glossary: [

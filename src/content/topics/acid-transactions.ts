@@ -240,8 +240,8 @@ SHOW checkpoint_timeout;`
     "CHECKPOINT — force dirty page flush",
   ],
   resources: [
-    { label: "Designing Data-Intensive Applications, Ch. 7", kind: "book", note: "Transactions — the definitive practical treatment of ACID." },
-    { label: "PostgreSQL Documentation — Transaction Isolation", kind: "docs", note: "How PostgreSQL implements ACID properties." },
+    { label: "Designing Data-Intensive Applications, Ch. 7", url: "https://dataintensive.net/", kind: "book", note: "Transactions — the definitive practical treatment of ACID." },
+    { label: "PostgreSQL Documentation — Transaction Isolation", url: "https://www.postgresql.org/docs/current/transaction-iso.html", kind: "docs", note: "How PostgreSQL implements ACID properties." },
     { label: "ARIES: A Transaction Recovery Method — Mohan et al.", kind: "paper", note: "The foundational paper on WAL-based recovery (redo/undo logging)." },
     { label: "Database Internals — Alex Petrov, Ch. 5", kind: "book", note: "Transaction processing and recovery internals." },
   ],

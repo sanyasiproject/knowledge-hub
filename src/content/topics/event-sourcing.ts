@@ -748,7 +748,7 @@ app.listen(3000, () => {
   ],
   resources: [
     {
-      label: "Event Sourcing — Martin Fowler",
+      label: "Event Sourcing — Martin Fowler", url: "https://martinfowler.com/",
       kind: "article",
     },
     {

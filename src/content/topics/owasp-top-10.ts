@@ -645,11 +645,11 @@ app.post("/api/transfer", (req: Request, res: Response) => {
   ],
   resources: [
     {
-      label: "OWASP Top 10 project",
+      label: "OWASP Top 10 project", url: "https://owasp.org/www-project-top-ten/",
       kind: "docs",
     },
     {
-      label: "OWASP Cheat Sheet Series",
+      label: "OWASP Cheat Sheet Series", url: "https://cheatsheetseries.owasp.org/",
       kind: "docs",
     },
     {

@@ -305,7 +305,7 @@ jobs:
 
   resources: [
     { label: "FinOps Foundation — Cloud Financial Management Framework", kind: "docs", note: "The industry-standard framework for cloud cost management: principles, personas, phases, and maturity model" },
-    { label: "AWS Well-Architected — Cost Optimization Pillar", kind: "docs", note: "Official AWS guidance on cost-aware architectures: expenditure awareness, cost-effective resources, matching supply and demand" },
+    { label: "AWS Well-Architected — Cost Optimization Pillar", url: "https://aws.amazon.com/architecture/well-architected/", kind: "docs", note: "Official AWS guidance on cost-aware architectures: expenditure awareness, cost-effective resources, matching supply and demand" },
     { label: "Last Week in AWS Newsletter by Corey Quinn", kind: "article", note: "Weekly newsletter covering AWS pricing changes, billing surprises, and cost optimization strategies with real-world analysis" },
     { label: "Infracost — Cloud Cost Estimates for Terraform", kind: "repo", note: "Open-source tool that shows cost impact of Terraform changes in pull requests — essential for shift-left cost management" },
     { label: "AWS re:Invent — Cost Optimization at Scale (FIN301)", kind: "video", note: "Enterprise-scale FinOps practices: organizational strategies, commitment management, and automated cost governance" }

@@ -434,14 +434,14 @@ async function fetchDocument(uri: string): Promise<string> {
     "Change notifications (`notifications/tools/list_changed`, etc.) allow servers to dynamically add or remove primitives without requiring reconnection."
   ],
   resources: [
-    { label: "MCP Specification", kind: "docs", note: "The official Model Context Protocol specification covering all primitives, transport, and lifecycle" },
+    { label: "MCP Specification", url: "https://modelcontextprotocol.io/", kind: "docs", note: "The official Model Context Protocol specification covering all primitives, transport, and lifecycle" },
     { label: "MCP TypeScript SDK", kind: "repo", note: "Official TypeScript SDK with McpServer class, Zod schema integration, and transport implementations" },
     { label: "MCP Python SDK", kind: "repo", note: "Official Python SDK with decorator-based tool/resource/prompt registration" },
-    { label: "Building MCP Servers (Anthropic Docs)", kind: "docs", note: "Step-by-step guide to building MCP servers with tool, resource, and prompt examples" },
+    { label: "Building MCP Servers (Anthropic Docs)", url: "https://docs.anthropic.com/", kind: "docs", note: "Step-by-step guide to building MCP servers with tool, resource, and prompt examples" },
     { label: "MCP Tools Documentation", kind: "docs", note: "Detailed reference for tool definitions, inputSchema, and tool call lifecycle" },
     { label: "MCP Resources Documentation", kind: "docs", note: "Reference for resource URIs, templates, subscriptions, and change notifications" },
-    { label: "Model Context Protocol GitHub", kind: "repo", note: "Main MCP organization with specification, SDKs, and reference server implementations" },
-    { label: "Introduction to MCP (Anthropic Blog)", kind: "article", note: "High-level overview of MCP architecture, primitives, and the problems it solves" }
+    { label: "Model Context Protocol GitHub", url: "https://modelcontextprotocol.io/", kind: "repo", note: "Main MCP organization with specification, SDKs, and reference server implementations" },
+    { label: "Introduction to MCP (Anthropic Blog)", url: "https://docs.anthropic.com/", kind: "article", note: "High-level overview of MCP architecture, primitives, and the problems it solves" }
   ],
   followUps: [
     "How does MCP transport (stdio vs SSE vs Streamable HTTP) affect which primitives are available?",

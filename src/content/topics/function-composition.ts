@@ -526,9 +526,9 @@ result = foldr (xform (:)) [] [1, 2, 3, 4, 5]
     "Refactor an imperative data processing function into a **point-free pipeline** using Ramda or fp-ts. The function should: parse a JSON string, extract the `users` array, filter for `active: true`, sort by `name`, and return an array of email addresses. Identify where *currying* and *partial application* enable the point-free style.",
   ],
   resources: [
-    { label: "Professor Frisby's Mostly Adequate Guide to FP (Ch. 5-6: Compose & Curry)", kind: "book", note: "Free online book covering composition and currying with practical JavaScript examples" },
-    { label: "Haskell Wiki: Function Composition", kind: "docs", note: "Definitive reference for (.), ($), point-free style, and eta-reduction in Haskell" },
-    { label: "Rich Hickey - Transducers (Strange Loop 2014)", kind: "video", note: "Original talk introducing transducers, their motivation, and implementation in Clojure" },
+    { label: "Professor Frisby's Mostly Adequate Guide to FP (Ch. 5-6: Compose & Curry)", url: "https://mostly-adequate.gitbook.io/mostly-adequate-guide", kind: "book", note: "Free online book covering composition and currying with practical JavaScript examples" },
+    { label: "Haskell Wiki: Function Composition", url: "https://wiki.haskell.org/", kind: "docs", note: "Definitive reference for (.), ($), point-free style, and eta-reduction in Haskell" },
+    { label: "Rich Hickey - Transducers (Strange Loop 2014)", url: "https://www.youtube.com/watch?v=6mTbuzafcII", kind: "video", note: "Original talk introducing transducers, their motivation, and implementation in Clojure" },
     { label: "Ramda Documentation", kind: "docs", note: "JavaScript library designed for function composition: R.compose, R.pipe, R.curry, R.partial" },
     { label: "fp-ts: Getting Started with Composition", kind: "article", note: "TypeScript-first functional programming with typed pipe, flow, and monadic composition" },
   ],

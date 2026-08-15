@@ -10,16 +10,23 @@ export const designTwitter: TopicContent = {
   ],
   detailed: [
     "## High-Level Architecture Overview\nTwitter's architecture is composed of several major subsystems: the Tweet Service (ingestion and storage), the Timeline Service (home and user timelines), the Social Graph Service (follow relationships), the Search Service (real-time indexing), and the Notification/Push Service. Each subsystem is independently scalable. The API gateway handles authentication, rate limiting (per-user and per-app token buckets), and routes requests to the appropriate backend service. All inter-service communication uses Thrift RPC or gRPC. A CDN layer sits in front for media (images, video) and static assets, handling billions of media requests per day. The entire stack runs across multiple data centers with active-active replication for availability.",
+    "## Capacity Estimation: Do the Math First\nSizing the system up front is what turns a hand-wavy diagram into a defensible design, so derive every number out loud. Assume 250M DAU and 500M tweets/day. Write QPS: 500M / 86,400 seconds = ~5,800 tweets/sec average; apply a 3x peak factor for global events (elections, World Cup finals) and you plan for ~18,000 writes/sec. Timeline read QPS: if each DAU opens their home timeline ~10 times/day, that is 2.5B loads/day = ~29,000 QPS average and ~90,000 QPS at peak; each load hydrates ~20 tweets, so the tweet-fetch tier must serve ~1.8M lookups/sec at peak — which is why every tweet body read must be a cache hit. Storage: a tweet is 280 characters plus metadata (author ID, entities, counters) — call it ~1KB; 500M/day x 1KB = ~500GB/day of tweet text, ~180TB/year, ~540TB/year after 3x replication. Media dominates raw bytes: if 10% of tweets carry a ~200KB image, that is 50M x 200KB = ~10TB/day into S3. Fan-out write volume: 5,800 tweets/sec x ~200 average followers = ~1.2M timeline-cache inserts/sec that the async pipeline must absorb.\nKey insight: the derived ratios drive the whole architecture — ~29K timeline reads vs ~5.8K tweet writes (and roughly 1000:1 at the individual tweet-fetch level) says precompute and cache the read path, and push every expensive operation (fan-out, search indexing, counter updates) off the synchronous write path onto Kafka.\nCommon mistake: quoting QPS figures without showing the division. Interviewers specifically want to see 500M / 86,400 = ~5,800 written out — the arithmetic is the demonstration of rigor, not the final number.",
     "## Tweet Ingestion and Storage\nWhen a user posts a tweet, the Tweet Service validates the content (280-character limit, media attachments, mentions parsing), assigns a Snowflake ID, and writes to a distributed key-value store (Manhattan). Tweets are stored with their metadata: author ID, timestamp, reply-to chain, media URLs, entities (hashtags, mentions, URLs). The write path also publishes the tweet to a Kafka topic for asynchronous fan-out. Media uploads go through a separate pipeline: images are resized into multiple variants, videos are transcoded, and all assets are pushed to a CDN with edge caching. The Kafka event triggers the Fan-Out Service, which determines the tweet author's follower count and chooses the appropriate fan-out strategy.",
     "## Timeline Generation and the Fan-Out Problem\nThe home timeline is the most latency-sensitive read path. For users with fewer than ~5,000 followers, Twitter uses fan-out on write: the Fan-Out Service reads the author's follower list from the Social Graph Service and inserts the tweet ID into each follower's timeline cache in Redis. Each user's timeline is a sorted set (ZSET) in Redis, scored by tweet ID (which embeds timestamp). When a user opens their timeline, the Timeline Service reads tweet IDs from Redis and hydrates them from the Tweet Service. For celebrity users (>5,000 followers), fan-out on write would require millions of Redis inserts per tweet, so Twitter switches to fan-out on read: the tweet is not pre-distributed, and instead, at read time, the Timeline Service fetches recent tweets from followed celebrities and merges them with the pre-computed timeline. This hybrid approach caps fan-out cost while keeping p99 read latency under 200ms for most users.",
     "## Search and Trending Topics\nTwitter's search system (Earlybird) is built on top of Apache Lucene and indexes tweets within seconds of posting. The index is partitioned by time: recent tweets live in an in-memory index for fastest access, while older tweets are in on-disk segments. Queries hit all partitions in parallel, and results are merged by relevance score (a combination of recency, engagement signals, and user affinity). Trending topics are detected by a streaming pipeline that processes the entire tweet firehose through Kafka Streams. Each hashtag or phrase passes through a Count-Min Sketch for approximate frequency counting, and a trending detector compares the current rate against a rolling 24-hour baseline using exponential moving averages. A topic is flagged as trending when its current rate exceeds the baseline by a configurable multiplier (typically 3-5x), and HyperLogLog is used to estimate the number of distinct users discussing each topic to filter out bot-driven spikes.",
     "## Reliability, Caching, and Failure Handling\nTwitter operates across multiple data centers with eventual consistency for most data. Timeline caches in Redis are replicated but can tolerate staleness: if a cache node fails, the timeline is rebuilt from the tweet store and social graph on the next read (a cache miss path that takes ~50-100ms more). Rate limiting uses a distributed token bucket per user and per application. Circuit breakers protect downstream services: if the Fan-Out Service cannot reach Redis, it buffers events in Kafka and retries with exponential backoff. The system is designed to degrade gracefully: if trending detection lags, stale trends are shown; if search indexing falls behind, results are slightly delayed but never lost. Hot partitions are handled by sharding timelines and social graphs by user ID with consistent hashing, and re-sharding is performed online using virtual nodes.",
+    "## End-to-End Trace: Posting a Tweet (Write Path)\nFollowing one tweet from the phone to 200 follower timelines shows exactly how every component earns its place.\n1. The client POSTs to the load balancer; the API gateway authenticates the OAuth token and checks the write rate limit (a token bucket in Redis, decremented via a Lua script).\n2. The Tweet Service validates content (280-char limit, entity parsing), obtains a 64-bit Snowflake ID, and synchronously writes the row to the tweet store — Manhattan at Twitter; in an interview, MySQL sharded by tweet ID or a Cassandra-style KV store is a perfectly good answer.\n3. Media was uploaded earlier through a separate endpoint straight to S3 and transcoded asynchronously; the tweet row stores only media URLs, never bytes.\n4. The service publishes a TweetCreated event to Kafka and returns 201 — total synchronous latency is ~50ms, and everything after this point is asynchronous.\n5. Fan-out workers consume the event, ask the social graph service (FlockDB-style adjacency store) for the follower ID list, and pipeline LPUSH + LTRIM commands into each follower's Redis timeline list — ~200 inserts for an average author, completing within 1-2 seconds.\n6. In parallel, independent Kafka consumer groups index the tweet into Elasticsearch/Earlybird, feed the Flink trends job, and fire mention/reply notifications through the WebSocket gateway.\nIn practice: the author sees their tweet instantly because the client renders it optimistically; followers see it a second or two later, and nobody notices the gap — this is the eventual consistency the async design deliberately accepts.",
+    "## End-to-End Trace: Loading the Home Timeline (Read Path)\nThe home timeline read is the hottest path in the system, so every step is engineered to stay under a ~200ms p99 budget.\n1. GET /home_timeline passes the gateway (auth + read rate limit) and lands on the Timeline Service.\n2. The service issues an LRANGE on the user's Redis timeline list for the first 20 tweet IDs — ~1ms, since fan-out already precomputed the list.\n3. Celebrity merge: for each high-follower account the user follows (usually fewer than a few dozen), the service fetches that author's recent tweet IDs from a small per-author cache and performs a k-way merge with the precomputed IDs, ordering by Snowflake ID (which embeds time).\n4. Hydration: the 20 winning IDs are fetched in one MGET against the hot tweet cache (memcached); misses fall through to the tweet store. Author profiles and engagement counters are batch-fetched the same way.\n5. The response is assembled and returned — p50 well under 100ms, p99 under 200ms.\nCommon mistake: designing the read path to query the social graph and tweet store on every load. That is the cache-miss rebuild path (~200-400ms, taken only when a dormant user's timeline was evicted), not the steady-state path — conflating the two is the most frequent error in this interview.",
   ],
   deepDive: [
     "The Snowflake ID generator is critical to Twitter's ability to scale without coordination. Each Snowflake ID is a 64-bit integer composed of: 41 bits for timestamp (milliseconds since a custom epoch, giving ~69 years of IDs), 10 bits for machine/worker ID (supporting 1,024 workers), and 12 bits for a per-worker sequence number (4,096 IDs per millisecond per worker). This means a single worker can generate 4,096 unique IDs per millisecond, and the entire system can produce ~4M IDs per millisecond across all workers. The timestamp-first layout ensures IDs are roughly chronologically sorted, which is essential for efficient range queries on timelines (Redis ZRANGEBYSCORE) and for the search index's time-partitioned segments. Clock skew is handled by refusing to generate IDs if the system clock moves backward, and NTP is tightly managed across the fleet.",
-    "The fan-out decision boundary of ~5,000 followers is not arbitrary. Twitter measured that with an average Redis write taking ~1ms (including network), fanning out a single tweet to 5,000 followers takes ~5 seconds of cumulative worker time, which is acceptable when amortized across a fleet of fan-out workers. Beyond this threshold, the cost grows linearly and starts impacting the fan-out pipeline's throughput for other tweets. Celebrity tweets (users with 10M+ followers) would take hours to fan out, creating unacceptable delays for all other users sharing the pipeline. The read-time merge for celebrity tweets adds ~10-20ms of latency per celebrity followed (fetching their recent tweets and merging), but since most users follow fewer than 50 celebrities, the total merge overhead stays under 100ms.",
+    "The fan-out decision boundary of ~5,000 followers is not arbitrary. Twitter measured that with an average Redis write taking ~1ms (including network), fanning out a single tweet to 5,000 followers takes ~5 seconds of cumulative worker time, which is acceptable when amortized across a fleet of fan-out workers. Beyond this threshold, the cost grows linearly and starts impacting the fan-out pipeline's throughput for other tweets. Celebrity tweets (users with 10M+ followers) would take hours to fan out, creating unacceptable delays for all other users sharing the pipeline. The read-time merge for celebrity tweets adds ~10-20ms of latency per celebrity followed (fetching their recent tweets and merging), but since most users follow fewer than 50 celebrities, the total merge overhead stays under 100ms.\nReal-world example: this is the famous 'Justin Bieber problem.' At ~110M followers, one tweet fanned out at ~1ms per Redis write is 110M ms = ~30 hours of sequential worker time; even spread across 1,000 parallel fan-out workers it is nearly 2 minutes of pipeline saturation per tweet — and celebrity accounts tweet many times a day, so pure fan-out on write simply cannot work at that scale.\nKey insight: the hybrid is a cost equation, not a special case — fan-out on write costs O(followers) once at write time, fan-out on read costs O(followees) on every read; you pick per-author whichever side of the equation is cheaper, and the ~5,000-follower threshold is just where the curves cross for Twitter's traffic mix.\nCommon mistake: forgetting the transition case. When an account crosses the threshold, its old tweets are already materialized in follower timelines while new ones go read-path; the merge logic must handle both sources for the same author without duplicates (deduplicate by tweet ID during the k-way merge).",
     "Count-Min Sketch for trending detection works by maintaining a 2D array of counters with multiple independent hash functions. When a hashtag appears in a tweet, it is hashed by each function and the corresponding counter in each row is incremented. To query the frequency, the minimum across all rows is taken (hence 'count-min'), which provides an upper bound on the true frequency with controllable error. Twitter uses a sketch with 5 hash functions and ~1M counters per row, giving an error rate of roughly 0.001% of total stream size. The sketch is reset on a sliding window (typically 5-minute buckets), and the trending detector compares the current window's estimate against the exponential moving average of previous windows. This approach uses only ~40MB of memory to track millions of distinct hashtags in real-time, compared to the gigabytes an exact counter map would require.",
     "Real-time notifications present a distinct scalability challenge. When a user is mentioned or their tweet is liked/retweeted, a notification event is generated and routed through a dedicated Kafka topic. Connected clients maintain persistent WebSocket or long-poll connections to a Notification Gateway, which subscribes to per-user notification channels via a pub/sub system (Twitter's internal system called Nighthawk, similar to Redis pub/sub but optimized for millions of concurrent subscriptions). The gateway maintains an in-memory mapping of user ID to active connections. For users not currently connected, notifications are queued in a per-user notification inbox (stored in Manhattan) and delivered on next connection. Push notifications to mobile devices are batched and sent through APNs/FCM with deduplication to avoid notification storms when a tweet goes viral.",
+    "Timeline cache design determines both read latency and the largest Redis bill in the company, so its details matter. Each user's home timeline is a Redis structure holding only tweet IDs — never tweet bodies. Twitter's classic design is a capped list per user: fan-out workers do LPUSH (newest first) followed by LTRIM 0 799, keeping exactly the most recent ~800 entries; a read is a single LRANGE. The sorted-set alternative scores entries by Snowflake ID, which buys ZRANGEBYSCORE cursor pagination and idempotent inserts (a duplicate ZADD is a no-op, useful when Kafka redelivers an event) at roughly 2x the memory of a list. Sizing: 800 entries x ~20 bytes (8-byte ID plus list overhead) = ~16KB per user; caching 250M recently active users = ~4TB of Redis, roughly 12TB if ZSETs are used — sharded by user ID with consistent hashing across ~100 primary nodes plus replicas. Only active users get cached timelines: anyone inactive for ~30 days is evicted and rebuilt on next login via the cache-miss path, which typically halves the memory footprint.\nKey insight: storing IDs instead of bodies keeps entries tiny and makes deletes cheap — a deleted tweet needs no timeline invalidation because hydration always fetches current state and simply skips missing IDs.\nCommon mistake: caching serialized tweet JSON in the timeline. At ~1KB per tweet that is 800 x 1KB x 250M = ~200TB of Redis, and every delete or edit becomes a scatter-gather invalidation across millions of lists.",
+    "The search indexing pipeline is a textbook Kafka-to-Elasticsearch ingestion flow, and being able to sketch it end-to-end is a reliable differentiator. TweetCreated events land on a Kafka topic partitioned by tweet ID; a consumer group of indexer workers tokenizes each tweet (text analysis, hashtag/mention/URL extraction, language detection) and bulk-indexes documents into Elasticsearch in batches of a few thousand to amortize per-request overhead. Indices are time-based — one index per day with an alias pointing at the hot index — so the newest index lives on memory-heavy nodes while older indices roll to cheaper hardware via index lifecycle management; Twitter's Earlybird achieves the same effect with time-partitioned Lucene segments. Deletes and edits flow through the same topic as tombstone events, so the index converges without a separate reconciliation job. Because Kafka retains the log, an indexing outage delays search visibility but never loses tweets — consumers resume from their committed offset and catch up.\nIn practice: quote the freshness target — a tweet should be searchable within ~5 seconds of posting — and mention consumer-lag monitoring as the alarm that tells you the pipeline is falling behind.\nWarning: never index synchronously on the tweet-write path; coupling the 201 response to Elasticsearch availability turns every index hiccup into a site-wide posting outage.",
+    "Trend detection is fundamentally a windowed streaming-count problem, which is why a stream processor like Flink (or Kafka Streams) owns it. The job consumes the full firehose, extracts hashtags and n-gram phrases, keys the stream by (term, region), and counts within 5-minute tumbling windows (or 1-minute-hop sliding windows for faster reaction). Each window's count is compared against an exponential moving average of that term's trailing 24-hour rate; a term trends when its current rate exceeds ~3-5x the baseline AND its HyperLogLog distinct-user estimate clears a floor that filters bot rings. Count-Min Sketch bounds per-window memory so millions of distinct terms fit in tens of megabytes. Regional keying gives per-country trend lists from the same job.\nKey insight: acceleration beats volume — raw counts alone would surface perennially popular tags like #love forever; a trend is defined by rate-now versus rate-expected, which is exactly what the EMA baseline encodes.\nCommon mistake: proposing a batch job over the last hour of tweets. Trends are only valuable while they are happening; a MapReduce-style hourly job surfaces them after the moment has passed, which is why the pipeline must be streaming.",
+    "Rate limiting the public API is a first-class subsystem, not an afterthought, because Twitter's API serves millions of third-party apps alongside its own clients. The classic published limits are concrete anchors: 300 home-timeline reads per 15-minute window per user token, 50 tweets per 24 hours per user, plus separate per-application quotas. Enforcement is a token bucket per (user, endpoint-class) and per (app, endpoint) stored in Redis: a Lua script performs read-refill-decrement atomically in a single round trip (~0.1ms), so the check adds negligible latency at the gateway. Responses carry x-rate-limit-remaining and x-rate-limit-reset headers, and exhausted buckets return 429 with Retry-After so well-behaved clients back off. Gateways may cache bucket state locally for ~1 second to shave hot-path latency, accepting slightly over-admitting in exchange.\nCommon mistake: enforcing limits with per-gateway in-memory counters — with 100 gateway instances behind a load balancer, a client that rotates connections gets ~100x the intended quota; the bucket must live in shared storage (or use bounded-error distributed quota splitting).\nIn practice: distinguish protective limits (keep the site up under abuse) from product limits (API pricing tiers); the same token-bucket machinery serves both, but product limits are configured per API key tier while protective limits are global circuit breakers.",
   ],
   code: [
     {
@@ -290,39 +297,87 @@ private:
     {
       title: "Twitter High-Level Architecture",
       kind: "architecture",
-      caption: "Major subsystems and data flow for tweet ingestion, timeline generation, and search",
-      mermaid: `graph LR
-    Client["Client Apps"]
-    APIGW["API Gateway"]
-    TweetSvc["Tweet Service"]
-    FanOut["Fan-Out Service"]
-    TimelineSvc["Timeline Service"]
-    SocialGraph["Social Graph Service"]
-    SearchSvc["Search Service"]
-    NotifSvc["Notification Service"]
-    Kafka["Kafka Event Bus"]
-    Redis["Redis Timeline Cache"]
-    TweetStore["Tweet Store - Manhattan"]
-    GraphDB["Graph Store"]
-    SearchIdx["Search Index - Earlybird"]
-    CDN["CDN"]
+      caption: "Layered architecture: tweet-post path (Tweet Service -> Kafka -> fan-out workers -> Redis) numbered 1-8, and home-timeline read path (Timeline Service -> Redis -> hydrate from store) numbered R1-R5",
+      mermaid: `graph TB
+    subgraph ClientsL["Clients"]
+        Web["Web App"]
+        Mobile["Mobile Apps<br/>iOS / Android"]
+    end
 
-    Client --> APIGW
-    APIGW --> TweetSvc
-    APIGW --> TimelineSvc
+    subgraph EdgeL["Edge"]
+        CDN["CDN<br/>media + static assets"]
+    end
+
+    subgraph GatewayL["Gateway"]
+        LB["Load Balancer<br/>L4 / L7"]
+        APIGW["API Gateway<br/>auth + rate limiting"]
+    end
+
+    subgraph ServicesL["Services"]
+        TweetSvc["Tweet Service<br/>validate + persist"]
+        TimelineSvc["Timeline Service<br/>read + merge"]
+        UserSvc["User / Social Graph<br/>Service"]
+        SearchSvc["Search Service"]
+        NotifSvc["Notification Service"]
+        TrendsSvc["Trends Service"]
+    end
+
+    subgraph CacheL["Cache Layer"]
+        RedisTL["Redis Timeline Caches<br/>tweet-ID list per user"]
+        HotCache["Hot Tweet Cache<br/>memcached"]
+    end
+
+    subgraph AsyncL["Async Pipeline"]
+        Kafka["Kafka Firehose<br/>TweetCreated events"]
+        FanOut["Fan-out Workers"]
+        Flink["Streaming Compute<br/>Flink - windowed counts"]
+        Indexer["Search Indexer Workers"]
+    end
+
+    subgraph DataL["Data Stores"]
+        TweetDB["Tweet Store<br/>MySQL / Manhattan KV"]
+        GraphDB["Social Graph Store<br/>FlockDB-style"]
+        ES["Elasticsearch / Earlybird<br/>time-partitioned index"]
+        S3["S3 Object Store<br/>images + video"]
+    end
+
+    subgraph RealtimeL["Realtime"]
+        WS["WebSocket Gateway<br/>streaming API + push"]
+    end
+
+    Web --> CDN
+    Mobile --> CDN
+    CDN --> S3
+    Web --> LB
+    Mobile --> LB
+    LB --> APIGW
+
+    APIGW -- "1. POST /tweet" --> TweetSvc
+    TweetSvc -- "2. persist tweet" --> TweetDB
+    TweetSvc -- "3. store media" --> S3
+    TweetSvc -- "4. publish event" --> Kafka
+    Kafka -- "5. TweetCreated" --> FanOut
+    FanOut -- "6. get follower IDs" --> UserSvc
+    UserSvc -- "7. read follow graph" --> GraphDB
+    FanOut -- "8. LPUSH + LTRIM" --> RedisTL
+
+    APIGW -- "R1. GET /home_timeline" --> TimelineSvc
+    TimelineSvc -- "R2. LRANGE tweet IDs" --> RedisTL
+    TimelineSvc -- "R3. hydrate bodies" --> HotCache
+    HotCache -- "R4. miss" --> TweetDB
+    TimelineSvc -- "R5. celebrity merge" --> UserSvc
+
+    Kafka --> Indexer
+    Indexer --> ES
+    SearchSvc --> ES
     APIGW --> SearchSvc
-    TweetSvc --> TweetStore
-    TweetSvc --> Kafka
-    TweetSvc --> CDN
-    Kafka --> FanOut
-    Kafka --> SearchSvc
+    Kafka --> Flink
+    Flink --> TrendsSvc
+    APIGW --> TrendsSvc
     Kafka --> NotifSvc
-    FanOut --> SocialGraph
-    FanOut --> Redis
-    SocialGraph --> GraphDB
-    TimelineSvc --> Redis
-    TimelineSvc --> TweetStore
-    SearchSvc --> SearchIdx`,
+    NotifSvc --> WS
+    WS --> Web
+    WS --> Mobile`,
     },
     {
       title: "Tweet Fan-Out Decision Flow",
@@ -458,6 +513,30 @@ private:
         "What happens if the Kafka consumer falls behind during a viral event?",
       ],
     },
+    {
+      q: "Walk me through the capacity estimation for Twitter. What are the key numbers and what do they imply for the design?",
+      a: "Start from 250M DAU and 500M tweets/day. Writes: 500M / 86,400s = ~5,800 tweets/sec average; with a 3x peak factor, design for ~18,000 writes/sec. Reads: at ~10 home-timeline loads per DAU per day, 2.5B loads/day = ~29,000 QPS average, ~90,000 peak; each load hydrates ~20 tweets, so the tweet-fetch tier sees ~1.8M lookups/sec at peak — implying tweet bodies must be served almost entirely from cache. Storage: ~1KB per tweet including metadata gives ~500GB/day of text (~180TB/year, ~540TB with 3x replication); media dominates at ~10TB/day if 10% of tweets carry a 200KB image. Fan-out: 5,800 tweets/sec x ~200 average followers = ~1.2M timeline-cache inserts/sec for the async pipeline. The implications: the read:write asymmetry justifies precomputing timelines (fan-out on write), the fan-out insert volume justifies an async Kafka pipeline with horizontally scalable workers, and the hydration volume justifies a dedicated hot-tweet cache in front of the store.",
+      followUps: [
+        "How would the numbers change if average follower count were 2,000 instead of 200?",
+        "How much Redis memory do the timeline caches need, and how would you shard it?",
+      ],
+    },
+    {
+      q: "Would you use a Redis list or a sorted set for the home timeline cache? Justify the choice.",
+      a: "Both work; the trade-off is memory versus operational convenience. A list is the leaner choice: fan-out does LPUSH plus LTRIM 0 799 to cap at ~800 entries, reads are a single LRANGE, and per-entry overhead is minimal (~16KB per user at 800 8-byte IDs), which matters when you multiply by 250M cached users (~4TB). A sorted set scored by Snowflake ID costs roughly 2x the memory but gives three things: idempotent inserts (a duplicate ZADD from a Kafka redelivery is a harmless no-op, whereas LPUSH would duplicate the entry), score-based cursor pagination via ZRANGEBYSCORE (stable even as new tweets arrive), and cheap ordered merges when backfilling. If the fan-out pipeline guarantees exactly-once-ish delivery and pagination uses ID cursors against the list, choose the list for cost; if redeliveries are common, the ZSET's idempotency usually pays for itself. Either way, store only tweet IDs — bodies are hydrated from a separate cache, which keeps entries tiny and makes deletes free.",
+      followUps: [
+        "How do you paginate deeper than the 800 cached entries?",
+        "How would you deduplicate if you kept the list but Kafka redelivered events?",
+      ],
+    },
+    {
+      q: "How would you rate limit the public Twitter API across a fleet of API gateway instances?",
+      a: "Use token buckets keyed by (user token, endpoint class) and (application, endpoint), stored centrally in Redis so all gateway instances see the same bucket. Each request runs a small Lua script that atomically reads the bucket, refills tokens based on elapsed time, and decrements — one round trip, ~0.1ms, no race conditions. Concrete limits mirror Twitter's published ones: 300 timeline reads per 15 minutes per user, 50 tweets per 24 hours. On exhaustion return 429 with Retry-After, and include x-rate-limit-remaining/x-rate-limit-reset headers on every response so clients can self-regulate. To shave hot-path latency, gateways can cache bucket state locally for ~1 second, accepting bounded over-admission. Shard the rate-limit Redis by key hash so it scales with traffic, and fail open (allow with logging) if the limiter itself is down — availability of the core product should not hinge on the limiter.",
+      followUps: [
+        "Why token bucket rather than a fixed-window counter? What is the burst behavior difference?",
+        "Is failing open the right call for a write endpoint like POST /tweet?",
+      ],
+    },
   ],
   mcqs: [
     {
@@ -538,6 +617,22 @@ private:
       front: "What is request coalescing and when is it used?",
       back: "When millions of users request the same celebrity tweet simultaneously, request coalescing ensures only one backend fetch occurs. All concurrent requests for the same key wait on a single in-flight request and share the result. Prevents thundering herd on the Tweet Service.",
     },
+    {
+      front: "Derive Twitter's write and read QPS from first principles.",
+      back: "Writes: 500M tweets/day / 86,400s = ~5,800/sec avg, ~18K peak (3x factor). Reads: 250M DAU x 10 timeline loads/day = 2.5B/day = ~29K QPS avg, ~90K peak. Each load hydrates ~20 tweets => ~1.8M tweet fetches/sec at peak, so bodies must come from cache.",
+    },
+    {
+      front: "What is the 'Justin Bieber problem' with numbers?",
+      back: "Pure fan-out on write fails for mega-accounts: ~110M followers x ~1ms per Redis write = 110M ms = ~30 hours of sequential worker time per tweet (~2 min even across 1,000 workers). Solution: skip fan-out for celebrities and merge their tweets at read time.",
+    },
+    {
+      front: "How much Redis memory do home timeline caches need?",
+      back: "Store only tweet IDs: 800 entries x ~20 bytes = ~16KB/user (list). 250M active users => ~4TB (roughly 12TB with sorted sets). Shard by user ID with consistent hashing (~100 primaries + replicas); evict users inactive >30 days and rebuild on next login.",
+    },
+    {
+      front: "What are Twitter's classic public API rate limits and how are they enforced?",
+      back: "300 timeline reads / 15 min per user token; 50 tweets / 24h per user; separate per-app quotas. Enforced by token buckets in shared Redis, updated atomically via a Lua script at the API gateway; 429 + Retry-After when exhausted.",
+    },
   ],
   exercises: [
     "Design the data model for the Social Graph Service. Define the storage schema for follow relationships, considering queries like 'get all followers of user X,' 'get all users that X follows,' and 'does X follow Y?' Estimate storage requirements for 400M users with an average of 500 follows each.",
@@ -557,6 +652,11 @@ private:
     "Notifications: Kafka per-recipient, aggregation windows (30s normal, 5min viral), WebSocket for connected, inbox for offline.",
     "Failure handling: Kafka buffering on Redis failure, circuit breakers, graceful degradation (stale trends, delayed search).",
     "CDN for all media. Images resized to 4 variants. Videos transcoded async. Tweet references media before processing completes.",
+    "Capacity math: 500M/86,400 = ~5.8K writes/sec avg, ~18K peak. 250M DAU x 10 loads = ~29K timeline QPS avg, ~90K peak. ~1.8M tweet hydrations/sec peak => cache everything.",
+    "Justin Bieber problem: 110M followers x 1ms/write = ~30h sequential fan-out per tweet. Celebrities bypass fan-out entirely; read-time k-way merge, dedup by tweet ID at threshold crossings.",
+    "Timeline cache sizing: 800 IDs x ~20B = ~16KB/user; 250M users = ~4TB Redis (lists) or ~12TB (ZSETs). IDs only, never bodies — makes deletes free.",
+    "Search pipeline: Kafka (partitioned by tweet ID) -> indexer workers -> bulk index into Elasticsearch daily indices with hot-index alias; tombstones for deletes; searchable within ~5s.",
+    "Rate limiting: token bucket per (user, endpoint) in shared Redis via atomic Lua script. 300 reads/15min, 50 tweets/24h. 429 + Retry-After; never per-gateway in-memory counters.",
   ],
   cheatSheet: [
     "Scale: 500M tweets/day | 400M DAU | ~5800 tweets/sec | read:write ~1000:1",
@@ -569,6 +669,11 @@ private:
     "Event bus: Kafka for fan-out, search indexing, notifications, analytics - all async",
     "Caching layers: CDN for media, Redis for timelines, API-level cache for hot tweets",
     "Failure modes: Kafka backpressure on overload, circuit breakers, stale-but-available degradation",
+    "Capacity: 500M/day / 86,400 = ~5.8K writes/s avg, ~18K peak | ~29K timeline QPS avg, ~90K peak | ~1.8M tweet fetches/s peak",
+    "Fan-out volume: 5.8K tweets/s x ~200 followers = ~1.2M Redis inserts/s | Bieber: 110M followers x 1ms = ~30h => read-path",
+    "Timeline Redis sizing: 800 IDs x 20B = 16KB/user | 250M users = ~4TB (lists), ~12TB (ZSETs) | IDs only, hydrate bodies separately",
+    "Rate limits: 300 reads/15min, 50 tweets/24h | token bucket in shared Redis + Lua | 429 + Retry-After | fail open with logging",
+    "Storage: ~1KB/tweet => 500GB/day text, ~540TB/yr with 3x replication | media ~10TB/day => S3 + CDN",
   ],
   glossary: [
     {
@@ -598,6 +703,26 @@ private:
     {
       term: "Request Coalescing",
       definition: "A technique where multiple concurrent requests for the same resource are collapsed into a single backend fetch. All waiting callers receive the same response, preventing thundering herd on hot keys.",
+    },
+    {
+      term: "Firehose",
+      definition: "The full real-time stream of every public tweet, typically carried on Kafka. Internal consumers (search indexers, trends jobs, analytics) subscribe to it; a filtered version is exposed externally as the streaming API.",
+    },
+    {
+      term: "Timeline Hydration",
+      definition: "The second phase of a timeline read: the cache returns only tweet IDs, and the service batch-fetches the current tweet bodies, author profiles, and counters for those IDs. Keeps caches small and makes deletes/edits automatically consistent.",
+    },
+    {
+      term: "Write Amplification",
+      definition: "When one logical write triggers many physical writes — e.g., one tweet from a 200-follower account causes 200 timeline-cache inserts. Fan-out on write trades write amplification for cheap reads.",
+    },
+    {
+      term: "Token Bucket",
+      definition: "A rate-limiting algorithm where each client has a bucket that refills at a fixed rate up to a burst capacity; each request consumes a token. Allows short bursts while enforcing a long-run average rate, unlike rigid fixed-window counters.",
+    },
+    {
+      term: "Manhattan",
+      definition: "Twitter's internal distributed key-value database, used as the primary tweet store and for per-user data like notification inboxes. In interview answers, sharded MySQL or Cassandra plays the same role.",
     },
   ],
   animations: [
@@ -679,6 +804,9 @@ private:
     "How would you design Twitter Spaces (live audio rooms) with thousands of concurrent listeners?",
     "How would you implement a content moderation pipeline that can review tweets in real-time before they appear in search and timelines?",
     "How would you extend this design to support Twitter Communities or topic-based feeds?",
+    "How would you support editable tweets while keeping timelines, search, and embedded quote-tweets consistent?",
+    "How would you serve like/retweet counters at 1.8M reads/sec without hot-key contention on viral tweets?",
+    "How would you shard the social graph store when a single account has 100M+ followers (a single unsplittable adjacency list)?",
   ],
   resources: [
     {
@@ -687,7 +815,7 @@ private:
       note: "Detailed writeup of Twitter's media processing pipeline and CDN architecture",
     },
     {
-      label: "Designing Data-Intensive Applications by Martin Kleppmann",
+      label: "Designing Data-Intensive Applications by Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
       note: "Chapters on stream processing, partitioning, and replication directly applicable to Twitter's architecture",
     },

@@ -284,7 +284,7 @@ ORDER BY node, total_cost;`
     "CYCLE col SET is_cycle USING path — SQL standard cycle detection",
   ],
   resources: [
-    { label: "PostgreSQL Documentation — WITH Queries (CTEs)", kind: "docs", note: "Official reference for CTE syntax including recursive and cycle detection." },
+    { label: "PostgreSQL Documentation — WITH Queries (CTEs)", url: "https://www.postgresql.org/docs/current/", kind: "docs", note: "Official reference for CTE syntax including recursive and cycle detection." },
     { label: "Modern SQL — WITH and Recursive Queries", kind: "article", note: "Clear explanation with practical examples." },
     { label: "The Art of PostgreSQL — Dimitri Fontaine", kind: "book", note: "Practical recipes for recursive queries and hierarchical data." },
     { label: "SQL Antipatterns — Bill Karwin, Ch. 3", kind: "book", note: "Covers naive trees and the adjacency list vs closure table trade-off." },

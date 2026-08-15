@@ -691,11 +691,11 @@ function createResilientCall<T>(
       kind: "book",
     },
     {
-      label: "CircuitBreaker — Martin Fowler",
+      label: "CircuitBreaker — Martin Fowler", url: "https://martinfowler.com/",
       kind: "article",
     },
     {
-      label: "resilience4j documentation",
+      label: "resilience4j documentation", url: "https://resilience4j.readme.io/",
       kind: "docs",
     },
   ],

@@ -417,7 +417,7 @@ git count-objects -vH
 
   resources: [
     {
-      label: "Pro Git — Git Internals chapter",
+      label: "Pro Git — Git Internals chapter", url: "https://git-scm.com/book",
       kind: "book",
     },
     {

@@ -463,7 +463,7 @@ const testAuth = new AuthService(
     { label: "Clean Architecture by Robert C. Martin", kind: "book", note: "Chapter 11 covers DIP as the architectural driver for the dependency rule." },
     { label: "Dependency Injection Principles, Practices, and Patterns by Mark Seemann", kind: "book", note: "The definitive book on DI and DIP in practice, covering composition roots, containers, and anti-patterns." },
     { label: "Hexagonal Architecture (Alistair Cockburn)", kind: "article", note: "The Ports and Adapters pattern that builds directly on DIP." },
-    { label: "Inversion of Control Containers and the Dependency Injection Pattern (Martin Fowler)", kind: "article", note: "Fowler's classic article distinguishing DI from Service Locator and IoC." },
+    { label: "Inversion of Control Containers and the Dependency Injection Pattern (Martin Fowler)", url: "https://martinfowler.com/", kind: "article", note: "Fowler's classic article distinguishing DI from Service Locator and IoC." },
     { label: "NestJS Documentation -- Dependency Injection", kind: "docs", note: "Practical DIP/DI implementation in a TypeScript framework." }
   ],
   glossary: [

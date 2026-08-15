@@ -747,12 +747,12 @@ int main() {
       note: "The definitive reference for TCP/IP protocol internals. Uses real packet traces to explain every protocol in detail. Essential for anyone doing network programming.",
     },
     {
-      label: "RFC 791 — Internet Protocol (IPv4)",
+      label: "RFC 791 — Internet Protocol (IPv4)", url: "https://www.rfc-editor.org/rfc/rfc791",
       kind: "paper",
       note: "The original specification for IPv4. Defines the packet header format, addressing, fragmentation, and routing fundamentals.",
     },
     {
-      label: "RFC 793 — Transmission Control Protocol (TCP)",
+      label: "RFC 793 — Transmission Control Protocol (TCP)", url: "https://www.rfc-editor.org/rfc/rfc793",
       kind: "paper",
       note: "The foundational TCP specification. Describes the three-way handshake, flow control, retransmission, and connection management.",
     },
@@ -767,7 +767,7 @@ int main() {
       note: "Clear, visual explanations of each OSI layer with real-world examples. Good for visual learners who want to supplement textbook study.",
     },
     {
-      label: "Beej's Guide to Network Programming",
+      label: "Beej's Guide to Network Programming", url: "https://beej.us/guide/bgnet/",
       kind: "article",
       note: "A practical, hands-on guide to socket programming in C. Excellent for understanding how applications interact with the Transport layer through the socket API.",
     },

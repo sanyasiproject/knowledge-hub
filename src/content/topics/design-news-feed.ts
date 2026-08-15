@@ -8,7 +8,8 @@ export const designNewsFeed: TopicContent = {
     "Most production systems use a hybrid approach: fan-out on write for normal users (fast reads), fan-out on read for celebrity users (avoid writing to millions of feeds), and a ranking service to order posts by relevance.",
   ],
   detailed: [
-    "## Requirements and Scale\n\nFunctional: users create posts (text, images, video), follow other users, view a personalized feed, like/comment on posts. Non-functional: feed loads in <500ms, support 500M DAU, eventually consistent (a new post appearing a few seconds late is acceptable), high availability. Estimation: 500M DAU x 10 feed views/day = 5B feed reads/day = ~58K read QPS. 500M DAU x 1% posting = 5M posts/day. Average user follows 200 people. Feed shows top 50 posts. These numbers drive the architecture: reads dominate writes by 1000:1.",
+    "## Requirements and Scale\n\nFunctional: users create posts (text, images, video), follow other users, view a personalized feed, like/comment on posts. Non-functional: feed loads in <500ms at p99, support 300M DAU, eventually consistent (a new post appearing a few seconds late is acceptable), high availability (the feed must always render something). Average user follows ~200 accounts and the feed shows the top 20-50 posts per page. These constraints immediately shape the design: this is a read-heavy system where reads dominate post creations by roughly 60:1, so the architecture should pre-compute as much of the read path as possible.",
+    "## Capacity Estimation\n\nDo the arithmetic out loud in the interview — it justifies every later decision. **Post write rate**: 50M posts/day / 86,400 s = ~580 posts/s average, plan for ~3x peak = ~1,700 posts/s. **Fan-out write rate**: 580 posts/s x 200 avg followers = ~116,000 feed-cache inserts/s — this 200x amplification is why fan-out must be asynchronous, behind a queue, and never on the request path. **Feed read rate**: 300M DAU x 10 feed loads/day = 3B reads/day = ~35K QPS average, ~100K QPS peak; each read must be a cache hit, not a query. **Feed cache sizing**: 300M users x 500 post IDs x 8 bytes/ID = 1.2 TB of raw IDs; with Redis sorted-set overhead (~50-100 bytes/entry) budget 10-15 TB, sharded by userId across a Redis cluster. **Post storage**: 50M posts/day x ~1 KB metadata = 50 GB/day = ~18 TB/year in the posts DB (media goes to object storage + CDN, never the DB). Key insight: the write path amplifies 200x while the read path must stay O(1) — that asymmetry is the entire reason the push/pull/hybrid debate exists.",
     "## Fan-Out on Write (Push Model)\n\nWhen user A creates a post: (1) Store the post in the Posts table. (2) Look up all of A's followers. (3) For each follower, insert the post ID into their precomputed feed (stored in Redis as a sorted set keyed by user ID, scored by timestamp or rank). When a user opens their feed: read their precomputed feed from Redis, fetch full post details from the Posts table/cache, return. **Pros**: feed reads are extremely fast (single Redis read), simple read path. **Cons**: write amplification (a user with 10M followers triggers 10M Redis writes), wasted work for inactive users (computing feeds they never read), delay in feed update (fan-out takes time). **Optimization**: only fan out to users who have been active in the last N days.",
     "## Fan-Out on Read (Pull Model)\n\nWhen a user opens their feed: (1) Fetch the list of users they follow. (2) For each followed user, fetch their recent posts. (3) Merge and rank all posts. (4) Return the top N. **Pros**: no write amplification, no wasted work for inactive users, posts appear instantly (no fan-out delay). **Cons**: slow reads (must query many users' posts and merge), high read-time compute, hard to scale for users following thousands of accounts. **Optimization**: cache each user's recent posts, so the merge only involves cache reads. Paginate with cursors to avoid recomputing the entire feed.",
     "## Hybrid Approach and Feed Ranking\n\nThe hybrid model combines both strategies: **Regular users** (< 10K followers): fan-out on write. Their posts are pushed to followers' feeds immediately. **Celebrity users** (> 10K followers): fan-out on read. Their posts are fetched at read time and merged into the precomputed feed. At read time: (1) Read precomputed feed from Redis. (2) Fetch recent posts from followed celebrities. (3) Merge. (4) Apply ranking model. **Feed ranking** uses a scoring function considering: post age (decay), engagement signals (likes, comments, shares), user relationship strength (interaction history), content type preferences, and ML-predicted engagement probability. The ranker assigns a score to each candidate post and returns the top N. In production (Facebook, Twitter/X), the ranking model is a sophisticated ML pipeline trained on user engagement data.",
@@ -31,11 +32,31 @@ export const designNewsFeed: TopicContent = {
       q: "How do you handle feed pagination?",
       a: "Use cursor-based pagination, not offset-based. The cursor is typically the timestamp or score of the last item on the current page. The next page fetches items with a score lower than the cursor. This is efficient because: (1) Redis ZREVRANGEBYSCORE with a score upper bound is O(log N + M). (2) It handles new posts appearing without shifting pages (unlike offset, where page 2 would shift if new items are added to page 1). (3) The cursor is opaque to the client: encode it as a base64 token containing the score and post ID (for tiebreaking). Return the cursor in the API response for the client to pass in the next request.",
     },
+    {
+      q: "A post that was already fanned out to 2 million feeds gets deleted. How do you handle it?",
+      a: "Do not chase the fanned-out copies synchronously — that would be a second full fan-out. Because the feed cache stores only post IDs, deletion is handled centrally: mark the post deleted in the posts DB and remove/tombstone its entry in the shared post-object cache. At read time, the feed service hydrates IDs into post objects; any ID that resolves to a tombstone or a deleted flag is filtered out of the response and lazily removed from that viewer's feed list. The same hydration-time check enforces edits (content lives in one place, so one cache update propagates everywhere), blocks, and privacy changes. A low-priority background sweep cleans tombstoned IDs out of feed lists so pages don't come back short after large spam removals.",
+      followUps: [
+        "What if the post cache and DB disagree about deletion?",
+        "How would you handle a GDPR erasure request versus a normal delete?",
+      ],
+    },
+    {
+      q: "How do you serve a feed to a brand-new user or one returning after six months?",
+      a: "Both break the push model's assumption that a warm materialized feed exists: new users have no follows, and dormant users are typically excluded from fan-out to avoid wasted writes. Use a layered fallback. For a returning user with a missing/stale feed key, run the pull path once — fetch their following list, pull recent posts per followee from the per-author cache, merge and rank, then re-materialize the Redis sorted set and flip their fan-out flag back to active so future posts are pushed again. For a brand-new user with no network, serve a cached regional trending/popular feed plus follow suggestions from the same candidate-generation machinery. This is why the pull path can never be deleted even in a push-first system: it doubles as the rebuild and cold-start mechanism.",
+      followUps: [
+        "How do you decide when to stop fanning out to an inactive user?",
+        "How would you personalize the trending fallback with almost no signals?",
+      ],
+    },
   ],
   followUps: [
     "Where would you set the follower threshold for the hybrid fan-out?",
     "How do you handle a user who follows 5,000 accounts?",
     "Where does ranking fit relative to retrieval?",
+    "How would you propagate an edit to a post that is already in millions of feeds?",
+    "Why must the pagination cursor include a post ID in addition to the timestamp?",
+    "What falls back where when the ranking service is down?",
+    "How would you size the Redis cluster for 300M users' feed lists?",
   ],
   mcqs: [
     {
@@ -116,11 +137,37 @@ export const designNewsFeed: TopicContent = {
       front: "How does cursor-based pagination work for feeds?",
       back: "The cursor encodes the score/timestamp of the last seen item. The next page requests items with scores below the cursor. This is stable even when new items are added at the top, unlike offset-based pagination which can cause duplicates or gaps.",
     },
+    {
+      front: "Capacity math: 50M posts/day with 200 avg followers — what write rates?",
+      back: "50M / 86,400s = ~580 posts/s average. Fan-out multiplies by 200 followers = ~116,000 feed-cache inserts/s. This 200x amplification is why fan-out runs asynchronously via queue + workers, never on the request path.",
+    },
+    {
+      front: "How big is the feed cache for 300M users at 500 post IDs each?",
+      back: "300M x 500 IDs x 8 bytes = ~1.2 TB of raw IDs. With Redis sorted-set overhead, budget roughly 10x that, sharded by userId. Storing IDs instead of full posts is what makes materialized feeds affordable.",
+    },
+    {
+      front: "How are deleted/edited posts handled in already-materialized feeds?",
+      back: "Never chase the fanned-out copies. Feeds store only IDs; delete = tombstone the post object, and hydration-time filtering drops tombstoned IDs from responses (lazily removing them from the list). Edits update the single shared post object, so they propagate everywhere instantly.",
+    },
+    {
+      front: "What happens when a user with no warm feed cache loads their feed?",
+      back: "Fall back to pull: fetch the following list, pull recent posts per followee, merge, rank, and re-materialize the feed list so the next read is cheap. Brand-new users with no follows get a cached trending/popular feed plus follow suggestions.",
+    },
+    {
+      front: "What are the four stages of the feed ranking pipeline?",
+      back: "(1) Candidate generation: ~500 posts from the precomputed feed + celebrity pull + out-of-network sources. (2) Feature assembly from the feature store. (3) Scoring: ML model predicts P(like), P(comment), etc. (4) Re-ranking: diversity caps (max ~3 per author), dedupe, seen-post demotion.",
+    },
   ],
   deepDive: [
     "**Understanding Fan-Out Trade-offs at Scale**\n\nThe core tension in news feed design lies in *when* to do the computational work of assembling a feed. **Fan-out on write** front-loads the cost: every `POST /posts` triggers a cascade of writes to followers' feed caches. For a social network with 500M DAU, where the average user follows ~200 accounts, each post potentially touches hundreds of sorted sets in Redis. The *write amplification factor* is directly proportional to the author's follower count. At Twitter's scale (~500M tweets/day), even with a modest average of 100 followers per author, that is **50 billion cache mutations per day**. The system must handle bursty writes (celebrity posting during prime time) without degrading feed read latency. To mitigate this, engineers introduce **async fan-out workers** backed by message queues like Kafka or RabbitMQ. The post service enqueues a `FanOutTask` containing the `postId` and `authorId`, and a fleet of fan-out workers consume these tasks, batch-fetching follower lists and performing `ZADD` operations on each follower's Redis sorted set. Worker concurrency, batch sizes, and queue partitioning (by author ID hash) become critical tuning knobs.",
     "**Feed Ranking and the ML Pipeline**\n\nModern feeds are *not* purely chronological. Facebook's **EdgeRank** (now deprecated in favor of deeper ML) introduced the concept of scoring each candidate post with `Score = Affinity x Weight x Decay`. Today's systems use **gradient-boosted decision trees** (XGBoost/LightGBM) or **deep neural networks** trained on engagement labels (`clicked`, `liked`, `commented`, `shared`, `reported`, `hid`). The feature vector for each `(user, post)` pair includes: *author features* (follower count, post frequency, historical engagement rate), *viewer features* (session recency, device type, topic interests), *interaction features* (messages exchanged, profile views, mutual friends), and *content features* (media type, text sentiment, entity tags, image quality score). The ranking service fetches a **candidate set** (e.g., 500 posts from the precomputed feed + celebrity pull), computes features from a **feature store** (often backed by Redis or a purpose-built system like Feast), scores them via the ML model, and returns the **top-N** with diversity constraints (no more than 3 posts from the same author, mix content types). The entire scoring pipeline must complete in <100ms to keep the end-to-end feed latency under 500ms.",
     "**Consistency, Availability, and Failure Modes**\n\nNews feed systems are designed for **eventual consistency** — a post appearing 2-5 seconds late in a follower's feed is acceptable. However, certain invariants must hold: a user must *always* see their own posts in their feed (read-your-writes consistency), and deleting a post must propagate within seconds to avoid showing removed content. For fan-out on write, if a fan-out worker crashes mid-way, some followers get the post and others do not until the worker retries. Using **idempotent `ZADD`** operations (Redis sorted set adds are naturally idempotent) ensures retries are safe. For the pull path, if the cache for a celebrity's recent posts is stale, the system falls back to a **database query** with a short TTL cache-aside pattern. **Circuit breakers** protect the ranking service: if the ML scoring service is down, the system falls back to a simpler chronological sort rather than returning an error. Feed caches are sharded across Redis clusters using **consistent hashing** (e.g., hashing `userId` to a shard). If a shard goes down, the system can either serve a *degraded feed* (missing some posts) or redirect to a replica. The key design principle is **graceful degradation**: the feed should always render *something*, even if it is slightly stale or unranked.",
+    "**Choosing the Push/Pull Threshold with Actual Numbers**\n\nThe hybrid threshold is not folklore — it falls out of a cost comparison you can do on a whiteboard. Pushing one post from an author with `F` followers costs `F` cache writes; if that author posts `P` times/day, push costs `F x P` writes/day. Pulling instead costs one extra query per feed load for *each follower who actually reads*: if a fraction `A` of followers are active and each loads the feed `R` times/day, pull costs roughly `F x A x R` reads/day (heavily amortized by caching the author's recent posts once for all followers). Push stops paying off when the writes exceed the reads they save, giving the break-even condition `F x P > F x A x R` per author — but the *real* driver is tail latency and burst load: a single post from a 50M-follower account at 116K baseline inserts/s would monopolize the fan-out fleet for minutes. In practice: systems pick a threshold between 10K and 100K followers (Twitter's historical hybrid used a similar order of magnitude), tune it empirically against fan-out queue lag, and store the push/pull flag on the user record so both the fan-out workers and the feed service agree on who is a 'celebrity'. For example, at threshold 10K only ~0.1% of accounts are pull-mode, yet they would otherwise account for the majority of all fan-out writes because follower counts are power-law distributed.",
+    "**Feed Cache Structure: ID Lists Plus Hydration**\n\nThe feed cache stores *references, not content*. Each user's feed is a Redis sorted set of post IDs scored by timestamp (or rank score), capped at 500-1000 entries via ZREMRANGEBYRANK — beyond that depth, almost no one scrolls, and anyone who does can fall back to pull. Storing only 8-byte IDs is what makes 300M materialized feeds affordable (~1.2 TB of IDs vs. hundreds of TB if full posts were duplicated per follower). At read time the feed service **hydrates**: it takes the page of IDs and multi-gets the full post objects from a shared post-object cache (`post:{postId}` -> serialized post), falling back to the posts DB on a miss. Key insight: hydration gives you a single source of truth for post content — a like count update or an edit touches one cache entry, not 200 fanned-out copies. Truncation also bounds rebuild cost: if a user's feed key is evicted or a shard is lost, the feed can be reconstructed on demand by running the pull path once and re-materializing the list. Common mistake: candidates propose fanning out entire post bodies to every follower's cache, which explodes memory 100x and makes edits and deletes nearly impossible to propagate.",
+    "**Ranking Pipeline: Candidates to Final Feed**\n\nRanking is a staged funnel, not a single model call. (1) **Candidate generation**: gather ~500 candidates — the precomputed feed list, pulled celebrity posts, and optionally out-of-network suggestions (topics you engage with, friends-of-friends activity). (2) **Feature assembly**: for each (viewer, post) pair, fetch features from the feature store — author features (historical engagement rate, follower count), viewer features (topic interests, session recency), interaction features (affinity: likes/comments/DMs between viewer and author), and content features (media type, age, early engagement velocity). (3) **Scoring**: a model (gradient-boosted trees or a DNN) predicts engagement probabilities — P(like), P(comment), P(share), P(hide) — combined into one score with business weights; the whole batch must score in well under 100ms. (4) **Re-ranking and diversity rules**: cap posts per author (e.g., max 3), interleave content types, demote near-duplicates and already-seen posts, inject required items (ads, 'follows you' notices). In practice: keep retrieval (steps 1) and ranking (steps 2-4) as separate services so the ranker can fail independently — if scoring times out, serve the candidates chronologically rather than erroring.",
+    "**Consistency: Deletes, Edits, and Stale Materialized Feeds**\n\nMaterializing feeds means copies of a post reference live in up to millions of follower lists — so what happens when the post is deleted or edited? Chasing down every fanned-out copy synchronously is a non-starter (it is a second full fan-out). The standard answer is **hydration-time filtering**: the feed cache stores only IDs, so deletion just writes a **tombstone** (delete the post object from the post cache and mark the DB row deleted); when the feed service hydrates a page and a post ID resolves to a tombstone or a miss-with-deleted-flag, it silently drops the ID from the response and lazily ZREMs it from the viewer's list. Edits are even easier: because content lives only in the post object, updating one cache entry updates the post everywhere instantly. The same mechanism handles blocks and privacy changes — visibility is re-checked at hydration, so a post from someone who just blocked you disappears on your next page load even though its ID is still in your list. Warning: also run a low-priority background sweep that removes tombstoned IDs from feed lists, otherwise heavily deleted content (spam waves) leaves feeds full of holes and pages come back short.",
+    "**Pagination and the Real-Time Insert Problem**\n\nOffset pagination (`LIMIT 20 OFFSET 40`) breaks in a feed because the list mutates under the reader: if 5 new posts arrive between page 1 and page 2, offset 20 now points 5 items earlier, so the user sees 5 duplicates — or, after deletes, silently skips posts. **Cursor pagination** anchors to content instead of position: the server returns an opaque token encoding `(score, postId)` of the last item (postId breaks timestamp ties), and the next page asks for items strictly below that score — `ZREVRANGEBYSCORE feed:{userId} (cursor -inf LIMIT 0 20`, an O(log N + M) operation. New items inserted above the cursor cannot shift what the cursor points at. Two subtleties matter for ranked feeds: rank scores are not stable across requests, so either freeze a feed 'session' (materialize the ranked order once and paginate over that snapshot) or accept minor reshuffling between refreshes; and cursors should expire, since a week-old cursor points into a truncated region of the list. Common mistake: returning the raw timestamp as the cursor without a tiebreaker ID — two posts in the same millisecond then cause a duplicate or a skip at every page boundary.",
+    "**Cold and Dormant Users**\n\nFan-out on write assumes the materialized feed exists and is warm — false for brand-new users (no follows yet), dormant users (feeds were skipped by the 'only fan out to recently active users' optimization), and users whose feed keys were evicted. The read path therefore needs a layered fallback. (1) **Rebuild via pull**: if the feed key is missing, run fan-out-on-read once — fetch the following list, pull each followee's recent posts (from the per-author recent-posts cache), merge, rank, and re-materialize the sorted set so the next read is cheap again. (2) **Popular / trending backfill**: a new user following nobody, or a user whose network posted nothing recently, gets a regionally cached trending feed plus onboarding suggestions ('accounts to follow') — the same candidate-generation machinery, just with non-network sources. (3) **Reactivation hook**: when a dormant user returns, serve the pull-built feed immediately and flip their fan-out flag back to active so future posts are pushed again. In practice: this makes the pull path load-bearing even in a push-first design — you cannot delete it, which is another argument for the hybrid architecture where the pull machinery is always exercised by celebrity merging.",
   ],
   code: [
     {
@@ -560,31 +607,53 @@ function rankFeed(candidates, viewer, interactionHistory, limit = 20) {
     {
       title: "News Feed System Architecture",
       kind: "architecture",
-      caption: "High-level architecture showing the write path through fan-out workers, the read path merging pre-computed and celebrity posts, and the ranking service.",
+      caption: "Layered architecture. Write path (left): post service persists the post, emits an event to Kafka, and fan-out workers read follower lists and insert the post ID into each follower's Redis feed list. Read path (right): feed service reads the cached ID list, hydrates post objects from the post cache, merges recent celebrity posts pulled on demand, and hands candidates to the ranking service.",
       mermaid: `graph TB
-    subgraph Write ["Write Path"]
-        PS["Post Service"]
-        MQ["Message Queue"]
-        FW["Fan-Out Workers"]
-        REDIS["Redis Feed Cache"]
+    subgraph ClientsL ["Clients"]
+        WEB["Web App"]
+        MOB["Mobile App"]
     end
-    subgraph Read ["Read Path"]
-        FS["Feed Service"]
-        RANKER["ML Ranker"]
+    subgraph GatewayL ["Gateway"]
+        LB["Load Balancer"]
+        GW["API Gateway<br/>auth, rate limiting"]
     end
-    subgraph Storage ["Storage"]
-        DB["Posts DB - MongoDB"]
-        SG["Social Graph DB"]
-        FS_STORE["Feature Store"]
+    subgraph ServicesL ["Services"]
+        POSTSVC["Post Service"]
+        FEEDSVC["Feed Service"]
+        GRAPHSVC["Follow / Graph Service"]
+        RANKSVC["Ranking Service"]
     end
-    PS --> MQ
-    MQ --> FW
-    FW --> SG
-    FW --> REDIS
-    FS --> REDIS
-    FS --> DB
-    FS --> RANKER
-    RANKER --> FS_STORE`,
+    subgraph CacheL ["Cache"]
+        FEEDCACHE["Redis Feed Cache<br/>per-user sorted set of post IDs"]
+        POSTCACHE["Post Object Cache<br/>postId to serialized post"]
+    end
+    subgraph AsyncL ["Async Fan-Out"]
+        KAFKA["Kafka<br/>post-created events"]
+        WORKERS["Fan-Out Workers"]
+    end
+    subgraph DataL ["Data"]
+        POSTSDB["Posts DB"]
+        GRAPHDB["Social Graph DB"]
+        FEATSTORE["ML Feature Store"]
+    end
+    WEB --> LB
+    MOB --> LB
+    LB --> GW
+    GW --> POSTSVC
+    GW --> FEEDSVC
+    POSTSVC --> POSTSDB
+    POSTSVC --> POSTCACHE
+    POSTSVC -- "emit event" --> KAFKA
+    KAFKA --> WORKERS
+    WORKERS -- "fetch follower list" --> GRAPHSVC
+    GRAPHSVC --> GRAPHDB
+    WORKERS -- "insert post ID per follower<br/>fan-out on write" --> FEEDCACHE
+    FEEDSVC -- "1 read ID list" --> FEEDCACHE
+    FEEDSVC -- "2 hydrate posts" --> POSTCACHE
+    POSTCACHE -- "miss fallback" --> POSTSDB
+    FEEDSVC -- "3 pull and merge celebrity posts" --> POSTSDB
+    FEEDSVC -- "4 score candidates" --> RANKSVC
+    RANKSVC --> FEATSTORE`,
     },
     {
       title: "Fan-Out on Write Sequence",
@@ -740,6 +809,10 @@ function rankFeed(candidates, viewer, interactionHistory, limit = 20) {
     "**Feed cache**: Redis sorted set per user. Key = `feed:{userId}`, member = `postId`, score = `timestamp`. Read with `ZREVRANGEBYSCORE`. Trim with `ZREMRANGEBYRANK` to cap at 500-1000 entries.",
     "**Cursor-based pagination**: encode last item's `(score, postId)` as an opaque base64 cursor. Next page = `ZREVRANGEBYSCORE feed:{userId} (cursor_score -inf LIMIT 0 pageSize`. Stable under concurrent inserts (unlike offset-based).",
     "**Ranking formula**: `Score = w1*Recency + w2*Engagement + w3*Affinity + w4*ContentBoost`. Production systems use ML models (XGBoost, deep nets) with features from a **feature store**. Must complete scoring in <100ms for 500 candidates.",
+    "**Capacity numbers to quote**: 300M DAU; 50M posts/day = ~580 posts/s; x200 avg followers = ~116K feed inserts/s; 3B feed reads/day = ~35K QPS (peak ~100K); feed cache = 300M x 500 IDs x 8B = ~1.2 TB raw IDs (budget ~10x with Redis overhead, sharded by userId).",
+    "**Deletes/edits in materialized feeds**: never re-fan-out. Feeds hold IDs only; tombstone the post object and filter at **hydration time** (drop + lazy ZREM). Edits touch the single shared post object. Background sweep cleans tombstoned IDs so pages aren't short.",
+    "**Cold users**: missing feed key means rebuild via pull (fetch following list, merge recent posts, re-materialize). New users get cached **trending/popular** feed + follow suggestions. Dormant users get their fan-out flag re-enabled on return.",
+    "**Threshold intuition**: push costs `F x P` writes/day per author; pull costs `~F x A x R` amortized reads/day. Follower counts are power-law, so a 10K-100K threshold flips <0.1% of accounts to pull mode while eliminating the majority of fan-out writes.",
   ],
   revisionNotes: [
     "The two fundamental feed distribution strategies are **fan-out on write** (push: fast reads, expensive writes proportional to follower count) and **fan-out on read** (pull: cheap writes, expensive reads requiring multi-source merge). Production systems use a **hybrid**: push for normal users, pull for celebrities with follower counts above a configurable threshold (~10K).",
@@ -747,10 +820,12 @@ function rankFeed(candidates, viewer, interactionHistory, limit = 20) {
     "**Feed ranking** transforms a chronological candidate set into a relevance-ordered feed. The scoring function combines *recency decay* (exponential), *engagement signals* (likes/comments/shares), *affinity* (viewer-author interaction strength), and *content type boost*. Modern systems train **ML models** on engagement labels and serve predictions via a feature store in <100ms per request.",
     "**Cursor-based pagination** is essential for feeds because new posts are continuously inserted at the top. Unlike offset-based pagination (where `page=2` shifts when new items arrive), a cursor anchored to the last seen item's score/ID provides a stable reference point. The cursor is encoded as an opaque token (base64 of score + postId for tiebreaking) and returned in each API response.",
     "**Graceful degradation** is a key design principle: if the ranking service is down, fall back to chronological order; if a Redis shard is unavailable, serve a partial feed from replicas; if celebrity post cache is stale, query the database with a short TTL. The feed should *always render something* rather than return an error. **Read-your-writes consistency** is the one hard requirement: a user must always see their own posts immediately.",
+    "**Capacity math anchors the design**: 50M posts/day = ~580 posts/s, amplified 200x by fan-out to ~116K feed inserts/s — so fan-out is async behind Kafka. 3B feed reads/day = ~35K QPS that must be O(1) cache hits. Feed cache holds IDs only: 300M users x 500 IDs x 8B = ~1.2 TB raw, ~10x with Redis overhead, sharded by userId.",
+    "**Materialized feeds hold references, not content**: the ID-list + hydration pattern is what makes deletes, edits, blocks, and privacy changes tractable. Deletion writes a tombstone once; hydration-time filtering drops dead IDs from every viewer's page without a second fan-out. Cold/dormant users are served by the pull path as a rebuild mechanism, then re-materialized — which is why the pull path must exist even in a push-first system.",
   ],
   resources: [
     {
-      label: "System Design Interview — Alex Xu",
+      label: "System Design Interview — Alex Xu", url: "https://bytebytego.com/",
       kind: "book",
     },
     {

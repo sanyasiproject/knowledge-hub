@@ -464,7 +464,7 @@ kubectl get volumeattachment`,
   ],
   resources: [
     {
-      label: "Kubernetes documentation — Storage (Volumes, PV, PVC, StorageClasses)",
+      label: "Kubernetes documentation — Storage (Volumes, PV, PVC, StorageClasses)", url: "https://kubernetes.io/docs/",
       kind: "docs",
     },
     {

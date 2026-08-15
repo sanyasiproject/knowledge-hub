@@ -14,12 +14,19 @@ export const designTinder: TopicContent = {
     "## High-Level Architecture\n\nThe system decomposes into six major services: (1) Profile Service manages user data, photos, and preferences in a PostgreSQL primary with read replicas, with photos stored in S3 and served via CloudFront CDN; (2) Location Service ingests location updates (every ~5 minutes when app is foregrounded) and maintains a geospatial index using Redis with geospatial commands (GEOADD/GEORADIUS) or a dedicated geospatial database; (3) Recommendation Service produces ranked candidate stacks by querying the geospatial index for nearby users, filtering by preferences, removing already-swiped users, and scoring/ranking the remainder; (4) Swipe Service records swipe events to a Kafka topic and performs match detection by checking for a reciprocal like in a Redis set; (5) Match and Chat Service manages the match lifecycle and real-time messaging via WebSocket gateway with Kafka-backed message persistence; (6) Trust and Safety Service runs ML pipelines for photo verification, spam detection, and content moderation. An API Gateway fronts all services, handling authentication (JWT), rate limiting, and request routing. Service-to-service communication uses gRPC for synchronous calls and Kafka for async event flows.",
     "## Matching Algorithm and Recommendation Engine\n\nThe recommendation pipeline executes in three phases: candidate generation, filtering, and scoring/ranking. In candidate generation, the Location Service returns all user IDs within the requesting user's distance preference (e.g., 50km radius) using a geospatial query -- this might return 50K-500K candidates in a dense city. The filtering phase eliminates users already swiped on (maintained in a bloom filter per user, ~1MB for 100K swipes at 0.1% false positive rate), users whose preferences do not match the requester (e.g., age/gender mismatch), inactive users (no activity in 7+ days), and blocked users. This typically reduces candidates to 1K-10K. The scoring phase computes a composite score for each candidate based on: geographic distance (closer is better, exponential decay), Elo-like attractiveness score (users who receive more right-swipes have higher scores, matched users tend to have similar Elos), profile completeness (more photos and longer bio boost score), activity recency (recently active users score higher to increase match probability), and mutual preference alignment. The top ~200 candidates are returned as the user's card stack, with the highest-scored profiles shown first. The Elo system updates asynchronously: a right-swipe on a high-Elo user boosts the swiper's Elo less than a right-swipe from a high-Elo user, similar to chess rating dynamics.",
     "## Real-Time Chat and Push Notifications\n\nChat is activated only upon mutual match, which serves as both a product feature and an architectural simplification -- it limits the number of active chat rooms and provides a natural authorization boundary. The chat architecture uses a WebSocket gateway that maintains persistent connections with mobile clients. When User A sends a message, it hits the gateway, which publishes the message to a Kafka topic partitioned by chat_room_id. A consumer writes the message to Cassandra (partitioned by room_id, clustered by timestamp) and forwards it to the WebSocket connection of User B if online. If User B is offline, a push notification is sent via APNs (iOS) or FCM (Android) with a truncated message preview. Message delivery semantics are at-least-once with client-side deduplication using message IDs. Read receipts and typing indicators are transmitted as ephemeral WebSocket events without persistence. Media messages (photos) are uploaded directly to S3 via a presigned URL, and only the S3 key is sent as a chat message; the recipient's client fetches the image via CDN. Rate limiting on messages (e.g., 50 messages/minute per user) and content filtering (profanity, harassment, solicitation detection via NLP) are enforced at the gateway layer before persistence.",
+    "## Capacity Math That Anchors Every Design Decision\n\nDoing the arithmetic out loud is what separates a strong HLD answer from hand-waving. Swipe throughput: 2B swipes/day divided by 86,400 seconds is ~23,148 -- call it ~23K swipes/second average. Traffic concentrates in the 8-11 PM window across time zones, so plan for a 3-5x peak: ~70K-115K swipes/second. At ~100 bytes per swipe event that is only ~2.3 MB/s average ingest bandwidth -- the challenge is not bytes, it is per-event work (dedup check, reciprocal-like check, durable write) at 100K ops/second. Deck generation QPS: with 10M DAU averaging 1.5 sessions/day plus mid-session refills, assume ~20M deck builds/day, which is ~230 QPS average and ~1K QPS peak. Each deck build fans out to several Elasticsearch shards and scores 1K-10K candidates, so 1K QPS of deck builds can mean 5-10K shard queries/second and millions of scoring operations/second -- this is why decks are precomputed and cached in Redis rather than built synchronously on every open. Photo storage: 75M users x 5 photos x 200KB compressed is ~75TB of originals; serving 3-4 renditions per photo (thumbnail, card, full-screen) roughly triples that to ~200-250TB in S3, which is cheap -- the real cost is CDN egress, since one deck session can pull 200 profiles x ~150KB of card-size imagery = ~30MB per session.\n\nKey insight: swipe ingestion is write-dominated with tiny payloads, while deck generation is read-dominated with heavy fan-out -- they scale on different axes and must be separate services.\n\nCommon mistake: quoting '2B swipes/day' without converting it to per-second peak load. Interviewers want to see 2B / 86,400 = 23K/s, then a 3-5x evening peak, because that number drives the choice of Kafka + Cassandra over a relational store.\n\nFor example, at 100K swipes/second peak, a Postgres cluster doing one indexed insert plus one reciprocal-check read per swipe would need hundreds of primaries; Cassandra's leaderless log-structured writes plus a Redis fast path handle it with a modest cluster.",
+    "## Geosharding the Discovery Index -- Tinder's Real Approach\n\nTinder's production discovery system is a geosharded Elasticsearch cluster, not a single global index. The world is divided into geographic cells (Tinder used an S2-based tiling), and cells are grouped into shards balanced by user count rather than by area -- so a shard might cover half of Manhattan or the entire Australian outback, because what matters is that each shard holds a roughly equal number of active users. Each shard is an Elasticsearch index holding the full discovery document (age, gender, preferences, last-active, desirability features, location) for the users physically inside its cells. A deck query for a user with a 50km radius computes which cells the radius circle covers, maps those cells to the (usually 1-3) shards that own them, fans the filtered query out to just those shards in parallel, and merges the ranked results. This keeps every query touching a tiny fraction of the fleet instead of broadcasting to all shards.\n\nMoving users are the operational wrinkle: when a user's location update crosses a shard boundary (travel, or the Passport feature), the system writes the discovery document to the new shard and deletes it from the old one -- brief double-presence is acceptable, absence is not, so write-then-delete ordering matters. Density hotspots are handled with replicas: shards covering London or NYC get more Elasticsearch replicas and more powerful nodes than rural shards, and the shard-to-cell mapping is periodically rebalanced as populations shift.\n\nKey insight: geosharding works for dating because queries are intrinsically local -- nobody in Tokyo needs Paris profiles in their deck -- so locality-based partitioning gives near-perfect query isolation, unlike a social graph where edges cross the planet.\n\nIn practice: Tinder published this design in its 'Geosharded Recommendations' engineering blog series -- shards balanced by user count over S2 cells, with a routing layer mapping cell -> shard and a background mover process for relocating users.\n\nWarning: naive geographic sharding by fixed-size cells creates massive hot shards in dense cities and near-empty shards elsewhere; always balance shards by user population, not by land area.",
+    "## One Session End-to-End: Open App to First Message\n\nTracing a single session ties every component together and is a great way to close an interview answer. (1) Open app: the client authenticates via the API gateway (JWT validation, session touch in Redis) and opens a WebSocket to the WS gateway, which registers user -> gateway-node in the Redis connection registry. (2) Deck fetch: the client requests its deck; the recommendation service first checks the Redis hot-deck cache, and on a hit returns the precomputed top-200 stack in a few milliseconds. On a miss it computes the S2 cells covering the user's radius, fans out to the 1-3 owning Elasticsearch shards with preference filters, excludes already-swiped IDs via the bloom filter, scores candidates with the desirability model, caches the stack, and returns it -- p99 target under ~300ms. (3) Photo prefetch: the client pulls card-size renditions for the first ~10 profiles from CloudFront so swiping never waits on the network. (4) Swipe: each swipe POSTs to the swipe ingestion service, which checks the dedup bloom filter, acks the client immediately, and publishes the event to the Kafka swipes topic keyed by the user pair. (5) Match: a match worker consumes the event, persists it to Cassandra, and runs the reciprocal check -- if the swiped user already right-swiped back, it creates the match row and emits a match event. (6) Notify: the match service looks up both users in the connection registry and pushes 'It's a Match!' over their WebSockets (APNs/FCM for whoever is offline), and creates the chat channel keyed by match_id. (7) First message: the sender's message goes over the WebSocket to the chat service, is persisted to Cassandra (partition: match_id, cluster: timestamp), routed to the recipient's gateway node via the registry, and mirrored to a moderation topic for async NLP scanning.\n\nReal-world example: from the user's perspective the entire swipe -> match -> notification loop completes in well under a second, even though it crosses an HTTP ack, a Kafka hop, a Cassandra write, and a WebSocket push -- because every step is O(1) and the only synchronous part is the initial ack.\n\nCommon mistake: making the client wait for the full match-detection pipeline before acknowledging the swipe. Ack fast on durable enqueue; deliver the match asynchronously over the WebSocket a few hundred milliseconds later.",
   ],
   deepDive: [
     "Geospatial indexing is the foundational infrastructure challenge for a location-based dating app. The naive approach -- computing Haversine distance from the requesting user to every other user -- is O(n) and computationally infeasible at scale. Geohashing solves this by encoding latitude/longitude into a string prefix that shares common prefixes for nearby points. A geohash of precision 6 (~1.2km x 0.6km cell) allows the system to query all users in adjacent cells using simple string prefix matching, reducing the search space by orders of magnitude. However, geohash has well-known edge-case problems: two points on opposite sides of a cell boundary may be very close but share no common prefix. The solution is to always query the target cell plus all 8 neighboring cells (a 9-cell query). Google's S2 geometry library offers a superior alternative: it uses a Hilbert curve to map the sphere to 64-bit cell IDs, providing better coverage uniformity and the ability to generate a minimal set of cells that cover an arbitrary radius with tunable precision. In practice, Redis GEOADD/GEORADIUS commands (which use a sorted set with geohash-based scoring) handle moderate scale (~10M users) well, but beyond that, a dedicated geospatial index like PostGIS with spatial partitioning or a custom S2-based index in a distributed store becomes necessary.",
-    "The recommendation scoring system must balance multiple competing objectives: showing users profiles they will find attractive (maximizing right-swipe rate), showing profiles of users who will find them attractive (maximizing mutual match rate), ensuring fair exposure for all users (preventing a small set of highly-attractive users from monopolizing all attention), and maintaining engagement over time (not exhausting the candidate pool too quickly). The Elo rating system, borrowed from chess, addresses the first two objectives: each user has a score that increases when they receive right-swipes and decreases on left-swipes, weighted by the swiper's own Elo. High-Elo users are preferentially shown to other high-Elo users, creating a natural tiering effect. However, pure Elo optimization leads to a 'rich get richer' dynamic that harms engagement for average users. Tinder's actual algorithm likely incorporates a desirability distribution constraint: a user's card stack is composed of a mix of Elo tiers -- mostly similar-Elo users, with occasional higher-Elo aspirational profiles to maintain excitement. Additionally, a freshness boost for new users (the 'newbie boost') ensures new profiles get initial exposure to calibrate their Elo quickly. The scoring formula also penalizes showing the same user repeatedly across sessions and incorporates a diversity constraint to avoid showing 10 consecutive profiles of the same type.",
+    "The recommendation scoring system must balance multiple competing objectives: showing users profiles they will find attractive (maximizing right-swipe rate), showing profiles of users who will find them attractive (maximizing mutual match rate), ensuring fair exposure for all users (preventing a small set of highly-attractive users from monopolizing all attention), and maintaining engagement over time (not exhausting the candidate pool too quickly). The Elo rating system, borrowed from chess, addresses the first two objectives: each user has a score that increases when they receive right-swipes and decreases on left-swipes, weighted by the swiper's own Elo. High-Elo users are preferentially shown to other high-Elo users, creating a natural tiering effect. However, pure Elo optimization leads to a 'rich get richer' dynamic that harms engagement for average users. Tinder's actual algorithm likely incorporates a desirability distribution constraint: a user's card stack is composed of a mix of Elo tiers -- mostly similar-Elo users, with occasional higher-Elo aspirational profiles to maintain excitement. Additionally, a freshness boost for new users (the 'newbie boost') ensures new profiles get initial exposure to calibrate their Elo quickly. The scoring formula also penalizes showing the same user repeatedly across sessions and incorporates a diversity constraint to avoid showing 10 consecutive profiles of the same type.\n\nExploration is the fourth ingredient alongside recency, distance, and desirability: a pure exploit-only ranker never learns whether an uncertain profile would perform well, so production systems reserve a slice of every deck (5-10%) for exploration -- epsilon-greedy insertion of under-exposed profiles, or Thompson sampling over the predicted right-swipe rate, which naturally favors candidates whose estimate is uncertain. This is also how the cold-start 'newbie boost' generalizes: a new profile has maximum uncertainty, so a bandit-style ranker gives it exposure until its estimate tightens.\n\nKey insight: the deck is a portfolio, not a top-K list -- a deliberate blend of high-probability matches (similar desirability, close, recently active), aspirational profiles, and exploration slots, because the objective is long-term match rate and retention, not per-card click-through.",
     "Anti-fraud and trust-and-safety systems are critical infrastructure for dating platforms where users are uniquely vulnerable. The threat model includes: fake profiles created for catfishing or romance scams, bot accounts that send spam or phishing links, underage users bypassing age verification, harassment and abusive messaging, and coordinated manipulation (e.g., Elo boosting rings). Photo verification uses a liveness-detection ML model: the user is prompted to mimic a randomly-selected pose, and a face-matching model compares the selfie to their profile photos, confirming both identity and liveness. Profile photos are also scanned against known databases of stolen images and run through NSFW detection models. Behavioral signals are equally important: a user who swipes right on every profile within seconds is likely a bot (legitimate users exhibit varied swipe timing and ~30-50% right-swipe rates). Message content is scanned in real-time using NLP classifiers trained on reported conversations, flagging solicitation, threats, requests for money, and links to external sites. A composite trust score is maintained per user, combining verification status, report history, behavioral signals, and account age. Users below a threshold are shadow-banned (their profile is shown to fewer users) rather than explicitly banned, which delays adversarial adaptation.",
     "Scaling the swipe ingestion pipeline to handle 2B events/day with sub-second match detection requires careful architectural choices. Each swipe is published to a Kafka topic partitioned by a hash of the swiper's user ID, ensuring all swipes from a given user land on the same partition for ordering guarantees. A stream processor (Kafka Streams or Flink) consumes the swipe events and performs match detection: for a right-swipe from User A on User B, it checks a Redis set keyed by User B for the presence of User A's ID. If found, a match event is emitted to a separate Kafka topic, triggering notifications to both users and creating a chat room. The Redis set approach provides O(1) lookup but requires ~8 bytes per entry; with 10M DAU averaging 1K right-swipes received each, this is ~80GB of Redis -- feasible with a Redis cluster. Bloom filters offer a space-efficient alternative (~1MB per user for 100K entries at 0.1% FPR) but introduce false positives that require a secondary check against the persistent swipe store. The swipe data is durably stored in a Cassandra cluster partitioned by swiper_id with a TTL of 90 days (swipes older than 90 days are unlikely to result in matches and can be archived to cold storage). During peak hours (typically 8-10 PM local time across multiple time zones), the system must handle 3-5x average throughput, requiring auto-scaling of Kafka consumers and Redis read replicas.",
+    "Match detection deserves precise treatment because it is a correctness problem, not just a throughput problem. The fast path is a Redis check: when A right-swipes B, the worker does SADD likes:B A (record the inbound like) then SISMEMBER likes:A B (did B already like A?). Both are O(1), but Redis is a cache -- entries expire, nodes fail over, and bloom-filter variants admit false positives -- so Cassandra remains the source of truth: every swipe is durably written to a swipes table, and any Redis-signaled match is confirmed against it before the match row is created. The nasty race is simultaneous reciprocal right-swipes: A swipes B and B swipes A within the same few milliseconds, each worker checks for the reciprocal like before the other's write lands, and both conclude 'no match yet' -- a lost match -- or both detect it and create duplicate matches. Two standard fixes compose well. First, serialize per pair: key the Kafka swipe topic by the normalized pair ID min(A,B):max(A,B) so both swipes of a pair land on the same partition and are processed by one consumer in order -- the second swipe always sees the first. Second, make match creation idempotent: the match row's primary key is the deterministic pair ID, inserted with a Cassandra lightweight transaction (INSERT ... IF NOT EXISTS) or an equivalent conditional write, so double-detection collapses into one match.\n\nKey insight: pair-keyed partitioning turns a distributed race into a local sequential problem; the idempotent insert is the belt-and-suspenders for redelivery and multi-consumer edge cases.\n\nCommon mistake: doing check-then-insert as two separate unconditional operations. Under at-least-once Kafka delivery you will create duplicate match rows and send duplicate 'It's a Match!' pushes; the conditional insert on a deterministic key eliminates both.",
+    "Swipe idempotency and repeat-free pagination are quiet requirements that dominate perceived quality. Idempotency: mobile clients retry on flaky networks, so every swipe carries a client-generated ID and the natural key (swiper, target) is itself idempotent -- the first write wins, and replays are dropped by the bloom-filter check plus the append-only Cassandra write where a re-insert of the same key is a harmless overwrite. Elo updates and analytics consumers, however, are not naturally idempotent, so they deduplicate on the swipe ID within a processing window. Repeat-free decks: the guarantee 'never show a profile I already swiped' must hold across sessions, devices, and deck refills. The bloom filter (per user, ~144KB for 100K entries at 0.1% FPR) is consulted at deck-build time to exclude seen profiles cheaply; because bloom false positives only ever hide an unswiped profile (never resurface a swiped one), the failure mode is invisible to users. Pagination without repeats falls out of the deck model: the server materializes a deck of ~200 IDs, the client consumes it as a cursor, and a refill request passes the IDs still unconsumed on the client so the server excludes in-flight cards from the next build. Served-but-not-swiped profiles are tracked in a short-TTL Redis set so two overlapping deck builds do not deal the same card twice.\n\nIn practice: teams rebuild the bloom filter from the Cassandra swipe table on cache loss rather than persisting the filter itself -- the filter is a derived structure, and rebuilds for a user take milliseconds.\n\nCommon mistake: enforcing 'no repeats' only within a single deck. Users notice repeats across sessions immediately; the exclusion check must run against the full swipe history structure, not the session state.",
+    "Chat-on-match is a scoped realtime messaging system, and the scoping is the design win. A channel exists only per match, identified by the match_id, so authorization is a single lookup: a message is accepted only if sender is one of the two members of an active (non-unmatched, non-banned) match -- there is no open-DM spam surface. Delivery: the sender's WebSocket frame arrives at their gateway node, the chat service validates membership, persists to Cassandra (partition key match_id, clustering key a time-ordered message ID like a TimeUUID), then consults the Redis connection registry (user_id -> gateway node) and forwards to the recipient's node for push over their socket; offline recipients get APNs/FCM with a truncated preview. Presence is tracked by the gateway: connect/disconnect events update a presence key with a short TTL heartbeat (e.g., 30s), and 'online now' or last-seen surfaces in the chat UI from that key -- deliberately eventually consistent, since stale presence for a few seconds is harmless. Unmatch is the important teardown path: it must atomically close the channel, revoke both users' ability to send, and hide history per policy -- and it must win any race with in-flight messages, so the membership check happens at persist time, not just at socket-accept time.\n\nKey insight: because chat rooms only exist between matched pairs, room count grows with matches (~50M) rather than with user pairs (75M squared), and every expensive realtime feature -- presence, typing, receipts -- is bounded by active matches, not by the user base.",
+    "The abuse and moderation pipeline runs as an asynchronous sidecar on every content and behavior stream, never in the synchronous hot path. Ingest: profile photo uploads, bio edits, chat messages, swipe events, and user reports each mirror into Kafka moderation topics. Photo pipeline: every upload passes NSFW and violence classifiers, a face-detection model (profiles without a detectable face rank lower), perceptual-hash matching against known scam/stolen-photo databases, and -- for verification -- a liveness-checked selfie matched against profile photos. Text pipeline: chat messages are scanned by NLP classifiers for solicitation, harassment, scam patterns (money, gift cards, crypto, off-platform links), with model scores written to a per-user trust ledger. Behavioral pipeline: a streaming job (Flink) over swipe events flags inhuman patterns -- 100% right-swipe rates, sub-second inter-swipe intervals, message blasts within seconds of matching -- and impossible-travel location sequences. Decisions are graduated: score decay on the trust ledger, shadow-ban (reduced deck exposure) below one threshold, human-review queue below another, hard ban with device/payment fingerprint blocking for confirmed abuse. Human reviewers handle the ambiguous middle and their labels feed back as training data.\n\nWarning: never put moderation inference on the synchronous message path -- a slow model must degrade to async scanning, not add latency to every chat message. The one exception is a cheap regex/keyword pre-filter at the gateway for known-bad content.\n\nReal-world example: romance-scam interdiction is the highest-stakes flow -- classifiers watch for the scam script shape (rapid affection, refusal to video-call, money request) across a conversation, not per message, which is why the trust ledger aggregates signals over time instead of acting on single events.",
   ],
   code: [
     {
@@ -475,54 +482,95 @@ public:
       title: "High-Level System Architecture",
       kind: "architecture",
       caption:
-        "Major services and data flow in the Tinder-like dating app system",
-      mermaid: `graph TD
-    Client["Mobile Client<br/>(iOS/Android)"]
-    CDN["CDN<br/>(CloudFront)"]
-    APIGW["API Gateway<br/>(Auth, Rate Limit)"]
-    WSGateway["WebSocket Gateway<br/>(Chat, Notifications)"]
+        "Layered architecture with named technologies. Solid arrows trace the deck-fetch path (client -> API gateway -> recommendation service -> Redis hot deck / geosharded Elasticsearch) and the swipe-to-match-to-chat path (swipe ingestion -> Kafka -> match workers -> match service -> WebSocket gateway -> chat service).",
+      mermaid: `graph TB
+    subgraph ClientsL["Clients"]
+        iOSApp["iOS App"]
+        AndroidApp["Android App"]
+    end
 
-    ProfileSvc["Profile Service"]
-    LocationSvc["Location Service"]
-    RecommendSvc["Recommendation<br/>Service"]
-    SwipeSvc["Swipe Service"]
-    MatchSvc["Match & Chat<br/>Service"]
-    TrustSvc["Trust & Safety<br/>Service"]
+    subgraph EdgeL["Edge"]
+        CDN["CloudFront CDN<br/>(profile photos,<br/>multiple resolutions)"]
+    end
 
-    PG["PostgreSQL<br/>(Profiles, Matches)"]
-    Redis["Redis Cluster<br/>(Geo Index, Likes)"]
-    Kafka["Kafka<br/>(Events Bus)"]
-    Cassandra["Cassandra<br/>(Chat Messages)"]
-    S3["S3<br/>(Photos, Media)"]
-    ML["ML Pipeline<br/>(Scoring, Moderation)"]
+    subgraph GatewayL["Gateway Layer"]
+        LB["Load Balancer<br/>(AWS ALB / Envoy)"]
+        APIGW["API Gateway<br/>(JWT auth, rate limiting)"]
+        WSGW["WebSocket Gateway<br/>(match + chat realtime,<br/>~100K conns per node)"]
+    end
 
-    Client -->|HTTPS| CDN
-    Client -->|HTTPS| APIGW
-    Client -->|WSS| WSGateway
-    CDN -->|Photos| S3
+    subgraph ServicesL["Service Layer"]
+        ProfileSvc["Profile Service"]
+        RecoSvc["Recommendation Service<br/>(deck generation)"]
+        SwipeSvc["Swipe Ingestion Service"]
+        MatchSvc["Match Service"]
+        ChatSvc["Chat Service"]
+        BoostSvc["Boost / Payments Service"]
+        TrustSvc["Trust and Safety Service<br/>(moderation)"]
+    end
+
+    subgraph CacheL["Cache Layer (Redis)"]
+        RedisDedup["Swipe dedup<br/>bloom filters"]
+        RedisDeck["Hot decks<br/>(precomputed stacks)"]
+        RedisSess["Sessions +<br/>WS connection registry"]
+    end
+
+    subgraph AsyncL["Async Backbone"]
+        KafkaSwipes["Kafka<br/>(swipe events topic)"]
+        MatchWorkers["Match Workers<br/>(reciprocal-like check)"]
+        MLPipe["ML Feature Pipelines<br/>(Flink / Spark)"]
+    end
+
+    subgraph DataL["Data Layer"]
+        ES["Geosharded Elasticsearch<br/>(user discovery index,<br/>Tinder's real approach)"]
+        Cass["Cassandra<br/>(swipes, matches, messages)"]
+        PG["PostgreSQL<br/>(accounts, payments)"]
+        S3P["S3<br/>(photo originals + renditions)"]
+    end
+
+    subgraph MLL["ML Layer"]
+        Desir["Desirability / ELO-style<br/>scoring models"]
+        PhotoMod["Photo moderation +<br/>face verification models"]
+    end
+
+    iOSApp -->|"photo fetch"| CDN
+    AndroidApp -->|"photo fetch"| CDN
+    CDN --> S3P
+    iOSApp -->|"HTTPS"| LB
+    AndroidApp -->|"HTTPS"| LB
+    iOSApp -.->|"WSS"| WSGW
+    AndroidApp -.->|"WSS"| WSGW
+    LB --> APIGW
+
+    APIGW -->|"1 deck fetch"| RecoSvc
+    RecoSvc -->|"2 hot deck hit"| RedisDeck
+    RecoSvc -->|"3 miss: geo fan-out"| ES
+    RecoSvc -->|"4 rank"| Desir
 
     APIGW --> ProfileSvc
-    APIGW --> LocationSvc
-    APIGW --> RecommendSvc
-    APIGW --> SwipeSvc
-
     ProfileSvc --> PG
-    ProfileSvc --> S3
-    LocationSvc --> Redis
-    RecommendSvc --> Redis
-    RecommendSvc --> PG
-    RecommendSvc --> ML
+    ProfileSvc --> S3P
+    ProfileSvc --> TrustSvc
+    APIGW --> BoostSvc
+    BoostSvc --> PG
 
-    SwipeSvc --> Kafka
-    SwipeSvc --> Redis
-    Kafka --> MatchSvc
-    MatchSvc --> PG
-    MatchSvc --> WSGateway
-    MatchSvc --> Cassandra
+    APIGW -->|"a swipe"| SwipeSvc
+    SwipeSvc -->|"b dedup"| RedisDedup
+    SwipeSvc -->|"c publish"| KafkaSwipes
+    KafkaSwipes -->|"d consume"| MatchWorkers
+    KafkaSwipes --> MLPipe
+    MatchWorkers -->|"e persist swipe/match"| Cass
+    MatchWorkers -->|"f mutual like"| MatchSvc
+    MatchSvc -->|"g match push"| WSGW
+    MatchSvc --> ChatSvc
+    ChatSvc -->|"h messages"| Cass
+    ChatSvc --> WSGW
+    WSGW --> RedisSess
 
-    TrustSvc --> ML
-    TrustSvc --> Kafka
-    WSGateway --> Cassandra`,
+    MLPipe --> Desir
+    MLPipe -->|"index updates"| ES
+    TrustSvc --> PhotoMod
+    TrustSvc --> KafkaSwipes`,
     },
     {
       title: "Swipe and Match Detection Flow",
@@ -653,6 +701,26 @@ public:
       q: "How would you scale the chat system for matched users?",
       a: "The chat system benefits from a natural scaling advantage: chat rooms only exist between matched users, so the total number of active rooms is much smaller than the total user base -- roughly 50M matches with perhaps 5M actively chatting at any time. The architecture uses a WebSocket gateway layer that maintains persistent connections with mobile clients. The gateway is horizontally scaled, with each gateway node handling ~100K concurrent connections. A connection registry (Redis) maps each online user to their gateway node, so when a message arrives for User B, the system looks up which gateway node holds B's connection and routes the message there. Message persistence uses Cassandra with a partition key of chat_room_id and clustering key of timestamp, which naturally supports the 'load older messages' pagination pattern. Message ordering is guaranteed within a partition, and at-least-once delivery is achieved by Kafka-backed message processing with client-side deduplication using monotonic message IDs. For offline users, a push notification is sent via APNs/FCM with the first 100 characters of the message. Typing indicators and read receipts are ephemeral -- sent only through WebSocket to currently-connected peers, never persisted, keeping the hot path extremely lightweight.",
     },
+    {
+      q: "Two users right-swipe each other at almost the same instant. How do you guarantee exactly one match is created and neither swipe is lost?",
+      a: "This is the classic race in swipe systems: A's worker checks 'did B like A?' before B's write lands, and B's worker checks 'did A like B?' before A's write lands -- both see no, and the match is silently lost. Or with a cache-based fast path, both see yes and create duplicate matches. The robust design layers two mechanisms. First, serialize per pair: key the Kafka swipe topic by the normalized pair ID min(A,B) + ':' + max(A,B), so both swipes of any pair land on the same partition and are consumed in order by a single worker -- whichever swipe is processed second is guaranteed to observe the first, eliminating the lost-match interleaving entirely. Second, make match creation idempotent: the match table's primary key is that same deterministic pair ID, and the insert uses a conditional write (Cassandra lightweight transaction, INSERT IF NOT EXISTS), so duplicate detection from redelivery or failover collapses to one row, and the notification fan-out is triggered off the successful insert only. Redis sets remain the low-latency fast path for the reciprocal check, but Cassandra's swipe log is the source of truth -- a Redis-signaled match is confirmed against durable state before the match row is written. Finish by noting the client contract: the swipe HTTP response may say 'match: true' optimistically from the fast path, but the authoritative 'It's a Match' event arrives over the WebSocket from the match service after the durable insert.",
+      followUps: [
+        "What happens if the Kafka partition owning that pair is lagging during peak -- how stale can match detection get?",
+        "How would you backfill matches if a bug dropped reciprocal checks for an hour?",
+      ],
+    },
+    {
+      q: "Explain geosharding as Tinder actually implemented it. Why not one global Elasticsearch index?",
+      a: "A single global index fails on two axes: every deck query would hit every shard of a 75M-user index (fan-out proportional to cluster size, not to relevance), and hot-city traffic would contend with the whole world's traffic. Tinder's production answer is geosharding: tile the planet with S2 cells, then group cells into shards balanced by active-user count -- a shard might be half of Manhattan or all of Mongolia, because equal user population per shard is what equalizes load, not equal area. Each shard is its own Elasticsearch index containing discovery documents (preferences, age, last-active, desirability features, location) for users physically inside its cells. A deck query computes the S2 cell covering of the user's search radius, routes to only the 1-3 shards owning those cells, executes the filtered query in parallel, and merges results -- so query cost is proportional to local density, not global scale. The moving parts to mention: a routing service maintaining the cell-to-shard map; a mover process that relocates a user's document when a location update crosses a shard boundary (write to new shard, then delete from old -- transient duplication is fine, absence is not); extra replicas on dense-city shards; and periodic rebalancing of the cell-to-shard assignment as populations shift. The property that makes this work is that dating queries are intrinsically local -- no query ever needs cross-planet fan-out, which is exactly the property a social feed system lacks.",
+      followUps: [
+        "How does the Passport feature (swipe in another city) interact with geosharding?",
+        "How do you rebalance shards without downtime when a city's user count doubles?",
+      ],
+    },
+    {
+      q: "Walk me through the full request path when a user opens the app until they send a first message to a new match.",
+      a: "Open: the client authenticates through the API gateway (JWT validation), and opens a WebSocket to the WS gateway, which records user -> gateway-node in a Redis connection registry. Deck: the recommendation service checks the Redis hot-deck cache; on miss it computes the S2 covering of the user's radius, fans out to the owning Elasticsearch shards with preference filters, excludes seen profiles via the per-user bloom filter, scores candidates with the desirability model, and returns ~200 ranked IDs; the client prefetches the first ~10 profiles' card-size photos from CloudFront. Swipe: each swipe POSTs to swipe ingestion, which checks the dedup bloom filter, acks immediately, and publishes to Kafka keyed by normalized pair ID. Match: a match worker persists the swipe to Cassandra, runs the reciprocal check (Redis fast path, Cassandra confirm), and on a mutual like performs an idempotent conditional insert of the match row keyed by pair ID. Notify: the match service resolves both users through the connection registry and pushes the match event over their WebSockets (APNs/FCM for offline), creating the chat channel keyed by match_id. Message: the first message travels over the sender's WebSocket to the chat service, which validates match membership, persists to Cassandra (partition match_id, clustered by TimeUUID), forwards to the recipient's gateway node, and mirrors the text to the async moderation topic. The design themes to call out: the only synchronous work anywhere is validation plus a fast durable enqueue; everything heavy (deck building, match detection, moderation) is precomputed or asynchronous, which is how the swipe-to-match loop stays under a second at 100K swipes/second peak.",
+    },
   ],
   mcqs: [
     {
@@ -737,6 +805,18 @@ public:
       front: "What are the three phases of the recommendation pipeline?",
       back: "1) Candidate Generation: geospatial query returns 50K-500K nearby users. 2) Filtering: remove already-swiped (bloom filter), preference mismatches, inactive, and blocked users -- reduces to 1K-10K. 3) Scoring/Ranking: compute weighted composite score (distance, Elo, activity, profile completeness) and return top-200 as the card stack.",
     },
+    {
+      front: "How is Tinder's discovery index geosharded, and how does a query route?",
+      back: "The planet is tiled with S2 cells; cells are grouped into Elasticsearch shards balanced by ACTIVE USER COUNT (not area). A deck query computes the S2 cell covering of the user's radius, routes to only the 1-3 shards owning those cells, runs the filtered query in parallel, and merges results. A mover process relocates a user's document when they cross a shard boundary (write new, then delete old).",
+    },
+    {
+      front: "How do you prevent lost or duplicate matches when two users right-swipe each other simultaneously?",
+      back: "Serialize per pair: key the Kafka swipe topic by min(A,B):max(A,B) so both swipes hit one partition and one consumer processes them in order -- the second swipe always sees the first. Then make the match insert idempotent: primary key = deterministic pair ID, written with a conditional insert (Cassandra LWT / INSERT IF NOT EXISTS) so duplicate detection collapses to one row.",
+    },
+    {
+      front: "Why is deck generation precomputed and cached instead of built per request?",
+      back: "~1K deck-build QPS at peak, but each build fans out to 1-3 geoshards and scores 1K-10K candidates -- synchronous builds would mean 5-10K shard queries/s and millions of scoring ops/s on the hot path. Precomputing decks into Redis turns the common case into a single O(1) cache read with p99 in milliseconds.",
+    },
   ],
   exercises: [
     "Design the data model and API for the 'Super Like' feature where a user gets 1 free super-like per day (more with premium). Consider how super-likes should affect the recipient's card stack ordering (should they appear first?), how to implement the daily quota with timezone handling, and how match detection differs for super-likes vs regular likes.",
@@ -756,6 +836,9 @@ public:
     "Trust and safety: Three layers -- photo verification (liveness + face match ML), behavioral analysis (swipe patterns, message velocity), content moderation (NLP on messages). Shadow-banning over hard-banning to slow adversarial adaptation. Composite trust score updated continuously.",
     "Data storage choices: PostgreSQL for profiles and matches (structured, relational queries). Redis for geo index and likes sets (low-latency, O(1) operations). Cassandra for chat messages (time-series, high write throughput). S3 + CDN for photos. Kafka for event streaming.",
     "Key non-functional requirements: Match notification <1 second, chat delivery <200ms for online users, 99.95% availability, GDPR compliance with right-to-deletion across all stores, encryption at rest and in transit for location and messaging data.",
+    "Geosharding (Tinder's real approach): S2 cells grouped into Elasticsearch shards balanced by user COUNT, not area. Deck query = compute cell covering of radius -> route to 1-3 owning shards -> parallel filtered query -> merge. Mover process relocates documents across shard boundaries (write-new-then-delete-old). Hot-city shards get extra replicas.",
+    "Simultaneous-swipe race: serialize per pair by keying Kafka on min(A,B):max(A,B) so one consumer sees both swipes in order, and make match insert idempotent via deterministic pair-ID primary key with a conditional write (Cassandra LWT). Redis is the fast path; Cassandra swipe log is the source of truth.",
+    "Deck generation math: ~20M deck builds/day = ~230 QPS avg, ~1K QPS peak; each build fans out to 1-3 geoshards and scores 1K-10K candidates -- hence precomputed hot decks in Redis, never synchronous builds on the hot path.",
   ],
   cheatSheet: [
     "Swipes/sec = 2B/day / 86400 = ~23K avg, peak 3-5x = ~70K-100K/sec",
@@ -767,7 +850,11 @@ public:
     "Haversine: d = 2R * arcsin(sqrt(sin^2(dlat/2) + cos(lat1)*cos(lat2)*sin^2(dlon/2)))",
     "Chat partition key: room_id; cluster key: timestamp; enables efficient range scans for message history",
     "WebSocket gateway sizing: ~100K connections per node, 50 nodes = 5M concurrent users",
-    "Photo storage: ~1MB per user (5 photos x 200KB compressed); 75M users = ~75TB total media",
+    "Photo storage: ~1MB per user (5 photos x 200KB compressed); 75M users = ~75TB originals, ~200-250TB with 3-4 CDN renditions",
+    "Deck QPS: ~20M deck builds/day / 86400 = ~230 avg, ~1K peak; each = 1-3 geoshard queries + 1K-10K candidates scored",
+    "Pair key for race-free matching: min(A,B) + ':' + max(A,B) -- Kafka partition key AND match-table primary key (INSERT IF NOT EXISTS)",
+    "Geoshard balance rule: equal ACTIVE USERS per shard, not equal area; radius query touches 1-3 shards via S2 cell covering",
+    "Swipe ingest bandwidth: 100K/s peak x 100B = ~10MB/s -- trivial bytes, the cost is per-event ops (dedup + reciprocal check + durable write)",
   ],
   glossary: [
     {
@@ -804,6 +891,26 @@ public:
       term: "Card Stack",
       definition:
         "The ordered list of recommended user profiles presented to a user for swiping. Generated by the recommendation pipeline through candidate generation (geo query), filtering (preferences, already-swiped), and scoring/ranking (Elo, distance, activity), typically containing ~200 profiles per session.",
+    },
+    {
+      term: "Geosharding",
+      definition:
+        "Partitioning a search index by geographic region so that location-scoped queries touch only the shards covering the query area. Tinder's implementation groups S2 cells into Elasticsearch shards balanced by active-user count, so a radius query routes to 1-3 shards regardless of global scale, and a mover process relocates user documents across shard boundaries as they travel.",
+    },
+    {
+      term: "Lightweight Transaction (LWT)",
+      definition:
+        "Cassandra's conditional-write mechanism (e.g., INSERT ... IF NOT EXISTS) implemented with Paxos. Used to make match creation idempotent: the match row is keyed by the deterministic pair ID, so concurrent or redelivered match detections collapse into exactly one row instead of duplicates.",
+    },
+    {
+      term: "Connection Registry",
+      definition:
+        "A Redis mapping of user_id to the WebSocket gateway node currently holding that user's connection. Lets any backend service (match, chat) route a realtime push to the correct gateway node in one lookup; entries carry short-TTL heartbeats so presence and last-seen fall out of the same structure.",
+    },
+    {
+      term: "Trust Ledger",
+      definition:
+        "A per-user aggregate of moderation signals -- photo verification status, NLP scores on messages, behavioral anomalies, report history -- accumulated over time rather than acted on per event. Graduated thresholds trigger shadow-banning, human review, or hard bans, which catches slow-burn abuse like romance scams that no single message reveals.",
     },
   ],
   animations: [
@@ -897,20 +1004,23 @@ public:
     "How would you design the monetization infrastructure to support multiple subscription tiers (Plus, Gold, Platinum) with different feature gates, cross-platform purchase validation (App Store, Play Store), and subscription lifecycle management?",
     "How would you handle the cold-start problem for new users who have no swipe history, ensuring they receive good recommendations and their Elo calibrates quickly?",
     "How would you design the system to comply with data privacy regulations (GDPR, CCPA) including right-to-deletion across all data stores (PostgreSQL, Redis, Cassandra, Kafka, S3, ML training data)?",
+    "How would you run this system multi-region -- which components are region-local (geoshards, decks, WebSocket gateways) vs global (accounts, payments), and what happens to in-flight matches during a regional failover?",
+    "A celebrity joins and receives 500K right-swipes in an hour, making their inbound-likes set and geoshard a hotspot. How do you keep deck generation and match detection healthy?",
+    "How would you degrade gracefully if the geosharded Elasticsearch cluster is unavailable -- can you serve a usable deck from caches alone?",
   ],
   resources: [
     {
-      label: "Tinder System Design - ByteByteGo",
+      label: "Tinder System Design - ByteByteGo", url: "https://bytebytego.com/",
       kind: "article",
       note: "Comprehensive overview of Tinder's architecture including geospatial indexing, matching algorithm, and scaling challenges",
     },
     {
-      label: "Designing Data-Intensive Applications by Martin Kleppmann",
+      label: "Designing Data-Intensive Applications by Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
       note: "Chapters on partitioning, replication, and stream processing are directly applicable to the swipe ingestion and chat pipelines",
     },
     {
-      label: "S2 Geometry Library - Google Open Source",
+      label: "S2 Geometry Library - Google Open Source", url: "https://s2geometry.io/",
       kind: "docs",
       note: "Documentation for the S2 spherical geometry library used for production-grade geospatial indexing beyond simple geohash",
     },

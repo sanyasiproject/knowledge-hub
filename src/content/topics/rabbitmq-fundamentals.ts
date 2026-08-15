@@ -134,11 +134,11 @@ When a consumer subscribes with \`basic.consume\`, the broker **pushes** message
   ],
   resources: [
     {
-      label: "RabbitMQ documentation — tutorials and concepts",
+      label: "RabbitMQ documentation — tutorials and concepts", url: "https://www.rabbitmq.com/docs",
       kind: "docs",
     },
     {
-      label: "Enterprise Integration Patterns — Hohpe & Woolf",
+      label: "Enterprise Integration Patterns — Hohpe & Woolf", url: "https://www.enterpriseintegrationpatterns.com/",
       kind: "book",
     },
   ],

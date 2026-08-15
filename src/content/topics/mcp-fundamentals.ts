@@ -457,12 +457,12 @@ await server.connect(transport);`,
   ],
   resources: [
     {
-      label: "MCP Specification (Official)",
+      label: "MCP Specification (Official)", url: "https://modelcontextprotocol.io/",
       kind: "docs",
       note: "The authoritative specification for the Model Context Protocol, including message formats, lifecycle, and transport details.",
     },
     {
-      label: "Model Context Protocol Documentation",
+      label: "Model Context Protocol Documentation", url: "https://modelcontextprotocol.io/",
       kind: "docs",
       note: "Official MCP documentation site with guides, tutorials, and SDK references for TypeScript and Python.",
     },
@@ -477,7 +477,7 @@ await server.connect(transport);`,
       note: "Official Python SDK with the FastMCP high-level API for quickly building MCP servers.",
     },
     {
-      label: "Anthropic Blog: Introducing the Model Context Protocol",
+      label: "Anthropic Blog: Introducing the Model Context Protocol", url: "https://docs.anthropic.com/",
       kind: "article",
       note: "Launch announcement explaining the motivation, design, and ecosystem vision behind MCP.",
     },

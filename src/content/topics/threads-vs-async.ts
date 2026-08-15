@@ -636,7 +636,7 @@ yield to loop"]
       note: "The foundational article that defined the challenge of handling 10K concurrent connections and surveyed OS-level solutions.",
     },
     {
-      label: "JEP 444: Virtual Threads (Project Loom)",
+      label: "JEP 444: Virtual Threads (Project Loom)", url: "https://openjdk.org/jeps/444",
       kind: "docs",
       note: "The official Java Enhancement Proposal for virtual threads, explaining motivation, design, and API.",
     },

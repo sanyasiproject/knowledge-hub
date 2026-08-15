@@ -782,7 +782,7 @@ int main() {
 
   resources: [
     {
-      label: "CQRS — Martin Fowler",
+      label: "CQRS — Martin Fowler", url: "https://martinfowler.com/",
       kind: "article",
     },
     {

@@ -547,7 +547,7 @@ ackermann m n = ackermann (m - 1) (ackermann m (n - 1))`
     { label: "Structure and Interpretation of Computer Programs (SICP), Chapters 1.2-1.3", kind: "book", note: "The gold standard introduction to recursive processes, tree recursion, and iterative vs recursive processes in Scheme" },
     { label: "Introduction to Algorithms (CLRS), Chapter 4: Divide-and-Conquer", kind: "book", note: "Rigorous treatment of the Master Theorem, recurrence relations, and divide-and-conquer algorithm design" },
     { label: "Computerphile - Recursion (YouTube)", kind: "video", note: "Visual explanation of recursion, call stacks, and base cases with clear animations" },
-    { label: "Haskell Wiki: Recursion Patterns", kind: "docs", note: "Covers fold, unfold, hylomorphism, and other recursion schemes in Haskell" },
+    { label: "Haskell Wiki: Recursion Patterns", url: "https://wiki.haskell.org/", kind: "docs", note: "Covers fold, unfold, hylomorphism, and other recursion schemes in Haskell" },
     { label: "tail-call-optimization tag on Stack Overflow", kind: "article", note: "Community discussions on TCO support across languages, with benchmarks and workarounds" }
   ],
 

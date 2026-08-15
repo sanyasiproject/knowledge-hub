@@ -544,7 +544,7 @@ DELETE /_pit
   ],
   resources: [
     { label: "Elasticsearch Query DSL Reference", kind: "docs", note: "Official reference for all query types, aggregations, and scoring functions" },
-    { label: "Elasticsearch: The Definitive Guide - Search chapter", kind: "book", note: "Comprehensive tutorial on full-text search, bool queries, and relevance tuning" },
+    { label: "Elasticsearch: The Definitive Guide - Search chapter", url: "https://www.elastic.co/guide/index.html", kind: "book", note: "Comprehensive tutorial on full-text search, bool queries, and relevance tuning" },
     { label: "Relevant Search (Turnbull & Berryman)", kind: "book", note: "Deep dive into relevance engineering with Elasticsearch, including function_score and boosting strategies" },
     { label: "Elastic Blog: BM25 Similarity and function_score", kind: "article", note: "Practical guide to combining BM25 with custom scoring functions for production search" },
     { label: "Elasticsearch Aggregations Reference", kind: "docs", note: "Official documentation for all aggregation types including pipeline and composite aggregations" },

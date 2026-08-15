@@ -342,10 +342,10 @@ correct tool"]
     "Always implement audit logging, rate limiting, and confirmation prompts for destructive tool operations",
   ],
   resources: [
-    { label: "Anthropic Tool Use Documentation", kind: "docs", note: "Official guide covering tool definition, tool choice, parallel calls, and best practices for Claude" },
+    { label: "Anthropic Tool Use Documentation", url: "https://docs.anthropic.com/", kind: "docs", note: "Official guide covering tool definition, tool choice, parallel calls, and best practices for Claude" },
     { label: "OpenAI Function Calling Guide", kind: "docs", note: "Comparison reference for OpenAI's function calling API, useful for understanding cross-provider differences" },
-    { label: "Model Context Protocol (MCP) Specification", kind: "docs", note: "Open standard for connecting LLMs to external tools and data sources via a unified protocol" },
-    { label: "Building Effective Agents - Anthropic Cookbook", kind: "article", note: "Practical patterns for tool-calling agents including orchestration, error handling, and evaluation" },
+    { label: "Model Context Protocol (MCP) Specification", url: "https://modelcontextprotocol.io/", kind: "docs", note: "Open standard for connecting LLMs to external tools and data sources via a unified protocol" },
+    { label: "Building Effective Agents - Anthropic Cookbook", url: "https://docs.anthropic.com/", kind: "article", note: "Practical patterns for tool-calling agents including orchestration, error handling, and evaluation" },
     { label: "Gorilla: Large Language Model Connected with Massive APIs", kind: "paper", note: "Research on training LLMs for accurate API/tool invocation with reduced hallucination" },
   ],
   glossary: [

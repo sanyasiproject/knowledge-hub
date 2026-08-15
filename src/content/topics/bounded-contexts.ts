@@ -620,7 +620,7 @@ namespace SharedKernel {
       kind: "book",
     },
     {
-      label: "BoundedContext — Martin Fowler",
+      label: "BoundedContext — Martin Fowler", url: "https://martinfowler.com/",
       kind: "article",
     },
   ],

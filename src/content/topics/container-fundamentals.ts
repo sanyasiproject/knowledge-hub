@@ -143,7 +143,7 @@ export const containerFundamentals: TopicContent = {
   ],
   resources: [
     {
-      label: "Docker documentation",
+      label: "Docker documentation", url: "https://docs.docker.com/",
       kind: "docs",
     },
     {

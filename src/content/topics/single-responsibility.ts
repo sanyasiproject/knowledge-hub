@@ -514,7 +514,7 @@ class OrderService {
     { label: "Clean Architecture by Robert C. Martin", kind: "book", note: "Chapter 7 covers SRP with the definitive actor-based definition." },
     { label: "Agile Software Development by Robert C. Martin", kind: "book", note: "Original detailed treatment of SRP as part of SOLID principles." },
     { label: "The Single Responsibility Principle (blog post by Uncle Bob)", kind: "article", note: "Martin's own clarification of common SRP misunderstandings." },
-    { label: "Refactoring: Improving the Design of Existing Code by Martin Fowler", kind: "book", note: "Provides concrete refactoring techniques for decomposing classes." },
+    { label: "Refactoring: Improving the Design of Existing Code by Martin Fowler", url: "https://martinfowler.com/", kind: "book", note: "Provides concrete refactoring techniques for decomposing classes." },
     { label: "SOLID Principles in 100 Seconds (Fireship)", kind: "video", note: "Quick visual overview of all SOLID principles including SRP." }
   ],
   glossary: [

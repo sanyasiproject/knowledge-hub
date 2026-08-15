@@ -561,8 +561,8 @@ function isNonBreakingChange(change: string): boolean {
     "Breaking = removal/rename/type change; Non-breaking = addition of optional fields/endpoints",
   ],
   resources: [
-    { label: "Stripe API Versioning", kind: "docs", note: "Stripe's documentation on their date-based versioning approach with API key pinning." },
-    { label: "RFC 8594: The Sunset HTTP Header Field", kind: "docs", note: "The specification for the Sunset header used to signal endpoint removal dates." },
+    { label: "Stripe API Versioning", url: "https://docs.stripe.com/api", kind: "docs", note: "Stripe's documentation on their date-based versioning approach with API key pinning." },
+    { label: "RFC 8594: The Sunset HTTP Header Field", url: "https://www.rfc-editor.org/rfc/rfc8594", kind: "docs", note: "The specification for the Sunset header used to signal endpoint removal dates." },
     { label: "API Design Patterns by JJ Geewax", kind: "book", note: "Covers versioning strategies, backward compatibility, and API evolution in detail." },
     { label: "Microsoft REST API Guidelines: Versioning", kind: "docs", note: "Microsoft's recommendations for API versioning including URL and header approaches." },
     { label: "Roy Fielding's REST Dissertation, Chapter 5", kind: "article", note: "Original REST constraints including the uniform interface principle relevant to versioning." },

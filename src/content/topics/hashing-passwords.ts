@@ -205,11 +205,11 @@ Implementation options:
   ],
   resources: [
     {
-      label: "OWASP Password Storage Cheat Sheet",
+      label: "OWASP Password Storage Cheat Sheet", url: "https://owasp.org/",
       kind: "docs",
     },
     {
-      label: "Argon2 — RFC 9106",
+      label: "Argon2 — RFC 9106", url: "https://www.rfc-editor.org/rfc/rfc9106",
       kind: "docs",
     },
   ],

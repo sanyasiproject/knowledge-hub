@@ -35,6 +35,8 @@ export interface ResourceLink {
   label: string;
   kind: "docs" | "book" | "paper" | "article" | "video" | "repo";
   note?: string;
+  /** Optional link to a free, legitimate source (official docs, free book, paper PDF, talk). */
+  url?: string;
 }
 
 export interface GlossaryEntry {

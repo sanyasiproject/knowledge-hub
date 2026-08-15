@@ -557,8 +557,8 @@ deploy-production:
     "Optimization: fail fast (lint before E2E), cache dependencies, shard tests across parallel runners, use ephemeral runners, and monitor pipeline metrics (p50 duration, flake rate).",
   ],
   resources: [
-    { label: "GitHub Actions Documentation", kind: "docs", note: "Official reference for workflow syntax, events, runners, expressions, and reusable workflows." },
-    { label: "GitLab CI/CD Documentation", kind: "docs", note: "Comprehensive guide covering .gitlab-ci.yml syntax, DAG mode, environments, review apps, and Auto DevOps." },
+    { label: "GitHub Actions Documentation", url: "https://docs.github.com/en/actions", kind: "docs", note: "Official reference for workflow syntax, events, runners, expressions, and reusable workflows." },
+    { label: "GitLab CI/CD Documentation", url: "https://docs.gitlab.com/ee/ci/", kind: "docs", note: "Comprehensive guide covering .gitlab-ci.yml syntax, DAG mode, environments, review apps, and Auto DevOps." },
     { label: "Continuous Delivery by Jez Humble and David Farley", kind: "book", note: "The foundational text on deployment pipelines, build automation, and release engineering practices." },
     { label: "SLSA (Supply-chain Levels for Software Artifacts)", kind: "docs", note: "Framework for end-to-end software supply chain integrity, including build provenance and verification." },
     { label: "Fireship: CI/CD in 100 Seconds", kind: "video", note: "Quick visual overview of CI/CD pipeline concepts, ideal as a refresher before diving into platform-specific details." },

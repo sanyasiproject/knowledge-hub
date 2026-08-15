@@ -478,15 +478,15 @@ async function streamCompletion(): Promise<void> {
 
   resources: [
     {
-      label: "Attention Is All You Need — Vaswani et al., 2017",
+      label: "Attention Is All You Need — Vaswani et al., 2017", url: "https://arxiv.org/abs/1706.03762",
       kind: "paper",
     },
     {
-      label: "The Illustrated Transformer — Jay Alammar",
+      label: "The Illustrated Transformer — Jay Alammar", url: "https://jalammar.github.io/illustrated-transformer/",
       kind: "article",
     },
     {
-      label: "Anthropic documentation — prompt engineering and tool use",
+      label: "Anthropic documentation — prompt engineering and tool use", url: "https://docs.anthropic.com/",
       kind: "docs",
     },
   ],

@@ -365,7 +365,7 @@ rank deficient"]`,
     "det(2×2) = ad − bc; A⁻¹ = (1/det)[[d,−b],[−c,a]]",
   ],
   resources: [
-    { label: "3Blue1Brown — Essence of Linear Algebra", kind: "video", note: "Best visual intuition for what matrices and vectors really do geometrically." },
+    { label: "3Blue1Brown — Essence of Linear Algebra", url: "https://www.3blue1brown.com/", kind: "video", note: "Best visual intuition for what matrices and vectors really do geometrically." },
     { label: "MIT 18.06 — Linear Algebra (Gilbert Strang)", kind: "video", note: "Full university course; the gold standard for rigorous yet accessible treatment." },
     { label: "Linear Algebra Done Right — Sheldon Axler", kind: "book", note: "Proof-oriented, avoids determinants until the end. Great for deep understanding." },
     { label: "NumPy Linear Algebra documentation", kind: "docs", note: "Reference for np.linalg — eigenvalues, SVD, solve, norm, etc." },

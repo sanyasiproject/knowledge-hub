@@ -420,10 +420,10 @@ get(Pid) ->
   resources: [
     { label: "Node.js Event Loop Documentation", kind: "docs", note: "Official guide explaining event loop phases, microtasks, and I/O polling." },
     { label: "The Go Blog: Go Concurrency Patterns", kind: "article", note: "Covers goroutines, channels, select, and common patterns like fan-in/fan-out." },
-    { label: "JEP 444: Virtual Threads (Project Loom)", kind: "docs", note: "The specification for Java virtual threads, including design rationale and limitations." },
+    { label: "JEP 444: Virtual Threads (Project Loom)", url: "https://openjdk.org/jeps/444", kind: "docs", note: "The specification for Java virtual threads, including design rationale and limitations." },
     { label: "Learn You Some Erlang for Great Good", kind: "book", note: "Comprehensive Erlang tutorial covering the actor model, OTP, and supervision trees." },
     { label: "Netty in Action by Norman Maurer", kind: "book", note: "Deep dive into the reactor pattern and non-blocking I/O with Netty." },
-    { label: "Designing Data-Intensive Applications, Ch. 11", kind: "book", note: "Martin Kleppmann covers stream processing, event-driven architectures, and concurrency." },
+    { label: "Designing Data-Intensive Applications, Ch. 11", url: "https://dataintensive.net/", kind: "book", note: "Martin Kleppmann covers stream processing, event-driven architectures, and concurrency." },
   ],
   glossary: [
     { term: "Context switch", definition: "The process of saving the state of a running thread/process and restoring another. OS-level context switches are expensive (~1-10 microseconds); user-space switches (goroutines, virtual threads) are cheap (~100 nanoseconds)." },

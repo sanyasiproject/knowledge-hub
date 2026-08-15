@@ -529,10 +529,10 @@ GET /_cat/recovery/products-split?v&h=index,shard,stage,bytes_percent`
     "Your cluster has a *single master-eligible node* and you need to add two more to prevent **split brain**. Describe the configuration changes in `elasticsearch.yml` for each node, explain how the *voting configuration* is automatically updated, and verify the setup using `GET /_cat/nodes?v&h=name,role`.",
   ],
   resources: [
-    { label: "Elasticsearch Cluster Administration documentation", kind: "docs", note: "Official guide covering cluster settings, shard allocation, and node configuration" },
-    { label: "Elasticsearch: The Definitive Guide - Cluster chapter", kind: "book", note: "Comprehensive explanation of cluster architecture, shard allocation, and scaling" },
+    { label: "Elasticsearch Cluster Administration documentation", url: "https://www.elastic.co/guide/index.html", kind: "docs", note: "Official guide covering cluster settings, shard allocation, and node configuration" },
+    { label: "Elasticsearch: The Definitive Guide - Cluster chapter", url: "https://www.elastic.co/guide/index.html", kind: "book", note: "Comprehensive explanation of cluster architecture, shard allocation, and scaling" },
     { label: "Elastic Blog: Sizing Elasticsearch Shards", kind: "article", note: "Official guidance on shard sizing, including benchmarks and formulas for capacity planning" },
-    { label: "Elasticsearch ILM documentation", kind: "docs", note: "Complete reference for Index Lifecycle Management policies, phases, and actions" },
+    { label: "Elasticsearch ILM documentation", url: "https://www.elastic.co/guide/index.html", kind: "docs", note: "Complete reference for Index Lifecycle Management policies, phases, and actions" },
     { label: "Elastic Blog: A New Era for Cluster Coordination in Elasticsearch", kind: "article", note: "Deep technical explanation of the ES 7.0 cluster coordination layer that replaced zen discovery" },
     { label: "Elastic Blog: Searchable Snapshots", kind: "article", note: "Architecture and performance characteristics of searchable snapshots for cold and frozen tiers" }
   ],

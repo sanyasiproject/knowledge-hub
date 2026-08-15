@@ -350,7 +350,7 @@ Shared State)]
   resources: [
     { label: "Stripe Rate Limiting Blog Post", kind: "article", note: "Detailed walkthrough of Stripe's rate limiting architecture using token bucket." },
     { label: "Redis Rate Limiting Pattern", kind: "docs", note: "Official Redis documentation on rate limiting with INCR and Lua scripts." },
-    { label: "IETF RateLimit Header Fields (Draft)", kind: "docs", note: "Draft standard for rate limit response headers (RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset)." },
+    { label: "IETF RateLimit Header Fields (Draft)", url: "https://raft.github.io/raft.pdf", kind: "docs", note: "Draft standard for rate limit response headers (RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset)." },
     { label: "System Design Interview Rate Limiter Chapter", kind: "book", note: "Alex Xu's System Design Interview covers rate limiter design in depth." },
   ],
   glossary: [

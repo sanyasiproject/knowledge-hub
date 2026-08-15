@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
 import { domainsByGroup, hubStats } from "../data/taxonomy";
 import { StatusBadge } from "../components/ui/primitives";
-import { interviewStats } from "../interview";
-import { TRACKS } from "../interview/tracks";
+import { INTERVIEW_META, TRACK_LINKS } from "../interview/meta";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 /* ---- Group accent colours -------------------------------------------------------- */
 const GROUP_ACCENT: Record<string, { border: string; bg: string; icon: string }> = {
@@ -36,7 +36,7 @@ const LEVEL_CHIP: Record<string, string> = {
 export function Home() {
   const groups = domainsByGroup();
   const stats = hubStats();
-  const interviewCounts = interviewStats();
+  usePageTitle();
 
   return (
     <>
@@ -142,7 +142,7 @@ export function Home() {
             { icon: "🗂️", value: stats.domains,    label: "Domains",    sub: "broad knowledge areas" },
             { icon: "📂", value: stats.categories, label: "Categories", sub: "focused topic clusters" },
             { icon: "📄", value: `${stats.topics}+`, label: "Topics",  sub: "individual concept pages" },
-            { icon: "🔖", value: "17",              label: "Sections",  sub: "per topic, structured" },
+            { icon: "🎤", value: `${INTERVIEW_META.questions}`, label: "Interview Q&A", sub: "model answers to revise" },
           ].map((s) => (
             <div
               key={s.label}
@@ -169,12 +169,12 @@ export function Home() {
                 </span>
               </div>
               <p className="max-w-2xl text-sm text-slate-600 dark:text-slate-300">
-                Interview soon and no time to read the hub? {interviewCounts.questions} model answers,{" "}
-                {interviewCounts.decisions} "why X over Y" decision tables, and the traps that lose
+                Interview soon and no time to read the hub? {INTERVIEW_META.questions} model answers,{" "}
+                {INTERVIEW_META.decisions} "why X over Y" decision tables, and the traps that lose
                 offers — organised into revision plans sized to the time you actually have.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
-                {TRACKS.map((t) => (
+                {TRACK_LINKS.map((t) => (
                   <Link
                     key={t.slug}
                     to={`/interview/track/${t.slug}`}
@@ -196,7 +196,7 @@ export function Home() {
 
         {/* ── What you get strip ─────────────────────────────────────────────── */}
         <section className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-6 dark:border-slate-800 dark:from-slate-900 dark:to-slate-900/60">
-          <h2 className="mb-5 text-xs font-bold uppercase tracking-widest text-slate-400">Every topic includes</h2>
+          <h2 className="mb-5 text-xs font-bold uppercase tracking-widest text-slate-400">What topics include (where relevant)</h2>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {[
               { icon: "📖", title: "Learn",      items: ["Quick Summary", "Detailed Explanation", "Deep Dive", "Code & Examples"] },

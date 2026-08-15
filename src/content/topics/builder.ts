@@ -568,7 +568,7 @@ private:
       note: "Original Builder pattern with the Director role and multiple concrete builders.",
     },
     {
-      label: "Refactoring Guru - Builder Pattern",
+      label: "Refactoring Guru - Builder Pattern", url: "https://refactoring.guru/",
       kind: "article",
       note: "Visual guide with step-by-step UML and code examples in Java, Python, TypeScript, and more.",
     },

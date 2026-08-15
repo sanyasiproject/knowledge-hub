@@ -249,8 +249,8 @@ SELECT name FROM terminated_employees;`
   resources: [
     { label: "A Relational Model of Data for Large Shared Data Banks — E.F. Codd (1970)", kind: "paper", note: "The foundational paper that introduced the relational model." },
     { label: "Database System Concepts — Silberschatz, Korth, Sudarshan", kind: "book", note: "Comprehensive textbook covering relational theory and implementation." },
-    { label: "Designing Data-Intensive Applications — Martin Kleppmann", kind: "book", note: "Chapter 2 covers data models and query languages." },
-    { label: "PostgreSQL Documentation — Data Definition", kind: "docs", note: "Practical reference for creating relational schemas." },
+    { label: "Designing Data-Intensive Applications — Martin Kleppmann", url: "https://dataintensive.net/", kind: "book", note: "Chapter 2 covers data models and query languages." },
+    { label: "PostgreSQL Documentation — Data Definition", url: "https://www.postgresql.org/docs/current/", kind: "docs", note: "Practical reference for creating relational schemas." },
   ],
   glossary: [
     { term: "Relation", definition: "A table — a set of tuples with a common set of attributes." },

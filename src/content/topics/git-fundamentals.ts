@@ -411,11 +411,11 @@ git cherry-pick def5678`,
 
   resources: [
     {
-      label: "Pro Git — Chacon & Straub (free online)",
+      label: "Pro Git — Chacon & Straub (free online)", url: "https://git-scm.com/book",
       kind: "book",
     },
     {
-      label: "Git reference documentation",
+      label: "Git reference documentation", url: "https://git-scm.com/docs",
       kind: "docs",
     },
   ],

@@ -1,8 +1,10 @@
 import { Link } from "react-router-dom";
 import { LEARNING_PATHS } from "../data/learningPaths";
 import { Card } from "../components/ui/primitives";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 export function LearningPaths() {
+  usePageTitle("Learning Paths");
   return (
     <div className="mx-auto max-w-5xl">
       <header className="mb-8">

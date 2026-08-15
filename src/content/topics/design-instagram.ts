@@ -9,17 +9,22 @@ export const designInstagram: TopicContent = {
     "The Explore/Discovery service uses collaborative filtering and content-based signals (image embeddings from CNNs, engagement velocity, hashtag co-occurrence) to recommend posts from accounts a user does not follow, driving ~50% of new account discovery.",
   ],
   detailed: [
-    "## Requirements and Scale Estimation\n\nInstagram must support core features: photo/video upload with filters, stories (24h ephemeral media), a personalized home feed, explore/discovery, direct messaging, likes, comments, and follow/unfollow. Non-functional requirements include sub-200ms feed load time, 99.99% availability, eventual consistency (a post appearing a few seconds late is acceptable), and global reach with low latency across continents. Scale estimation: with 2B MAU and ~500M DAU, assume 10 feed views per user per day yielding 5B feed reads/day (~58K read QPS). Photo uploads: 100M/day (~1,150 uploads/sec). Average photo size after compression is ~200KB, so daily ingestion is ~20TB of raw photo data, plus 3x for resized variants (~60TB/day). Stories: 500M/day at ~500KB average = ~250TB/day, but with 24h TTL the steady-state storage is bounded. The read-to-write ratio is roughly 100:1, making caching critical.",
-    "## Photo Upload Pipeline and Storage Architecture\n\nWhen a user uploads a photo, the client sends the image to an upload service behind a load balancer. The upload service assigns a globally unique photo ID (Snowflake-style: timestamp + datacenter + sequence), writes the original to a temporary staging bucket, and enqueues a processing job. The media processing pipeline runs asynchronously: it applies the selected filter, resizes the image into multiple resolutions (150px thumbnail, 640px feed, 1080px full), strips EXIF metadata for privacy, and writes all variants to the permanent object store (S3 or equivalent). Metadata (photo ID, owner, caption, hashtags, dimensions, creation time, storage keys) is written to a sharded MySQL or PostgreSQL database. Consistent hashing maps photo IDs to storage shards, ensuring balanced distribution and minimal data movement when shards are added or removed. A CDN (CloudFront, Akamai) caches photos at edge locations worldwide; cache hit rates exceed 95% for popular content. Failure handling: if processing fails, the job is retried from the staging bucket with exponential backoff; idempotency keys prevent duplicate posts.",
-    "## Feed Generation: Hybrid Fan-Out with Ranking\n\nThe home feed combines a push and pull model. When a regular user (fewer than ~10K followers) publishes a post, a fan-out service reads their follower list from the social graph and inserts the post ID into each follower's feed cache (a Redis sorted set scored by timestamp). For celebrity accounts (more than 10K followers), no fan-out occurs at write time. At read time, the feed service retrieves the precomputed feed from Redis, then fetches recent posts from any followed celebrity accounts, merges the two lists, and applies a ranking model. The ranking model considers recency (exponential time decay), engagement signals (like/comment/save velocity in the first hour), relationship strength (how often the viewer interacts with the author via likes, DMs, profile visits), and content-type affinity (users who engage more with Reels see more video). The ranker produces a final score for each candidate and returns the top 50 for the first page. Cursor-based pagination allows infinite scrolling without duplicates. The entire read path targets a p99 latency under 200ms, achieved through aggressive caching and pre-ranking.",
-    "## Social Graph, Stories, and Explore\n\nThe social graph (who follows whom) is stored in a dedicated graph service backed by a sharded adjacency list (MySQL or TAO-style graph store). Each edge stores followerId, followeeId, and timestamp. The graph supports two fast queries: 'who does user X follow' (used for feed fan-out on read and suggestions) and 'who follows user X' (used for fan-out on write and follower counts). Both directions are indexed. Stories are stored separately from posts: each story has a TTL of 24 hours and is kept in a time-partitioned store. When a user opens the stories tray, the client fetches the list of followed users who have unexpired stories (a Redis set per user, entries auto-expire via TTL). Story media is served from the CDN with aggressive caching since stories are hot content viewed by many users in a short window. The Explore page uses a recommendation engine that combines collaborative filtering (users who liked similar posts), content embeddings (CNN-extracted feature vectors from images), engagement velocity (posts gaining likes rapidly), and diversity constraints (avoid showing too many posts from one category). The Explore service precomputes candidate pools periodically and re-ranks them in real time per user request.",
-    "## Reliability, Consistency, and Operational Concerns\n\nInstagram favors availability over strict consistency (AP in CAP terms). A new post may take a few seconds to appear in all followers' feeds, and like counts are eventually consistent. Data is replicated across multiple datacenters with asynchronous replication; in the rare event of a datacenter failure, traffic is rerouted to surviving regions. The photo pipeline uses idempotent operations: re-processing an upload produces the same output, so retries are safe. Rate limiting protects against spam and abuse: per-user upload limits (e.g., 100 photos/day), per-IP request limits, and per-account API rate limits. Monitoring tracks key metrics: upload success rate, feed load p50/p99 latency, CDN cache hit ratio, fan-out lag, and storage growth rate. Capacity planning uses the daily ingestion rate (~60TB photos, ~250TB stories) to project storage needs and trigger shard splits or new node provisioning. Database schema changes are performed online using tools like pt-online-schema-change or gh-ost to avoid downtime on tables with billions of rows.",
+    "## Requirements: What You Are Actually Building\n\nInstagram is a read-heavy, media-heavy social platform, and every design decision follows from that. Functional requirements: photo/video upload with filters, stories (24h ephemeral media), a personalized home feed, explore/discovery, direct messaging, likes, comments, follow/unfollow, and search over users and hashtags. Non-functional requirements: sub-200ms p99 feed load, 99.99% availability, eventual consistency (a post appearing in followers' feeds a few seconds late is acceptable — a lost photo is not), durability of media (11 nines via object storage), and global low latency.\n\nKey insight: the read-to-write ratio is roughly 100:1, so the system is designed around caching and precomputation — you pay extra work at write time (fan-out, renditions) to make reads nearly free.\n\nCommon mistake: jumping straight to the feed algorithm without pinning down NFRs. Interviewers want to hear that media durability is non-negotiable while feed freshness is negotiable; that asymmetry justifies the async architecture.",
+    "## Capacity Estimation: Do the Arithmetic Out Loud\n\nAlways derive QPS, storage, and bandwidth from a small set of stated assumptions — the numbers below are the ones the rest of this design references.\n\n- **Users:** 2B MAU, 500M DAU.\n- **Write QPS:** 100M photo uploads/day / 86,400 s ≈ **1,160 uploads/sec average**; assume a 3x peak factor → **~3,500 uploads/sec peak**. Likes/comments add ~10x that in tiny metadata writes.\n- **Read QPS:** 500M DAU × 10 feed loads/day = 5B feed reads/day ≈ **58K feed QPS average, ~175K peak**. Each feed page also triggers 10-20 CDN media fetches.\n- **Storage per photo:** ~2MB original + renditions (1080px ~500KB, 640px ~300KB, 150px thumbnail ~20KB) ≈ **~3MB total per photo**.\n- **Storage growth:** 100M/day × 3MB = **~300TB/day ≈ 110PB/year** of new media. With erasure coding (1.5x overhead) that is ~165PB/year raw; with naive 3x replication it would be 330PB/year — which is why large object stores use erasure coding.\n- **Metadata:** ~1KB per post × 100M/day ≈ 100GB/day — trivially small next to media, which is why metadata and blobs live in different systems.\n- **Egress bandwidth:** 500M DAU × 20 photos viewed × ~300KB rendition ≈ 3PB/day ≈ **~280Gbps average, ~800Gbps peak**. At a 95% CDN hit rate, origin (S3) egress drops to ~15-40Gbps — the CDN is what makes the bandwidth bill and the origin load survivable.\n- **Cache sizing (80/20 rule):** 20% of content serves ~80% of reads. Feed cache: 500M active users × 800 post IDs × ~60B per Redis sorted-set entry ≈ **~24TB**, sharded across ~100 Redis nodes at 256GB each. Hot metadata cache: 20% of a day's posts × 1KB ≈ 20GB — fits in a handful of nodes.\n\nIn practice: interviewers care less about the exact numbers than that your arithmetic is visible and your conclusions follow from it — 'media dwarfs metadata, reads dwarf writes, therefore object store + CDN + precomputed feeds.'",
+    "## Component Choices: Name Real Technology and Say Why\n\nEach component maps to a concrete, defensible technology choice. **PostgreSQL (sharded by user ID)** stores users, follows, and post metadata: relational integrity for the social graph, secondary indexes for lookups, and mature online-schema-change tooling. **Cassandra** stores feed timelines and activity streams: it is write-optimized (LSM trees), partitions naturally by user ID, and tolerates the eventual consistency the feed already accepts — a perfect fit for billions of small time-ordered writes from fan-out. **S3** holds originals and renditions: 11-nines durability, effectively infinite capacity, and presigned URLs let clients upload directly without proxying bytes through app servers. **Redis Cluster** holds precomputed feeds as sorted sets (ZADD/ZREVRANGE give O(log N) inserts and fast top-K reads) plus sessions and hot metadata. **Kafka** is the async backbone: an upload emits one durable post-created event that independently drives media processing, fan-out, notifications, and search indexing — consumers can lag or replay without affecting the upload path. **Elasticsearch** powers hashtag/user search with inverted indexes and prefix (edge n-gram) matching for typeahead. **CloudFront/Akamai** serve all media from the edge. **Envoy/ALB + an API gateway** terminate TLS and enforce auth (OAuth2/JWT) and per-user rate limits before traffic reaches services.\n\nKey insight: the pattern to articulate is polyglot persistence — each store is chosen for its access pattern (relational graph → Postgres, append-heavy timelines → Cassandra, blobs → S3, top-K reads → Redis, full-text → Elasticsearch), not one database stretched to do everything.",
+    "## Photo Upload Pipeline: One Photo, End to End\n\nTrace a single upload — user posts a 2MB beach photo — and every layer of the write path shows up in order. (1) The client calls POST /v1/media/uploads through the load balancer and API gateway (auth + rate-limit check); the upload service generates a Snowflake-style photo ID (41-bit timestamp + shard + sequence) and returns a presigned S3 URL. (2) The client PUTs the 2MB original directly to S3 — app servers never touch the bytes. (3) The client confirms; the upload service writes the metadata row (photo ID, owner, caption, hashtags, storage key, state=PROCESSING) to sharded Postgres and publishes a post-created event to Kafka. Total synchronous work: one ID, one DB row, one Kafka publish — a few milliseconds. (4) Media workers consume the event: resize into 1080px/640px/150px renditions, strip EXIF for privacy, run moderation checks, write renditions to S3 under content-hashed keys, and flip the row to READY. (5) Fan-out workers consume the same event, read the follower list from the graph service, and ZADD the post ID into each active follower's Redis feed (persisting to Cassandra as the durable copy). (6) Notification workers send pushes to close friends. The first follower to view the photo pulls the 640px rendition through the CDN (pull-through cache miss → S3 → cached at the edge for everyone nearby).\n\nCommon mistake: routing image bytes through the API servers. At 3,500 uploads/sec × 2MB that is ~7GB/s of pointless proxy traffic; presigned direct-to-S3 upload removes it entirely.\n\nWarning: every async step must be idempotent (keyed by photo ID) — Kafka is at-least-once, so workers will occasionally see the same event twice.",
+    "## Feed Read Path: One Feed Load, End to End\n\nTrace a feed load the same way — a user opens the app and the response must be back in under 200ms. (1) GET /v1/feed?cursor=... hits the gateway (auth, rate limit) and lands on the feed service. (2) The feed service issues ZREVRANGE feed:{userId} against Redis — one O(log N + K) read returning ~500 precomputed post IDs (~5ms). On a cache miss (evicted or new device region) it rebuilds from the Cassandra timeline table. (3) In parallel it asks the graph service which followed accounts are celebrities (typically under 20) and fetches their recent post IDs directly — this is the fan-out-on-read half of the hybrid. (4) Merged candidates (~500) go to the ranking service, which scores them with a multi-task DNN using precomputed features from the feature store (~50ms budget). (5) The top 50 post IDs are hydrated from the hot-metadata cache (fallback: Postgres) into full objects with CDN URLs. (6) The response returns IDs, captions, counts, and rendition URLs — never bytes; the client fetches images from the CDN as the user scrolls. Latency budget: gateway 5ms + Redis 5ms + celebrity fetch 15ms + ranking 50ms + hydration 20ms + serialization/network ≈ **p99 under 200ms**.\n\nKey insight: the feed API is a metadata service. Separating the control plane (IDs and URLs from the feed service) from the data plane (bytes from the CDN) is what lets each scale independently.",
+    "## Social Graph, Stories, and Explore\n\nThe social graph (who follows whom) is stored in a dedicated graph service backed by a sharded adjacency list (Postgres or a TAO-style graph store). Each edge stores followerId, followeeId, and timestamp. The graph supports two fast queries: 'who does user X follow' (used for feed fan-out on read and suggestions) and 'who follows user X' (used for fan-out on write and follower counts) — both directions indexed, which effectively means writing each edge twice. Stories are stored separately from posts: each story has a TTL of 24 hours and is kept in a time-partitioned store (hourly partitions dropped wholesale after 25 hours). When a user opens the stories tray, the client fetches the list of followed users who have unexpired stories via a Redis presence set with TTL — intersect the following list with the set instead of scanning everyone. Story media is served from the CDN with aggressive caching since stories are hot content viewed by many users in a short window. The Explore page uses a recommendation engine combining collaborative filtering (users who liked similar posts), content embeddings (CNN-extracted feature vectors), engagement velocity, and diversity constraints; candidate pools are precomputed offline and re-ranked in real time per request.\n\nFor example, when a user with 800 followers posts a story, one S3 write plus one SADD into the presence set is all that happens synchronously — the 800 followers discover it lazily when they open the tray.",
+    "## Reliability, Consistency, and Operational Concerns\n\nInstagram favors availability over strict consistency (AP in CAP terms). A new post may take a few seconds to appear in all followers' feeds, and like counts are eventually consistent; only the user's own actions must read-your-writes (route the author's reads to the primary or patch their feed locally). Data is replicated across multiple regions with asynchronous replication; on a regional failure, traffic reroutes to surviving regions and Kafka consumers replay from committed offsets. The photo pipeline is idempotent end to end: reprocessing an upload produces identical renditions under the same content-hashed keys, so retries with exponential backoff are always safe. Rate limiting protects against abuse: per-user upload caps, per-IP limits, and per-token API quotas enforced at the gateway. Monitoring tracks upload success rate, feed p50/p99, CDN hit ratio, Kafka consumer lag (fan-out lag is the user-visible 'my post isn't showing' metric), and storage growth against the ~300TB/day projection to trigger shard splits ahead of need. Schema changes on billion-row tables run online via gh-ost or pt-online-schema-change.\n\nIn practice: the single most-watched dashboard is Kafka consumer lag per group — it is the earliest signal that fan-out, media processing, or notifications are falling behind user expectations.",
   ],
   deepDive: [
+    "Fan-out on write versus fan-out on read is the central trade-off of this design, and the numbers decide it. Fan-out on write for an average user (200 followers) costs 200 Redis ZADDs per post — at 1,160 posts/sec that is ~230K cache writes/sec, cheap and easily sharded, and it buys a single-read feed load. The same strategy for a 50M-follower celebrity costs 50M writes per post; at 100K writes/sec of fan-out throughput that is over 8 minutes of lag and ~3TB of duplicated post-ID entries for one photo. Pure fan-out on read flips the cost: a user following 500 accounts would trigger 500 timeline fetches plus a merge on every feed load — hundreds of milliseconds at 58K QPS. The hybrid takes the cheap side of each: push for authors under ~10K followers (over 99.9% of accounts), pull at read time for the handful of celebrities a user follows (typically under 20 extra fetches, ~15ms in parallel).\n\nKey insight: the ~10K threshold is not magic — it is the point where fan-out latency (followers / fan-out throughput) exceeds the freshness SLO. State the formula, not just the number.\n\nCommon mistake: forgetting the transition case. When an account crosses the threshold mid-flight, keep double-writing briefly (push and pull both work — duplicates are deduped at merge), then stop the push side; going the other way, backfill the celebrity's recent posts into follower feeds lazily.\n\nIn practice: fan-out also skips followers inactive for 30+ days (often 40-50% of edges) and rebuilds their feed from Cassandra on their next visit — a huge write saving for zero user-visible cost.",
+    "The media storage strategy rests on three decisions: presigned direct uploads, immutable content-addressed renditions, and a CDN that never needs invalidation. Uploads: the API returns a short-lived presigned S3 URL so the client PUTs bytes straight to object storage — app servers handle only metadata, and a 2MB × 3,500/sec peak (~7GB/s) of image traffic never touches them; multipart upload handles videos and flaky mobile networks with resumable parts. Renditions: workers generate each size once (1080/640/150px, WebP/AVIF where the client supports it) and store it under a key derived from the content hash plus rendition name, e.g. media/ab/cd/abcd1234.../640.webp. Because keys are content-addressed, the same URL can never serve two different images — so CDN objects are immutable and get Cache-Control: public, max-age=31536000, immutable. 'Invalidation' is therefore not cache purging but pointer swapping: an edit produces new keys and updates the metadata row; the old objects age out. The only true purges are takedowns (DMCA, moderation), handled by the CDN's purge-by-URL API plus a 404 at origin.\n\nKey insight: immutable, content-hashed media keys convert the hardest CDN problem (invalidation) into a metadata update — this is the single highest-leverage trick in media serving.\n\nWarning: presigned URLs must be scoped (single key, content-length-range, short expiry) and the metadata row must only flip to READY after the service verifies the object exists and passes moderation — otherwise clients can publish unscanned bytes.",
     "Consistent hashing is fundamental to Instagram's storage layer. Rather than using simple modular hashing (photoId % N), which would require rehashing nearly all keys when a node is added or removed, consistent hashing maps both photo IDs and storage nodes onto a virtual ring. Each physical node is assigned multiple virtual nodes (typically 100-200) to ensure even distribution. When a photo needs to be stored, its hash is computed and the ring is traversed clockwise to find the first virtual node; the physical node owning that virtual node stores the photo. When a node fails, only the keys mapped to that node are redistributed to the next node on the ring, affecting roughly 1/N of the data. Instagram uses this for both its object storage distribution and its database sharding, with shard-aware routing in the application layer. The virtual node count is tuned to balance load variance against routing table size: too few virtual nodes cause hotspots, too many increase memory usage in the routing table. In practice, with 200 virtual nodes per physical node and a good hash function (MurmurHash3 or xxHash), the load imbalance is under 5%.",
     "Feed ranking at Instagram's scale requires a multi-stage pipeline to keep latency low while evaluating thousands of candidate posts. The first stage is candidate generation: the precomputed feed (from fan-out on write) plus celebrity posts (fetched on read) yield a raw candidate set of ~500 posts. The second stage is a lightweight pre-ranker that applies a simple linear model to reduce the set to ~150 candidates, filtering out low-quality or duplicate content. The third stage is the heavy ranker: a deep neural network (typically a multi-task model predicting probability of like, comment, save, and share) scores each candidate. Feature inputs include user-post interaction history, post age, author engagement rate, image embedding similarity to the user's interest profile, and time-of-day patterns. The final stage applies business rules: diversity constraints (no more than 2 consecutive posts from the same author), freshness guarantees (at least 30% of feed items should be from the last 6 hours), and ads interleaving. The entire pipeline runs in under 100ms by pre-computing features in a feature store (Redis + Flink) and serving the model via a low-latency inference service (TensorFlow Serving or equivalent).",
     "The stories infrastructure presents unique challenges compared to the permanent photo graph. Stories have a strict 24-hour TTL, which means the storage system must efficiently expire and garbage-collect billions of objects daily. Instagram uses a time-partitioned storage scheme: stories created in each hour are stored in a dedicated partition, and entire partitions are dropped after 25 hours (the extra hour provides a buffer). The stories tray (the row of circles at the top of the app) must load in under 100ms, which requires knowing which of the user's followed accounts have active stories without scanning all of them. This is solved with a Redis-backed presence set: when a user posts a story, their user ID is added to a set with a 24h TTL. When loading the tray, the app intersects the viewer's following list with the presence set. Story viewing order is ranked by relationship strength and recency. Stories also support interactive elements (polls, questions, quizzes) which require real-time aggregation of responses; these are handled by a separate real-time counting service using Redis HyperLogLog for unique viewer counts and sorted sets for poll tallies.",
     "Instagram's Explore and Discovery system must recommend posts from accounts a user does not follow, which is fundamentally different from the home feed. The system operates on an item-to-item collaborative filtering model combined with content understanding. First, a set of seed accounts is identified: accounts similar to those the user already follows (based on co-follow patterns and interaction overlap). Posts from these seed accounts, plus posts with high engagement velocity (viral content), form the candidate pool of ~10K posts per user, refreshed every few hours. At request time, a real-time ranker scores each candidate using the same multi-task neural network as the feed ranker, but with additional features like topic diversity (the user should see posts from multiple interest categories), content novelty (avoid showing the same viral post repeatedly), and safety signals (demoting borderline content). Image understanding is powered by a CNN (ResNet or EfficientNet) that extracts a 2048-dimensional embedding vector for each photo; similar images cluster together in embedding space, enabling visual similarity recommendations. Hashtag co-occurrence graphs provide additional topic signals. The Explore page is one of Instagram's most computationally expensive features, requiring a dedicated cluster of GPU-equipped inference servers.",
+    "Hot partitions are the classic failure mode of storing feeds and activity in Cassandra, and interviewers probe for it. The natural schema — PRIMARY KEY ((user_id), created_at DESC) — puts each user's whole timeline on one partition. Two things break it: unbounded growth (a 5-year-old active account accumulates hundreds of thousands of rows, and Cassandra partitions degrade badly past ~100MB) and celebrity-adjacent hotspots (an activity table keyed by post_id melts when one post gets 10M likes in an hour, because every write and read hammers the same replica set). The fixes are mechanical once you know them. First, bucket the partition key by time: PRIMARY KEY ((user_id, day_bucket), created_at DESC) caps partition size and lets reads walk buckets newest-first until the page fills. Second, for genuinely hot keys, add a salt: key by (post_id, shard) with shard = hash(actor) % 16, spreading one logical partition across 16 physical ones; readers fan in across the 16 shards, which is fine because hot keys are read through a cache anyway. Third, absorb like/view counters in Redis and flush aggregated deltas to Cassandra every few seconds instead of writing per-event.\n\nReal-world example: Discord's messages table went through exactly this evolution — channel_id alone created giant hot partitions, and they moved to (channel_id, bucket) with time buckets to bound partition size.\n\nCommon mistake: proposing 'just add more nodes.' A hot partition lives on one replica set regardless of cluster size; only changing the key shape (buckets, salts) or absorbing writes upstream (cache, batching) actually spreads the load.",
   ],
   code: [
     {
@@ -276,44 +281,82 @@ public:
       title: "Instagram High-Level Architecture",
       kind: "architecture",
       caption:
-        "End-to-end architecture showing the photo upload pipeline, feed generation, and content serving paths.",
-      mermaid: `graph LR
-    Client[Mobile Client]
-    LB[Load Balancer]
-    UploadSvc[Upload Service]
-    MediaProc[Media Processing]
-    ObjStore[Object Storage S3]
-    CDN[CDN Edge Nodes]
-    FeedSvc[Feed Service]
-    FanOut[Fan-Out Service]
-    RedisCache[Redis Feed Cache]
-    Ranker[Ranking Service]
-    PostDB[(Post Database)]
-    GraphDB[(Social Graph DB)]
-    ExploreSvc[Explore Service]
-    MLInference[ML Inference]
+        "Layered end-to-end architecture. Edges numbered U1-U6 trace the photo upload hot path (client to S3 via presigned URL, metadata write, event emit); edges numbered R1-R9 trace the feed read hot path (Redis feed cache with Cassandra fallback, ranking, media from the CDN). Shared hops carry both labels; async fan-out and processing edges are unnumbered.",
+      mermaid: `graph TB
+    subgraph ClientsLayer["Clients"]
+        MobileApp["Mobile App<br/>iOS / Android"]
+        WebApp["Web Client"]
+    end
 
-    Client -->|upload| LB
-    LB --> UploadSvc
-    UploadSvc --> MediaProc
-    MediaProc --> ObjStore
-    ObjStore --> CDN
-    UploadSvc --> PostDB
-    UploadSvc --> FanOut
-    FanOut --> GraphDB
-    FanOut --> RedisCache
+    subgraph EdgeLayer["Edge"]
+        CDN["CDN for Media<br/>CloudFront / Akamai"]
+    end
 
-    Client -->|read feed| LB
-    LB --> FeedSvc
-    FeedSvc --> RedisCache
-    FeedSvc --> Ranker
-    Ranker --> MLInference
-    FeedSvc --> CDN
+    subgraph GatewayLayer["Gateway"]
+        LB["Load Balancer<br/>L7, e.g. Envoy / ALB"]
+        APIGW["API Gateway<br/>AuthN + Rate Limiting"]
+    end
 
-    Client -->|explore| LB
-    LB --> ExploreSvc
-    ExploreSvc --> MLInference
-    ExploreSvc --> PostDB`,
+    subgraph ServicesLayer["Services"]
+        UploadSvc["Upload Service<br/>presigned URLs, dedup"]
+        FeedSvc["Feed Service<br/>merge + paginate"]
+        UserSvc["User / Graph Service<br/>follows, profiles"]
+        NotifSvc["Notification Service<br/>APNs / FCM push"]
+        SearchSvc["Search Service<br/>hashtags, users"]
+    end
+
+    subgraph CacheLayer["Cache"]
+        FeedCache["Redis Cluster<br/>Feed Cache: sorted sets"]
+        SessionCache["Redis<br/>Sessions + Hot Metadata"]
+    end
+
+    subgraph AsyncLayer["Async"]
+        Kafka["Kafka<br/>post-created / media-uploaded events"]
+        FanoutWorkers["Fan-out Workers<br/>push post IDs to follower feeds"]
+        MediaWorkers["Media Processing Workers<br/>resize, thumbnail, transcode, EXIF strip"]
+    end
+
+    subgraph DataLayer["Data"]
+        Postgres["PostgreSQL, sharded<br/>Users + Post Metadata"]
+        Cassandra["Cassandra<br/>Feed + Activity Timelines"]
+        S3["S3 Object Storage<br/>Originals + Renditions"]
+        ES["Elasticsearch<br/>Hashtag + User Search Index"]
+    end
+
+    subgraph MLLayer["ML"]
+        Ranker["Feed Ranking Service<br/>multi-task DNN inference"]
+        ExploreML["Explore / Discovery<br/>embeddings + CF candidates"]
+    end
+
+    MobileApp -->|"U1. upload: request presigned URL"| LB
+    WebApp -->|"R1. GET /v1/feed"| LB
+    LB -->|"U2 / R2. route"| APIGW
+    APIGW -->|"U3. presign + create post"| UploadSvc
+    APIGW -->|"R3. authenticated read"| FeedSvc
+    APIGW --> UserSvc
+    APIGW --> SearchSvc
+    MobileApp -->|"U4. upload: PUT original bytes"| S3
+    UploadSvc -->|"U5. write metadata"| Postgres
+    UploadSvc -->|"U6. emit post-created"| Kafka
+    Kafka --> MediaWorkers
+    Kafka --> FanoutWorkers
+    Kafka --> NotifSvc
+    Kafka -->|"index posts + hashtags"| ES
+    MediaWorkers -->|"write renditions"| S3
+    FanoutWorkers -->|"read follower lists"| UserSvc
+    FanoutWorkers -->|"ZADD post IDs"| FeedCache
+    FanoutWorkers -->|"persist timeline"| Cassandra
+    FeedSvc -->|"R4. read: precomputed feed"| FeedCache
+    FeedSvc -->|"R5. cache-miss rebuild"| Cassandra
+    FeedSvc -->|"R6. hydrate post metadata"| Postgres
+    FeedSvc -->|"R7. score candidates"| Ranker
+    UserSvc --> Postgres
+    UserSvc --> SessionCache
+    SearchSvc --> ES
+    ExploreML --> ES
+    ExploreML --> Ranker
+    CDN -->|"R9. pull-through on miss"| S3
+    MobileApp -->|"R8. fetch media renditions"| CDN`,
     },
     {
       title: "Photo Upload and Processing Flow",
@@ -437,6 +480,30 @@ public:
         "How do you balance exploration vs exploitation in the ranking?",
       ],
     },
+    {
+      q: "Walk me through the capacity estimation for Instagram. What numbers matter and what do they imply?",
+      a: "Start from stated assumptions: 2B MAU, 500M DAU, 100M photo uploads/day, 10 feed loads per DAU per day. Write QPS: 100M / 86,400 ≈ 1,160 uploads/sec average, ~3,500/sec at a 3x peak. Read QPS: 5B feed reads/day ≈ 58K/sec average, ~175K peak — a ~100:1 read-to-write ratio. Storage: ~2MB original + ~1MB of renditions ≈ 3MB/photo → 300TB/day ≈ 110PB/year of new media, versus only ~100GB/day of metadata — which implies blobs in S3 with erasure coding and metadata in a sharded relational DB, never the reverse. Egress: 500M DAU × 20 views × 300KB ≈ 3PB/day ≈ 280Gbps average; at 95% CDN hit rate origin egress collapses to tens of Gbps, so the CDN is a load-bearing component, not an optimization. Cache: 500M users × 800 feed entries × ~60B ≈ 24TB of Redis, ~100 nodes. Each number should end in a design conclusion: reads dominate → precompute feeds; media dominates → separate control plane (metadata API) from data plane (CDN bytes).",
+      followUps: [
+        "How would the numbers change if video (Reels) became 50% of uploads?",
+        "At what DAU would the Redis feed cache stop being cost-effective?",
+      ],
+    },
+    {
+      q: "You store feed timelines in Cassandra. How do you avoid hot partitions?",
+      a: "Three techniques, applied in order of leverage. First, bound partition size with time buckets: instead of PRIMARY KEY ((user_id), created_at), use ((user_id, day_bucket), created_at DESC) so no partition grows past Cassandra's ~100MB comfort zone; reads walk buckets newest-first until the page fills. Second, salt genuinely hot keys: an activity partition keyed by post_id melts when one post receives 10M likes in an hour, so key by (post_id, hash(actor) % 16) to spread one logical partition across 16 physical ones and fan in on read — acceptable because hot data is served through a cache anyway. Third, absorb high-frequency counters upstream: increment like/view counts in Redis and flush aggregated deltas to Cassandra periodically rather than writing per event. The non-answer to call out explicitly: adding nodes does not help, because a single partition maps to one replica set no matter how large the cluster is — only reshaping the key or absorbing writes upstream spreads the load.",
+      followUps: [
+        "How do you pick the bucket granularity (hour vs day vs week)?",
+        "What are the read-path costs of salting, and when are they unacceptable?",
+      ],
+    },
+    {
+      q: "Why do clients upload photos via presigned URLs instead of through your API servers?",
+      a: "Bandwidth and blast radius. At ~3,500 uploads/sec peak × 2MB, proxying bytes through API servers means ~7GB/s of traffic that adds zero value — every byte would be read from a socket and written straight to S3, burning NIC capacity, memory buffers, and connection slots that should serve metadata requests. With presigned URLs the API only authenticates the user, generates a photo ID, and signs a short-lived, tightly scoped URL (single object key, content-length-range limit, minutes-long expiry); the client PUTs directly to S3, which is built for exactly this ingest. Failure isolation improves too: a spike in upload volume or a large-video surge cannot saturate the API tier. Two safeguards are mandatory: the metadata row starts in a PROCESSING state and only flips to READY after the service verifies the object exists, matches the expected size/type, and passes moderation — so a client cannot publish arbitrary bytes; and multipart presigned uploads give mobile clients resumability on flaky networks.",
+      followUps: [
+        "How do you clean up orphaned objects when a client uploads but never confirms?",
+        "How would you rate-limit presigned URL issuance to prevent storage abuse?",
+      ],
+    },
   ],
   mcqs: [
     {
@@ -521,6 +588,22 @@ public:
       front: "How does the Explore candidate generation work?",
       back: "Offline batch pipeline builds per-interest-cluster candidate pools of ~10K posts using collaborative filtering (co-like patterns), content CNN embeddings (2048-dim vectors), hashtag co-occurrence, and engagement velocity. Pools refresh every few hours.",
     },
+    {
+      front: "Derive Instagram's write and read QPS from first principles.",
+      back: "Writes: 100M uploads/day / 86,400s ≈ 1,160/s average, ~3,500/s at 3x peak. Reads: 500M DAU × 10 feed loads = 5B/day ≈ 58K/s average, ~175K/s peak. Read:write ≈ 100:1, which justifies precomputed feeds and heavy caching.",
+    },
+    {
+      front: "Why are media keys content-hashed, and what does that buy the CDN?",
+      back: "Keys like media/ab/cd/{contentHash}/640.webp can never serve two different images, so CDN objects are immutable with max-age=31536000. 'Invalidation' becomes a metadata pointer swap to new keys; explicit purges are needed only for takedowns.",
+    },
+    {
+      front: "Three fixes for a hot Cassandra partition, in order.",
+      back: "1) Time-bucket the partition key ((user_id, day_bucket)) to bound size. 2) Salt hot keys: (post_id, hash(actor) % 16), fan in on read. 3) Absorb counters in Redis and flush batched deltas. Adding nodes never fixes it — one partition lives on one replica set.",
+    },
+    {
+      front: "Why do uploads go direct to S3 via presigned URLs?",
+      back: "3,500 uploads/sec × 2MB ≈ 7GB/s that would otherwise pointlessly transit API servers. The API only signs a scoped, short-lived URL and writes metadata; the row flips to READY only after the object is verified and moderated.",
+    },
   ],
   exercises: [
     "Design the photo upload pipeline that handles 100M uploads/day. Draw the architecture for the synchronous upload path and asynchronous processing pipeline. Include failure handling, retry logic, and idempotency guarantees. Calculate the required number of processing workers given that each resize takes ~200ms.",
@@ -540,6 +623,10 @@ public:
     "Explore: offline candidate generation (collaborative filtering + CNN embeddings + hashtag graphs), online ranking (multi-task DNN), Bloom filter dedup, diversity constraints.",
     "Social graph: sharded adjacency list. Two indexes: followerId->followees (for feed reads) and followeeId->followers (for fan-out writes).",
     "Failure handling: idempotent uploads (dedup by photo ID), retry with exponential backoff, async processing decoupled from upload response. AP system (availability over consistency).",
+    "Capacity headline numbers: ~1,160 uploads/sec avg (3.5K peak), ~58K feed QPS avg (175K peak), ~3MB/photo with renditions -> ~300TB/day ~ 110PB/year media, ~280Gbps avg egress (95% from CDN), ~24TB Redis feed cache.",
+    "Tech per component: Postgres (users/graph/post metadata, sharded by user), Cassandra (feed + activity timelines, time-bucketed keys), S3 (originals + renditions, erasure coded), Redis Cluster (feeds as sorted sets), Kafka (post-created events), Elasticsearch (hashtag/user search), CloudFront/Akamai (media edge).",
+    "Uploads are presigned direct-to-S3: API issues scoped short-lived URL, client PUTs bytes, metadata row flips PROCESSING -> READY only after verification + moderation. Media keys are content-hashed and immutable -> CDN 'invalidation' is a metadata pointer swap; real purges only for takedowns.",
+    "Cassandra hot partitions: bucket keys by time ((user_id, day_bucket)), salt hot keys (post_id, hash(actor) % 16), absorb counters in Redis with batched flush. Adding nodes does NOT fix a hot partition.",
   ],
   cheatSheet: [
     "Photo ID generation: Snowflake = 41-bit timestamp + 10-bit datacenter/worker + 12-bit sequence. ~4K IDs/ms/worker.",
@@ -551,7 +638,12 @@ public:
     "Bloom filter sizing: m = -n*ln(p)/ln(2)^2, k = (m/n)*ln(2). 1B items at 1% FP = ~1.2GB.",
     "CDN cache: pull-through model. Cache-Control: public, max-age=604800 for photos. Purge API for takedowns.",
     "Explore pipeline latency budget: candidate fetch 20ms + pre-rank 10ms + heavy rank 50ms + dedup/diversity 10ms + response build 10ms = ~100ms.",
-    "Storage math: 100M photos/day x 200KB x 4 variants = ~80TB/day. 500M stories x 500KB = ~250TB/day (steady-state bounded by 24h TTL).",
+    "Storage math: 100M photos/day x ~3MB (2MB original + renditions) = ~300TB/day = ~110PB/year. 500M stories x 500KB = ~250TB/day (steady-state bounded by 24h TTL).",
+    "QPS math: 100M uploads / 86,400s = ~1,160/s avg, x3 peak = ~3,500/s. 500M DAU x 10 feed loads = 5B/day = ~58K/s avg, ~175K/s peak.",
+    "Egress math: 500M DAU x 20 views x 300KB = ~3PB/day = ~280Gbps avg; 95% CDN hit rate -> origin egress only tens of Gbps.",
+    "Redis feed cache sizing: 500M users x 800 entries x ~60B/entry = ~24TB -> ~100 nodes at 256GB.",
+    "Cassandra feed schema: PRIMARY KEY ((user_id, day_bucket), created_at DESC). Hot key salt: (post_id, hash(actor) % 16). Counters: Redis INCR + periodic batched flush.",
+    "Presigned upload flow: POST /media/uploads -> photo ID + scoped presigned URL (content-length-range, short expiry) -> client PUT to S3 -> confirm -> Kafka post-created -> workers write content-hashed renditions -> state READY.",
   ],
   glossary: [
     {
@@ -588,6 +680,31 @@ public:
       term: "Time-Partitioned Storage",
       definition:
         "A storage scheme where data is organized into partitions based on creation time (e.g., hourly buckets). Enables efficient bulk deletion of expired data by dropping entire partitions rather than scanning and deleting individual items.",
+    },
+    {
+      term: "Presigned URL",
+      definition:
+        "A time-limited, cryptographically signed URL that grants a client direct, scoped access to an object-storage operation (e.g., PUT one specific key with a size limit). Lets clients upload media straight to S3 without proxying bytes through application servers.",
+    },
+    {
+      term: "Rendition",
+      definition:
+        "A derived version of an uploaded media asset at a specific resolution or format (e.g., 150px thumbnail, 640px feed image, 1080px full, WebP/AVIF variants). Generated once by async workers and stored under immutable content-hashed keys.",
+    },
+    {
+      term: "Hot Partition",
+      definition:
+        "A partition in a distributed store (e.g., Cassandra) that receives disproportionate read or write traffic or grows unboundedly, overloading its replica set. Mitigated by time-bucketing partition keys, salting hot keys across shards, and absorbing counters in a cache.",
+    },
+    {
+      term: "Write Amplification (Fan-Out)",
+      definition:
+        "The multiplication of a single logical write into many physical writes — one celebrity post fanned out to 50M follower feeds is 50M cache writes. The hybrid feed model exists specifically to cap this cost.",
+    },
+    {
+      term: "Erasure Coding",
+      definition:
+        "A durability technique that splits data into fragments with parity so it survives node loss at ~1.5x storage overhead instead of 3x full replication. Standard for exabyte-scale object stores holding immutable media.",
     },
   ],
   animations: [
@@ -674,20 +791,23 @@ public:
     "How would you design the notification system that alerts users about likes, comments, follows, and story views at Instagram's scale?",
     "How would you implement a global search feature that allows users to search for accounts, hashtags, and locations in real time?",
     "How would you design an abuse detection system that identifies and removes spam accounts, fake engagement, and policy-violating content?",
+    "How would you evolve the feed storage if Cassandra partition sizes for very active users started degrading read latency?",
+    "How would you support editing a posted photo's caption and alt text with the CDN and immutable media keys in place?",
+    "How would you run this architecture active-active across three regions, and which components need conflict resolution?",
   ],
   resources: [
     {
-      label: "Designing Data-Intensive Applications by Martin Kleppmann",
+      label: "Designing Data-Intensive Applications by Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
       note: "Chapters on partitioning, replication, and stream processing are directly applicable to Instagram's architecture.",
     },
     {
-      label: "Instagram Engineering Blog: Scaling Instagram Infrastructure",
+      label: "Instagram Engineering Blog: Scaling Instagram Infrastructure", url: "https://instagram-engineering.com/",
       kind: "article",
       note: "First-party engineering posts covering Django migration, Cassandra usage, and feed delivery at scale.",
     },
     {
-      label: "System Design Interview by Alex Xu (Volume 1, Chapter 11: Design a News Feed System)",
+      label: "System Design Interview by Alex Xu (Volume 1, Chapter 11: Design a News Feed System)", url: "https://bytebytego.com/",
       kind: "book",
       note: "Covers the fan-out on write vs read trade-off with detailed calculations and diagrams applicable to Instagram's feed.",
     },
@@ -697,7 +817,7 @@ public:
       note: "Describes the graph storage system (TAO) used at Meta for the social graph, directly relevant to Instagram's follow relationships.",
     },
     {
-      label: "Consistent Hashing and Random Trees (Karger et al., 1997)",
+      label: "Consistent Hashing and Random Trees (Karger et al., 1997)", url: "https://www.cs.princeton.edu/courses/archive/fall09/cos518/papers/chash.pdf",
       kind: "paper",
       note: "The foundational paper on consistent hashing, essential reading for understanding Instagram's storage distribution strategy.",
     },

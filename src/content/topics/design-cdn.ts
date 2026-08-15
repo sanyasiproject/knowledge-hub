@@ -14,9 +14,15 @@ export const designCdn: TopicContent = {
 
     "## Routing: Anycast vs. GeoDNS\nRouting users to the optimal edge server is critical for performance. GeoDNS uses the client's DNS resolver IP to determine geographic location and returns the IP of the nearest PoP. This works well but has limitations: DNS resolvers may not be near the client (e.g., Google Public DNS), and DNS TTLs mean routing changes propagate slowly (30-60 seconds). Anycast takes a different approach — the same IP address is announced from every PoP via BGP, and the internet's routing infrastructure naturally directs packets to the nearest one. Anycast provides instant failover (BGP withdrawal takes 1-3 seconds) and is immune to DNS resolver misplacement, but it complicates TCP connections because route flaps can shift a session to a different PoP mid-connection. Most production CDNs combine both: Anycast for initial connection and DNS for fine-grained load balancing. Latency-based routing (measuring actual RTT rather than relying on geography) provides the best results but requires continuous probing infrastructure.",
 
-    "## Cache Invalidation and Consistency\nCache invalidation is famously one of the two hard problems in computer science. CDNs offer several strategies with different trade-off profiles. TTL-based expiration is the simplest: each object has a max-age, and the edge serves it until expiry, then revalidates with the origin using If-None-Match (ETag) or If-Modified-Since headers. This is efficient but provides only eventual consistency — stale content is served until TTL expires. Purge APIs allow the origin to push invalidation to all edge nodes, achieving near-instant consistency (typically 1-5 seconds globally), but they require infrastructure to fan out purge commands to hundreds of PoPs. Versioned URLs (e.g., /style.abc123.css) sidestep invalidation entirely — the URL changes when content changes, so old cached versions are simply never requested again. Soft purge (stale-while-revalidate) serves stale content while fetching fresh content in the background, preserving availability at the cost of a brief staleness window. A well-designed CDN uses all four strategies for different content types.",
+    "## Cache Invalidation and Consistency\nCache invalidation is famously one of the two hard problems in computer science. CDNs offer several strategies with different trade-off profiles. TTL-based expiration is the simplest: each object has a max-age, and the edge serves it until expiry, then revalidates with the origin using If-None-Match (ETag) or If-Modified-Since headers. This is efficient but provides only eventual consistency — stale content is served until TTL expires. Purge APIs allow the origin to push invalidation to all edge nodes, achieving near-instant consistency (typically 1-5 seconds globally), but they require infrastructure to fan out purge commands to hundreds of PoPs. Versioned URLs (e.g., /style.abc123.css) sidestep invalidation entirely — the URL changes when content changes, so old cached versions are simply never requested again. Soft purge (stale-while-revalidate) serves stale content while fetching fresh content in the background, preserving availability at the cost of a brief staleness window. A well-designed CDN uses all four strategies for different content types.\nKey insight: versioned URLs win over purge wherever they are applicable, because they turn a distributed-consistency problem (propagate an invalidation to 300 PoPs, handle partial failures, race in-flight fills) into a naming problem with zero propagation delay, atomic deploys (HTML referencing new hashes flips all assets at once), and free rollback (old URLs remain cached). Purge is the fallback for content whose URL you cannot change — HTML documents, APIs, legal takedowns.\nCommon mistake: relying on purge as the primary freshness mechanism for static assets. Purges race with in-flight cache fills, cost an origin stampede for popular objects, and cannot touch browser caches at all — only a changed URL can.",
 
-    "## TLS Termination and Security\nEvery CDN must handle TLS termination at the edge. Terminating TLS at the edge rather than the origin reduces latency by eliminating the TLS handshake round trips over long distances — a TLS 1.3 handshake is 1-RTT, and the edge-to-user RTT might be 5ms vs. 200ms to the origin. Edge servers need access to the domain's private key, which raises security concerns at scale. Solutions include distributing encrypted key material to all PoPs with HSMs, using keyless SSL (the edge performs the TLS handshake but delegates the private key operation to a remote key server the customer controls), or using delegated credentials (short-lived credentials derived from the main certificate). For DDoS protection, the CDN's edge network absorbs volumetric attacks by distributing traffic across hundreds of PoPs — a 1 Tbps attack spread across 300 PoPs is only 3.3 Gbps per PoP, well within capacity. Layer 7 attacks are mitigated with WAF rules, rate limiting, and bot detection at the edge.",
+    "## TLS Termination and Security\nEvery CDN must handle TLS termination at the edge. Terminating TLS at the edge rather than the origin reduces latency by eliminating the TLS handshake round trips over long distances — a TLS 1.3 handshake is 1-RTT, and the edge-to-user RTT might be 5ms vs. 200ms to the origin. Edge servers need access to the domain's private key, which raises security concerns at scale. Solutions include distributing encrypted key material to all PoPs with HSMs, using keyless SSL (the edge performs the TLS handshake but delegates the private key operation to a remote key server the customer controls), or using delegated credentials (short-lived credentials derived from the main certificate). Session resumption is the other big TLS lever at the edge: TLS 1.3 session tickets (and 0-RTT early data for idempotent requests) let returning clients skip the full handshake, but tickets are encrypted with a session-ticket key that must be shared across every server in a PoP — and ideally across nearby PoPs, since anycast can land a returning client on a different PoP — with frequent rotation (hours, not weeks) because a leaked ticket key retroactively breaks forward secrecy for every session it minted. Certificate distribution is a control-plane problem in its own right: with millions of customer domains, the CDN runs automated issuance (ACME/Let's Encrypt), stores certs centrally, pushes them to all PoPs within a renewal SLA, and often lazy-loads rarely used certs at the edge on first SNI hit. For DDoS protection, the CDN's edge network absorbs volumetric attacks by distributing traffic across hundreds of PoPs — a 1 Tbps attack spread across 300 PoPs is only 3.3 Gbps per PoP, well within capacity. Layer 7 attacks are mitigated with WAF rules, rate limiting, and bot detection at the edge.",
+
+    "## Capacity Math: Sizing the Network\nBack-of-envelope capacity math turns a hand-wavy CDN sketch into a defensible design, so walk the numbers explicitly. Assume 100 Tbps global peak egress across 200 PoPs: 100 Tbps / 200 = 500 Gbps average per PoP at peak. Add 50% failover headroom (a PoP must absorb a failed neighbor's traffic) and you provision ~750 Gbps per PoP; at ~40 Gbps of effective delivery per cache server (NIC, TLS, and disk bound), that is ~19 servers per PoP, so call it 20-25 with maintenance slack. Now origin offload: with a 95% combined edge hit ratio, only 5% of 100 Tbps = 5 Tbps would hit the origin — still ruinous, which is why the shield tier matters. If shields lift the combined hit ratio to 99%, origin egress drops to 1 Tbps, and request coalescing cuts the request count further. For storage, suppose the hot working set follows the usual skew: 80% of traffic comes from ~5% of a 500 TB unique-content catalog, so the hot set is ~25 TB. A PoP with 20 servers x 10 TB SSD = 200 TB easily holds the hot set plus a generous slice of the long tail, while each server's ~256 GB RAM holds the very hottest few-hundred-GB slice for memory-speed hits.\nKey insight: interviewers care less about the exact numbers than about the chain of reasoning — peak traffic -> per-PoP bandwidth -> server count -> hit ratio -> origin egress -> SSD/RAM sizing. Practice reproducing that chain from any starting assumption.\nCommon mistake: sizing only for average traffic. CDN traffic follows the sun and spikes on events; design for peak-of-peaks (2-3x average) plus failover headroom, or the design falls over exactly when it matters.",
+
+    "## Cache-Control Semantics: The CDN's API Surface\nHTTP caching headers are the contract between the origin and the CDN, and getting their semantics right is a core interview signal. `max-age` governs how long any cache (browser or CDN) may serve the response; `s-maxage` overrides it for shared caches only, letting you cache aggressively at the CDN (s-maxage=86400) while keeping browsers fresh (max-age=60) — essential because you can purge the CDN but never a user's browser cache. `stale-while-revalidate=N` (RFC 5861) permits serving the stale copy for N seconds while revalidating in the background, converting revalidation latency into a background cost. `stale-if-error=N` allows serving stale content when the origin is down, turning the CDN into an availability shield. `no-store` forbids caching entirely; `private` restricts to browser caches; `immutable` tells browsers not to revalidate even on reload — perfect for fingerprinted assets. `Vary` names the request headers that partition the cache key; every added Vary dimension multiplies the variant count and divides the effective hit rate.\nIn practice: a production recipe for fingerprinted static assets is Cache-Control: public, max-age=31536000, immutable; for HTML it is Cache-Control: public, max-age=0, s-maxage=300, stale-while-revalidate=60, stale-if-error=86400 — browsers always revalidate, the CDN caches for 5 minutes, and users are protected from both revalidation latency and origin outages.",
+
+    "## Dynamic Content Acceleration\nA common misconception is that CDNs only help cacheable content — modern CDNs also accelerate fully dynamic, uncacheable responses (APIs, personalized pages, checkout flows). The main lever is terminating the client connection at the nearest edge: the TCP and TLS handshakes happen over a 5-20ms edge RTT instead of a 150-300ms transcontinental RTT, cutting connection setup from ~600ms to ~40ms for a cold TLS 1.2 connection. From the edge to the origin, the CDN maintains a pool of pre-warmed, long-lived HTTP/2 connections with large congestion windows already opened, so dynamic requests skip slow-start entirely. Route optimization adds another win: the CDN continuously probes paths between its PoPs and routes requests over its private backbone or the measurably fastest inter-PoP path, bypassing congested public-internet routes (Cloudflare Argo and Akamai SureRoute are commercial examples, with typical 20-30% TTFB improvements). Finally, edge compute can move parts of the dynamic work itself to the PoP — auth token validation, geo-based redirects, A/B assignment — so many requests never travel to the origin at all.\nReal-world example: an API served from us-east-1 to a user in Sydney sees ~210ms RTT direct. Via a Sydney PoP with pooled backbone connections, the user's handshakes cost ~4ms, and the single edge-to-origin round trip rides an already-warm connection — total latency drops by hundreds of milliseconds for the first request even though nothing was cached.",
 
     "## Video Streaming and Large Object Delivery\nVideo streaming is the dominant use case for CDN bandwidth, accounting for over 70% of internet traffic. CDNs support adaptive bitrate streaming protocols (HLS and DASH) by caching the manifest files and individual video segments (typically 2-10 seconds each). The key challenge is the long tail: a catalog of millions of videos where most are rarely watched, leading to low cache hit ratios. Solutions include predictive prefetching based on trending content, tiered caching to concentrate the long tail at shield nodes, and origin storage co-located with PoPs for the coldest content. For live streaming, the CDN must balance ultra-low latency (sub-5-second glass-to-glass) with scale. Techniques include chunked transfer encoding to start delivering a segment before it is fully received, WebSocket or HTTP/2 push for low-latency delivery, and edge compute to transcode or repackage streams closer to viewers.",
   ],
@@ -406,21 +412,64 @@ private:
     {
       title: "CDN Architecture Overview",
       kind: "architecture",
-      caption: "Multi-tier CDN architecture showing the request flow from client through edge PoPs, shield nodes, to the origin server.",
-      mermaid: `graph LR
-    Client["Client Browser"] -->|"DNS Lookup"| GeoDNS["GeoDNS / Anycast"]
-    GeoDNS -->|"Nearest PoP IP"| Edge["Edge PoP L1"]
-    Edge -->|"Cache HIT"| Client
-    Edge -->|"Cache MISS"| Shield["Shield Node L2"]
-    Shield -->|"Cache HIT"| Edge
-    Shield -->|"Cache MISS"| Origin["Origin Server L3"]
-    Origin -->|"Response + Headers"| Shield
-    Shield -->|"Cache + Forward"| Edge
-    Edge -->|"Cache + Serve"| Client
-    Origin --- ObjectStore["Object Storage / S3"]
-    Origin --- AppServer["Application Server"]
-    Edge --- WAF["WAF / DDoS Filter"]
-    Edge --- TLS["TLS Termination"]`,
+      caption: "Layered CDN architecture: users are routed via GeoDNS/anycast to an edge PoP (L1 memory + L2 SSD cache behind TLS termination); misses coalesce through a regional origin shield before reaching the origin. The control plane distributes config, certificates, and purges; edge logs feed the analytics pipeline. Steps 1-9 trace the full cache-miss request flow; H1/H2 mark the cache-hit short-circuits.",
+      mermaid: `graph TB
+    subgraph UsersLayer["Users"]
+        Client["Client Browser / App"]
+    end
+
+    subgraph RoutingLayer["Routing Layer"]
+        GeoDNS["GeoDNS<br/>resolver-IP geolocation"]
+        Anycast["Anycast BGP<br/>same IP from every PoP"]
+    end
+
+    subgraph EdgePoP["Edge PoP (one of ~200)"]
+        TLSTerm["TLS Termination<br/>session resumption, 0-RTT"]
+        L1Cache["L1 Memory Cache<br/>~256GB RAM hot set"]
+        L2Cache["L2 SSD Cache<br/>~10TB warm set"]
+        Coalescer["Request Coalescer<br/>1 upstream fetch per key"]
+    end
+
+    subgraph ShieldTier["Regional Shield Tier"]
+        Shield["Origin Shield<br/>collapses N edge misses into 1"]
+    end
+
+    subgraph OriginLayer["Origin"]
+        AppOrigin["Customer App Servers"]
+        ObjStore["Object Storage / S3"]
+    end
+
+    subgraph ControlPlane["Control Plane"]
+        ConfigDist["Config Distribution"]
+        CertMgmt["Cert Management"]
+        PurgeAPI["Purge API"]
+    end
+
+    subgraph AnalyticsLayer["Analytics"]
+        LogPipe["Edge Log Pipeline"]
+        Metrics["Real-time Metrics / Billing"]
+    end
+
+    Client -->|"1. DNS lookup"| GeoDNS
+    Client -->|"or anycast IP"| Anycast
+    GeoDNS -->|"2. nearest PoP IP"| TLSTerm
+    Anycast --> TLSTerm
+    TLSTerm -->|"3. request"| L1Cache
+    L1Cache -->|"H1. HIT: serve from RAM"| Client
+    L1Cache -->|"4. miss"| L2Cache
+    L2Cache -->|"H2. HIT: serve from SSD"| Client
+    L2Cache -->|"5. miss"| Coalescer
+    Coalescer -->|"6. single coalesced fetch"| Shield
+    Shield -->|"9. shield HIT: fan back to edge"| L2Cache
+    Shield -->|"7. shield miss"| AppOrigin
+    AppOrigin --- ObjStore
+    AppOrigin -->|"8. response cached at shield"| Shield
+    PurgeAPI -.->|"purge fan-out to shields"| Shield
+    Shield -.->|"propagate purge to edges"| L1Cache
+    ConfigDist -.->|"routing / WAF / cache rules"| TLSTerm
+    CertMgmt -.->|"key material, delegated creds"| TLSTerm
+    L1Cache -.->|"access logs"| LogPipe
+    LogPipe --> Metrics`,
     },
     {
       title: "Cache Invalidation Flow",
@@ -619,6 +668,22 @@ private:
         "How do you prevent a compromised control plane from pushing malicious configuration to all PoPs?",
       ],
     },
+    {
+      q: "Walk me through the capacity math for a CDN serving 100 Tbps of global peak traffic across 200 PoPs.",
+      a: "Start with bandwidth: 100 Tbps / 200 PoPs = 500 Gbps average per PoP at peak. Traffic is not uniform — large metro PoPs carry several times the average — and each PoP needs roughly 50% failover headroom to absorb a failed neighbor, so provision a typical PoP at ~750 Gbps. At ~40 Gbps of effective delivery per cache server (bounded by NIC, TLS CPU, and disk throughput together), that is about 19 servers, so plan 20-25 per PoP with maintenance slack. Next, origin offload: at a 95% combined hit ratio, 5 Tbps would still reach origins, which is why shields matter — lifting the combined ratio to 99% cuts origin egress to 1 Tbps, and request coalescing collapses concurrent misses further. Then storage: with the typical skew where ~5% of a 500 TB catalog drives 80% of traffic, the hot working set is ~25 TB; a PoP with 20 servers x 10 TB SSD = 200 TB holds the hot set many times over plus long tail, while ~256 GB RAM per server keeps the hottest slice at memory speed. Finally sanity-check requests: 10B requests/day is ~115K rps average, ~350K rps peak, under 2K rps per PoP — trivially cheap in request terms, confirming the design is bandwidth- and storage-bound, not request-bound.",
+      followUps: [
+        "How does the math change if the content is long-tail video where 50% of traffic goes to content outside the hot set?",
+        "How would you decide whether to add servers to existing PoPs versus opening new PoPs?",
+      ],
+    },
+    {
+      q: "Why do versioned URLs generally beat purge APIs for cache invalidation, and when is purge still necessary?",
+      a: "Versioned URLs (content-hashed filenames like app.9f3c2a.js) win because they eliminate the invalidation problem instead of solving it. Purge is a distributed-systems problem: a command must reach 300 PoPs reliably, handle partial failures and retries, race against in-flight cache fills that can re-populate stale content after the purge, and it still cannot touch browser caches. Versioning is a naming problem: new content gets a new URL, so no stale copy is ever requested again; propagation delay is zero, the deploy is atomic (the HTML that references new hashes flips every asset reference at once), rollback is free because old URLs are still cached, and both CDN and browser caches can use max-age=31536000, immutable for near-100% hit rates. The costs are a build pipeline that rewrites references and the discipline to never reuse a URL for different bytes. Purge remains necessary for content whose URL is the identity and cannot change: HTML documents, API responses, and emergency removals (leaked data, legal takedowns, defaced content). A production setup therefore versions all static assets, gives HTML a short s-maxage with stale-while-revalidate, and keeps purge as the low-volume emergency path rather than the routine freshness mechanism.",
+      followUps: [
+        "How would you design the purge pipeline for tag-based invalidation (purge all URLs tagged product-123)?",
+        "What goes wrong if a deploy reuses an existing hashed URL for changed content?",
+      ],
+    },
   ],
 
   mcqs: [
@@ -698,6 +763,18 @@ private:
       back: "TLS is terminated at the edge to save 100-200ms of cross-continent handshake latency. Private keys are distributed encrypted with HSMs, or via keyless SSL (private key ops delegated to customer's key server), or using delegated credentials (short-lived creds derived from the main certificate). TLS 1.3 reduces handshake to 1-RTT, and 0-RTT resumption eliminates it entirely for returning connections.",
     },
     {
+      front: "What is the difference between max-age and s-maxage in Cache-Control?",
+      back: "max-age applies to all caches including the browser; s-maxage overrides it for shared caches (CDNs, proxies) only. This lets you cache HTML aggressively at the CDN (s-maxage=300, purgeable) while keeping browsers on max-age=0 — critical because you can purge the CDN but never a user's browser cache.",
+    },
+    {
+      front: "Given 100 Tbps global peak and 200 PoPs, how much bandwidth must each PoP provision?",
+      back: "100 Tbps / 200 = 500 Gbps average per PoP at peak. Add ~50% failover headroom (absorbing a failed neighbor) = ~750 Gbps provisioned. At ~40 Gbps effective per cache server, that is roughly 20-25 servers per PoP.",
+    },
+    {
+      front: "How does a CDN accelerate dynamic, uncacheable content?",
+      back: "Terminate TCP/TLS at the nearest edge (handshakes over a 5-20ms RTT instead of 200ms+), reuse pre-warmed long-lived HTTP/2 connections from edge to origin (skipping slow-start), route over the CDN's optimized backbone instead of congested public paths, and run auth/redirect/A-B logic in edge compute so some requests never reach the origin.",
+    },
+    {
       front: "What is consistent hashing and why is it used within a CDN PoP?",
       back: "Consistent hashing maps both cache keys and servers onto a hash ring, routing each key to the next clockwise server. Within a PoP, it ensures the same URL always goes to the same cache server, maximizing per-server cache hit rates. When a server is added/removed, only 1/N of keys are redistributed instead of reshuffling everything. Virtual nodes (100-200 per server) ensure even load distribution.",
     },
@@ -722,6 +799,10 @@ private:
     "Consistent hashing with 100-200 virtual nodes ensures even distribution within a PoP. Bounded-load variant caps per-node load to prevent hot spots. When a server fails, only 1/N keys redistribute.",
     "Capacity planning: bandwidth (Tbps), CPU (TLS + compression + WAF), memory (hot cache), storage (warm cache). Traffic is diurnal and follows the sun. Design for peak-of-peaks (2-3x average) plus 50% failover headroom.",
     "Control plane: centralized source of truth with eventually consistent push to all PoPs. Local agents cache config for availability during disconnection. Canary deployments (5% -> 25% -> 50% -> 100%) with automatic rollback on error rate spikes.",
+    "Capacity math chain to memorize: 100 Tbps peak / 200 PoPs = 500 Gbps per PoP; +50% failover headroom = 750 Gbps; at 40 Gbps/server = ~20 servers per PoP. 95% hit ratio leaves 5 Tbps on origin; shields to 99% leave 1 Tbps. Hot set = 5% of 500 TB catalog = 25 TB, fits easily in 200 TB of per-PoP SSD.",
+    "Invalidation hierarchy: versioned URLs beat purge — zero propagation delay, atomic deploys, free rollback, works for browser caches. Purge is the emergency path for un-renamable URLs (HTML, APIs, takedowns).",
+    "Header recipes: static assets = max-age=31536000, immutable. HTML = max-age=0, s-maxage=300, stale-while-revalidate=60, stale-if-error=86400. s-maxage lets the CDN cache longer than browsers because you can purge the CDN but never the browser.",
+    "Dynamic acceleration: terminate TCP/TLS at the edge (handshakes over 5-20ms RTT instead of 200ms), keep pre-warmed HTTP/2 connection pools edge-to-origin (skip slow-start), route over the CDN backbone past congested public paths (~20-30% TTFB gain).",
   ],
 
   cheatSheet: [
@@ -735,6 +816,10 @@ private:
     "TTL jitter: add random offset to TTL (e.g., TTL * (0.9 + rand * 0.2)) so edges do not all expire the same object simultaneously.",
     "Purge propagation SLA: 1-5 seconds for all PoPs. Use reliable message bus with at-least-once delivery. Track per-PoP acknowledgment for audit trail.",
     "Cache key normalization: strip tracking query params (utm_*), sort remaining params, lowercase the path. Prevents duplicate cache entries for semantically identical URLs.",
+    "s-maxage vs max-age: s-maxage applies only to shared caches (the CDN), max-age to everyone. Recipe: HTML gets max-age=0, s-maxage=300 — browsers always revalidate, CDN caches 5 min and is purgeable.",
+    "Fingerprinted assets: Cache-Control: public, max-age=31536000, immutable — never invalidate, just deploy new hashed URLs. stale-if-error=86400 keeps serving during origin outages.",
+    "Capacity quick math: peak Tbps / PoP count = per-PoP Gbps; x1.5 failover headroom; / ~40 Gbps per server = server count. (1 - hit ratio) x peak = origin egress. Hot-set share x catalog size = SSD floor per PoP.",
+    "Dynamic acceleration levers: edge TLS termination (client handshakes at 5-20ms RTT), pre-warmed HTTP/2 origin pools (no slow-start), backbone route optimization, edge compute for auth/redirects.",
   ],
 
   glossary: [
@@ -775,11 +860,14 @@ private:
     "How does HTTP/3 (QUIC) change CDN architecture, particularly around connection migration and 0-RTT?",
     "What are the privacy implications of CDN architecture (user IP visibility, TLS interception) and how do you address them?",
     "How would you design a CDN for IoT workloads with millions of small, frequent requests from resource-constrained devices?",
+    "How would you implement tag-based (surrogate-key) purging so one API call invalidates every URL associated with a product?",
+    "How would you accelerate uncacheable POST/checkout traffic where edge caching provides zero benefit?",
+    "How should the capacity math change for a regional CDN (one continent, 20 PoPs) versus a global one (200+ PoPs)?",
   ],
 
   resources: [
     {
-      label: "Designing Data-Intensive Applications by Martin Kleppmann",
+      label: "Designing Data-Intensive Applications by Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
       note: "Chapters on caching, replication, and distributed systems provide foundational knowledge for CDN architecture decisions.",
     },
@@ -794,7 +882,7 @@ private:
       note: "Netflix's custom CDN serving 15%+ of global internet traffic. Covers appliance-based PoPs, ISP embedding, and content pre-positioning for video streaming.",
     },
     {
-      label: "RFC 7234: HTTP Caching and RFC 5861: Stale Extensions",
+      label: "RFC 7234: HTTP Caching and RFC 5861: Stale Extensions", url: "https://www.rfc-editor.org/rfc/rfc7234",
       kind: "docs",
       note: "The authoritative HTTP caching standards defining Cache-Control semantics, conditional requests, and stale-while-revalidate behavior that CDNs implement.",
     },

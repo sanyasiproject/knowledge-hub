@@ -170,7 +170,7 @@ In practice, most teams combine head-based sampling (e.g., 5%) with tail-based r
   ],
   resources: [
     {
-      label: "OpenTelemetry documentation",
+      label: "OpenTelemetry documentation", url: "https://opentelemetry.io/docs/",
       kind: "docs",
     },
     {

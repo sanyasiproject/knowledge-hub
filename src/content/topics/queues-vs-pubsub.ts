@@ -592,12 +592,12 @@ async function consumeQueue(queueUrl: string) {
   ],
 
   resources: [
-    { label: "RabbitMQ Tutorials", kind: "docs", note: "Official tutorials covering all exchange types, work queues, pub/sub, and routing patterns." },
+    { label: "RabbitMQ Tutorials", url: "https://www.rabbitmq.com/tutorials", kind: "docs", note: "Official tutorials covering all exchange types, work queues, pub/sub, and routing patterns." },
     { label: "Kafka: The Definitive Guide (2nd Ed.)", kind: "book", note: "Comprehensive coverage of Kafka architecture, consumer groups, transactions, and operations." },
     { label: "AWS SNS+SQS Fan-Out Pattern", kind: "docs", note: "AWS architecture guide for implementing event-driven fan-out with filtering." },
-    { label: "Designing Data-Intensive Applications (Ch. 11)", kind: "book", note: "Martin Kleppmann's treatment of stream processing, message brokers, and log-based messaging." },
-    { label: "The Log: What every software engineer should know", kind: "article", note: "Jay Kreps' foundational article on log-based architectures that inspired Kafka's design." },
-    { label: "Enterprise Integration Patterns", kind: "book", note: "Gregor Hohpe's catalog of messaging patterns including competing consumers, publish-subscribe, and message routing." },
+    { label: "Designing Data-Intensive Applications (Ch. 11)", url: "https://dataintensive.net/", kind: "book", note: "Martin Kleppmann's treatment of stream processing, message brokers, and log-based messaging." },
+    { label: "The Log: What every software engineer should know", url: "https://engineering.linkedin.com/distributed-systems/log-what-every-software-engineer-should-know-about-real-time-datas-unifying", kind: "article", note: "Jay Kreps' foundational article on log-based architectures that inspired Kafka's design." },
+    { label: "Enterprise Integration Patterns", url: "https://www.enterpriseintegrationpatterns.com/", kind: "book", note: "Gregor Hohpe's catalog of messaging patterns including competing consumers, publish-subscribe, and message routing." },
   ],
   exercises: [
     "Design an **order processing system** where an `order.created` event must be handled by three independent services: *billing*, *inventory*, and *notifications*. Choose between a queue, pub/sub, or a hybrid approach. Draw the architecture, specify the messaging technology (RabbitMQ, Kafka, or SNS+SQS), and explain how each service handles **failures** and **retries** independently.",

@@ -265,9 +265,9 @@ export class ConversationMemory {
   resources: [
     { label: "MemGPT: Towards LLMs as Operating Systems", kind: "paper", note: "The foundational paper introducing virtual context management for LLM agents with tiered memory." },
     { label: "Letta Framework (formerly MemGPT)", kind: "repo", note: "Production-ready open-source framework for building agents with persistent, managed memory. github.com/letta-ai/letta" },
-    { label: "LangChain Memory Documentation", kind: "docs", note: "Comprehensive guide to memory classes in LangChain: buffer, summary, vector-backed, entity, and conversation memory." },
+    { label: "LangChain Memory Documentation", url: "https://python.langchain.com/docs/", kind: "docs", note: "Comprehensive guide to memory classes in LangChain: buffer, summary, vector-backed, entity, and conversation memory." },
     { label: "LLM Powered Autonomous Agents (Lilian Weng)", kind: "article", note: "Influential blog post covering planning, memory, and tool use in LLM agents. Excellent diagrams and taxonomy." },
-    { label: "Building AI Agents (Anthropic Cookbook)", kind: "docs", note: "Practical patterns for agent loops, tool use, planning, and memory management with Claude." },
+    { label: "Building AI Agents (Anthropic Cookbook)", url: "https://docs.anthropic.com/", kind: "docs", note: "Practical patterns for agent loops, tool use, planning, and memory management with Claude." },
   ],
   glossary: [
     { term: "Task Decomposition", definition: "Breaking a complex goal into a sequence of smaller, actionable sub-tasks with clear inputs, outputs, and dependencies." },

@@ -10,21 +10,85 @@ import type {
   TopicContent,
 } from "../../content/types";
 import type { ContentComponentKind } from "../../data/topicSections";
-import { Placeholder, Pill, cx } from "../ui/primitives";
-import { RichParagraphs, RichText } from "./RichText";
+import { Pill, cx } from "../ui/primitives";
+import { Inline, RichText } from "./RichText";
+
+/**
+ * Whether a topic has authored material for a given section. The page template
+ * uses this to render ONLY the sections that exist — a behavioral topic
+ * without code simply has no "Code & Examples" section, rather than a
+ * placeholder box.
+ */
+export function hasSectionContent(kind: ContentComponentKind, c: TopicContent): boolean {
+  switch (kind) {
+    case "quick-summary": return !!c.quickSummary?.length;
+    case "detailed-explanation": return !!c.detailed?.length;
+    case "deep-dive": return !!c.deepDive?.length;
+    case "code": return !!c.code?.length;
+    case "diagram": return !!c.diagrams?.length;
+    case "animation": return !!c.animations?.length;
+    case "comparison-table": return !!c.comparison;
+    case "interview-qa": return !!c.interviewQA?.length;
+    case "follow-ups": return !!c.followUps?.length;
+    case "mcq": return !!c.mcqs?.length;
+    case "exercises": return !!c.exercises?.length;
+    case "flashcards": return !!c.flashcards?.length;
+    case "revision-notes": return !!c.revisionNotes?.length;
+    case "cheat-sheet": return !!c.cheatSheet?.length;
+    case "resources": return !!c.resources?.length;
+    case "glossary": return !!c.glossary?.length;
+    default: return false;
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* Learn                                                               */
 /* ------------------------------------------------------------------ */
 
-function Paragraphs({ items }: { items?: string[] }) {
+/**
+ * Theory renderer: each authored block becomes a numbered "concept step" on a
+ * vertical rail, with its opening thesis sentence emphasized (RichText `lead`).
+ * Turns a wall of paragraphs into a sequence the eye can follow.
+ */
+function ConceptBlocks({ items, tone }: { items?: string[]; tone: "brand" | "violet" }) {
   if (!items?.length) return null;
-  return <RichParagraphs items={items} />;
+  if (items.length === 1) return <RichText text={items[0]} lead />;
+
+  const chip =
+    tone === "brand"
+      ? "bg-gradient-to-br from-brand-500 to-indigo-500 shadow-brand-500/30"
+      : "bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-violet-500/30";
+
+  return (
+    <div className="space-y-0">
+      {items.map((p, i) => (
+        <div key={i} className="relative flex gap-4">
+          <div className="flex flex-col items-center">
+            <span
+              className={cx(
+                "flex h-7 w-7 flex-shrink-0 select-none items-center justify-center rounded-full text-xs font-bold text-white shadow-md",
+                chip
+              )}
+              aria-hidden
+            >
+              {i + 1}
+            </span>
+            {i < items.length - 1 && (
+              <span className="w-px flex-1 bg-gradient-to-b from-slate-300 to-slate-200 dark:from-slate-700 dark:to-slate-800" />
+            )}
+          </div>
+          <div className={cx("min-w-0 flex-1", i < items.length - 1 && "pb-7")}>
+            <RichText text={p} lead />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function QuickSummary({ c }: { c: TopicContent }) {
   if (!c.quickSummary?.length)
-    return <Placeholder icon="⚡" title="Quick Summary">A 2-minute revision of this topic will appear here.</Placeholder>;
+    return null;
   return (
     <div className="rounded-xl border border-brand-200 bg-brand-50 p-5 dark:border-brand-800/60 dark:bg-brand-900/20">
       <ul className="space-y-3">
@@ -41,14 +105,14 @@ function QuickSummary({ c }: { c: TopicContent }) {
 
 function DetailedExplanation({ c }: { c: TopicContent }) {
   if (!c.detailed?.length)
-    return <Placeholder icon="📖" title="Detailed Explanation">A full, from-first-principles explanation will appear here.</Placeholder>;
-  return <Paragraphs items={c.detailed} />;
+    return null;
+  return <ConceptBlocks items={c.detailed} tone="brand" />;
 }
 
 function DeepDive({ c }: { c: TopicContent }) {
   if (!c.deepDive?.length)
-    return <Placeholder icon="🔬" title="Deep Technical Explanation">Internals, edge cases, and trade-offs for mastery will appear here.</Placeholder>;
-  return <Paragraphs items={c.deepDive} />;
+    return null;
+  return <ConceptBlocks items={c.deepDive} tone="violet" />;
 }
 
 /* ------------------------------------------------------------------ */
@@ -209,9 +273,63 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/* Shiki (real grammar-based highlighting) loads lazily per language; until it
+   resolves — or for languages it doesn't know — the fast homegrown tokenizer
+   above renders instantly as a fallback. */
+const SHIKI_LANGS = new Set([
+  "javascript", "typescript", "jsx", "tsx", "python", "java", "cpp", "c",
+  "csharp", "go", "rust", "sql", "bash", "shell", "yaml", "json", "html",
+  "css", "haskell", "hcl", "docker", "dockerfile", "graphql", "kotlin",
+  "swift", "ruby", "php", "scala", "toml", "xml", "protobuf",
+]);
+const LANG_ALIASES: Record<string, string> = {
+  "node.js": "javascript", "c++": "cpp", "c#": "csharp", js: "javascript",
+  ts: "typescript", sh: "bash", zsh: "bash", terraform: "hcl", golang: "go",
+};
+
+function normalizeLang(language: string): string | null {
+  const l = LANG_ALIASES[language.toLowerCase()] ?? language.toLowerCase();
+  return SHIKI_LANGS.has(l) ? l : null;
+}
+
+function ShikiCode({ source, language }: { source: string; language: string }) {
+  const [html, setHtml] = useState<string | null>(null);
+  const lang = normalizeLang(language);
+
+  useEffect(() => {
+    let cancelled = false;
+    setHtml(null);
+    if (!lang) return;
+    (async () => {
+      try {
+        const { codeToHtml } = await import("shiki");
+        const out = await codeToHtml(source, { lang, theme: "github-dark" });
+        if (!cancelled) setHtml(out);
+      } catch {
+        /* fall back to the tokenizer rendering */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [source, lang]);
+
+  if (html) {
+    return (
+      <div
+        className="thin-scroll overflow-x-auto p-4 text-sm leading-relaxed [&_pre]:!bg-transparent [&_code]:!bg-transparent"
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    );
+  }
+  return (
+    <pre className="thin-scroll overflow-x-auto p-4 text-sm leading-relaxed text-slate-100">
+      <code>{highlightCode(source, language)}</code>
+    </pre>
+  );
+}
+
 function CodeBlock({ c }: { c: TopicContent }) {
   if (!c.code?.length)
-    return <Placeholder icon="💻" title="Code & Examples">Runnable snippets and reference implementations will appear here.</Placeholder>;
+    return null;
   return (
     <div className="space-y-4">
       {c.code.map((block, i) => (
@@ -223,9 +341,7 @@ function CodeBlock({ c }: { c: TopicContent }) {
               <CopyButton text={block.source} />
             </div>
           </figcaption>
-          <pre className="thin-scroll overflow-x-auto p-4 text-sm leading-relaxed text-slate-100">
-            <code>{highlightCode(block.source, block.language)}</code>
-          </pre>
+          <ShikiCode source={block.source} language={block.language} />
         </figure>
       ))}
     </div>
@@ -258,13 +374,32 @@ function useThemeChanges() {
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
     return () => observer.disconnect();
   }, []);
-  return document.documentElement.classList.contains("dark") ? "dark" : "default";
+  return document.documentElement.classList.contains("dark") ? ("dark" as const) : ("default" as const);
+}
+
+/* Initialize mermaid once per theme, not once per diagram. `antiscript`
+   keeps the HTML line-break labels the diagrams use while stripping any
+   script content before the SVG is injected. */
+let mermaidTheme: string | null = null;
+async function getMermaid(theme: "dark" | "default") {
+  const { default: mermaid } = await import("mermaid");
+  if (mermaidTheme !== theme) {
+    mermaid.initialize({
+      startOnLoad: false,
+      theme,
+      securityLevel: "antiscript",
+      fontFamily: "Inter, system-ui, sans-serif",
+    });
+    mermaidTheme = theme;
+  }
+  return mermaid;
 }
 
 function MermaidBlock({ source }: { source: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const currentTheme = useThemeChanges();
 
   useEffect(() => {
@@ -273,13 +408,7 @@ function MermaidBlock({ source }: { source: string }) {
     setError(false);
     (async () => {
       try {
-        const { default: mermaid } = await import("mermaid");
-        mermaid.initialize({
-          startOnLoad: false,
-          theme: currentTheme,
-          securityLevel: "loose",
-          fontFamily: "Inter, system-ui, sans-serif",
-        });
+        const mermaid = await getMermaid(currentTheme);
         const id = `mermaid-${Math.random().toString(36).slice(2, 9)}`;
         const { svg: rendered } = await mermaid.render(id, source);
         if (!cancelled) setSvg(rendered);
@@ -305,11 +434,63 @@ function MermaidBlock({ source }: { source: string }) {
     );
   }
   return (
-    <div
-      ref={ref}
-      className="overflow-x-auto rounded-lg bg-white p-3 dark:bg-slate-800/50 [&_svg]:mx-auto [&_svg]:max-w-full"
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
+    <div className="group/diagram relative">
+      <div
+        ref={ref}
+        className="overflow-x-auto rounded-lg bg-white p-3 dark:bg-slate-800/50 [&_svg]:mx-auto [&_svg]:max-w-full"
+        dangerouslySetInnerHTML={{ __html: svg }}
+      />
+      <button
+        onClick={() => setExpanded(true)}
+        className="absolute right-2 top-2 rounded-lg border border-slate-200 bg-white/90 px-2 py-1 text-xs font-medium text-slate-500 opacity-0 shadow-sm backdrop-blur transition group-hover/diagram:opacity-100 hover:text-brand-600 dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-300"
+        aria-label="Expand diagram"
+      >
+        ⤢ Expand
+      </button>
+      {expanded && <DiagramLightbox svg={svg} onClose={() => setExpanded(false)} />}
+    </div>
+  );
+}
+
+/** Fullscreen pan/zoom view for dense architecture diagrams. */
+function DiagramLightbox({ svg, onClose }: { svg: string; onClose: () => void }) {
+  const [zoom, setZoom] = useState(1.4);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const drag = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex flex-col bg-slate-950/95" role="dialog" aria-label="Diagram viewer">
+      <div className="flex items-center justify-end gap-2 p-3">
+        <button onClick={() => setZoom((z) => Math.max(0.4, z / 1.3))} className="rounded-lg bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700" aria-label="Zoom out">−</button>
+        <span className="w-14 text-center text-xs tabular-nums text-slate-400">{Math.round(zoom * 100)}%</span>
+        <button onClick={() => setZoom((z) => Math.min(6, z * 1.3))} className="rounded-lg bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700" aria-label="Zoom in">+</button>
+        <button onClick={() => { setZoom(1.4); setPos({ x: 0, y: 0 }); }} className="rounded-lg bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700">Reset</button>
+        <button onClick={onClose} className="ml-2 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-500">Close ✕</button>
+      </div>
+      <div
+        className="flex-1 cursor-grab overflow-hidden active:cursor-grabbing"
+        onWheel={(e) => setZoom((z) => Math.min(6, Math.max(0.4, z * (e.deltaY < 0 ? 1.1 : 0.9))))}
+        onPointerDown={(e) => { drag.current = { x: e.clientX - pos.x, y: e.clientY - pos.y }; (e.target as Element).setPointerCapture?.(e.pointerId); }}
+        onPointerMove={(e) => { if (drag.current) setPos({ x: e.clientX - drag.current.x, y: e.clientY - drag.current.y }); }}
+        onPointerUp={() => { drag.current = null; }}
+      >
+        <div
+          className="flex h-full w-full items-center justify-center rounded bg-white [&_svg]:h-auto [&_svg]:max-w-none"
+          style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${zoom})`, transformOrigin: "center center" }}
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -333,15 +514,19 @@ class DiagramErrorBoundary extends React.Component<
 
 function Diagrams({ c }: { c: TopicContent }) {
   if (!c.diagrams?.length)
-    return (
-      <Placeholder icon="🗺️" title="Diagrams">
-        Architecture, flow, sequence, and state diagrams will appear here. This slot accepts SVG, Mermaid, or images.
-      </Placeholder>
-    );
+    return null;
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       {c.diagrams.map((d, i) => (
-        <div key={i} className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+        <div
+          key={i}
+          className={cx(
+            "rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900",
+            // Architecture diagrams are the "main" system pictures — give them
+            // the full row so they render at a readable size.
+            d.kind === "architecture" && "sm:col-span-2"
+          )}
+        >
           <div className="mb-3 flex items-center gap-2">
             <span className="text-lg" aria-hidden>{DIAGRAM_ICON[d.kind] ?? "📊"}</span>
             <span className="font-semibold text-slate-800 dark:text-slate-100">{d.title}</span>
@@ -386,8 +571,8 @@ function StepAnimation({ spec }: { spec: AnimationSpec }) {
         ))}
       </div>
       <div className="min-h-[5rem] rounded-lg bg-slate-50 p-4 dark:bg-slate-800/50">
-        <div className="font-semibold text-brand-600 dark:text-brand-300">{current.label}</div>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{current.detail}</p>
+        <div className="font-semibold text-brand-600 dark:text-brand-300"><Inline text={current.label} /></div>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300"><Inline text={current.detail} /></p>
       </div>
       <div className="mt-4 flex gap-2">
         <button
@@ -417,11 +602,7 @@ function StepAnimation({ spec }: { spec: AnimationSpec }) {
 
 function Animations({ c }: { c: TopicContent }) {
   if (!c.animations?.length)
-    return (
-      <Placeholder icon="🎬" title="Animations">
-        Step-by-step animated walkthroughs will appear here. This slot supports SVG, Lottie, CSS animation, GIF, or video.
-      </Placeholder>
-    );
+    return null;
   return (
     <div className="space-y-4">
       {c.animations.map((a, i) => (
@@ -433,7 +614,7 @@ function Animations({ c }: { c: TopicContent }) {
 
 function Comparison({ table }: { table?: ComparisonTable }) {
   if (!table)
-    return <Placeholder icon="📊" title="Comparison Table">A side-by-side comparison against alternatives will appear here.</Placeholder>;
+    return null;
   return (
     <div className="thin-scroll overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
       <table className="w-full text-left text-sm">
@@ -451,7 +632,7 @@ function Comparison({ table }: { table?: ComparisonTable }) {
             <tr key={r} className="border-t border-slate-200 odd:bg-white even:bg-slate-50 dark:border-slate-800 dark:odd:bg-slate-900 dark:even:bg-slate-900/50">
               {row.map((cell, ci) => (
                 <td key={ci} className={cx("px-4 py-2.5 text-slate-600 dark:text-slate-300", ci === 0 && "font-medium text-slate-800 dark:text-slate-100")}>
-                  {cell}
+                  <Inline text={cell} />
                 </td>
               ))}
             </tr>
@@ -474,7 +655,7 @@ function QA({ item }: { item: QAItem }) {
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
       >
-        <span className="font-medium text-slate-800 dark:text-slate-100">{item.q}</span>
+        <span className="font-medium text-slate-800 dark:text-slate-100"><Inline text={item.q} /></span>
         <span className="text-brand-500">{open ? "−" : "+"}</span>
       </button>
       {open && (
@@ -485,7 +666,7 @@ function QA({ item }: { item: QAItem }) {
               <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Follow-ups</div>
               <ul className="list-disc space-y-1 pl-5 text-slate-600 dark:text-slate-400">
                 {item.followUps.map((f, i) => (
-                  <li key={i}>{f}</li>
+                  <li key={i}><Inline text={f} /></li>
                 ))}
               </ul>
             </div>
@@ -498,7 +679,7 @@ function QA({ item }: { item: QAItem }) {
 
 function InterviewQA({ c }: { c: TopicContent }) {
   if (!c.interviewQA?.length)
-    return <Placeholder icon="🎤" title="Interview Questions & Answers">Common questions with model answers will appear here.</Placeholder>;
+    return null;
   return (
     <div className="space-y-2">
       {c.interviewQA.map((item, i) => (
@@ -510,7 +691,7 @@ function InterviewQA({ c }: { c: TopicContent }) {
 
 function FollowUps({ c }: { c: TopicContent }) {
   if (!c.followUps?.length)
-    return <Placeholder icon="↪️" title="Follow-up & Tricky Questions">Deeper follow-ups and frequently-confused points will appear here.</Placeholder>;
+    return null;
   return (
     <ul className="space-y-2">
       {c.followUps.map((f, i) => (
@@ -528,7 +709,7 @@ function MCQ({ item, onAnswer }: { item: MCQItem; onAnswer?: (choice: number) =>
   const answered = choice !== null;
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-      <p className="mb-3 font-medium text-slate-800 dark:text-slate-100">{item.q}</p>
+      <p className="mb-3 font-medium text-slate-800 dark:text-slate-100"><Inline text={item.q} /></p>
       <div className="space-y-2">
         {item.options.map((opt, i) => {
           const isCorrect = i === item.answerIndex;
@@ -547,7 +728,7 @@ function MCQ({ item, onAnswer }: { item: MCQItem; onAnswer?: (choice: number) =>
               )}
             >
               <span className="font-mono text-slate-400">{String.fromCharCode(65 + i)}</span>
-              <span className="text-slate-700 dark:text-slate-200">{opt}</span>
+              <span className="text-slate-700 dark:text-slate-200"><Inline text={opt} /></span>
               {answered && isCorrect && <span className="ml-auto text-emerald-600">&#x2713;</span>}
               {answered && isChosen && !isCorrect && <span className="ml-auto text-rose-600">&#x2717;</span>}
             </button>
@@ -564,11 +745,10 @@ function MCQ({ item, onAnswer }: { item: MCQItem; onAnswer?: (choice: number) =>
 }
 
 function MCQs({ c }: { c: TopicContent }) {
-  if (!c.mcqs?.length)
-    return <Placeholder icon="✅" title="MCQs">Self-test multiple-choice questions will appear here.</Placeholder>;
-
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [retryKey, setRetryKey] = useState(0);
+  if (!c.mcqs?.length) return null;
+
   const total = c.mcqs.length;
   const answeredCount = Object.keys(answers).length;
   const allAnswered = answeredCount === total;
@@ -622,7 +802,7 @@ function MCQs({ c }: { c: TopicContent }) {
 
 function Exercises({ c }: { c: TopicContent }) {
   if (!c.exercises?.length)
-    return <Placeholder icon="🏋️" title="Exercises & Scenarios">Practical, scenario-based, and debugging exercises will appear here.</Placeholder>;
+    return null;
   return (
     <ol className="space-y-2">
       {c.exercises.map((e, i) => (
@@ -640,18 +820,35 @@ function FlashcardView({ card }: { card: Flashcard }) {
   return (
     <button
       onClick={() => setFlipped((f) => !f)}
-      className="flex min-h-[7rem] w-full flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-4 text-center transition hover:border-brand-300 dark:border-slate-800 dark:bg-slate-900"
+      className="h-full w-full text-left [perspective:1200px]"
+      aria-label={flipped ? "Show prompt" : "Show answer"}
     >
-      <span className="mb-1 text-xs uppercase tracking-wide text-slate-400">{flipped ? "Answer" : "Prompt"}</span>
-      <span className="font-medium text-slate-800 dark:text-slate-100">{flipped ? card.back : card.front}</span>
-      <span className="mt-2 text-xs text-slate-400">tap to flip</span>
+      <div
+        className={cx(
+          "relative grid h-full min-h-[8rem] w-full transition-transform duration-500 ease-in-out [transform-style:preserve-3d] motion-reduce:transition-none",
+          flipped && "[transform:rotateY(180deg)]"
+        )}
+      >
+        {/* Front face */}
+        <div className="col-start-1 row-start-1 flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-4 text-center [backface-visibility:hidden] hover:border-brand-300 dark:border-slate-800 dark:bg-slate-900">
+          <span className="mb-1 text-xs uppercase tracking-wide text-slate-400">Prompt</span>
+          <span className="font-medium text-slate-800 dark:text-slate-100"><Inline text={card.front} /></span>
+          <span className="mt-2 text-xs text-slate-400">tap to flip</span>
+        </div>
+        {/* Back face (pre-rotated so it shows when the inner wrapper flips) */}
+        <div className="col-start-1 row-start-1 flex flex-col items-center justify-center rounded-xl border border-brand-300 bg-brand-50 p-4 text-center [backface-visibility:hidden] [transform:rotateY(180deg)] dark:border-brand-700 dark:bg-brand-900/25">
+          <span className="mb-1 text-xs uppercase tracking-wide text-brand-500 dark:text-brand-300">Answer</span>
+          <span className="font-medium text-slate-800 dark:text-slate-100"><Inline text={card.back} /></span>
+          <span className="mt-2 text-xs text-brand-400">tap to flip back</span>
+        </div>
+      </div>
     </button>
   );
 }
 
 function Flashcards({ c }: { c: TopicContent }) {
   if (!c.flashcards?.length)
-    return <Placeholder icon="🃏" title="Flashcards">Active-recall cards for spaced repetition will appear here.</Placeholder>;
+    return null;
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {c.flashcards.map((card, i) => (
@@ -665,8 +862,8 @@ function Flashcards({ c }: { c: TopicContent }) {
 /* Reference                                                           */
 /* ------------------------------------------------------------------ */
 
-function BulletBox({ items, icon, title, tone }: { items?: string[]; icon: string; title: string; tone: "notes" | "cheat" }) {
-  if (!items?.length) return <Placeholder icon={icon} title={title}>{title} will appear here.</Placeholder>;
+function BulletBox({ items, tone }: { items?: string[]; tone: "notes" | "cheat" }) {
+  if (!items?.length) return null;
   return (
     <div
       className={cx(
@@ -699,31 +896,59 @@ const RESOURCE_ICON: Record<ResourceLink["kind"], string> = {
 
 function Resources({ c }: { c: TopicContent }) {
   if (!c.resources?.length)
-    return <Placeholder icon="🔖" title="Resources">Docs, books, papers, talks, and open-source references will appear here.</Placeholder>;
+    return null;
   return (
     <ul className="space-y-2">
-      {c.resources.map((r, i) => (
-        <li key={i} className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-          <span aria-hidden>{RESOURCE_ICON[r.kind]}</span>
-          <div>
-            <div className="font-medium text-slate-800 dark:text-slate-100">{r.label}</div>
-            {r.note && <div className="text-sm text-slate-500 dark:text-slate-400">{r.note}</div>}
-          </div>
-          <Pill>{r.kind}</Pill>
-        </li>
-      ))}
+      {c.resources.map((r, i) => {
+        const inner = (
+          <>
+            <span aria-hidden>{RESOURCE_ICON[r.kind]}</span>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium text-slate-800 dark:text-slate-100">
+                {r.label}
+                {r.url && (
+                  <span aria-hidden className="ml-1.5 inline-block text-xs text-brand-500 dark:text-brand-300">↗</span>
+                )}
+              </div>
+              {r.note && <div className="text-sm text-slate-500 dark:text-slate-400"><Inline text={r.note} /></div>}
+              {r.url && (
+                <div className="mt-0.5 truncate text-xs text-brand-500/80 dark:text-brand-300/70">{r.url}</div>
+              )}
+            </div>
+            <Pill>{r.kind}</Pill>
+          </>
+        );
+        const cls =
+          "flex items-start gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900";
+        return (
+          <li key={i}>
+            {r.url ? (
+              <a
+                href={r.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={cx(cls, "transition hover:border-brand-300 hover:shadow-sm dark:hover:border-brand-600")}
+              >
+                {inner}
+              </a>
+            ) : (
+              <div className={cls}>{inner}</div>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }
 
 function Glossary({ entries }: { entries?: GlossaryEntry[] }) {
   if (!entries?.length)
-    return <Placeholder icon="🔤" title="Glossary">Key terms for this topic will appear here.</Placeholder>;
+    return null;
   return (
     <dl className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
       {entries.map((e, i) => (
         <div key={i} className="px-4 py-3">
-          <dt className="font-semibold text-slate-800 dark:text-slate-100">{e.term}</dt>
+          <dt className="font-semibold text-slate-800 dark:text-slate-100"><Inline text={e.term} /></dt>
           <dd className="text-sm text-slate-600 dark:text-slate-400"><RichText text={e.definition} /></dd>
         </div>
       ))}
@@ -766,9 +991,9 @@ export function renderSection(kind: ContentComponentKind, content: TopicContent)
     case "flashcards":
       return <Flashcards c={content} />;
     case "revision-notes":
-      return <BulletBox items={content.revisionNotes} icon="📝" title="Revision Notes" tone="notes" />;
+      return <BulletBox items={content.revisionNotes} tone="notes" />;
     case "cheat-sheet":
-      return <BulletBox items={content.cheatSheet} icon="🧾" title="Cheat Sheet" tone="cheat" />;
+      return <BulletBox items={content.cheatSheet} tone="cheat" />;
     case "resources":
       return <Resources c={content} />;
     case "glossary":

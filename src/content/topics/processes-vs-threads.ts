@@ -264,7 +264,7 @@ int main() {
     "Modern pattern: process-per-core + thread pool or event loop within each.",
   ],
   resources: [
-    { label: "Operating Systems: Three Easy Pieces", kind: "book", note: "Free online — excellent on processes, threads, and concurrency." },
+    { label: "Operating Systems: Three Easy Pieces", url: "https://pages.cs.wisc.edu/~remzi/OSTEP/", kind: "book", note: "Free online — excellent on processes, threads, and concurrency." },
     { label: "man 7 pthreads", kind: "docs", note: "POSIX threads reference." },
     { label: "The Linux Programming Interface, Ch. 24-33", kind: "book", note: "Comprehensive coverage of processes, threads, and IPC on Linux." },
     { label: "Concurrency is not Parallelism — Rob Pike", kind: "video", note: "Go talk clarifying the distinction with practical examples." },

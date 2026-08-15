@@ -489,9 +489,9 @@ private:
   resources: [
     { label: "Brewer's CAP conjecture (PODC 2000 keynote)", kind: "paper", note: "The original presentation where Eric Brewer proposed the CAP conjecture." },
     { label: "Brewer's Conjecture and the Feasibility of Consistent, Available, Partition-Tolerant Web Services (Gilbert & Lynch, 2002)", kind: "paper", note: "The formal proof of the CAP theorem." },
-    { label: "Designing Data-Intensive Applications — Ch. 5, 7, 9", kind: "book", note: "Martin Kleppmann's authoritative coverage of replication, consistency, and distributed systems trade-offs." },
+    { label: "Designing Data-Intensive Applications — Ch. 5, 7, 9", url: "https://dataintensive.net/", kind: "book", note: "Martin Kleppmann's authoritative coverage of replication, consistency, and distributed systems trade-offs." },
     { label: "Please stop calling databases CP or AP (Martin Kleppmann, 2015)", kind: "article", note: "Explains why the CAP labels are often misapplied and how to think about consistency more precisely." },
-    { label: "Jepsen: Consistency testing for distributed systems", kind: "repo", note: "Kyle Kingsbury's testing framework and analyses that have found consistency bugs in nearly every major distributed database." },
+    { label: "Jepsen: Consistency testing for distributed systems", url: "https://jepsen.io/analyses", kind: "repo", note: "Kyle Kingsbury's testing framework and analyses that have found consistency bugs in nearly every major distributed database." },
     { label: "A Critique of the CAP Theorem (Kleppmann, 2015)", kind: "paper", note: "Detailed analysis of CAP's limitations and why PACELC and other models are more useful in practice." },
     { label: "Consistency Models in Distributed Systems (Viotti & Vukolic, 2016)", kind: "paper", note: "Comprehensive survey and taxonomy of consistency models from linearizability to eventual consistency." },
   ],

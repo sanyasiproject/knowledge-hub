@@ -474,7 +474,7 @@ void cfs_simulate(Task tasks[], int n, int slice_ms) {
   ],
   resources: [
     { label: "Operating System Concepts (Silberschatz)", kind: "book", note: "Chapter 5 covers CPU scheduling algorithms in depth with worked examples." },
-    { label: "Operating Systems: Three Easy Pieces (OSTEP)", kind: "book", note: "Free online textbook. Chapters on scheduling are excellent and accessible." },
+    { label: "Operating Systems: Three Easy Pieces (OSTEP)", url: "https://pages.cs.wisc.edu/~remzi/OSTEP/", kind: "book", note: "Free online textbook. Chapters on scheduling are excellent and accessible." },
     { label: "Linux kernel CFS documentation", kind: "docs", note: "Documentation/scheduler/sched-design-CFS.rst in the kernel source tree." },
     { label: "The Linux Completely Fair Scheduler", kind: "article", note: "IBM DeveloperWorks article explaining CFS internals with diagrams." },
     { label: "CPU Scheduling - Neso Academy", kind: "video", note: "Clear video lectures covering all major scheduling algorithms with Gantt chart examples." },

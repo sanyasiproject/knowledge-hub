@@ -10,13 +10,17 @@ export const designObjectStorage: TopicContent = {
   ],
   detailed: [
     "## High-Level Architecture and Data Flow\n\nAn object storage system is organized into three planes: an API gateway layer, a metadata service, and a data storage layer. The API gateway receives HTTP requests (PUT, GET, DELETE, HEAD, LIST), authenticates them using HMAC-signed requests (like AWS Signature V4), and routes them to the correct internal service. The metadata service is the brain of the system: it maps each object key to its physical storage locations, manages bucket-level configuration (versioning, lifecycle, CORS), and maintains indexes for LIST operations. The data storage layer handles the actual bytes on disk across thousands of storage nodes, each running a local blob store daemon that manages disk I/O, checksums, and local garbage collection. A typical write path for a 100 MB object involves the gateway chunking it into 64 MB or 128 MB blocks, writing each block to the data layer across multiple storage nodes, and then atomically committing the object metadata once all blocks are durable. The read path is simpler: the gateway queries the metadata service for the block locations, then streams the blocks directly from storage nodes back to the client, often in parallel.",
+    "## Capacity Estimation: The Numbers That Drive the Design\n\nBack-of-envelope capacity math is what separates a hand-wavy design from a defensible one, so run the arithmetic before drawing boxes. Suppose the system must store 100 PB of logical data. With 3x replication the raw footprint is 100 PB × 3 = 300 PB. With Reed-Solomon RS(10,4) erasure coding the overhead factor is (10+4)/10 = 1.4x, so the raw footprint is 100 PB × 1.4 = 140 PB — a saving of 160 PB of raw disk versus replication while tolerating 4 simultaneous fragment losses instead of 2. At roughly $15 per TB of raw HDD (drive plus chassis, power, and cooling amortized), that difference is 160,000 TB × $15 ≈ $2.4M in capital cost alone, before power and replacement cycles — this is the cost argument that makes erasure coding non-negotiable at scale. Key insight: erasure coding simultaneously improves durability AND cuts cost by half; the price you pay is CPU for encoding, read fan-out, and repair traffic. Now size the metadata: at 1 trillion objects × ~1 KB per metadata record, the metadata layer alone is ~1 PB — far too large for one machine, which is why the metadata store must itself be a sharded, replicated database on SSDs. Finally sanity-check throughput: if clients push 10 GB/s of ingest, RS(10,4) amplifies that to 14 GB/s of fan-out writes, and a fleet of storage nodes each sustaining ~2-4 GB/s of disk throughput needs a matching 25-50 Gbps network per node so the network never becomes the bottleneck before the disks do. For example, a design review that proposes 3x replication for a 100 PB archive tier should be challenged immediately: the same durability target is reachable at 140 PB raw instead of 300 PB.\n\nCommon mistake: quoting 11 nines durability without separating it from availability. Durability (will the bytes still exist?) comes from redundancy plus scrubbing; availability (can I read them right now?) comes from serving-path redundancy and is typically only 4 nines. They are engineered by different mechanisms and quoted as different SLAs.",
     "## Metadata Service Design\n\nThe metadata service is the most critical and complex component because every single operation touches it. It must handle billions of objects across millions of buckets, supporting fast point lookups (GET object metadata by key) and range scans (LIST objects with prefix and delimiter). A common design uses a distributed B-tree or LSM-tree partitioned by bucket ID, with each partition responsible for a range of object keys within that bucket. Partitioning by bucket avoids hotspots for LIST operations but creates skew for buckets with millions of objects, so large buckets are further sub-partitioned by key range. Each metadata record stores the object key, version ID, size, content type, user metadata, ACL, creation timestamp, and a list of chunk references (storage node + disk + offset + length). The metadata service uses Paxos or Raft for replication across 3-5 nodes per partition to achieve strong consistency. The total metadata footprint matters: at 1 KB per record and 100 billion objects, the metadata layer alone requires 100 TB of storage, typically on SSDs for low-latency access.",
-    "## Erasure Coding vs. Replication\n\nDurability is the defining feature of object storage, and the choice between erasure coding and replication is the most consequential engineering trade-off. Triple replication stores 3 copies of every byte, consuming 3x storage but offering simple recovery (just copy from a surviving replica) and low read latency (read from the nearest replica). Erasure coding (e.g., Reed-Solomon 8+4) splits each chunk into 8 data fragments and 4 parity fragments across 12 storage nodes, tolerating any 4 failures while using only 1.5x storage — a 50% space savings compared to triple replication. The trade-off is CPU overhead for encoding/decoding (roughly 2-4 GB/s per core with SIMD-optimized libraries like ISA-L) and higher read tail latency because a degraded read requires fetching from 8 of 12 nodes and reconstructing. In practice, S3 uses erasure coding for the vast majority of data because at exabyte scale, the storage cost savings dominate. Hot data (frequently accessed) might use replication for latency, while warm and cold tiers use progressively more aggressive erasure coding ratios (e.g., 12+4 or 17+3).",
+    "## Erasure Coding vs. Replication\n\nDurability is the defining feature of object storage, and the choice between erasure coding and replication is the most consequential engineering trade-off. Triple replication stores 3 copies of every byte, consuming 3x storage but offering simple recovery (just copy from a surviving replica) and low read latency (read from the nearest replica). Erasure coding (e.g., Reed-Solomon 8+4) splits each chunk into 8 data fragments and 4 parity fragments across 12 storage nodes, tolerating any 4 failures while using only 1.5x storage — a 50% space savings compared to triple replication. The trade-off is CPU overhead for encoding/decoding (roughly 2-4 GB/s per core with SIMD-optimized libraries like ISA-L) and higher read tail latency because a degraded read requires fetching from 8 of 12 nodes and reconstructing. In practice, S3 uses erasure coding for the vast majority of data because at exabyte scale, the storage cost savings dominate. Hot data (frequently accessed) might use replication for latency, while warm and cold tiers use progressively more aggressive erasure coding ratios (e.g., 12+4 or 17+3).\n\nKey insight: erasure coding has two hidden costs that replication does not. First, repair traffic amplification: rebuilding one lost replica copies 1 unit of data, but rebuilding one lost RS(10,4) fragment requires reading 10 surviving fragments — 10x the network and disk I/O per unit repaired. Second, small-object overhead: a 4 KB object split into 10 data fragments produces 400-byte fragments plus fixed per-fragment metadata and I/O costs, so the effective overhead can exceed 3x anyway.\n\nIn practice: production systems use a hybrid policy — replicate small objects (below roughly 128 KB-1 MB) and erasure-code large ones, or initially triple-replicate all incoming writes for low write latency and asynchronously re-encode to erasure coding once objects age out of the hot window.",
     "## Multi-Part Upload and Large Object Handling\n\nMulti-part upload is essential for objects larger than ~100 MB because single-stream uploads over the internet are unreliable for large transfers. The protocol works in three phases: initiate (returns an upload ID), upload parts (each part is a separate HTTP PUT with the upload ID and a part number, uploaded in any order, potentially in parallel), and complete (submits a manifest listing all part ETags, which triggers the server to assemble the final object). Each part is independently stored and checksummed, so a failed part can be retried without re-uploading the entire object. The server enforces a minimum part size of 5 MB (except the last part) to prevent abuse that would create billions of tiny fragments. Parts can be uploaded from different machines or regions, enabling distributed upload pipelines. An important edge case is abandoned uploads: parts consume storage but the object is not yet visible, so a lifecycle rule or background sweeper must garbage-collect incomplete uploads after a configurable timeout (e.g., 7 days).",
+    "## Hot-Spot Avoidance and Key Placement\n\nA flat namespace does not automatically mean uniform load: real workloads write sequential or timestamp-prefixed keys (logs/2026/08/15/...), and any placement scheme that ranges over raw key order concentrates those writes on one metadata partition and one set of storage nodes. The classic mitigation is to hash the key (or a salted prefix) before it enters the partition map, so lexically adjacent keys land on different shards — this is exactly why old S3 guidance told users to reverse or randomize key prefixes, and why modern S3 removed that burden by automatically partitioning hot prefixes. The metadata layer must therefore support dynamic partition splitting: when one shard's request rate or size crosses a threshold, it splits its key range in two and the router map is updated, exactly like HBase/Bigtable region splits. On the data plane, hot-spotting is a read problem too: a single viral object can attract millions of GETs per second, which no 12-node fragment group can serve. Mitigations layer up: CDN/edge caching absorbs repeated GETs, gateways coalesce concurrent requests for the same object into one backend fetch, and the system can temporarily over-replicate hot objects onto many more nodes. Warning: hashing keys for placement destroys locality for LIST — the metadata index still needs a lexically-sorted structure per bucket for prefix scans, so systems keep a sorted index for listing while using hashed placement for load spreading; conflating the two is a common design error.\n\nReal-world example: S3 historically throttled workloads that wrote monotonically increasing keys to a single prefix at ~3,500 PUT/s; after its 2018 re-architecture each distinct prefix independently scales to that rate, and hot prefixes are split automatically behind the scenes.",
     "## Versioning, Lifecycle Policies, and Garbage Collection\n\nVersioning transforms every PUT into an append operation at the metadata layer: instead of overwriting the previous metadata record, a new record with a unique version ID is inserted, and the latest-version pointer is updated atomically. A DELETE on a versioned bucket inserts a delete marker (a zero-byte version), making the object invisible to unversioned GET requests but recoverable by specifying the version ID. Lifecycle policies are declarative rules (expressed as XML or JSON) that automate storage management: transition rules move objects to cheaper storage classes (e.g., Standard to Infrequent Access after 30 days, to Glacier after 90 days), and expiration rules delete objects after a specified age. These rules are executed by background workers that scan metadata indexes (typically sorted by creation timestamp), identify matching objects, and enqueue transition or deletion tasks. Garbage collection is a two-phase process: first, metadata is updated to mark the object as deleted, then a separate background process reclaims the physical storage blocks. This decoupling prevents deletion latency from affecting client-facing operations and allows batch optimization of disk I/O during garbage collection.",
   ],
   deepDive: [
     "Achieving 11 nines of durability (99.999999999%) requires thinking probabilistically about correlated failures. At 1 trillion objects, 11 nines means losing fewer than 0.01 objects per year. With triple replication across 3 availability zones, you must lose all 3 copies simultaneously. If a single drive has an annual failure rate (AFR) of 2% and mean time to repair (MTTR) of 4 hours, the probability of triple failure is approximately (AFR * MTTR/8760)^2 for each pair, multiplied across all objects. But the real danger is correlated failures: a firmware bug affecting a batch of drives, a power event taking out a rack, or a software bug corrupting data silently (bit rot). Erasure coding with fragments spread across independent failure domains (different racks, power circuits, and AZs) reduces correlation. Silent data corruption is detected by computing and verifying checksums (SHA-256 or CRC32c) at every layer: on write, on read, during background scrubbing (periodic verification of all stored data, typically cycling through the entire corpus every 30-90 days). The scrubbing process detects and repairs bit rot before it compounds into an irrecoverable state.",
+    "The durability arithmetic is worth being able to sketch on a whiteboard, because it shows why 11 nines is achievable at all. Take a single disk with 2% annual failure rate (AFR) and a 4-hour repair window: the chance it fails during any given 4-hour window is roughly 0.02 × (4/8760) ≈ 9 × 10^-6. For triple replication, losing an object requires two more specific disks to fail inside the repair window of the first failure: roughly 0.02 × (9 × 10^-6)^2 ≈ 1.6 × 10^-12 per replica-group per year — already past 11 nines before you even count scrubbing. For RS(10,4) you need 5 overlapping failures out of 14, which drives the per-group probability below 10^-17: erasure coding buys MORE durability for LESS storage. Key insight: the two levers that actually move durability in practice are repair speed (a shorter MTTR window shrinks the failure-overlap probability quadratically or better) and failure-domain independence (correlated failures — a bad firmware batch, a rack power event, an AZ outage — collapse the exponent, which is why fragments must span racks and AZs, not just disks). This is also why 11 nines is quoted per year and per object: at 1 trillion objects, 11 nines still means an expected loss of about 10 objects per year in aggregate, so operators watch fleet-wide repair queue depth and scrub error rates as the leading durability indicators rather than waiting for an actual loss.",
+    "Multipart upload resumability deserves a closer look because it is the mechanism that makes petabyte-scale ingestion practical over unreliable networks. Each part upload is idempotent and independently committed: the server stores the part's chunks, records (uploadId, partNumber, ETag, chunk refs) in a pending-upload metadata table, and returns the ETag. A client that crashes can call ListParts to discover exactly which parts the server already holds, compare ETags against local checksums, and re-upload only the missing or mismatched parts — resumability falls out of the protocol without any server-side session state beyond the parts table. Re-uploading the same part number simply supersedes the earlier attempt; the older chunks become garbage referenced only by the pending table and are reclaimed later. The CompleteMultipartUpload call is the atomic commit: the server validates the manifest (all parts present, each at least 5 MB except the last, ETags match), then writes a single metadata record whose chunk list is the concatenation of the parts' chunk lists — no data is copied or reassembled on disk, which is why completion is fast even for a 5 TB object. The multipart ETag is not an MD5 of the whole object but a hash-of-hashes (MD5 of the concatenated part MD5s, suffixed with the part count), a detail that trips up integrity-checking clients. In practice: SDKs default to multipart above about 100 MB with 8-16 parallel part uploads, which both maximizes throughput (single TCP streams rarely fill a long fat pipe) and caps retransmission cost at one part rather than the whole object.",
     "The consistency model of an object storage system is more nuanced than simple strong or eventual. Read-after-write consistency guarantees that after a PUT returns 200, any GET from any client sees the new object. List-after-write consistency guarantees the new object appears in LIST results. S3 achieved strong consistency for both by making the metadata commit the linearization point: data is written to the storage layer first (potentially with eventual convergence), and only after the metadata is committed via Raft consensus across multiple metadata nodes does the PUT return success. The metadata layer acts as a serialization barrier. For deletes, the delete marker is committed the same way, so subsequent GETs return 404 immediately. The subtle aspect is conditional writes: if-none-match semantics require a read-modify-write cycle on the metadata, which must be linearized to prevent lost updates. S3 added conditional writes in 2024, using compare-and-swap on the version vector in the metadata layer, enabling safe concurrent modifications without application-level locking.",
     "Scaling to exabytes requires careful capacity planning at every layer. The metadata service must handle hundreds of millions of requests per second globally, which is achieved by aggressive partitioning (millions of metadata partitions) and caching (hot bucket metadata in a distributed cache layer in front of the metadata store). The data layer consists of hundreds of thousands of storage nodes, each with 10-36 HDDs (14-22 TB each), giving a total raw capacity of 50-800 TB per node. The placement algorithm must balance writes across nodes while respecting failure domain constraints (no two fragments of the same erasure-coded group on the same rack), which is solved by a consistent-hashing-based placement algorithm (similar to Ceph's CRUSH) that is deterministic — any node can compute the placement without consulting a central coordinator. Network bandwidth is a binding constraint: a storage node with 36 HDDs can sustain about 3-5 GB/s aggregate disk throughput, requiring at least a 50 Gbps network link. Cross-AZ data transfer for replication and erasure coding adds significant cost, so systems batch cross-AZ writes and use intra-AZ read preference to minimize transfer fees.",
     "Failure scenarios and operational resilience define the true quality of an object storage system. A storage node failure triggers the repair process: the placement algorithm identifies all erasure-coded groups that had a fragment on the failed node, reads the surviving fragments from other nodes, reconstructs the missing fragment, and writes it to a new node. At 500 TB per node and 200 MB/s repair throughput, a full node repair takes about 40 minutes with parallel reconstruction across hundreds of groups. During repair, the system operates in a degraded state with reduced fault tolerance, so repair speed is critical — a second failure during repair could cause data loss if the erasure coding cannot tolerate it. To mitigate this, systems over-provision parity (e.g., 8+4 tolerates 4 failures but expects at most 1-2 during repair), monitor repair queues, and prioritize groups with the fewest surviving fragments. Beyond hardware failures, the system must handle software bugs (detected by checksums and cross-replica comparison), human errors (prevented by versioning and MFA Delete), and regional outages (handled by cross-region replication with configurable RPO).",
@@ -410,33 +414,78 @@ private:
       title: "Object Storage High-Level Architecture",
       kind: "architecture",
       caption:
-        "Three-plane architecture: API gateways, metadata service with Raft consensus, and erasure-coded data storage across availability zones",
-      mermaid: `graph TD
-    Client["Client / SDK"] -->|"HTTP PUT/GET"| LB["Load Balancer"]
-    LB --> GW1["API Gateway 1"]
-    LB --> GW2["API Gateway 2"]
-    LB --> GW3["API Gateway 3"]
-    GW1 --> Auth["Auth Service - Signature V4"]
-    GW2 --> Auth
-    GW3 --> Auth
-    GW1 --> Meta["Metadata Service - Raft Cluster"]
-    GW2 --> Meta
-    GW3 --> Meta
-    Meta --> MetaDB1["Metadata Partition 1 - SSD B-tree"]
-    Meta --> MetaDB2["Metadata Partition 2 - SSD B-tree"]
-    Meta --> MetaDB3["Metadata Partition N - SSD B-tree"]
-    GW1 --> DS["Data Plane Router"]
-    GW2 --> DS
-    GW3 --> DS
-    DS --> AZ1["AZ-1 Storage Nodes"]
-    DS --> AZ2["AZ-2 Storage Nodes"]
-    DS --> AZ3["AZ-3 Storage Nodes"]
-    AZ1 --> D1["Node 1: 36 HDDs"]
-    AZ1 --> D2["Node 2: 36 HDDs"]
-    AZ2 --> D3["Node 3: 36 HDDs"]
-    AZ2 --> D4["Node 4: 36 HDDs"]
-    AZ3 --> D5["Node 5: 36 HDDs"]
-    AZ3 --> D6["Node 6: 36 HDDs"]`,
+        "Layered architecture with the PUT path numbered 1-5 (request, route, chunk, erasure code and place across failure domains, commit metadata) and the GET path prefixed G1-G2 (lookup placement, stream fragments). Background workers handle repair, garbage collection, and lifecycle tiering; monitoring observes every layer.",
+      mermaid: `graph TB
+    subgraph CLIENTS["Clients"]
+        SDK["REST API Client / SDK<br/>PUT GET DELETE LIST"]
+        MPU["Multipart Uploader<br/>parallel resumable parts"]
+    end
+
+    subgraph GATEWAY["Gateway Layer"]
+        LBX["Load Balancer"]
+        APIGW["API Gateway<br/>SigV4 auth, rate limiting,<br/>multipart orchestration"]
+    end
+
+    subgraph METALAYER["Metadata Service"]
+        MDSVC["Metadata Router<br/>bucket + key to placement mapping"]
+        SHARD1["Shard 1<br/>Raft, SSD LSM or B-tree"]
+        SHARD2["Shard 2<br/>Raft, SSD LSM or B-tree"]
+        SHARDN["Shard N<br/>Raft, SSD LSM or B-tree"]
+    end
+
+    subgraph DATAPLANE["Data Plane"]
+        CHUNK["Chunk Manager<br/>split into blocks, RS erasure encode"]
+        subgraph AZONE1["AZ-1 / Rack A"]
+            NODE1["Storage Node<br/>EC fragments on HDDs"]
+            NODE2["Storage Node<br/>EC fragments on HDDs"]
+        end
+        subgraph AZONE2["AZ-2 / Rack B"]
+            NODE3["Storage Node<br/>EC fragments on HDDs"]
+            NODE4["Storage Node<br/>EC fragments on HDDs"]
+        end
+        subgraph AZONE3["AZ-3 / Rack C"]
+            NODE5["Storage Node<br/>EC fragments on HDDs"]
+            NODE6["Storage Node<br/>EC fragments on HDDs"]
+        end
+    end
+
+    subgraph BACKGROUND["Background Services"]
+        REPAIR["Repair and Re-replication Workers<br/>rebuild lost fragments"]
+        GCWORK["Garbage Collector<br/>reclaim unreferenced chunks"]
+        LIFEC["Lifecycle / Tiering Workers<br/>transition and expire"]
+        COLDT["Cold Storage Tier<br/>aggressive EC, tape or dense HDD"]
+    end
+
+    subgraph MONITOR["Monitoring"]
+        METRICS["Heartbeats, Metrics,<br/>Scrubbing Reports, Audit Logs"]
+    end
+
+    SDK -->|"1. signed request"| LBX
+    MPU --> LBX
+    LBX -->|"2. route + authenticate"| APIGW
+
+    APIGW -->|"3. PUT: chunk object"| CHUNK
+    CHUNK -->|"4. PUT: erasure code and place<br/>across failure domains"| NODE1
+    CHUNK --> NODE3
+    CHUNK --> NODE5
+    APIGW -->|"5. PUT: commit metadata<br/>after fragments durable"| MDSVC
+
+    APIGW -->|"G1. GET: lookup placement"| MDSVC
+    APIGW -->|"G2. GET: fetch k fragments in parallel"| CHUNK
+
+    MDSVC --> SHARD1
+    MDSVC --> SHARD2
+    MDSVC --> SHARDN
+
+    REPAIR --> NODE2
+    GCWORK --> NODE4
+    LIFEC --> COLDT
+    LIFEC -.->|"scan indexes"| MDSVC
+
+    METRICS -.-> APIGW
+    METRICS -.-> MDSVC
+    METRICS -.-> NODE6
+    METRICS -.-> REPAIR`,
     },
     {
       title: "Multi-Part Upload Sequence",
@@ -687,6 +736,24 @@ private:
         "How do you optimize lifecycle scans for buckets with billions of objects?",
       ],
     },
+    {
+      q: "Estimate the raw storage and cost difference between replication and erasure coding for a 100 PB object store, and size the metadata layer.",
+      a: "Start with the logical requirement: 100 PB of user data. Triple replication needs 100 PB x 3 = 300 PB raw. Reed-Solomon RS(10,4) has an overhead factor of (10+4)/10 = 1.4x, so it needs 100 PB x 1.4 = 140 PB raw — 160 PB less, while tolerating 4 simultaneous fragment losses instead of 2. At roughly $15 per raw TB fully loaded, that is about $2.4M in capital savings, and the gap grows linearly with scale, which is why every hyperscale object store erasure-codes the bulk of its data. The caveats: EC costs CPU for encoding, a degraded read must fan out to 10 nodes, repairing one fragment reads 10 surviving fragments (10x repair traffic vs 1x for replication), and tiny objects fragment poorly — so the standard hybrid is to replicate small objects and hot data, and erasure-code large or cooling data, sometimes by writing 3x first and re-encoding asynchronously. For metadata: assume ~1 KB per object record; at 1 trillion objects that is ~1 PB of metadata, which mandates a sharded, Raft-replicated SSD-backed store (hundreds of shards) rather than any single database. Also sanity-check bandwidth: 10 GB/s of client ingest becomes 14 GB/s of backend writes at 1.4x, so per-node network (25-50 Gbps) must be provisioned to match aggregate disk throughput.",
+      followUps: [
+        "How does the cost comparison change for a read-heavy hot tier?",
+        "At what object size does erasure coding stop making sense, and why?",
+        "How would you migrate 100 PB from 3x replication to RS(10,4) without downtime?",
+      ],
+    },
+    {
+      q: "A customer writes objects with monotonically increasing keys (timestamps) and hits throttling. Why does this happen and how do you fix it in the system design?",
+      a: "This is the classic hot-partition problem. If metadata (and placement) is range-partitioned by key, all writes with keys like logs/2026-08-15T10:00:01... land on the single partition owning the tail of the key range: one Raft group absorbs the entire write load while the rest of the fleet idles, so the system throttles at that one shard's capacity. There are three complementary fixes. First, hashed placement: route each key through a hash (optionally salting the prefix) before the partition map, so lexically adjacent keys spread across shards — the trade-off is that a purely hashed index cannot serve efficient prefix LISTs, so the design keeps a lexically-sorted index per bucket for listing while using hash-spread placement for load. Second, dynamic partition splitting: monitor per-shard request rate and size, and when a shard runs hot, split its key range and migrate half to another node, the same mechanism Bigtable and HBase use — modern S3 does this automatically per prefix, which is why the old advice to randomize key prefixes is obsolete. Third, client-side key design as a stopgap: prefix keys with a hash bucket (0-f) when the platform cannot repartition. For read hot-spots (one viral object), the fixes are different: CDN edge caching, request coalescing at the gateway, and temporary over-replication of the hot object across many storage nodes.",
+      followUps: [
+        "How do you split a hot metadata partition without pausing writes to it?",
+        "How does hashing for placement interact with LIST pagination guarantees?",
+        "How would you detect a hot partition before it causes client-visible throttling?",
+      ],
+    },
   ],
   mcqs: [
     {
@@ -766,6 +833,22 @@ private:
       front: "How does object storage handle the thundering herd problem on a popular object?",
       back: "When a hot object gets thousands of concurrent requests, mitigations include: 1) Edge caching via CDN to serve repeated GETs without hitting the storage backend. 2) Request coalescing at the gateway: concurrent GETs for the same object share a single backend fetch. 3) Local read caches on gateway nodes with short TTLs. 4) Multiple replicas of hot objects across more storage nodes to spread read load.",
     },
+    {
+      front: "100 PB logical data: raw storage under 3x replication vs RS(10,4)?",
+      back: "3x replication: 100 PB x 3 = 300 PB raw. RS(10,4): overhead (10+4)/10 = 1.4x, so 140 PB raw. Erasure coding saves 160 PB raw while tolerating 4 fragment losses vs 2 replica losses — the core cost argument for EC at scale. Hidden EC costs: 10x repair traffic per lost fragment and poor efficiency for small objects.",
+    },
+    {
+      front: "Why replicate small objects but erasure-code large ones?",
+      back: "Splitting a 4 KB object into 10 data fragments yields ~400-byte fragments where per-fragment metadata and IOPS dominate, so effective overhead can exceed 3x anyway — replication is simpler and no more expensive. Large objects amortize encoding and per-fragment costs, so EC's 1.4-1.5x overhead wins. Common hybrid: write 3x for hot/new data, asynchronously re-encode to EC as it cools.",
+    },
+    {
+      front: "How does a crashed multipart upload resume without re-sending everything?",
+      back: "Each part is independently committed and idempotent. The client calls ListParts to see which (partNumber, ETag) pairs the server holds, compares against local checksums, and re-uploads only missing/mismatched parts. Complete is an atomic metadata commit that concatenates the parts' chunk lists — no data copying — after validating the manifest.",
+    },
+    {
+      front: "Why do monotonically increasing object keys cause throttling, and what fixes it?",
+      back: "Range-partitioned metadata sends all tail-of-keyspace writes to one partition (one Raft group), capping throughput at a single shard. Fixes: hash keys into the partition map (keep a separate sorted index for LIST), dynamic partition splitting of hot shards (modern S3 does this per prefix automatically), or salted key prefixes as a client-side stopgap.",
+    },
   ],
   exercises: [
     "Design the data placement algorithm for an object storage system: given N storage nodes across 3 AZs and R racks per AZ, write pseudocode that selects 12 nodes for an (8,4) erasure-coded group such that no two fragments share a rack, at least one fragment is in each AZ, and the algorithm is deterministic (any node can compute the placement from the object key and cluster map alone).",
@@ -785,6 +868,10 @@ private:
     "Lifecycle policies are background processes: workers scan metadata indexes by creation timestamp, apply transition rules (Standard to IA to Archive) and expiration rules, enqueuing actions to a task queue.",
     "Garbage collection is two-phase: first update metadata (fast, in the client path), then asynchronously reclaim data chunks when reference counts reach zero (batch-optimized for disk I/O).",
     "Content-addressable storage using SHA-256 hashes enables deduplication (identical chunks stored once with reference counting) and integrity verification (hash comparison during scrubbing).",
+    "Capacity math to memorize: 100 PB logical = 300 PB raw at 3x replication vs 140 PB raw at RS(10,4) (1.4x). Metadata: 1 trillion objects x ~1 KB = ~1 PB, mandating a sharded SSD metadata store.",
+    "Erasure coding hidden costs: 10x repair traffic (read 10 fragments to rebuild 1) and poor small-object efficiency. Standard hybrid: replicate small/hot objects, erasure-code large/cool ones, or 3x-then-re-encode asynchronously.",
+    "Hot-spot avoidance: hash keys for placement and split hot metadata partitions dynamically, but keep a lexically-sorted index per bucket for prefix LIST. Read hot-spots need CDN caching, request coalescing, and temporary over-replication.",
+    "Durability levers: repair speed (shorter MTTR shrinks failure-overlap probability super-linearly) and failure-domain independence (spread fragments across racks and AZs — correlated failures are what actually break the durability math).",
   ],
   cheatSheet: [
     "Object key lookup: Client -> Gateway -> Metadata Service (B-tree point query, ~1ms on SSD) -> return chunk locations -> Gateway reads chunks from Data Storage in parallel.",
@@ -797,6 +884,10 @@ private:
     "Versioning overhead: one additional metadata record per version (~1 KB). Data chunks shared via content-addressable deduplication when versions share unchanged parts.",
     "Background processes: scrubbing (30-90 day cycle, verify all checksums), garbage collection (reclaim unreferenced chunks), lifecycle workers (scan and apply transition/expiration rules), repair (reconstruct missing fragments after node failure).",
     "Capacity planning: storage node with 36 x 20 TB HDDs = 720 TB raw. With RS(8,4) at 1.5x overhead, usable = 480 TB. 1 EB raw = ~1,400 storage nodes. Add 20% headroom for repair and fragmentation.",
+    "Cost argument: 100 PB logical -> 300 PB raw (3x replication) vs 140 PB raw (RS(10,4), 1.4x). At ~$15/raw TB fully loaded, EC saves ~$2.4M capex. EC repair cost: rebuild 1 fragment = read 10 survivors (10x traffic).",
+    "Size-based redundancy policy: objects < ~1 MB -> replicate (fragmenting them costs more than 3x anyway); objects >= 1 MB -> erasure code. Alternative: write 3x for latency, re-encode to EC asynchronously as data cools.",
+    "Hot keys: hash key -> partition map for placement; keep sorted per-bucket index for LIST; split hot metadata shards dynamically. Hot object reads: CDN, gateway request coalescing, temporary over-replication.",
+    "Multipart resumability: ListParts returns committed (partNumber, ETag) pairs -> re-upload only missing parts. Complete = atomic metadata commit concatenating chunk lists (no data copy). Multipart ETag = MD5 of part MD5s + '-partCount'.",
   ],
   glossary: [
     {
@@ -842,6 +933,8 @@ private:
     "How would you design a storage class transition system that physically moves data between different erasure coding schemes without affecting availability?",
     "How does the system handle extremely large buckets (10 billion+ objects) for LIST performance and metadata partitioning?",
     "What is the design for event notifications (e.g., S3 Event Notifications to Lambda/SQS/SNS) and how do you guarantee at-least-once delivery without impacting write latency?",
+    "How would you migrate an exabyte-scale fleet from 3x replication to erasure coding online, and how do you throttle re-encoding so it never competes with client traffic or repair?",
+    "How do conditional writes (If-None-Match / compare-and-swap on ETag) change the metadata layer, and what new concurrency patterns do they enable for applications built on object storage?",
   ],
   resources: [
     {
@@ -855,7 +948,7 @@ private:
       note: "The foundational paper on the CRUSH algorithm used in Ceph, describing the deterministic placement algorithm that respects failure domains without a central lookup table.",
     },
     {
-      label: "Designing Data-Intensive Applications by Martin Kleppmann",
+      label: "Designing Data-Intensive Applications by Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
       note: "Chapters 5-9 cover replication, partitioning, consistency models, and distributed system trade-offs directly applicable to object storage design.",
     },
@@ -865,7 +958,7 @@ private:
       note: "Describes Facebook's transition from triple replication to erasure coding for warm data, achieving 2.1x storage reduction while maintaining durability, with detailed cost analysis.",
     },
     {
-      label: "System Design Interview: Object Storage (S3) - by Alex Xu",
+      label: "System Design Interview: Object Storage (S3) - by Alex Xu", url: "https://bytebytego.com/",
       kind: "video",
       note: "Walkthrough of S3 system design covering the metadata service, data storage layer, multi-part upload, and consistency model with interview-focused trade-off analysis.",
     },

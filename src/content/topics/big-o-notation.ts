@@ -234,8 +234,8 @@ function hasDuplicateFast<T>(items: T[]): boolean {
   ],
   resources: [
     { label: "Introduction to Algorithms (CLRS), Ch. 3", kind: "book", note: "The definitive treatment of asymptotic notation." },
-    { label: "Big-O Cheat Sheet (bigocheatsheet.com)", kind: "article", note: "Complexity of common data structures and algorithms." },
-    { label: "MIT 6.006 — Introduction to Algorithms", kind: "video", note: "Free lecture series covering complexity analysis." },
+    { label: "Big-O Cheat Sheet (bigocheatsheet.com)", url: "https://www.bigocheatsheet.com/", kind: "article", note: "Complexity of common data structures and algorithms." },
+    { label: "MIT 6.006 — Introduction to Algorithms", url: "https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-spring-2020/", kind: "video", note: "Free lecture series covering complexity analysis." },
   ],
   glossary: [
     { term: "Asymptotic", definition: "Describing behavior as the input size approaches infinity." },

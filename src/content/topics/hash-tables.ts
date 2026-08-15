@@ -553,12 +553,12 @@ public:
   ],
   resources: [
     { label: "Introduction to Algorithms (CLRS), Chapter 11: Hash Tables", kind: "book", note: "The canonical textbook treatment covering universal hashing, chaining, and open addressing with proofs." },
-    { label: "Designing Data-Intensive Applications by Martin Kleppmann", kind: "book", note: "Covers consistent hashing, partitioning, and distributed hash table patterns in real systems." },
+    { label: "Designing Data-Intensive Applications by Martin Kleppmann", url: "https://dataintensive.net/", kind: "book", note: "Covers consistent hashing, partitioning, and distributed hash table patterns in real systems." },
     { label: "Abseil Swiss Tables Design Notes", kind: "docs", note: "Google's flat_hash_map design using SIMD-accelerated probing -- a masterclass in modern hash table engineering." },
     { label: "Cuckoo Hashing -- Pagh and Rodler (2004)", kind: "paper", note: "The original paper introducing cuckoo hashing with worst-case O(1) lookups." },
-    { label: "Consistent Hashing and Random Trees -- Karger et al. (1997)", kind: "paper", note: "The foundational paper on consistent hashing, developed for distributed caching at Akamai." },
+    { label: "Consistent Hashing and Random Trees -- Karger et al. (1997)", url: "https://www.cs.princeton.edu/courses/archive/fall09/cos518/papers/chash.pdf", kind: "paper", note: "The foundational paper on consistent hashing, developed for distributed caching at Akamai." },
     { label: "Hash Table Performance Tests by Martin Ankerl", kind: "article", note: "Comprehensive benchmarks of Robin Hood, Swiss Table, and other hash map implementations in C++." },
-    { label: "MIT 6.006 Lecture on Hashing (YouTube)", kind: "video", note: "Erik Demaine's lecture covering hash functions, chaining, open addressing, and universal hashing." },
+    { label: "MIT 6.006 Lecture on Hashing (YouTube)", url: "https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-spring-2020/", kind: "video", note: "Erik Demaine's lecture covering hash functions, chaining, open addressing, and universal hashing." },
     { label: "hashbrown (Rust HashMap implementation)", kind: "repo", note: "Rust's standard HashMap backed by SwissTable, a production-grade Robin Hood + SIMD implementation." },
   ],
   glossary: [

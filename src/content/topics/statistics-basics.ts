@@ -485,7 +485,7 @@ prob = beta"]`,
       note: "Reference for Python statistical functions: distributions, hypothesis tests, correlation, and regression.",
     },
     {
-      label: "Seeing Theory (Brown University)",
+      label: "Seeing Theory (Brown University)", url: "https://seeing-theory.brown.edu/",
       kind: "article",
       note: "Interactive visual introduction to probability and statistics concepts in the browser.",
     },

@@ -340,8 +340,8 @@ export async function answerMultiHop(question: string) {
     "**RAG evaluation** must assess retrieval and generation independently. Use RAGAS metrics: faithfulness, answer relevance, context precision, context recall.",
   ],
   resources: [
-    { label: "Gao et al. - Retrieval-Augmented Generation for Large Language Models: A Survey", kind: "paper" as const, note: "Comprehensive survey covering the full taxonomy of RAG techniques including advanced retrieval, augmentation, and generation strategies." },
-    { label: "LangChain RAG Documentation", kind: "docs" as const, note: "Official guides for building RAG pipelines with hybrid search, reranking, query transformations, and evaluation using LangChain." },
+    { label: "Gao et al. - Retrieval-Augmented Generation for Large Language Models: A Survey", url: "https://arxiv.org/abs/2005.11401", kind: "paper" as const, note: "Comprehensive survey covering the full taxonomy of RAG techniques including advanced retrieval, augmentation, and generation strategies." },
+    { label: "LangChain RAG Documentation", url: "https://python.langchain.com/docs/", kind: "docs" as const, note: "Official guides for building RAG pipelines with hybrid search, reranking, query transformations, and evaluation using LangChain." },
     { label: "RAGAS Documentation", kind: "docs" as const, note: "Framework for evaluating RAG pipelines with metrics for faithfulness, answer relevance, context precision, and context recall." },
     { label: "Sentence-Transformers: Cross-Encoders", kind: "repo" as const, note: "Library providing pre-trained cross-encoder models for reranking, with examples for information retrieval and semantic search." },
     { label: "Microsoft GraphRAG", kind: "repo" as const, note: "Microsoft's implementation of Graph RAG using LLM-extracted knowledge graphs with community summaries for local and global queries." },

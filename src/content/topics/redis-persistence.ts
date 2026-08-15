@@ -403,10 +403,10 @@ DEBUG RELOAD     # Save + quit + reload (testing only)`,
     "DEBUG SLEEP 0 — no-op to test latency monitoring",
   ],
   resources: [
-    { label: "Redis Persistence Documentation", kind: "docs", note: "Official guide covering RDB, AOF, and hybrid persistence." },
+    { label: "Redis Persistence Documentation", url: "https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/", kind: "docs", note: "Official guide covering RDB, AOF, and hybrid persistence." },
     { label: "Redis Administration Guide", kind: "docs", note: "Production deployment guidance including persistence tuning and THP." },
     { label: "Redis in Action — Chapter 4: Persistence", kind: "book", note: "Practical coverage of RDB and AOF trade-offs with worked examples." },
-    { label: "Antirez blog — Redis persistence demystified", kind: "article", note: "Deep dive into fork mechanics, AOF rewrite, and data safety guarantees." },
+    { label: "Antirez blog — Redis persistence demystified", url: "https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/", kind: "article", note: "Deep dive into fork mechanics, AOF rewrite, and data safety guarantees." },
     { label: "Redis source: rdb.c and aof.c", kind: "repo", note: "Core persistence implementation. rdbSave(), rewriteAppendOnlyFile(), and related functions." },
   ],
   glossary: [

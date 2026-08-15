@@ -133,11 +133,11 @@ In practice, most systems are tunable. Cassandra's consistency levels (ONE, QUOR
   ],
   resources: [
     {
-      label: "Designing Data-Intensive Applications — Martin Kleppmann",
+      label: "Designing Data-Intensive Applications — Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
     },
     {
-      label: "Jepsen — consistency model analyses",
+      label: "Jepsen — consistency model analyses", url: "https://jepsen.io/analyses",
       kind: "article",
     },
   ],

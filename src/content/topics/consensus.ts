@@ -732,15 +732,15 @@ public:
 
   resources: [
     {
-      label: "In Search of an Understandable Consensus Algorithm (Raft) — Ongaro & Ousterhout",
+      label: "In Search of an Understandable Consensus Algorithm (Raft) — Ongaro & Ousterhout", url: "https://raft.github.io/raft.pdf",
       kind: "paper",
     },
     {
-      label: "Paxos Made Simple — Leslie Lamport",
+      label: "Paxos Made Simple — Leslie Lamport", url: "https://lamport.azurewebsites.net/pubs/paxos-simple.pdf",
       kind: "paper",
     },
     {
-      label: "etcd documentation — Raft in practice",
+      label: "etcd documentation — Raft in practice", url: "https://raft.github.io/raft.pdf",
       kind: "docs",
     },
   ],

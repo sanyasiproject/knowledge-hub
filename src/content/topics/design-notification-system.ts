@@ -9,6 +9,7 @@ export const designNotificationSystem: TopicContent = {
     "Delivery tracking and retry with exponential backoff ensure reliability. Each notification is assigned a unique ID and its lifecycle (queued, sent, delivered, read, failed) is tracked. Failed deliveries are retried with exponential backoff and jitter, with a dead-letter queue capturing permanently failed notifications for investigation.",
   ],
   detailed: [
+    "## Capacity Estimation and Back-of-Envelope Math\n\nStart every notification design with load numbers, because they dictate queue sizing and provider quotas. Assume 100M notifications/day: 100,000,000 / 86,400 s = ~1,160 notifications/second average. Traffic is not flat -- a marketing campaign or a breaking-news push produces 10x spikes, so provision the ingestion path and Kafka for ~12,000/s sustained bursts. If each user averages 2 devices and there are 100M users, the device token registry holds ~200M tokens; at ~200 bytes per row (token ~150 bytes, userId, platform, timestamps) that is ~40 GB -- small enough for a single replicated store, but hot enough on reads (one lookup per push) to justify a Redis cache in front. Notification log: 100M events/day x ~1 KB (payload + status history) = ~100 GB/day, ~36 TB/year -- use an append-only wide-column store (Cassandra/DynamoDB) with a TTL of 30-90 days and archive to object storage. Per-channel provider limits shape worker pools: FCM accepts very high throughput per project but throttles per-device (collapse keys mitigate this); APNs sustains thousands of requests/second per HTTP/2 connection, so a pool of ~10-20 connections covers push; SES default quotas are on the order of tens of thousands of emails/second only after quota increases (a fresh account starts at ~14/s, so plan quota requests and IP warm-up); Twilio long-code SMS is ~1 message/second per number -- high-volume SMS requires short codes (~100/s each) or a number pool. Key insight: the bottleneck of a notification system is almost never your own servers -- it is third-party provider quotas, which is why per-channel queues that absorb backpressure independently are the core of the design.",
     "## High-Level Architecture\n\nThe notification system is composed of several layers: **Notification Service** (API gateway that receives send requests from internal services), **Validation and Enrichment** (checks user preferences, deduplicates, applies rate limits, resolves templates), **Channel Router** (determines which channels to use based on priority, user preferences, and channel availability), **Channel Workers** (per-channel consumer pools that handle actual delivery via third-party providers), and **Tracking Service** (records delivery status, handles callbacks/webhooks from providers). Producers (order service, payment service, social service) call the Notification Service API with a notification type, recipient, and context data. The service validates the request, checks if the user has opted out, resolves the template, and publishes channel-specific messages to Kafka topics (one topic per channel). Channel workers consume from their respective topics and deliver via the appropriate provider (APNs for iOS push, FCM for Android push, SES/SendGrid for email, Twilio for SMS). Provider delivery receipts (webhooks, callbacks) flow back into the tracking service to update notification status.",
     "## Template Engine and User Preferences\n\nThe **template engine** stores versioned templates in a template registry (database or configuration service). Each template has a unique type identifier (e.g., 'order_shipped', 'payment_received'), a channel variant (push body is shorter than email body), locale-specific translations, and parameterized placeholders. At render time, the engine merges the template with event context data using a lightweight templating language (Mustache, Handlebars, or a custom DSL). Templates support conditional blocks for personalization (e.g., show a coupon section only for premium users). **User preferences** are stored per user and define: which notification types they want to receive, preferred channels per type (e.g., 'order updates via push + email, marketing via email only'), quiet hours (do not disturb windows), and language/locale. The preference service is queried during the enrichment phase. If a user has disabled a notification type entirely, the notification is dropped. If they have channel preferences, the router sends only to those channels. Quiet hours cause notifications to be deferred (queued with a scheduled delivery time) rather than dropped.",
     "## Rate Limiting and Priority Levels\n\nRate limiting operates at multiple granularities: **per-user** (no more than N notifications per hour to prevent fatigue), **per-channel** (respect provider rate limits -- e.g., APNs throttles per device token), **per-notification-type** (marketing emails capped at 1/day), and **global** (circuit breaker if total throughput exceeds system capacity). Implementation uses Redis sliding window counters: for each (userId, channel, window) tuple, increment a counter on each send; if the counter exceeds the limit, the notification is either dropped (low priority), deferred to the next window (medium), or sent anyway with a warning (critical). **Priority levels** classify notifications: P0 (critical -- security alerts, OTP codes) bypass rate limits and quiet hours; P1 (high -- transaction confirmations) respect quiet hours but get priority queue placement; P2 (normal -- social updates) follow all rules; P3 (low -- marketing, digests) are batched and sent during optimal engagement windows. Priority determines queue ordering: channel workers consume from priority-partitioned topics, processing P0 before P1 before P2.",
@@ -19,6 +20,11 @@ export const designNotificationSystem: TopicContent = {
     "Fan-out strategies differ significantly based on notification type. **Event-triggered notifications** (order shipped, password reset) are 1:1 and processed immediately. **Broadcast notifications** (system maintenance, new feature announcement) target millions of users and require a different path: a broadcast service expands the recipient list in batches, writing individual notifications to the queue in chunks of 1000-10000. This prevents a single broadcast from overwhelming the queue. Segment-based targeting (e.g., 'all users in region X who have not logged in for 30 days') requires integration with a user segmentation service that pre-computes audience lists. The broadcast path also needs its own rate limiting to prevent a marketing campaign from starving transactional notifications.",
     "Channel failover and multi-channel orchestration add resilience. When the primary channel fails (push provider returns a permanent error like 'invalid device token'), the system can automatically fall back to a secondary channel (email). This requires a **channel orchestration engine** that defines fallback chains per notification type: for OTP, try SMS first, then voice call; for order updates, try push first, then email. The orchestrator tracks which channels succeeded and avoids sending the same notification twice (once via push and again via fallback email if push already delivered). Time-based escalation is another pattern: send a push notification, wait 5 minutes, if not read (no read receipt), send an email as a follow-up. This requires a scheduler service that tracks pending escalations and fires them based on the absence of a delivery/read event within the window.",
     "Notification deduplication and aggregation handle bursty event sources. If a user receives 50 likes on a photo in 10 minutes, sending 50 individual push notifications creates a terrible experience. The **aggregation service** groups related notifications within a time window (e.g., 5 minutes) and collapses them into a single notification ('Alice, Bob, and 48 others liked your photo'). Aggregation rules are defined per notification type: social events aggregate by target entity (photo, post), while transaction events (payment received) are never aggregated. The aggregation buffer is implemented as a time-windowed accumulator in Redis: on each incoming notification, check if an aggregation buffer exists for (userId, notificationType, entityId); if yes, increment the counter and update the actor list; if no, create a new buffer with a TTL equal to the aggregation window. When the TTL expires, a scheduled job flushes the aggregated notification to the channel queue.",
+    "Idempotency and deduplication must be enforced at every layer, because each layer can independently duplicate work. At the API layer, producers attach an idempotency key -- typically the source event ID (e.g., `order-9821-shipped`) -- and the notification service records it in Redis with a TTL covering the producer's retry horizon (e.g., 24h); a repeated key returns the original notification ID instead of creating a new one. At the pipeline layer, Kafka consumers are at-least-once, so a worker that crashes after sending but before committing its offset will reprocess the message: the worker checks the tracking store for a terminal state on (notificationId, channel) before calling the provider, shrinking the duplicate window to the instant between provider-accept and status-write. At the provider layer, use platform dedup primitives: FCM `collapse_key` and APNs `apns-collapse-id` make a newer notification replace an older undisplayed one on the device (ideal for 'score updated' style events), and many email/SMS providers accept a client reference ID they deduplicate on. Key insight: exactly-once delivery to a phone is impossible to guarantee end-to-end -- design for at-least-once everywhere, and make the last hop idempotent with collapse keys plus client-side dedup on notification ID for in-app.",
+    "The preference and quiet-hours engine is a real subsystem, not a boolean check. The effective decision for each (user, notificationType, channel) tuple resolves a precedence chain: legal opt-outs (unsubscribe, SMS STOP -- absolute, cannot be overridden), user per-type/per-channel toggles, org or tenant policies, and system defaults. Quiet hours are timezone-sensitive: store the user's IANA timezone (from device or profile), and evaluate 'is 22:00-08:00 local?' at send time, not enqueue time -- a notification queued at 21:55 and delivered at 22:05 must still be deferred. Deferred notifications go to a scheduler (delay queue or a 'deliver_after' timestamp index scanned each minute) and are re-checked against preferences on release, because the user may have opted out in the meantime. Cache the resolved preference document per user in Redis with an event-driven invalidation (preference-change events bust the cache) -- at 1,160 sends/second you cannot afford a database read per notification. Common mistake: evaluating quiet hours in server time or at enqueue time; both produce 3 a.m. pushes for someone, and 3 a.m. pushes are the fastest way to get your app's notification permission revoked.",
+    "Retry policy must be channel-specific because failure semantics differ per provider. Push: FCM/APNs return explicit permanent errors -- `UNREGISTERED` / 410 `Unregistered` means the token is dead (app uninstalled or token rotated); do not retry, immediately mark the token invalid in the registry so future sends skip it, and fall back to another channel if the notification matters. Transient 429/5xx retries use exponential backoff honoring `Retry-After` when present. Email: a 4xx SMTP soft bounce (mailbox full, greylisting) retries over hours; a 5xx hard bounce (no such user) must add the address to a suppression list -- continuing to send to hard-bounced addresses destroys sender reputation and gets your IP blocked for everyone. SMS: carrier errors distinguish 'handset unreachable' (retry for a validity period, then expire -- an OTP delivered 6 hours late is harmful, so OTPs carry a short TTL) from 'invalid number' (permanent). In practice, each channel worker owns a retry table: error class -> action (backoff-retry with per-channel base/max, suppress, invalidate-token, fallback-channel), and every notification carries a per-priority expiry so stale messages die in the queue instead of being delivered absurdly late.",
+    "Campaign and bulk sends must never starve transactional notifications, and the isolation has to be structural, not just a priority flag. Use physically separate lanes: distinct Kafka topics (or queue tiers) for transactional vs campaign traffic, with channel workers reserving guaranteed capacity for the transactional lane (e.g., weighted consumption 80/20, or a dedicated transactional worker pool). Campaign expansion is itself rate-limited: a 50M-recipient campaign is expanded by a batch job in pages of ~10K users and drip-fed into the campaign topic at a target rate (say 20K/s) computed from remaining provider quota after transactional headroom is subtracted. Provider quota is the shared scarce resource, so implement a token-bucket per provider that transactional sends draw from first; campaign workers only consume leftover tokens. For example, if SES quota is 30K/s and transactional email runs at 2K/s peak, campaigns get a ceiling around 25K/s with margin. Also warm campaigns by engagement cohort (most-active users first) so early delivery-rate and open-rate metrics can abort a bad campaign before it reaches everyone. Common mistake: putting campaigns and OTPs on the same queue with priority ordering only -- a deep campaign backlog still inflates tail latency and one misconfigured campaign delays every password reset.",
+    "Delivery-rate tracking closes the loop, and most of the signal arrives asynchronously via provider webhooks. Sending is only 'provider accepted'; actual outcomes come later -- SES/SendGrid post bounce/complaint/delivery/open/click events to a webhook endpoint, Twilio posts delivery status callbacks, and APNs/FCM report token validity per request (plus batch feedback for dead tokens). Treat webhook ingestion as untrusted, bursty input: verify signatures, respond 200 immediately, and drop events onto a Kafka topic for asynchronous processing -- a slow synchronous handler causes the provider to retry and duplicate events, so webhook processing must itself be idempotent (event IDs). A stream job joins status events to notification IDs and updates the tracking store, then aggregates per-minute delivery rate, bounce rate, and open rate per (channel, notificationType, provider). These aggregates power alerting -- delivery rate for push dropping from 97% to 80% within 5 minutes usually means a provider incident or a bad token batch -- and feed automated controls: pause a campaign when its bounce or complaint rate crosses a threshold (complaint rate above ~0.1% risks provider suspension), and trip the provider circuit breaker on webhook-confirmed failure spikes even when the synchronous API is still returning 200s.",
     "Compliance and deliverability are critical operational concerns. Email notifications must comply with CAN-SPAM (unsubscribe link in every email, honor opt-outs within 10 days), GDPR (right to erasure applies to notification history), and carrier regulations for SMS. The system maintains per-user consent records and processes unsubscribe events from multiple sources (email link clicks, SMS STOP replies, in-app preference changes) through a centralized preference update pipeline. Email deliverability requires managing sender reputation: using dedicated IP pools, implementing SPF/DKIM/DMARC, monitoring bounce rates, and automatically suppressing hard-bounced addresses. SMS requires maintaining opt-in records and handling carrier-specific throughput limits. Push notifications require handling token rotation (when a user reinstalls the app, the device token changes) and cleaning up stale tokens that return 'not registered' errors from APNs/FCM.",
   ],
   code: [
@@ -329,61 +335,81 @@ private:
       title: "Notification System Architecture",
       kind: "architecture",
       caption:
-        "End-to-end notification system with multi-channel delivery, template engine, and tracking",
+        "Layered architecture: one event ingested once fans out to per-channel queues, each with its own workers, provider, and retry loop; status flows back through delivery tracking into the notification log. The delivery path is numbered 1-9 (the push lane shown as the representative channel); the status feedback flow is prefixed S1-S3",
       mermaid: `graph TB
-    subgraph Producers
-        OS[Order Service]
-        PS[Payment Service]
-        SS[Social Service]
-        MS[Marketing Service]
+    subgraph TRIG["Triggers - services emitting events"]
+        OS["Order Service"]
+        PS["Payment Service"]
+        SS["Social Service"]
+        CAMP["Campaign / Marketing Service"]
     end
 
-    subgraph Notification Platform
-        API[Notification API Gateway]
-        VAL[Validator + Deduplicator]
-        PREF[User Preference Service]
-        TE[Template Engine]
-        RL[Rate Limiter]
-        ROUTER[Channel Router]
-        PQ[Priority Queue - Kafka]
+    subgraph ING["Ingestion"]
+        API["Notification API<br/>auth, validation, idempotency key"]
+        KAFKA["Kafka - notification events<br/>partitioned by userId"]
     end
 
-    subgraph Channel Workers
-        PW[Push Workers]
-        EW[Email Workers]
-        SW[SMS Workers]
-        IW[In-App Workers]
+    subgraph CORE["Core Pipeline"]
+        PREF["Preference / Opt-out Service<br/>channel choices, quiet hours"]
+        TPL["Template Service<br/>versioned, locale + channel variants"]
+        DEDUP["Dedup + Per-User Rate Limiting<br/>event-ID keys, sliding windows"]
+        ROUTER["Priority Router<br/>transactional vs campaign lanes"]
     end
 
-    subgraph Providers
-        APNS[APNs / FCM]
-        SES[SES / SendGrid]
-        TWI[Twilio / SNS]
-        WS[WebSocket Gateway]
+    subgraph CHAN["Channel Workers"]
+        PUSHQ["Push Queue"]
+        EMAILQ["Email Queue"]
+        SMSQ["SMS Queue"]
+        INAPPQ["In-App Queue"]
+        PW["Push Workers"]
+        EW["Email Workers"]
+        SW["SMS Workers"]
+        IW["In-App Workers"]
     end
 
-    subgraph Tracking
-        TS[Tracking Service]
-        DLQ[Dead Letter Queue]
-        AN[Analytics Pipeline]
+    subgraph PROV["Providers"]
+        FCM["FCM / APNs"]
+        SES["SES / SendGrid"]
+        TWI["Twilio"]
+        WSG["WebSocket Gateway"]
     end
 
-    OS & PS & SS & MS --> API
-    API --> VAL
-    VAL --> PREF
-    VAL --> TE
-    VAL --> RL
-    RL --> ROUTER
-    ROUTER --> PQ
-    PQ --> PW & EW & SW & IW
-    PW --> APNS
+    subgraph TRK["Delivery Tracking"]
+        TRACK["Tracking Service<br/>status events, webhook ingestion"]
+        DLQ["Dead Letter Queue"]
+    end
+
+    subgraph DATA["Data Stores"]
+        PREFDB["User Prefs DB"]
+        TOKDB["Device Token Registry"]
+        LOGDB["Notification Log<br/>append-only"]
+    end
+
+    OS & PS & SS & CAMP -->|"1. send request"| API
+    API -->|"2. publish event"| KAFKA
+    KAFKA -->|"3. consume"| PREF
+    PREF -->|"4. allowed"| TPL
+    TPL -->|"5. rendered payload"| DEDUP
+    DEDUP -->|"6. unique event"| ROUTER
+    PREF --- PREFDB
+    ROUTER -->|"7. fan-out per channel"| PUSHQ & EMAILQ & SMSQ & INAPPQ
+    PUSHQ -->|"8. consume"| PW
+    EMAILQ --> EW
+    SMSQ --> SW
+    INAPPQ --> IW
+    PW --- TOKDB
+    PW -->|"9. deliver via provider"| FCM
     EW --> SES
     SW --> TWI
-    IW --> WS
-    APNS & SES & TWI --> TS
-    PW & EW & SW & IW --> TS
-    TS --> DLQ
-    TS --> AN`,
+    IW --> WSG
+    PW -->|"transient error: backoff retry"| PUSHQ
+    EW -->|"retry"| EMAILQ
+    SW -->|"retry"| SMSQ
+    IW -->|"retry"| INAPPQ
+    FCM & SES & TWI -->|"S2. delivery receipts / webhooks"| TRACK
+    PW & EW & SW & IW -->|"S1. attempt status"| TRACK
+    TRACK -->|"retries exhausted"| DLQ
+    TRACK -->|"S3. persist status"| LOGDB`,
     },
     {
       title: "Notification Lifecycle Flow",
@@ -502,6 +528,22 @@ private:
       q: "What happens when a third-party provider (e.g., Twilio for SMS) goes down?",
       a: "Implement multi-layer resilience: (1) **Circuit breaker**: monitor provider error rates. If errors exceed a threshold (e.g., 50% in 60 seconds), trip the circuit -- stop sending to that provider, queue all notifications for that channel. The circuit half-opens after a cooldown period and lets a few test requests through. If they succeed, close the circuit. (2) **Provider failover**: configure backup providers per channel (e.g., Twilio primary, Vonage secondary for SMS). When the primary circuit breaks, route to the backup. (3) **Queue buffering**: since notifications are already in Kafka, they survive provider outages. Workers simply stop consuming (or consume and re-enqueue with delay) until the provider recovers. No data is lost. (4) **Channel failover**: if the entire SMS channel is degraded, the orchestration engine can escalate critical notifications to an alternative channel (e.g., push notification + email for an OTP that would normally go via SMS). (5) **Alerting**: immediate page to the on-call engineer when a provider circuit trips, with dashboards showing queue depth growth and estimated drain time.",
     },
+    {
+      q: "Walk me through the capacity estimation for a notification system handling 100M notifications per day.",
+      a: "Throughput: 100M / 86,400s = ~1,160/s average; campaigns and breaking-news events cause ~10x spikes, so size ingestion and Kafka for ~12K/s. Fan-out multiplies this: if an average notification goes to 1.5 channels, downstream channel traffic is ~1,700/s average. Storage: device token registry for 100M users x 2 devices x ~200 bytes = ~40 GB (cacheable in Redis, read once per push); notification log at ~1 KB per notification with status history = ~100 GB/day, so use an append-only store with 30-90 day TTL and cold archive. Provider limits are the real constraint: APNs sustains thousands of req/s per HTTP/2 connection (10-20 connections suffice), FCM throttles per-device rather than per-project, SES starts at ~14 emails/s until quota increases are granted (plan IP warm-up), and Twilio long codes do ~1 SMS/s per number so bulk SMS needs short codes or number pools. Worker pool sizing follows from provider latency: if an email API call takes 100ms, one worker sustains ~10/s, so 2K emails/s needs ~200 concurrent sends -- a few dozen worker instances with async I/O.",
+      followUps: [
+        "How would your numbers change if 90% of the daily volume arrived in a 2-hour window?",
+        "Where would you put caches, and what is the hit rate you would need for the preference store?",
+      ],
+    },
+    {
+      q: "How do you guarantee a user never receives the same notification twice, given at-least-once delivery everywhere?",
+      a: "You cannot fully guarantee it end-to-end, so state that upfront and then minimize the duplicate window at each layer. API layer: producers send an idempotency key derived from the source event (event ID); the service stores key -> notificationId in Redis with a TTL longer than producer retry horizons, so a retried API call is a no-op. Pipeline layer: Kafka consumers are at-least-once (crash after send, before offset commit = reprocess), so workers check the tracking store for a terminal Sent/Delivered state on (notificationId, channel) before calling the provider -- this shrinks duplicates to the tiny race between provider-accept and status-write. Provider layer: use FCM collapse_key / APNs apns-collapse-id so a duplicate replaces the undisplayed original on the device instead of appearing twice; pass client reference IDs to email/SMS providers that deduplicate on them. Client layer: in-app clients dedupe by notification ID. Also prevent cross-channel duplicates: the orchestration engine records which channel succeeded so a fallback email is not sent after the push already delivered. The honest summary for the interviewer: at-least-once transport plus an idempotent last hop approximates exactly-once well enough in practice.",
+      followUps: [
+        "What TTL would you choose for idempotency keys, and what breaks if it is too short?",
+        "How does collapse-key behavior differ from server-side dedup, and when is collapsing wrong (e.g., two distinct OTPs)?",
+      ],
+    },
   ],
   mcqs: [
     {
@@ -583,6 +625,22 @@ private:
       back: "A DLQ captures notifications that have exhausted all retry attempts and permanently failed to deliver. Each DLQ entry contains the full notification payload, error history (all attempt timestamps and error codes), and metadata. Operations teams monitor the DLQ to identify systemic issues (provider outages, bad token batches) and can replay messages after fixing the root cause.",
     },
     {
+      front: "What is the quick capacity math for 100M notifications/day?",
+      back: "100M / 86,400s = ~1,160/s average; plan for ~10x campaign spikes (~12K/s). Token registry: 100M users x 2 devices x ~200 B = ~40 GB. Notification log: ~1 KB each = ~100 GB/day. Real bottleneck is provider quotas: SES starts ~14 emails/s until raised, Twilio long codes ~1 SMS/s per number, APNs thousands/s per HTTP/2 connection.",
+    },
+    {
+      front: "At which layers is notification deduplication enforced?",
+      back: "Four layers: (1) API -- event-ID idempotency key stored in Redis with TTL; (2) pipeline -- worker checks tracking store for terminal state before calling provider (Kafka is at-least-once); (3) provider/device -- FCM collapse_key and APNs apns-collapse-id replace undisplayed duplicates; (4) client -- in-app dedup by notification ID. End-to-end exactly-once is impossible; at-least-once + idempotent last hop approximates it.",
+    },
+    {
+      front: "Why must quiet hours be evaluated at send time, not enqueue time?",
+      back: "A notification enqueued at 21:55 may be delivered at 22:05, inside the quiet window -- evaluating at enqueue time would still wake the user. Evaluate against the user's IANA timezone at send time, defer via a delay queue or deliver_after index, and re-check preferences when the deferred notification is released (the user may have opted out meanwhile).",
+    },
+    {
+      front: "How do campaigns avoid starving transactional notifications?",
+      back: "Structural isolation, not just priority flags: separate Kafka topics/worker pools, reserved transactional capacity, and a per-provider token bucket that transactional sends draw from first. Campaigns are expanded in ~10K-user pages and drip-fed at a rate computed as provider quota minus transactional headroom, warming by engagement cohort so bad campaigns can be auto-paused early.",
+    },
+    {
       front: "How does channel failover work?",
       back: "Each notification type defines a fallback chain (e.g., OTP: SMS -> voice call; order update: push -> email). When the primary channel permanently fails (invalid token) or the provider circuit breaker trips, the orchestration engine routes to the next channel in the chain. It tracks which channels succeeded to avoid duplicate delivery across channels.",
     },
@@ -605,6 +663,11 @@ private:
     "Aggregation groups bursty events (50 likes) into one notification using a time-windowed buffer. Prevents fatigue while preserving information. Rules are per-notification-type (social events aggregate, transaction events do not).",
     "Channel failover: define fallback chains per notification type. On permanent failure or circuit breaker trip, route to next channel. Track delivery across channels to prevent duplicates.",
     "Observability: track queue depth, delivery latency (p50/p99), failure rate per provider, rate limit hit rate, open/click rates. Alert on provider degradation, queue backlog growth, and abnormal failure spikes.",
+    "Capacity anchors: 100M/day = ~1,160/s average, plan ~10x (~12K/s) for campaign spikes. Token registry: 200M tokens x ~200 B = ~40 GB. Log: ~100 GB/day at 1 KB/notification. Provider limits (SES quotas, ~1 SMS/s per Twilio long code) are the true bottleneck.",
+    "Idempotency layers: event-ID idempotency key at the API (Redis, TTL > producer retry horizon), tracking-store check before provider call in workers, FCM collapse_key / APNs apns-collapse-id at the device, notification-ID dedup in the client.",
+    "Quiet hours evaluate at send time in the user's IANA timezone, never at enqueue time or in server time. Deferred notifications re-check preferences on release. Legal opt-outs (unsubscribe, SMS STOP) override everything, including P1.",
+    "Campaign isolation is structural: separate topics/worker pools, campaigns drip-fed at a computed rate, and a per-provider token bucket that transactional sends draw from first. Priority flags alone do not prevent starvation.",
+    "Webhook status ingestion: verify signature, ack 200 immediately, enqueue to Kafka, process idempotently by event ID. Stream-aggregate delivery/bounce/complaint rates per (channel, type, provider) to drive alerts, campaign auto-pause, and circuit breakers.",
   ],
   cheatSheet: [
     "Architecture layers: API Gateway -> Validator -> Preference Check -> Template Render -> Rate Limiter -> Channel Router -> Priority Queue -> Channel Workers -> Providers -> Tracking Service",
@@ -617,6 +680,11 @@ private:
     "Idempotency: API layer uses idempotency key (client-provided UUID). Queue layer uses Kafka deduplication. Provider layer uses collapse IDs (APNs) or collapse keys (FCM).",
     "Broadcast expansion: never expand all-at-once. Batch into pages of 10K users, write to queue at controlled rate (50K/sec), use lower-priority topic to avoid starving transactional notifications.",
     "Tracking state machine: Created -> Queued -> Sending -> Sent -> Delivered -> Read. Terminal error states: Rejected, Dropped, Failed, Bounced. All transitions logged to append-only event store.",
+    "Capacity quick math: 100M/day / 86,400 = ~1,160/s avg; x10 spike = ~12K/s. Tokens: 200M x 200 B = 40 GB. Log: 100M x 1 KB = 100 GB/day. SES starts ~14/s until raised; Twilio long code ~1 SMS/s; APNs = thousands/s per HTTP/2 conn.",
+    "Per-channel permanent errors: push UNREGISTERED/410 = invalidate token now; email 5xx hard bounce = suppression list (protect sender reputation); SMS invalid number = never retry. OTP/SMS carry short TTLs -- late delivery is worse than none.",
+    "Quiet hours: evaluate at SEND time in user's IANA timezone; defer via delay queue / deliver_after index; re-check prefs on release. Cache resolved preference doc in Redis with event-driven invalidation.",
+    "Campaign vs transactional: separate topics + reserved transactional worker capacity + per-provider token bucket (transactional draws first). Expand campaigns in 10K pages, drip at (provider quota - transactional headroom).",
+    "Webhook ingestion: verify signature -> ack 200 -> enqueue -> process idempotently by event ID. Auto-pause campaign if complaint rate > ~0.1% or delivery rate drops sharply in the first cohort.",
   ],
   glossary: [
     {
@@ -753,6 +821,9 @@ private:
     "How would you design a notification analytics dashboard that shows real-time delivery funnel metrics (sent -> delivered -> opened -> clicked) per notification campaign?",
     "What strategies would you use to maintain email deliverability at scale (managing sender reputation, IP warming, bounce handling, spam score optimization)?",
     "How would you extend the notification system to support rich interactive notifications (action buttons, inline replies, carousels) across different platforms?",
+    "How would you keep the device token registry healthy over time (token rotation on reinstall, batch feedback for dead tokens, users with 10+ stale devices)?",
+    "How would you design guardrails that automatically pause a campaign when early delivery-rate or complaint-rate metrics look bad?",
+    "How would you provide per-tenant isolation and fairness if this notification system were offered as a multi-tenant platform product?",
   ],
   resources: [
     {
@@ -776,7 +847,7 @@ private:
       note: "AWS documentation for Simple Notification Service (fan-out pub/sub) and Simple Queue Service (reliable message queuing) used as building blocks for notification systems",
     },
     {
-      label: "Designing Data-Intensive Applications",
+      label: "Designing Data-Intensive Applications", url: "https://dataintensive.net/",
       kind: "book",
       note: "Martin Kleppmann's book covers message queues, exactly-once delivery, idempotency, and distributed system reliability patterns foundational to notification systems",
     },

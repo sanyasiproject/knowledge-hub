@@ -489,7 +489,7 @@ int main(void) {
   ],
   resources: [
     {
-      label: "Crafting Interpreters (Robert Nystrom)",
+      label: "Crafting Interpreters (Robert Nystrom)", url: "https://craftinginterpreters.com/",
       kind: "book",
       note: "Free online book walking through two complete interpreters: a tree-walker in Java and a bytecode VM in C.",
     },

@@ -244,10 +244,10 @@ FROM pg_stat_replication;`
     "Split-brain prevention: fencing (STONITH), quorum, epoch numbers",
   ],
   resources: [
-    { label: "Designing Data-Intensive Applications, Ch. 5-6", kind: "book", note: "The definitive treatment of replication and partitioning." },
-    { label: "Dynamo: Amazon's Highly Available Key-Value Store", kind: "paper", note: "Foundational paper on leaderless replication and consistent hashing." },
-    { label: "PostgreSQL Documentation — High Availability and Replication", kind: "docs", note: "Streaming replication, logical replication, and failover." },
-    { label: "Consistent Hashing and Random Trees — Karger et al.", kind: "paper", note: "The original consistent hashing paper." },
+    { label: "Designing Data-Intensive Applications, Ch. 5-6", url: "https://dataintensive.net/", kind: "book", note: "The definitive treatment of replication and partitioning." },
+    { label: "Dynamo: Amazon's Highly Available Key-Value Store", url: "https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf", kind: "paper", note: "Foundational paper on leaderless replication and consistent hashing." },
+    { label: "PostgreSQL Documentation — High Availability and Replication", url: "https://www.postgresql.org/docs/current/", kind: "docs", note: "Streaming replication, logical replication, and failover." },
+    { label: "Consistent Hashing and Random Trees — Karger et al.", url: "https://www.cs.princeton.edu/courses/archive/fall09/cos518/papers/chash.pdf", kind: "paper", note: "The original consistent hashing paper." },
   ],
   glossary: [
     { term: "Replication", definition: "Copying data across multiple nodes so each has a complete copy for fault tolerance and read scalability." },

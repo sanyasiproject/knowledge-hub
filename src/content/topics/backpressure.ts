@@ -412,7 +412,7 @@ await pipeline(source, processor, sink);`,
   resources: [
     { label: "Reactive Streams Specification", kind: "docs", note: "The canonical spec for async stream processing with backpressure on the JVM" },
     { label: "Project Reactor Reference Guide", kind: "docs", note: "Comprehensive guide to Reactor's Flux/Mono and backpressure operators" },
-    { label: "Designing Data-Intensive Applications (Ch. 11)", kind: "book", note: "Martin Kleppmann on stream processing and flow control" },
+    { label: "Designing Data-Intensive Applications (Ch. 11)", url: "https://dataintensive.net/", kind: "book", note: "Martin Kleppmann on stream processing and flow control" },
     { label: "Node.js Stream Documentation", kind: "docs", note: "Official guide to Node.js streams, including backpressure handling" },
     { label: "RabbitMQ Consumer Prefetch", kind: "docs", note: "Official RabbitMQ documentation on basic.qos and prefetch" },
     { label: "Kafka Consumer Configuration", kind: "docs", note: "Apache Kafka docs on consumer configs affecting throughput and backpressure" },

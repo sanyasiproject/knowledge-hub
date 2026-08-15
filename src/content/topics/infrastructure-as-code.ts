@@ -387,7 +387,7 @@ export const url = alb.loadBalancer.dnsName;`
 
   resources: [
     { label: "Terraform: Up & Running (Brikman)", kind: "book", note: "The definitive guide to Terraform in production, covering modules, state, testing, and team workflows" },
-    { label: "Terraform Documentation", kind: "docs", note: "Official docs covering all providers, functions, and configuration language" },
+    { label: "Terraform Documentation", url: "https://developer.hashicorp.com/terraform/docs", kind: "docs", note: "Official docs covering all providers, functions, and configuration language" },
     { label: "AWS CloudFormation User Guide", kind: "docs", note: "Complete reference for CloudFormation templates, intrinsic functions, and stack management" },
     { label: "Infrastructure as Code (Morris)", kind: "book", note: "Principles and patterns for managing infrastructure in the cloud era" },
     { label: "Spacelift Blog: IaC Best Practices", kind: "article", note: "Practical articles on Terraform workflows, testing strategies, and policy enforcement" },

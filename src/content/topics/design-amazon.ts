@@ -9,13 +9,21 @@ export const designAmazon: TopicContent = {
     "The recommendation engine accounts for ~35% of revenue. It combines collaborative filtering (users who bought X also bought Y), content-based filtering (product attribute similarity), and real-time session signals to generate personalized product suggestions.",
   ],
   detailed: [
+    "## Capacity Estimation: Put Numbers on the Board First\n\nStart every e-commerce design by sizing the problem, because the numbers dictate the architecture. Assume ~300M active customers and ~1.6M packages shipped per day. Work the arithmetic out loud:\n\n- Orders: 1.6M orders/day / 86,400 s/day ≈ **18-20 orders/s average**. Prime Day peaks run ~10x normal and are bursty, so budget **~200-500 orders/s peak** for the checkout path.\n- Reads vs writes: product pages are read-dominated at roughly **100:1**. If each order represents ~20 product-page views plus search queries, that is 1.6M x 20 ≈ 32M product views/day ≈ 370 views/s average, with browse peaks of **50k-100k page views/s** during events (many browsers never buy).\n- Catalog size: ~350M SKUs x ~5 KB of structured metadata ≈ **1.75 TB** of catalog data — small enough to replicate widely; it is the request rate, not the byte count, that forces the caching tier.\n- Cache sizing: the classic 80/20 rule says 20% of SKUs get 80% of traffic. Caching the hot 20% ≈ 70M items x 5 KB ≈ **350 GB** — a modest Redis cluster (e.g., 6 x 64 GB nodes with replicas) absorbs the read storm.\n- Images: 350M SKUs x ~5 images x ~200 KB ≈ **350 TB** in S3, served via CloudFront so origin traffic stays tiny.\n- Orders storage: 1.6M orders/day x ~2 KB ≈ 3.2 GB/day ≈ **~1.2 TB/year** in Aurora/Postgres — trivially small, which is why orders can afford full ACID.\n\nKey insight: the read:write asymmetry (~100:1) means the browse path and the checkout path are effectively two different systems: browse is a caching/CDN problem tolerating staleness, checkout is a low-QPS correctness problem demanding transactions. Never design them with the same consistency model.\n\nCommon mistake: candidates size storage carefully but forget QPS. 1.75 TB of catalog is boring; 100k reads/s against it is the actual problem.",
     "## High-Level Architecture and Service Decomposition\n\nAmazon's architecture is a canonical example of microservices at scale, with over 1,000 independent services communicating via asynchronous messaging and synchronous APIs. The core services include Product Catalog, Search, Cart, Order, Payment, Inventory, Fulfillment, Recommendations, and Reviews. An API Gateway (or BFF layer) routes client requests to the appropriate downstream services, handles authentication, rate limiting, and request shaping. Service-to-service communication uses a mix of synchronous gRPC calls for latency-sensitive paths and asynchronous event buses (Kafka/SQS/SNS) for eventual-consistency workflows like analytics, notifications, and inventory sync. Each service owns its data store, following the database-per-service pattern, which eliminates cross-service schema coupling but introduces challenges around distributed transactions and data consistency. The front end is served through a CDN (CloudFront) with edge caching for static assets and personalized content assembled via edge-side includes or client-side composition.",
     "## Product Catalog and Search\n\nThe product catalog stores hundreds of millions of SKUs with attributes like title, description, price, images, category hierarchy, seller information, and inventory status. DynamoDB provides single-digit-millisecond reads by product ID, while a separate search cluster (OpenSearch) maintains an inverted index over product text fields. When a seller updates a product, an event is published to a change data capture stream, and a search indexer asynchronously updates the inverted index. Search ranking combines text relevance (BM25/TF-IDF), product popularity (sales velocity, click-through rate), seller quality score, and personalization signals. A re-ranking layer using a machine learning model (gradient-boosted trees or a neural ranker) produces the final ordering. Faceted search (filter by brand, price range, rating, Prime eligibility) is implemented via aggregation queries on the inverted index. Autocomplete and query suggestion use a prefix trie backed by a precomputed dictionary of popular queries, updated hourly from search logs.",
     "## Shopping Cart and Order Processing\n\nThe shopping cart is a session-scoped service that persists cart items in a fast key-value store (DynamoDB or Redis) keyed by user ID or session token. Carts must survive server failures and merge gracefully when a guest user logs in (merge guest cart into authenticated cart, preferring higher quantities). Cart operations (add, remove, update quantity) are idempotent by including a client-generated request ID checked against a deduplication window. Order processing follows the saga pattern: the Order Service orchestrates a sequence of steps -- validate cart, reserve inventory, authorize payment, confirm order, and queue for fulfillment. Each step publishes a domain event, and compensating actions (release inventory, void payment authorization) fire if any downstream step fails. The Order Service itself is a state machine with states like CREATED, INVENTORY_RESERVED, PAYMENT_AUTHORIZED, CONFIRMED, SHIPPED, DELIVERED, CANCELLED, and RETURNED. SQS dead-letter queues capture events that fail repeatedly for manual investigation.",
     "## Payment Processing and Idempotency\n\nPayment processing requires exactly-once semantics despite network unreliability. Every payment request carries an idempotency key (typically the order ID), and the payment service stores the result of each key in a durable log. If a retry arrives with the same key, the stored result is returned without re-executing the charge. The payment flow involves: (1) authorize the payment method for the order amount, placing a hold on the customer's card, (2) upon order confirmation, capture the authorized amount, (3) if the order is cancelled before capture, void the authorization. For marketplace orders with multiple sellers, the payment is split: Amazon collects the full amount and disburses to each seller minus commission, using a ledger-based accounting system that records every debit and credit as an immutable journal entry. PCI-DSS compliance requires tokenization of card data; the payment service never stores raw card numbers but references tokens from a vault. Fraud detection runs as a synchronous pre-authorization check using ML models trained on historical chargeback data.",
     "## Inventory Management and Fulfillment\n\nInventory is distributed across hundreds of fulfillment centers worldwide. Each center maintains a local inventory count, and a global inventory service aggregates availability by region. The system uses a reservation model: when a customer adds an item to cart, a soft reservation (TTL of 15 minutes) is placed; upon order confirmation, it converts to a hard reservation. Distributed locking via DynamoDB conditional writes (optimistic concurrency with version numbers) or Redis-based Redlock prevents two customers from reserving the last unit simultaneously. During flash sales or Prime Day, the system pre-partitions hot inventory items across multiple lock shards to avoid contention bottlenecks. Fulfillment routing selects the optimal warehouse based on proximity to the customer, current stock levels, shipping cost, and delivery promise. A background reconciliation process continuously compares physical counts with system counts to detect and correct drift caused by returns, damages, or miscounts.",
+    "## Named Technology Per Service\n\nAnchor each service to a concrete, defensible technology choice rather than generic boxes. A strong mapping: **Product Catalog** on DynamoDB (key-value reads by ASIN in single-digit ms, auto-partitioned) fronted by a **Redis** product cache; **Search** on Elasticsearch/OpenSearch fed by a CDC pipeline; **Cart** on DynamoDB (the AP workload that literally motivated Dynamo) with a Redis session cache; **Orders and Payments** on Aurora PostgreSQL (ACID, foreign keys, auditable ledger); **Images** on S3 behind CloudFront; **Events** on Kafka (order lifecycle, inventory sync, analytics fan-out) with SQS + dead-letter queues for worker retry semantics; **Recommendations** on a feature store (e.g., SageMaker Feature Store) serving precomputed item-to-item similarities; **Analytics** landing in Redshift via Kafka -> Firehose. Pricing is its own service because price is computed (promotions, dynamic pricing, regional tax), not a static catalog attribute — denormalizing it into search or catalog caches requires an invalidation path.\n\n| Service | Store | Why |\n| --- | --- | --- |\n| Catalog | DynamoDB + Redis | 100:1 reads, key lookup by ASIN, staleness OK |\n| Search | Elasticsearch | inverted index, facets, BM25 + ML re-rank |\n| Cart | DynamoDB | always-writable, LWW/merge, Dynamo heritage |\n| Orders | Aurora Postgres | ACID, low write QPS, audit trail |\n| Inventory | DynamoDB conditional writes | atomic decrement, no oversell |\n| Payments | Postgres ledger + token vault | immutable journal, PCI scope isolation |\n| Images | S3 + CloudFront | 350 TB blobs, edge-cached |\n| Events | Kafka | ordered, replayable order-event log |\n\nIn practice: interviewers reward the *why* column far more than the logo column — every choice should trace back to a workload property (read ratio, consistency need, data shape).",
+    "## One Purchase, End to End: Tracing the Order Saga\n\nWalk a single purchase through the system to prove the design hangs together. (1) **Browse**: the client hits CloudFront for images/static assets and the API Gateway for data; the product page is assembled from the Redis product cache (hit rate >95%), falling back to DynamoDB catalog reads on miss. (2) **Search**: the query goes to the Search Service, which runs BM25 retrieval + ML re-ranking on Elasticsearch and returns product IDs hydrated from the catalog cache. (3) **Add to cart**: the Cart Service writes {userId, sku, qty} to DynamoDB with a client-generated request ID for idempotency — no inventory is held yet. (4) **Checkout**: the Checkout/Order Service re-validates price and availability, creates an order row in Aurora in state CREATED, and publishes an OrderCreated event to Kafka. (5) **Saga executes**: orchestration workers consume the event and run the sequence — *reserve inventory* (DynamoDB conditional write: decrement only if stock >= qty), then *authorize/charge payment* (call the external processor with idempotency key = orderId), then *confirm* (order -> CONFIRMED, confirmation email via Notification Service), then *fulfill* (event to the warehouse pipeline, which picks a fulfillment center by proximity, stock, and delivery promise). (6) **Compensation on failure**: if payment is declined after inventory was reserved, the saga runs the compensating action — release the reservation (conditional increment), mark the order CANCELLED, notify the customer. If fulfillment fails post-charge, compensation refunds the payment and releases inventory.\n\nKey insight: the saga trades the atomicity of a distributed transaction for a guarantee that the system always converges to a consistent terminal state (CONFIRMED-and-fulfilled or fully-compensated CANCELLED), which is why every step must be both idempotent and compensatable.\n\nCommon mistake: reserving inventory at add-to-cart time. Carts abandon at ~70%; holding stock for every cart starves real buyers. Reserve at checkout, optionally with a short soft-hold TTL.",
   ],
   deepDive: [
+    "## Why the Cart Lives in DynamoDB: the Real Origin Story\n\nThe shopping cart is the reason Dynamo exists — in the 2004-2007 era, Amazon's Oracle-backed cart suffered outages during peak season, and the business insight was brutal: an unavailable cart is lost revenue, while a slightly stale cart is merely an annoyance. The 2007 Dynamo paper explicitly names the shopping cart as the motivating workload for an 'always writable' store: writes must never be rejected, even during network partitions or node failures. Dynamo achieved this with leaderless replication, sloppy quorums with hinted handoff, and vector clocks to detect concurrent versions — pushing conflict resolution to read time. When two divergent cart versions surface (say the user added items from their phone and laptop during a partition), the cart service performs a *semantic merge*: union the item sets and take the max quantity per SKU. The famous side effect is that deleted items can occasionally resurrect after a merge — Amazon accepted this because re-deleting an item is a one-click fix, whereas losing an added item loses a sale.\n\nKey insight: the merge is business-aware, not storage-generic. Last-writer-wins at the storage layer would silently drop items; the union-with-max-quantity merge encodes the product decision 'never lose something the customer meant to buy'.\n\nIn practice: modern DynamoDB hides vector clocks behind the API, but the interview lesson stands — for the cart, choose AP, design an application-level merge, and be able to say which anomaly (item resurrection) you accepted and why.",
+    "## Inventory Consistency: Preventing (or Pricing) Oversell\n\nInventory is where the AP-everywhere philosophy stops, and there are three defensible strategies. **Strategy 1 — conditional writes (CP on the decrement):** the reservation is a single atomic DynamoDB conditional write, ConditionExpression 'stock >= :qty', decrementing in the same operation; a losing racer gets ConditionalCheckFailedException and the customer sees 'just sold out'. No distributed lock is required for a single item because the write itself is the linearization point — this is simpler and safer than Redlock and should be your default answer. **Strategy 2 — reservation ledger:** instead of mutating a counter, append reservation rows (orderId, sku, qty, TTL, state=SOFT|HARD) and compute availability as stock minus active reservations; expired soft holds self-release, and the append-only shape gives a natural audit trail. **Strategy 3 — oversell-and-apologize:** for high-supply items, accept orders optimistically against an eventually consistent count and reconcile asynchronously; the rare oversell becomes a cancellation email plus a goodwill credit.\n\nCommon mistake: proposing distributed locks (Redlock) as the first answer. A conditional write gives the same safety in one round trip with no lock-expiry edge cases; locks only enter the picture when a reservation spans multiple items or systems.\n\nKey insight: overselling is a *business* decision dressed as a technical one — Amazon oversells cheap, restockable goods (apologize) but never oversells a flash-sale PS5 (conditional writes), because the cost of the apology differs by orders of magnitude.\n\nReal-world example: airlines run the extreme version of strategy 3 — they deliberately oversell seats because no-show statistics make it profitable, and the 'compensation' (rebooking + voucher) is a priced-in cost.",
+    "## Idempotent Payments: Exactly-Once Effects on an At-Least-Once Network\n\nThe network gives you at-least-once delivery, so the payment layer must convert duplicate requests into single charges. The mechanism is an idempotency key — typically the orderId or a per-attempt UUID — sent with every charge request. The payment service does an atomic insert-if-absent of the key into a durable table *before* calling the processor, storing state=IN_PROGRESS; on success it updates to state=SUCCEEDED with the response payload; any retry with the same key reads the record and replays the stored response instead of re-charging. Three failure windows matter: (a) retry arrives while the original is IN_PROGRESS — return 409/retry-later rather than issuing a second processor call; (b) the service crashes after charging but before recording success — on recovery, query the processor by idempotency key (Stripe et al. support this) to resolve the ambiguity, never blind-retry; (c) client retries with a *different* key for the same order — prevent by deriving the key deterministically from the orderId. Retries themselves use exponential backoff with jitter, and the auth/capture split bounds the blast radius: authorization places a hold, capture happens only on order confirmation, and void cancels the hold — so most failures are compensated by voiding an auth, not refunding a settled charge.\n\nKey insight: idempotency must be enforced at every hop that has a side effect — client to order service, order service to payment service, payment service to processor — a single non-idempotent link reintroduces double-charging.\n\nCommon mistake: storing the idempotency key only in a cache with TTL. If the key expires before the retry window closes (e.g., a mobile client retries hours later), the duplicate charge returns; the key store must be as durable as the payment record itself.",
+    "## Catalog-to-Search Denormalization Pipeline\n\nSearch documents are deliberately denormalized snapshots of many source-of-truth tables, and keeping them fresh is a pipeline problem. The catalog (DynamoDB), pricing service, inventory service, and reviews service each own a slice of what a search result displays: title/brand/attributes, current price, in-stock flag, star rating. The pipeline: every source emits change events via CDC (DynamoDB Streams, Postgres logical decoding) into Kafka; a *document builder* service consumes them, joins the slices into one flat search document per SKU, and bulk-indexes into Elasticsearch. Ordering and dedup are handled by versioning each document with the source event timestamp and using external versioning on the index request so stale updates are rejected. Full reindexes (mapping changes, ranking-feature additions) run against a shadow index with an alias flip — blue/green for indexes — so a bad build never serves traffic. Freshness SLAs differ per field: price and availability changes should be searchable within seconds (fast lane: partial document update), while description edits can lag minutes (batch lane).\n\nKey insight: denormalization moves the join from query time to write time — you pay with a pipeline and eventual consistency, and you win 10-50ms faceted queries over 350M SKUs that no query-time join could deliver.\n\nCommon mistake: letting services write directly to Elasticsearch. Without the single document-builder chokepoint you get write races between services, no version ordering, and no way to rebuild the index from source when it drifts.\n\nIn practice: teams add a nightly reconciliation job that samples SKUs, recomputes documents from sources, and diffs against the live index — drift detection is the difference between a pipeline you trust and one you don't.",
+    "## Flash Sales and Hot Items: Surviving the Stampede\n\nA flash sale inverts the normal load profile: instead of 100M SKUs sharing traffic, one SKU absorbs 100k+ requests/s against maybe 10k units of stock — a hot-partition problem no amount of generic horizontal scaling fixes. The playbook layers defenses: (1) **Token bucket admission control** at the gateway per user and per SKU — the vast majority of requests are rejected cheaply at the edge with a friendly 'high demand' page before touching any datastore. (2) **Request queueing**: admitted checkout attempts enter a FIFO queue (SQS/Kafka) sized near the stock count; a small consumer pool processes them sequentially against inventory, converting an unbounded concurrency problem into bounded throughput — this is the 'virtual waiting room' pattern Ticketmaster and sneaker drops use. (3) **Inventory sharding**: split 10k units into, say, 20 partitions of 500 with independent conditional-write counters so successful reservations don't serialize on one DynamoDB partition key; rebalance leftover stock between shards near sell-out. (4) **Serve the page statically**: the product page for a flash-sale item is pre-rendered and pushed to the CDN with a tiny dynamic 'stock state' endpoint, so 99% of the traffic never reaches origin. (5) **Degrade around the sale**: disable recommendations and reviews on that page, shed non-critical load, and pre-scale the checkout fleet since autoscaling reacts in minutes but the spike arrives in seconds.\n\nKey insight: the goal is not to make the datastore survive 100k writes/s — it is to ensure only ~10k requests (the stock count, plus margin) ever become writes, and everyone else gets a fast, honest rejection.\n\nWarning: fairness matters as much as throughput — without per-user token buckets and bot detection, scalpers' scripts win every unit and the sale damages the brand even though the system 'stayed up'.",
     "Scaling Amazon's search infrastructure to handle peak loads (e.g., Prime Day with 10x normal traffic) requires a multi-layered caching strategy. The first layer is a CDN-level cache for search result pages with stable queries (e.g., 'iPhone 15 case'). The second layer is an application-level cache (Redis cluster) storing serialized search results keyed by normalized query plus filters. The third layer is the OpenSearch cluster itself, which uses in-memory segment caching. To avoid thundering herd on cache expiry, staggered TTLs and probabilistic early recomputation are employed. Index sharding follows a product-category-based scheme so that queries constrained to a category hit only the relevant shards. During indexing, a shadow cluster receives updates first, and once it passes health checks, traffic is gradually shifted via weighted routing. This blue-green indexing approach prevents serving stale or corrupt indices.",
     "The recommendation engine is a complex pipeline blending offline and online components. Offline, a collaborative filtering model (matrix factorization or deep neural network) is trained on the full purchase and browsing history, producing item-to-item similarity matrices and user embedding vectors stored in a feature store. Online, when a user visits a product page, the system retrieves pre-computed similar items, applies real-time session context (recent views, cart contents, time of day), and re-ranks using a lightweight model. The 'Customers who bought this also bought' feature uses item-to-item collaborative filtering with co-purchase frequency normalized by item popularity to avoid recommending universally popular items. A/B testing infrastructure continuously evaluates recommendation algorithms, measuring click-through rate, add-to-cart rate, and downstream purchase conversion. Cold-start for new products is handled by content-based features (category, brand, price range, description embeddings) until sufficient interaction data accumulates.",
     "Handling failure scenarios at Amazon's scale requires designing every service for graceful degradation. If the recommendation service is down, the product page still renders with a static 'popular in this category' fallback. If the payment gateway times out, the order enters a PENDING_PAYMENT state and a retry worker attempts authorization with exponential backoff. Circuit breakers (Hystrix-style) prevent cascading failures: if a downstream service exceeds its error budget, the circuit opens and requests are immediately failed or routed to a fallback. Each service publishes health metrics (latency p99, error rate, throughput) to a centralized monitoring system, and automated alerts trigger runbook-driven remediation. Data durability is ensured through multi-AZ replication for databases and cross-region replication for critical data like orders and payments. The CAP theorem trade-off is navigated carefully: the cart service favors availability (AP) using last-writer-wins conflict resolution, while the inventory service favors consistency (CP) to prevent overselling.",
@@ -477,29 +485,80 @@ public:
       title: "Amazon High-Level Architecture",
       kind: "architecture",
       caption:
-        "Microservices decomposition showing core services and data stores",
-      mermaid: `graph TD
-    Client["Client Apps"] --> CDN["CDN CloudFront"]
-    CDN --> APIGW["API Gateway"]
-    APIGW --> AuthSvc["Auth Service"]
-    APIGW --> SearchSvc["Search Service"]
-    APIGW --> CatalogSvc["Catalog Service"]
-    APIGW --> CartSvc["Cart Service"]
-    APIGW --> OrderSvc["Order Service"]
-    APIGW --> RecoSvc["Recommendation Service"]
-    SearchSvc --> OpenSearch["OpenSearch Cluster"]
-    CatalogSvc --> DynamoDB["DynamoDB"]
-    CartSvc --> Redis["Redis Cluster"]
-    OrderSvc --> OrderDB["Order Database"]
-    OrderSvc --> PaymentSvc["Payment Service"]
-    OrderSvc --> InventorySvc["Inventory Service"]
-    OrderSvc --> EventBus["Kafka Event Bus"]
-    PaymentSvc --> PaymentGW["Payment Gateway"]
-    InventorySvc --> InvDB["Inventory DB"]
-    EventBus --> FulfillSvc["Fulfillment Service"]
-    EventBus --> NotifSvc["Notification Service"]
-    EventBus --> AnalyticsSvc["Analytics Pipeline"]
-    RecoSvc --> FeatureStore["Feature Store"]`,
+        "Layered microservices architecture: the checkout write path through the order saga, Kafka, and the fulfillment pipeline is numbered 1-8; the browse/search/add-to-cart read path through caches and Elasticsearch is numbered B1-B8",
+      mermaid: `graph TB
+    subgraph Clients["Clients"]
+        Web["Web Browser"]
+        Mobile["Mobile Apps<br/>iOS / Android"]
+        Alexa["Alexa / Partner APIs"]
+    end
+    subgraph Edge["Edge Layer"]
+        CDN["CloudFront CDN<br/>images + static assets"]
+    end
+    subgraph Gateway["Gateway Layer"]
+        LB["Load Balancer<br/>AWS ALB / ELB"]
+        APIGW["API Gateway<br/>auth, rate limiting, routing"]
+    end
+    subgraph Services["Service Layer"]
+        CatalogSvc["Product Catalog Service"]
+        SearchSvc["Search Service"]
+        CartSvc["Cart Service"]
+        CheckoutSvc["Checkout / Order Service"]
+        InvSvc["Inventory Service"]
+        PaySvc["Payment Service"]
+        PriceSvc["Pricing Service"]
+        ReviewSvc["Reviews Service"]
+        RecoSvc["Recommendation Service"]
+        NotifSvc["Notification Service"]
+    end
+    subgraph Cache["Cache Layer"]
+        ProdCache["Redis Product Cache<br/>hot product pages"]
+        CartCache["Redis Cart Cache<br/>active sessions"]
+    end
+    subgraph Async["Async Processing"]
+        Kafka["Kafka<br/>order events topic"]
+        SagaWorkers["Order Orchestration<br/>Saga Workers"]
+        Fulfill["Warehouse / Fulfillment<br/>Pipeline"]
+    end
+    subgraph Data["Data Layer"]
+        CartDB["DynamoDB Cart Store<br/>born from cart availability needs"]
+        OrderDB["Aurora PostgreSQL<br/>orders, ACID"]
+        ES["Elasticsearch<br/>product search index"]
+        S3["S3<br/>product images"]
+        DWH["Redshift<br/>data warehouse"]
+    end
+    subgraph External["External"]
+        PayGW["Payment Processors<br/>Visa, Stripe, banks"]
+    end
+    Web --> CDN
+    Mobile --> CDN
+    Web --> LB
+    Mobile --> LB
+    Alexa --> LB
+    CDN --> S3
+    LB --> APIGW
+    APIGW -->|"B1. search query"| SearchSvc
+    APIGW -->|"B3. product page"| CatalogSvc
+    APIGW -->|"B6. add to cart"| CartSvc
+    APIGW -->|"1. place order"| CheckoutSvc
+    APIGW --> ReviewSvc
+    APIGW --> RecoSvc
+    SearchSvc -->|"B2. query index"| ES
+    CatalogSvc -->|"B4. cache read"| ProdCache
+    CatalogSvc -->|"B5. fetch price"| PriceSvc
+    CartSvc -->|"B7. session cache"| CartCache
+    CartSvc -->|"B8. persist cart"| CartDB
+    CheckoutSvc -->|"2. reserve inventory"| InvSvc
+    CheckoutSvc -->|"3. authorize payment"| PaySvc
+    CheckoutSvc -->|"5. persist order"| OrderDB
+    CheckoutSvc -->|"6. publish OrderPlaced"| Kafka
+    PaySvc -->|"4. charge"| PayGW
+    Kafka -->|"7. order events"| SagaWorkers
+    Kafka --> NotifSvc
+    Kafka --> DWH
+    SagaWorkers --> InvSvc
+    SagaWorkers --> PaySvc
+    SagaWorkers -->|"8. queue fulfillment"| Fulfill`,
     },
     {
       title: "Order Processing Saga Flow",
@@ -630,6 +689,33 @@ public:
         "How would you implement a saved-for-later feature?",
       ],
     },
+    {
+      q: "Walk me through the capacity estimation for this system.",
+      a: "Anchor on two published numbers: ~300M active customers and ~1.6M packages/day. Orders: 1.6M / 86,400s gives roughly 18-20 orders/s average; Prime Day runs ~10x with bursts, so design the checkout path for 200-500 orders/s. Reads dominate: with ~20 product views per order plus pure browsers, product-page traffic is on the order of tens of thousands of reads/s at peak — call the read:write ratio 100:1. Storage: 350M SKUs at ~5KB of metadata is only ~1.75TB, so the catalog fits comfortably in a replicated NoSQL store; the challenge is QPS, not bytes. Cache sizing with the 80/20 rule: hot 20% of SKUs is ~70M items x 5KB = ~350GB, a mid-size Redis cluster. Images: 350M SKUs x 5 images x 200KB = ~350TB in S3 behind a CDN. Orders: 1.6M/day x 2KB = ~1.2TB/year, tiny enough to justify a fully ACID relational store. The conclusion to state explicitly: browse and checkout are different systems — browse is a high-QPS caching problem tolerating staleness; checkout is a low-QPS transactional problem demanding correctness.",
+      followUps: [
+        "How would the numbers change for a flash-sale-heavy business like a sneaker marketplace?",
+        "How do you capacity-plan for a 10x spike that lasts only 48 hours?",
+        "Which of these estimates would you validate first with real telemetry?",
+      ],
+    },
+    {
+      q: "Why is the shopping cart in DynamoDB but orders in a relational database?",
+      a: "Because the two workloads sit at opposite ends of the CAP trade-off. The cart must be always-writable: Amazon's own Dynamo paper cites the shopping cart as the motivating workload — a customer unable to add an item is lost revenue, while a briefly inconsistent cart is a minor annoyance. So the cart uses an AP store (Dynamo/DynamoDB) with leaderless replication and application-level conflict resolution: on divergent versions, union the items and take max quantity per SKU, accepting the rare resurrected-deleted-item anomaly. Orders are the opposite: low write volume (~20-500/s), but every row is money — they need atomic multi-row transactions (order + order_items + ledger entries), foreign-key integrity, and a queryable audit trail, which is exactly what Aurora/PostgreSQL provides. The volume math makes this free: ~1.2TB of orders per year is trivial for a relational store. The general principle to articulate: choose consistency per workload, not per company — the same page load can touch an AP cart and a CP inventory counter, and that is correct design, not inconsistency.",
+      followUps: [
+        "What anomalies does the cart's eventual consistency expose to users?",
+        "Could you build the cart on Postgres with high availability instead?",
+        "Where else in this design would you insist on strong consistency?",
+      ],
+    },
+    {
+      q: "How do you keep the search index consistent with the catalog, pricing, and inventory data?",
+      a: "Treat the search document as a denormalized materialized view maintained by a CDC pipeline. Each source of truth — catalog (DynamoDB Streams), pricing and reviews (Postgres logical decoding or outbox events) — publishes change events to Kafka. A single document-builder service consumes them, assembles one flat document per SKU, and bulk-writes to Elasticsearch using external versioning (source event timestamp as version) so out-of-order or duplicate events cannot regress a document. Different fields get different freshness lanes: price and availability updates take a fast partial-update path with seconds-level SLA; description or attribute edits can batch with minutes-level lag. Schema or ranking changes are handled by building a shadow index and flipping an alias — blue/green for indexes — so a bad rebuild never serves traffic. Finally, run a reconciliation job that periodically samples SKUs, recomputes documents from the sources, and diffs against the live index to catch silent drift. The key point: never let services write to the index directly; the single builder is what makes the index rebuildable and its ordering enforceable.",
+      followUps: [
+        "How do you reindex 350M documents without downtime?",
+        "How would you handle a poison event that repeatedly crashes the document builder?",
+        "Should in-stock status live in the search index at all, or be checked at render time?",
+      ],
+    },
   ],
   mcqs: [
     {
@@ -714,6 +800,22 @@ public:
       front: "What is the database-per-service pattern?",
       back: "Each microservice owns its private data store, and no other service can access it directly. Services communicate only via APIs or events. This eliminates schema coupling and allows independent scaling, but introduces challenges around cross-service queries and distributed transactions.",
     },
+    {
+      front: "How does a DynamoDB conditional write prevent overselling?",
+      back: "The decrement carries a condition expression (stock >= requested qty) evaluated atomically with the write. Concurrent racers serialize at the storage layer; the loser receives ConditionalCheckFailedException and the customer sees 'sold out'. No distributed lock is needed for a single-item reservation.",
+    },
+    {
+      front: "Why did Amazon build Dynamo for the shopping cart?",
+      back: "Peak-season outages of the relational cart cost sales, and an unavailable cart is worse than a stale one. Dynamo made the cart always-writable via leaderless replication, sloppy quorums, and read-time conflict resolution — the 2007 paper names the cart as the motivating workload.",
+    },
+    {
+      front: "What is the token bucket pattern in flash sales?",
+      back: "An admission-control rate limiter at the gateway: each user/SKU bucket holds tokens refilled at a fixed rate; a request without a token is rejected cheaply at the edge. It converts a 100k req/s stampede into a bounded trickle before any datastore is touched.",
+    },
+    {
+      front: "What is CDC (change data capture) and why does search need it?",
+      back: "CDC streams every committed change from a source database (DynamoDB Streams, Postgres logical decoding) as ordered events. The search pipeline consumes CDC via Kafka to rebuild denormalized Elasticsearch documents, keeping the index a derived, rebuildable view of the sources of truth.",
+    },
   ],
   exercises: [
     "Design a cart merging algorithm: given a guest cart and an authenticated user cart, write logic that merges them correctly. Handle conflicts where the same SKU appears in both carts (pick higher quantity). Consider edge cases like items that went out of stock, price changes, and maximum quantity limits.",
@@ -733,6 +835,12 @@ public:
     "Recommendations combine offline collaborative filtering (co-purchase item-to-item similarity) with online re-ranking using real-time session signals",
     "Circuit breakers prevent cascading failures; each service has a fallback (e.g., static popular items if recommendation service is down)",
     "Scale numbers: ~300M active customers, ~1.6M packages/day, sub-200ms search latency, 10x traffic spikes during Prime Day",
+    "Capacity math: 1.6M orders/day ~= 18-20 orders/s average, 200-500/s Prime-Day peak; read:write ~100:1 on product pages; hot-20% catalog cache ~= 350GB Redis",
+    "Cart merge is semantic, not LWW: union item sets, max quantity per SKU; accepts rare resurrected-deleted-item anomaly to never lose an added item",
+    "Search index is a denormalized materialized view: CDC (DynamoDB Streams/outbox) -> Kafka -> single document builder -> Elasticsearch with external versioning; blue/green alias flip for reindexes",
+    "Payment idempotency record has states (IN_PROGRESS/SUCCEEDED); on crash-after-charge, query the processor by key to resolve — never blind-retry; key store must be durable, not a TTL cache",
+    "Flash sale playbook: token buckets at the edge -> FIFO queue sized near stock -> sharded inventory counters -> pre-rendered CDN page -> degrade non-critical features",
+    "Overselling is a business choice: conditional writes (never oversell scarce items) vs oversell-and-apologize (cheap restockable goods) vs reservation ledger (auditable holds with TTL)",
   ],
   cheatSheet: [
     "Product Catalog: DynamoDB for key-value reads, OpenSearch for full-text search with facets",
@@ -745,6 +853,12 @@ public:
     "Search Pipeline: query parsing -> BM25 retrieval -> facet filtering -> ML re-ranking -> caching",
     "Recommendations: offline item-to-item CF + online session re-ranking; ~35% of revenue attributed to recommendations",
     "Failure Handling: circuit breakers, dead-letter queues, graceful degradation with static fallbacks, multi-AZ replication",
+    "Numbers: 300M customers | 1.6M orders/day (~20/s avg, 200-500/s peak) | 100:1 read:write | 350GB hot cache | 350TB images in S3",
+    "Tech map: Catalog=DynamoDB+Redis | Search=Elasticsearch | Cart=DynamoDB (AP) | Orders=Aurora Postgres (CP) | Events=Kafka | Images=S3+CloudFront",
+    "Oversell prevention: DynamoDB conditional write 'stock >= qty' is the default answer — atomic, no lock, loser gets ConditionalCheckFailed",
+    "Cart merge rule: union items, max(qty) per SKU; deleted items may resurrect — accepted trade-off from the Dynamo paper",
+    "Payment safety: idempotency key = f(orderId), durable insert-if-absent before charging, replay stored result on retry; auth -> capture -> void lifecycle",
+    "Hot item: edge token bucket -> waiting-room queue -> sharded counters; only ~stock-count requests ever become writes",
   ],
   glossary: [
     {
@@ -781,6 +895,36 @@ public:
       term: "Circuit Breaker",
       definition:
         "A stability pattern that monitors failures to a downstream service and, after exceeding a threshold, short-circuits requests to a fallback instead of overwhelming the failing service.",
+    },
+    {
+      term: "Conditional Write",
+      definition:
+        "A write that succeeds only if a server-evaluated condition holds (e.g., DynamoDB ConditionExpression 'stock >= qty'), making check-and-update atomic and eliminating the need for a separate lock in single-item reservations.",
+    },
+    {
+      term: "Change Data Capture (CDC)",
+      definition:
+        "A technique that streams every committed change from a database (via DynamoDB Streams, binlog, or logical decoding) as ordered events, used to keep derived views like search indexes and caches in sync with the source of truth.",
+    },
+    {
+      term: "Hot Partition",
+      definition:
+        "A shard or partition key receiving disproportionate traffic (e.g., one flash-sale SKU), overwhelming its node while the rest of the cluster idles; mitigated by key sharding, caching, and admission control.",
+    },
+    {
+      term: "Token Bucket",
+      definition:
+        "A rate-limiting algorithm where each request consumes a token from a bucket refilled at a fixed rate; allows short bursts up to bucket capacity while enforcing an average rate, used for per-user and per-SKU admission control.",
+    },
+    {
+      term: "Compensating Action",
+      definition:
+        "The semantic undo for a completed saga step — release a reservation, void a payment authorization, issue a refund — executed in reverse order when a later step fails, restoring business consistency without a distributed rollback.",
+    },
+    {
+      term: "Denormalization",
+      definition:
+        "Duplicating data from multiple sources of truth into one read-optimized document or table (e.g., the Elasticsearch product document combining catalog, price, rating, and stock), trading write-time pipeline complexity for fast reads.",
     },
   ],
   animations: [
@@ -874,20 +1018,23 @@ public:
     "Design the seller marketplace and multi-tenant catalog management",
     "Design Amazon's real-time pricing engine with dynamic pricing",
     "Design the return and refund processing pipeline",
+    "Design a flash-sale / limited-drop system (virtual waiting room, fairness, bot defense)",
+    "Design the promotions and coupon engine with stacking rules and abuse prevention",
+    "Design Amazon's search autocomplete and query-suggestion service",
   ],
   resources: [
     {
-      label: "Amazon Dynamo Paper",
+      label: "Amazon Dynamo Paper", url: "https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf",
       kind: "paper",
       note: "Foundational paper on Amazon's highly available key-value store, explaining the trade-offs behind the cart service design",
     },
     {
-      label: "Designing Data-Intensive Applications by Martin Kleppmann",
+      label: "Designing Data-Intensive Applications by Martin Kleppmann", url: "https://dataintensive.net/",
       kind: "book",
       note: "Comprehensive coverage of distributed systems concepts used throughout Amazon's architecture: replication, partitioning, transactions, and stream processing",
     },
     {
-      label: "System Design Interview by Alex Xu",
+      label: "System Design Interview by Alex Xu", url: "https://bytebytego.com/",
       kind: "book",
       note: "Practical system design interview preparation covering e-commerce, search, and distributed systems patterns",
     },
@@ -897,7 +1044,7 @@ public:
       note: "Collection of articles by Amazon engineers on real-world practices: avoiding fallback, using shuffle sharding, and implementing retries with backoff",
     },
     {
-      label: "Martin Fowler - Saga Pattern",
+      label: "Martin Fowler - Saga Pattern", url: "https://martinfowler.com/",
       kind: "article",
       note: "Detailed explanation of the saga pattern for managing distributed transactions in microservice architectures",
     },

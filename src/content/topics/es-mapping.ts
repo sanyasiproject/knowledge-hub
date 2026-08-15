@@ -543,11 +543,11 @@ POST /orders/_search
   ],
   resources: [
     { label: "Elasticsearch Mapping Reference", kind: "docs", note: "Official documentation covering all field types, mapping parameters, and dynamic mapping rules" },
-    { label: "Elasticsearch: The Definitive Guide - Mapping chapter", kind: "book", note: "Detailed explanations of mapping concepts with practical examples and best practices" },
+    { label: "Elasticsearch: The Definitive Guide - Mapping chapter", url: "https://www.elastic.co/guide/index.html", kind: "book", note: "Detailed explanations of mapping concepts with practical examples and best practices" },
     { label: "Elastic Blog: Flattened field type", kind: "article", note: "Introduction to the flattened type for preventing mapping explosion with arbitrary key-value data" },
-    { label: "Elasticsearch Runtime Fields documentation", kind: "docs", note: "Guide to defining and using runtime fields for schema-on-read flexibility" },
+    { label: "Elasticsearch Runtime Fields documentation", url: "https://www.elastic.co/guide/index.html", kind: "docs", note: "Guide to defining and using runtime fields for schema-on-read flexibility" },
     { label: "Elastic Common Schema (ECS) Reference", kind: "docs", note: "Standard field names and types for common data sources. Great reference for mapping design." },
-    { label: "Elasticsearch Index Templates documentation", kind: "docs", note: "Official guide to composable index templates and component templates" }
+    { label: "Elasticsearch Index Templates documentation", url: "https://www.elastic.co/guide/index.html", kind: "docs", note: "Official guide to composable index templates and component templates" }
   ],
 
   glossary: [

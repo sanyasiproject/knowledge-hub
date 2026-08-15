@@ -226,8 +226,8 @@ COMMIT;`
     "VACUUM — clean up dead row versions from MVCC",
   ],
   resources: [
-    { label: "Designing Data-Intensive Applications, Ch. 7", kind: "book", note: "Outstanding treatment of isolation levels, snapshot isolation, and write skew." },
-    { label: "PostgreSQL Documentation — Transaction Isolation", kind: "docs", note: "Implementation details of PostgreSQL's MVCC and SSI." },
+    { label: "Designing Data-Intensive Applications, Ch. 7", url: "https://dataintensive.net/", kind: "book", note: "Outstanding treatment of isolation levels, snapshot isolation, and write skew." },
+    { label: "PostgreSQL Documentation — Transaction Isolation", url: "https://www.postgresql.org/docs/current/transaction-iso.html", kind: "docs", note: "Implementation details of PostgreSQL's MVCC and SSI." },
     { label: "A Critique of ANSI SQL Isolation Levels — Berenson et al.", kind: "paper", note: "Seminal paper showing ANSI levels are insufficient and introducing snapshot isolation." },
     { label: "Serializable Snapshot Isolation in PostgreSQL — Ports & Grittner", kind: "paper", note: "How PostgreSQL implements true serializability on top of MVCC." },
   ],

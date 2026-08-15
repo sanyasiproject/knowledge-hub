@@ -640,11 +640,11 @@ int main() {
 
   resources: [
     {
-      label: "NGINX documentation — load balancing",
+      label: "NGINX documentation — load balancing", url: "https://nginx.org/en/docs/",
       kind: "docs",
     },
     {
-      label: "Envoy proxy documentation",
+      label: "Envoy proxy documentation", url: "https://www.envoyproxy.io/docs",
       kind: "docs",
     },
   ],

@@ -21,6 +21,9 @@ export type Level =
 /** Status lets us ship the IA before all content exists. */
 export type Status = "available" | "in-progress" | "coming-soon";
 
+/** How likely this topic is to show up in an interview or contest round. */
+export type Frequency = "Very High" | "High" | "Medium" | "Low";
+
 /** A single topic — the leaf of the hierarchy and the unit that gets a page. */
 export interface Topic {
   slug: string;
@@ -29,6 +32,17 @@ export interface Topic {
   summary: string;
   level: Level;
   status?: Status;
+  /**
+   * "Reach for this when…" — the concrete problems this topic solves. Shown on
+   * category listings so a reader can pick the right tool without opening
+   * every page.
+   */
+  useCase?: string;
+  /**
+   * How often this comes up in interviews and contests — a prioritisation
+   * signal when revision time is short, not a measure of importance.
+   */
+  frequency?: Frequency;
   /** Slugs of related topics (cross-links). "topicSlug" resolved globally. */
   related?: string[];
   /** Free-form tags to power search + filtering. */

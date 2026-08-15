@@ -527,12 +527,12 @@ runAgent("What is the weather in Tokyo and Paris?").then(console.log);`,
   ],
   resources: [
     {
-      label: "ReAct: Synergizing Reasoning and Acting in Language Models (Yao et al., 2023)",
+      label: "ReAct: Synergizing Reasoning and Acting in Language Models (Yao et al., 2023)", url: "https://arxiv.org/abs/2210.03629",
       kind: "paper",
       note: "The foundational paper introducing the ReAct framework, showing how interleaving reasoning and acting outperforms both alone."
     },
     {
-      label: "Anthropic Tool Use Documentation",
+      label: "Anthropic Tool Use Documentation", url: "https://docs.anthropic.com/",
       kind: "docs",
       note: "Official Anthropic documentation on implementing tool use with Claude, including tool definitions, structured outputs, and best practices."
     },
@@ -542,7 +542,7 @@ runAgent("What is the weather in Tokyo and Paris?").then(console.log);`,
       note: "Introduces the tree-of-thought framework for exploring multiple reasoning paths with LLMs."
     },
     {
-      label: "Building Effective Agents — Anthropic Cookbook",
+      label: "Building Effective Agents — Anthropic Cookbook", url: "https://docs.anthropic.com/",
       kind: "docs",
       note: "Practical guide covering agent architectures, common patterns, and production deployment considerations."
     },

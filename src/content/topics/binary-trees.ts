@@ -464,7 +464,7 @@ int max_depth(TreeNode* root) {
       note: "Definitive treatment of BST operations, AVL trees, and Red-Black tree properties with correctness proofs.",
     },
     {
-      label: "Visualgo - Binary Search Tree and AVL Visualization",
+      label: "Visualgo - Binary Search Tree and AVL Visualization", url: "https://visualgo.net/",
       kind: "article",
       note: "Interactive step-by-step visualization of BST insert/delete/search and AVL rotations.",
     },
@@ -474,7 +474,7 @@ int max_depth(TreeNode* root) {
       note: "Clear visual explanation of all four AVL rotation cases with worked examples.",
     },
     {
-      label: "LeetCode Binary Tree Study Plan",
+      label: "LeetCode Binary Tree Study Plan", url: "https://leetcode.com/",
       kind: "article",
       note: "Structured problem set covering traversals, BST operations, LCA, serialization, and tree construction.",
     },

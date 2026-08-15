@@ -754,7 +754,7 @@ private:
       note: "Describes a simplified Red-Black tree variant that restricts red links to left children, reducing implementation complexity significantly.",
     },
     {
-      label: "MIT 6.006 - AVL Trees lecture (YouTube)",
+      label: "MIT 6.006 - AVL Trees lecture (YouTube)", url: "https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-spring-2020/",
       kind: "video",
       note: "Clear explanation of AVL rotations and height analysis with visual demonstrations.",
     },
@@ -764,7 +764,7 @@ private:
       note: "Production-oriented coverage of B+ Tree design for database storage engines, including concurrency control and bulk loading.",
     },
     {
-      label: "Visualgo - BST / AVL / B-Tree visualizations",
+      label: "Visualgo - BST / AVL / B-Tree visualizations", url: "https://visualgo.net/",
       kind: "docs",
       note: "Interactive web-based visualizations that animate insertions, deletions, and rotations step by step.",
     },

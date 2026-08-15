@@ -562,11 +562,11 @@ PUT /articles
     "Implement **delta encoding with variable-byte (VByte) compression** for a posting list in C++. Given a sorted vector of document IDs like `[100, 105, 110, 200, 201]`, compute deltas `[100, 5, 5, 90, 1]` and encode each delta using VByte (7 bits per byte, high bit as continuation flag). Decode back to original IDs and verify correctness. Measure the space savings compared to storing raw 32-bit integers.",
   ],
   resources: [
-    { label: "Elasticsearch: The Definitive Guide - Inverted Index chapter", kind: "book", note: "Comprehensive explanation of how Elasticsearch builds and queries inverted indexes" },
-    { label: "Introduction to Information Retrieval (Manning, Raghavan, Schutze)", kind: "book", note: "The standard academic textbook covering inverted indexes, TF-IDF, and scoring models" },
+    { label: "Elasticsearch: The Definitive Guide - Inverted Index chapter", url: "https://www.elastic.co/guide/index.html", kind: "book", note: "Comprehensive explanation of how Elasticsearch builds and queries inverted indexes" },
+    { label: "Introduction to Information Retrieval (Manning, Raghavan, Schutze)", url: "https://nlp.stanford.edu/IR-book/", kind: "book", note: "The standard academic textbook covering inverted indexes, TF-IDF, and scoring models" },
     { label: "Lucene in Action (McCandless, Hatcher, Gospodnetik)", kind: "book", note: "Deep dive into Lucene internals including segment architecture and posting list encoding" },
     { label: "BM25 The Next Generation of Lucene Relevance (Elasticsearch blog)", kind: "article", note: "Explains why Elasticsearch switched from TF-IDF to BM25 and how to tune parameters" },
-    { label: "Elasticsearch Analysis documentation", kind: "docs", note: "Official reference for all built-in analyzers, tokenizers, and token filters" },
+    { label: "Elasticsearch Analysis documentation", url: "https://www.elastic.co/guide/index.html", kind: "docs", note: "Official reference for all built-in analyzers, tokenizers, and token filters" },
     { label: "Mike McCandless - Lucene Codec Internals (presentations)", kind: "video", note: "Deep technical talks on how Lucene encodes posting lists, doc values, and term dictionaries" }
   ],
 

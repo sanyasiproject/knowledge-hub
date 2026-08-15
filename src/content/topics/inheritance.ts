@@ -981,11 +981,11 @@ int main() {
     { label: "Design Patterns: Elements of Reusable Object-Oriented Software (GoF)", kind: "book", note: "Discusses composition over inheritance as a fundamental principle; Strategy, Decorator, and Template Method patterns" },
     { label: "A Monotonic Superclass Linearization for Dylan (Barrett et al., 1996)", kind: "paper", note: "The paper introducing C3 linearization, later adopted by Python" },
     { label: "Python MRO documentation", kind: "docs", note: "Official documentation on Method Resolution Order and C3 linearization in Python" },
-    { label: "MDN: Inheritance and the prototype chain", kind: "docs", note: "Comprehensive guide to JavaScript's prototypal inheritance mechanism" },
+    { label: "MDN: Inheritance and the prototype chain", url: "https://developer.mozilla.org/", kind: "docs", note: "Comprehensive guide to JavaScript's prototypal inheritance mechanism" },
     { label: "C++ Core Guidelines C.120-C.140", kind: "docs", note: "Guidelines on class hierarchies, virtual functions, and multiple inheritance in C++" },
     { label: "The Liskov Substitution Principle (Martin, 1996)", kind: "paper", note: "Robert C. Martin's practical explanation of LSP with examples" },
     { label: "Kotlin language documentation - Classes and Inheritance", kind: "docs", note: "Covers Kotlin's default-final classes, open keyword, and delegation pattern" },
-    { label: "You Don't Know JS: this & Object Prototypes (Kyle Simpson)", kind: "book", note: "Deep dive into JavaScript's prototype mechanism and why 'class' is misleading" },
+    { label: "You Don't Know JS: this & Object Prototypes (Kyle Simpson)", url: "https://github.com/getify/You-Dont-Know-JS", kind: "book", note: "Deep dive into JavaScript's prototype mechanism and why 'class' is misleading" },
     { label: "A Theory of Objects (Abadi & Cardelli)", kind: "book", note: "Formal treatment of object calculi, inheritance, and subtyping from a type-theoretic perspective" }
   ],
 

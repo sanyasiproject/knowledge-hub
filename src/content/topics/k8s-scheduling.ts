@@ -423,11 +423,11 @@ kubectl label nodes worker-2 disktype=ssd`,
   ],
   resources: [
     {
-      label: "Kubernetes documentation — Scheduling, Preemption and Eviction",
+      label: "Kubernetes documentation — Scheduling, Preemption and Eviction", url: "https://kubernetes.io/docs/",
       kind: "docs",
     },
     {
-      label: "Kubernetes documentation — Managing Resources for Containers",
+      label: "Kubernetes documentation — Managing Resources for Containers", url: "https://kubernetes.io/docs/",
       kind: "docs",
     },
   ],

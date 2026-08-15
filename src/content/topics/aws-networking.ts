@@ -614,7 +614,7 @@ aws ec2 create-flow-logs \\
       kind: "docs",
     },
     {
-      label: "AWS Well-Architected Framework",
+      label: "AWS Well-Architected Framework", url: "https://aws.amazon.com/architecture/well-architected/",
       kind: "docs",
     },
   ],

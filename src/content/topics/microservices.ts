@@ -797,11 +797,11 @@ app.listen(8080, () => console.log("[API Gateway] Listening on port 8080"));`,
       kind: "book",
     },
     {
-      label: "Microservices Patterns — Chris Richardson",
+      label: "Microservices Patterns — Chris Richardson", url: "https://microservices.io/patterns/index.html",
       kind: "book",
     },
     {
-      label: "martinfowler.com — architecture and pattern articles",
+      label: "martinfowler.com — architecture and pattern articles", url: "https://martinfowler.com/",
       kind: "article",
     },
   ],
