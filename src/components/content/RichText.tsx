@@ -15,7 +15,7 @@ import { allTopics, topicPath } from "../../data/taxonomy";
 const SINGLE_WORD_ALLOW = new Set([
   "encapsulation", "polymorphism", "immutability", "deadlocks", "idempotency",
   "sharding", "microservices", "normalization", "cqrs", "sagas", "gitops",
-  "profiling", "tries", "rebasing",
+  "profiling", "rebasing",
 ]);
 
 let topicIndex: { byTitle: Map<string, string>; regex: RegExp } | null = null;

@@ -392,14 +392,5 @@ export const llmTransformers: Area = {
     { label: "Quantisation quality", value: "8-bit ≈ lossless, 4-bit usable", note: "Below 4-bit degrades noticeably on hard tasks." },
   ],
 
-  relatedTopics: [
-    "llm-fundamentals",
-    "tokenization-embeddings",
-    "fine-tuning",
-    "inference-optimization",
-    "prompting-fundamentals",
-    "structured-output",
-    "ml-evaluation",
-    "rag-fundamentals",
-  ],
+  relatedTopics: ["llm-fundamentals", "tokenization-embeddings", "fine-tuning", "inference-optimization", "prompting-fundamentals", "structured-output", "ml-evaluation", "rag-fundamentals"],
 };

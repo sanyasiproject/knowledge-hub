@@ -268,12 +268,5 @@ export const behavioral: Area = {
     { label: "Questions to have ready", value: "3+", note: "Tailored to who is interviewing you." },
   ],
 
-  relatedTopics: [
-    "star-method",
-    "common-behavioral-questions",
-    "common-hr-questions",
-    "hr-fundamentals",
-    "leadership-principles",
-    "salary-negotiation",
-  ],
+  relatedTopics: ["star-method", "common-behavioral-questions", "common-hr-questions", "hr-fundamentals", "leadership-principles", "salary-negotiation"],
 };

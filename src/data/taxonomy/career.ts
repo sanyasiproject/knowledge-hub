@@ -39,13 +39,4 @@ export const career: Domain[] = [
       },
     ],
   },
-  {
-    slug: "coding-interview-preparation",
-    title: "Coding Interview Preparation",
-    summary: "A full coding-interview curriculum is on the way.",
-    icon: "⌨️",
-    group: "Career",
-    status: "coming-soon",
-    categories: [],
-  },
 ];

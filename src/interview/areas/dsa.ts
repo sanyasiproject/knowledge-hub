@@ -122,7 +122,7 @@ export const dsa: Area = {
         },
       ],
       verdict: "Shortest path unweighted → BFS. Structure, cycles, or exhaustive exploration → DFS.",
-      topic: "graphs",
+      topic: "bfs-traversal",
     },
     {
       title: "Memoisation (top-down) vs tabulation (bottom-up)",
@@ -190,7 +190,7 @@ export const dsa: Area = {
       followUps: ["Solve 'longest substring without repeating characters'.", "Why do negatives break it?"],
       depth: "Intermediate",
       tags: ["patterns", "arrays"],
-      topic: "arrays-strings",
+      topic: "two-pointers",
     },
     {
       id: "dsa-two-pointers",
@@ -231,7 +231,7 @@ export const dsa: Area = {
       followUps: ["What's a hash-flooding attack?", "When would you use a TreeMap instead?"],
       depth: "Intermediate",
       tags: ["hashing", "complexity"],
-      topic: "hash-tables",
+      topic: "design-data-structures",
     },
     {
       id: "dsa-heap",
@@ -242,7 +242,7 @@ export const dsa: Area = {
       followUps: ["How do you build a max-heap when the library only gives a min-heap?", "Solve the running-median problem."],
       depth: "Intermediate",
       tags: ["heaps", "patterns"],
-      topic: "heaps",
+      topic: "top-k-heap",
     },
     {
       id: "dsa-graph-representation",
@@ -253,7 +253,7 @@ export const dsa: Area = {
       followUps: ["What does O(V + E) mean for a matrix representation?", "Where is a matrix genuinely better?"],
       depth: "Intermediate",
       tags: ["graphs"],
-      topic: "graphs",
+      topic: "bfs-traversal",
     },
     {
       id: "dsa-recursion-iteration",
@@ -316,7 +316,7 @@ export const dsa: Area = {
       followUps: ["Solve 'daily temperatures'.", "How does the histogram problem reduce to this?"],
       depth: "Advanced",
       tags: ["stacks", "patterns"],
-      topic: "stacks-queues",
+      topic: "monotonic-stack",
     },
   ],
 
@@ -339,16 +339,5 @@ export const dsa: Area = {
     { label: "Recursion depth (Python)", value: "~1000 default", note: "Convert to an explicit stack beyond this." },
   ],
 
-  relatedTopics: [
-    "big-o-notation",
-    "time-space-complexity",
-    "amortized-analysis",
-    "arrays-strings",
-    "hash-tables",
-    "binary-trees",
-    "graphs",
-    "heaps",
-    "recursion",
-    "stacks-queues",
-  ],
+  relatedTopics: ["big-o-notation", "time-space-complexity", "amortized-analysis", "two-pointers", "design-data-structures", "dfs-traversal", "bfs-traversal", "top-k-heap", "recursion", "monotonic-stack"],
 };

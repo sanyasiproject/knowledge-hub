@@ -251,22 +251,5 @@ export const oopDesign: Area = {
     "Don't forget concurrency in an LLD design; it's usually the hardest part and it's usually skipped.",
   ],
 
-  relatedTopics: [
-    "encapsulation",
-    "abstraction",
-    "inheritance",
-    "polymorphism",
-    "composition-vs-inheritance",
-    "single-responsibility",
-    "open-closed",
-    "liskov-substitution",
-    "interface-segregation",
-    "dependency-inversion",
-    "coupling-cohesion",
-    "strategy",
-    "decorator",
-    "singleton",
-    "lld-fundamentals",
-    "lld-case-studies",
-  ],
+  relatedTopics: ["encapsulation", "abstraction", "inheritance", "polymorphism", "composition-vs-inheritance", "single-responsibility", "open-closed", "liskov-substitution", "interface-segregation", "dependency-inversion", "coupling-cohesion", "strategy", "decorator", "singleton", "lld-fundamentals", "lld-case-studies"],
 };

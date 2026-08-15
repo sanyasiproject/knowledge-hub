@@ -307,15 +307,5 @@ export const agentsMcp: Area = {
     { label: "Prompt caching benefit", value: "Large on agent runs", note: "The system prompt and tool schemas are re-sent every iteration." },
   ],
 
-  relatedTopics: [
-    "agent-fundamentals",
-    "tool-use",
-    "multi-agent",
-    "planning-memory",
-    "mcp-fundamentals",
-    "mcp-servers-tools",
-    "building-mcp-servers",
-    "structured-output",
-    "ml-evaluation",
-  ],
+  relatedTopics: ["agent-fundamentals", "tool-use", "multi-agent", "planning-memory", "mcp-fundamentals", "mcp-servers-tools", "building-mcp-servers", "structured-output", "ml-evaluation"],
 };

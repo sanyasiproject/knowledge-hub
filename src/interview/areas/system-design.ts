@@ -366,18 +366,5 @@ export const systemDesign: Area = {
     { label: "Availability: 99.9% / 99.99%", value: "~8.8 h / ~53 min per year", note: "Each nine costs roughly an order of magnitude more." },
   ],
 
-  relatedTopics: [
-    "system-design-framework",
-    "estimation",
-    "tradeoff-analysis",
-    "hld-fundamentals",
-    "load-balancing",
-    "cache-strategies",
-    "sharding",
-    "consistency-models",
-    "resilience-patterns",
-    "idempotency",
-    "queues-vs-pubsub",
-    "microservices",
-  ],
+  relatedTopics: ["system-design-framework", "estimation", "tradeoff-analysis", "hld-fundamentals", "load-balancing", "cache-strategies", "sharding", "consistency-models", "resilience-patterns", "idempotency", "queues-vs-pubsub", "microservices"],
 };

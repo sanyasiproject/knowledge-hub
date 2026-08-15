@@ -345,14 +345,5 @@ export const nodejs: Area = {
     { label: "Processes per machine", value: "= CPU cores", note: "One Node process saturates exactly one core." },
   ],
 
-  relatedTopics: [
-    "threads-vs-async",
-    "concurrency-models-backend",
-    "backpressure",
-    "error-handling",
-    "request-lifecycle",
-    "cache-strategies",
-    "horizontal-vertical",
-    "metrics",
-  ],
+  relatedTopics: ["threads-vs-async", "concurrency-models-backend", "backpressure", "error-handling", "request-lifecycle", "cache-strategies", "horizontal-vertical", "metrics"],
 };

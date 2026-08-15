@@ -580,14 +580,5 @@ export const javascript: Area = {
     { label: "Number.EPSILON", value: "~2.22e-16", note: "Tolerance for float comparison." },
   ],
 
-  relatedTopics: [
-    "functions",
-    "higher-order-functions",
-    "immutability",
-    "garbage-collection",
-    "threads-vs-async",
-    "error-handling",
-    "http",
-    "type-systems",
-  ],
+  relatedTopics: ["functions", "higher-order-functions", "immutability", "garbage-collection", "threads-vs-async", "error-handling", "http", "type-systems"],
 };

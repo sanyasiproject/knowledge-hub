@@ -281,18 +281,5 @@ export const security: Area = {
     { label: "Top OWASP risk", value: "Broken access control", note: "Object-level authorisation is where most real bugs are." },
   ],
 
-  relatedTopics: [
-    "owasp-top-10",
-    "injection-attacks",
-    "hashing-passwords",
-    "authn-vs-authz",
-    "jwt",
-    "oauth-oidc",
-    "sessions-vs-tokens",
-    "rbac-abac",
-    "secure-coding",
-    "tls-ssl",
-    "crypto-basics",
-    "aws-iam",
-  ],
+  relatedTopics: ["owasp-top-10", "injection-attacks", "hashing-passwords", "authn-vs-authz", "jwt", "oauth-oidc", "sessions-vs-tokens", "rbac-abac", "secure-coding", "tls-ssl", "crypto-basics", "aws-iam"],
 };

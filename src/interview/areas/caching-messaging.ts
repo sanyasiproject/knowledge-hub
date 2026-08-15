@@ -278,18 +278,5 @@ export const cachingMessaging: Area = {
     { label: "Key queue alert", value: "Oldest message age", note: "Maps to user-visible delay better than depth." },
   ],
 
-  relatedTopics: [
-    "caching-basics",
-    "cache-strategies",
-    "cache-invalidation",
-    "distributed-caching",
-    "redis-data-structures",
-    "redis-patterns",
-    "kafka-fundamentals",
-    "topics-partitions",
-    "queues-vs-pubsub",
-    "delivery-guarantees",
-    "backpressure",
-    "event-sourcing",
-  ],
+  relatedTopics: ["caching-basics", "cache-strategies", "cache-invalidation", "distributed-caching", "redis-data-structures", "redis-patterns", "kafka-fundamentals", "topics-partitions", "queues-vs-pubsub", "delivery-guarantees", "backpressure", "event-sourcing"],
 };

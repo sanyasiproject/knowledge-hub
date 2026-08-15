@@ -298,18 +298,5 @@ export const apiDesign: Area = {
     { label: "Cookie size limit", value: "~4 KB", note: "Sent on every request — keep tokens small." },
   ],
 
-  relatedTopics: [
-    "rest",
-    "graphql",
-    "grpc",
-    "api-versioning",
-    "pagination-filtering",
-    "idempotency",
-    "rate-limiting",
-    "authn-vs-authz",
-    "sessions-vs-tokens",
-    "jwt",
-    "error-handling",
-    "http",
-  ],
+  relatedTopics: ["rest", "graphql", "grpc", "api-versioning", "pagination-filtering", "idempotency", "rate-limiting", "authn-vs-authz", "sessions-vs-tokens", "jwt", "error-handling", "http"],
 };

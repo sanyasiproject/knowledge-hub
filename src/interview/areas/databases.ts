@@ -352,16 +352,5 @@ export const databases: Area = {
     { label: "Postgres default isolation", value: "READ COMMITTED", note: "MySQL InnoDB defaults to REPEATABLE READ." },
   ],
 
-  relatedTopics: [
-    "indexing",
-    "query-optimization",
-    "acid-transactions",
-    "isolation-levels",
-    "normalization",
-    "sharding",
-    "replication-partitioning",
-    "cap-theorem",
-    "pagination-filtering",
-    "sql-basics",
-  ],
+  relatedTopics: ["indexing", "query-optimization", "acid-transactions", "isolation-levels", "normalization", "sharding", "replication-partitioning", "cap-theorem", "pagination-filtering", "sql-basics"],
 };

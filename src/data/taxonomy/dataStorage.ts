@@ -15,7 +15,7 @@ export const dataAndStorage: Domain[] = [
         topics: [
           { slug: "relational-model", title: "The Relational Model", summary: "Tables, keys, and relationships.", level: "Beginner", tags: ["databases"], related: ["normalization", "sql-basics", "acid-transactions", "indexing", "joins"] },
           { slug: "normalization", title: "Normalization", summary: "Organizing data to reduce redundancy.", level: "Intermediate", tags: ["databases"], related: ["relational-model", "data-modeling-nosql", "indexing", "sql-basics", "query-optimization"] },
-          { slug: "indexing", title: "Indexing & B-Trees", summary: "How databases find rows fast.", level: "Advanced", tags: ["databases", "performance"], contentReady: ["quick-summary", "detailed-explanation", "animations", "diagrams", "interview-qa"], related: ["query-optimization", "relational-model", "balanced-trees", "normalization", "replication-partitioning"] },
+          { slug: "indexing", title: "Indexing & B-Trees", summary: "How databases find rows fast.", level: "Advanced", tags: ["databases", "performance"], contentReady: ["quick-summary", "detailed-explanation", "animations", "diagrams", "interview-qa"], related: ["query-optimization", "relational-model", "segment-tree-1d", "normalization", "replication-partitioning"] },
         ],
       },
       {
@@ -71,10 +71,10 @@ export const dataAndStorage: Domain[] = [
         title: "The Families",
         summary: "The four major non-relational models.",
         topics: [
-          { slug: "key-value-stores", title: "Key-Value Stores", summary: "The simplest, fastest model.", level: "Beginner", tags: ["nosql"], related: ["document-stores", "redis-data-structures", "caching-basics", "hash-tables", "cap-and-nosql"] },
+          { slug: "key-value-stores", title: "Key-Value Stores", summary: "The simplest, fastest model.", level: "Beginner", tags: ["nosql"], related: ["document-stores", "redis-data-structures", "caching-basics", "design-data-structures", "cap-and-nosql"] },
           { slug: "document-stores", title: "Document Stores", summary: "Schema-flexible JSON-like documents.", level: "Intermediate", tags: ["nosql"], related: ["key-value-stores", "wide-column", "data-modeling-nosql", "normalization", "cap-and-nosql"] },
           { slug: "wide-column", title: "Wide-Column Stores", summary: "Columns grouped into families for scale.", level: "Advanced", tags: ["nosql"], related: ["document-stores", "key-value-stores", "replication-partitioning", "data-modeling-nosql", "cap-and-nosql"] },
-          { slug: "graph-databases", title: "Graph Databases", summary: "Relationships as first-class citizens.", level: "Advanced", tags: ["nosql", "graphs"], related: ["graph-theory", "graphs", "document-stores", "data-modeling-nosql", "ctes-recursion"] },
+          { slug: "graph-databases", title: "Graph Databases", summary: "Relationships as first-class citizens.", level: "Advanced", tags: ["nosql", "graphs"], related: ["graph-theory", "bfs-traversal", "document-stores", "data-modeling-nosql", "ctes-recursion"] },
         ],
       },
       {
@@ -120,7 +120,7 @@ export const dataAndStorage: Domain[] = [
         title: "Core Redis",
         summary: "Data structures and how Redis is used.",
         topics: [
-          { slug: "redis-data-structures", title: "Redis Data Structures", summary: "Strings, hashes, lists, sets, sorted sets, streams.", level: "Beginner", tags: ["redis"], related: ["redis-patterns", "caching-basics", "key-value-stores", "redis-persistence", "hash-tables"] },
+          { slug: "redis-data-structures", title: "Redis Data Structures", summary: "Strings, hashes, lists, sets, sorted sets, streams.", level: "Beginner", tags: ["redis"], related: ["redis-patterns", "caching-basics", "key-value-stores", "redis-persistence", "design-data-structures"] },
           { slug: "redis-persistence", title: "Persistence (RDB & AOF)", summary: "Keeping in-memory data durable.", level: "Intermediate", tags: ["redis"], related: ["redis-data-structures", "redis-cluster", "acid-transactions", "replication-partitioning", "fault-tolerance"] },
           { slug: "redis-patterns", title: "Redis Patterns", summary: "Rate limiting, locks, leaderboards, queues.", level: "Advanced", tags: ["redis"], related: ["redis-data-structures", "rate-limiting", "cache-strategies", "distributed-caching", "lock-free-programming"] },
           { slug: "redis-cluster", title: "Replication & Clustering", summary: "Scaling and high availability.", level: "Advanced", tags: ["redis", "scalability"], related: ["redis-persistence", "distributed-caching", "replication-partitioning", "sharding", "consensus"] },
@@ -140,7 +140,7 @@ export const dataAndStorage: Domain[] = [
         title: "Core Elasticsearch",
         summary: "Indexing and querying at scale.",
         topics: [
-          { slug: "inverted-index", title: "The Inverted Index", summary: "The structure that makes full-text search fast.", level: "Intermediate", tags: ["elasticsearch", "search"], related: ["es-mapping", "es-querying", "hash-tables", "indexing", "tries"] },
+          { slug: "inverted-index", title: "The Inverted Index", summary: "The structure that makes full-text search fast.", level: "Intermediate", tags: ["elasticsearch", "search"], related: ["es-mapping", "es-querying", "design-data-structures", "indexing", "trie-template"] },
           { slug: "es-mapping", title: "Indexing & Mapping", summary: "Defining how documents are analyzed and stored.", level: "Intermediate", tags: ["elasticsearch"], related: ["inverted-index", "es-querying", "es-cluster", "normalization", "data-modeling-nosql"] },
           { slug: "es-querying", title: "Query DSL", summary: "Full-text, term, and compound queries.", level: "Advanced", tags: ["elasticsearch"], related: ["es-mapping", "inverted-index", "es-cluster", "query-optimization", "aggregation"] },
           { slug: "es-cluster", title: "Shards, Replicas & Scaling", summary: "How Elasticsearch distributes data.", level: "Advanced", tags: ["elasticsearch", "scalability"], related: ["es-querying", "es-mapping", "replication-partitioning", "sharding", "consensus"] },

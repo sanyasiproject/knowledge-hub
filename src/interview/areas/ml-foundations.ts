@@ -265,14 +265,5 @@ export const mlFoundations: Area = {
     { label: "Tabular winner", value: "Gradient-boosted trees", note: "Still generally beats deep learning on tabular data." },
   ],
 
-  relatedTopics: [
-    "ml-basics",
-    "ml-evaluation",
-    "model-serving",
-    "statistics-basics",
-    "probability-basics",
-    "bayes-theorem",
-    "vectors-matrices",
-    "pipelines",
-  ],
+  relatedTopics: ["ml-basics", "ml-evaluation", "model-serving", "statistics-basics", "probability-basics", "bayes-theorem", "vectors-matrices", "pipelines"],
 };

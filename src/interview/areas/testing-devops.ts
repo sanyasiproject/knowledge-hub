@@ -288,21 +288,5 @@ export const testingDevops: Area = {
     { label: "Canary first step", value: "1–5% of traffic", note: "Enough to see error-rate movement, small enough to contain it." },
   ],
 
-  relatedTopics: [
-    "test-pyramid",
-    "unit-testing",
-    "integration-testing",
-    "test-doubles",
-    "tdd",
-    "git-fundamentals",
-    "rebasing",
-    "branching-merging",
-    "container-fundamentals",
-    "images-layers",
-    "k8s-architecture",
-    "continuous-integration",
-    "continuous-delivery",
-    "release-strategies",
-    "infrastructure-as-code",
-  ],
+  relatedTopics: ["test-pyramid", "unit-testing", "integration-testing", "test-doubles", "tdd", "git-fundamentals", "rebasing", "branching-merging", "container-fundamentals", "images-layers", "k8s-architecture", "continuous-integration", "continuous-delivery", "release-strategies", "infrastructure-as-code"],
 };

@@ -286,17 +286,5 @@ export const osConcurrency: Area = {
     { label: "CPU-bound pool size", value: "≈ cores", note: "I/O-bound: cores × (1 + wait/compute), capped by the downstream bottleneck." },
   ],
 
-  relatedTopics: [
-    "processes-vs-threads",
-    "concurrency-vs-parallelism",
-    "race-conditions",
-    "deadlocks",
-    "locks-and-atomics",
-    "synchronization-primitives",
-    "context-switching",
-    "virtual-memory",
-    "memory-hierarchy",
-    "threads-vs-async",
-    "cpu-scheduling",
-  ],
+  relatedTopics: ["processes-vs-threads", "concurrency-vs-parallelism", "race-conditions", "deadlocks", "locks-and-atomics", "synchronization-primitives", "context-switching", "virtual-memory", "memory-hierarchy", "threads-vs-async", "cpu-scheduling"],
 };

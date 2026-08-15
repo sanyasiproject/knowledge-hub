@@ -343,15 +343,5 @@ export const rag: Area = {
     { label: "Key retrieval metric", value: "recall@k", note: "A hard ceiling on end-to-end quality." },
   ],
 
-  relatedTopics: [
-    "rag-fundamentals",
-    "advanced-rag",
-    "chunking-embeddings",
-    "retrieval-strategies",
-    "tokenization-embeddings",
-    "inverted-index",
-    "indexing",
-    "ml-evaluation",
-    "rbac-abac",
-  ],
+  relatedTopics: ["rag-fundamentals", "advanced-rag", "chunking-embeddings", "retrieval-strategies", "tokenization-embeddings", "inverted-index", "indexing", "ml-evaluation", "rbac-abac"],
 };

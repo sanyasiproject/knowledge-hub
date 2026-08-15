@@ -76,7 +76,7 @@ export const opsAndReliability: Domain[] = [
           { slug: "git-fundamentals", title: "Git Fundamentals", summary: "Commits, staging, and the three trees.", level: "Beginner", tags: ["git"], contentReady: ["quick-summary", "detailed-explanation", "diagrams", "interview-qa"], related: ["branching-merging", "rebasing", "git-internals", "continuous-integration", "gitops"] },
           { slug: "branching-merging", title: "Branching & Merging", summary: "Parallel work and bringing it together.", level: "Intermediate", tags: ["git"], related: ["git-fundamentals", "rebasing", "continuous-integration", "gitops", "git-internals"] },
           { slug: "rebasing", title: "Rebasing", summary: "Rewriting history for a clean line.", level: "Intermediate", tags: ["git"], related: ["branching-merging", "git-fundamentals", "git-internals", "continuous-integration", "gitops"] },
-          { slug: "git-internals", title: "Git Internals", summary: "The object model: blobs, trees, commits.", level: "Advanced Concepts", tags: ["git"], related: ["git-fundamentals", "branching-merging", "file-systems", "hash-tables", "rebasing"] },
+          { slug: "git-internals", title: "Git Internals", summary: "The object model: blobs, trees, commits.", level: "Advanced Concepts", tags: ["git"], related: ["git-fundamentals", "branching-merging", "file-systems", "design-data-structures", "rebasing"] },
         ],
       },
     ],

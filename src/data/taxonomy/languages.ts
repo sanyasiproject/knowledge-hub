@@ -75,7 +75,7 @@ export const languagesAndParadigms: Domain[] = [
           { slug: "pure-functions", title: "Pure Functions & Side Effects", summary: "Predictable functions and isolating effects.", level: "Beginner", tags: ["fp"], related: ["immutability", "higher-order-functions", "functions", "tdd", "unit-testing"] },
           { slug: "immutability", title: "Immutability", summary: "Data that never changes, and why it helps.", level: "Beginner", tags: ["fp"], related: ["pure-functions", "concurrency-vs-parallelism", "race-conditions", "actor-model", "memory-models"] },
           { slug: "higher-order-functions", title: "Higher-Order Functions", summary: "Functions that take or return functions.", level: "Intermediate", tags: ["fp"], related: ["pure-functions", "function-composition", "recursion", "functors-monads", "functions"] },
-          { slug: "recursion", title: "Recursion & Tail Calls", summary: "Solving problems in terms of themselves.", level: "Intermediate", tags: ["fp"], related: ["higher-order-functions", "stacks-queues", "binary-trees", "combinatorics", "function-composition"] },
+          { slug: "recursion", title: "Recursion & Tail Calls", summary: "Solving problems in terms of themselves.", level: "Intermediate", tags: ["fp"], related: ["higher-order-functions", "monotonic-stack", "dfs-traversal", "combinatorics", "function-composition"] },
         ],
       },
       {

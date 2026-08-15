@@ -355,14 +355,5 @@ export const python: Area = {
     { label: "Free-threaded (no-GIL) build", value: "3.13+, experimental", note: "Not the default; costs single-thread performance." },
   ],
 
-  relatedTopics: [
-    "concurrency-vs-parallelism",
-    "threads-vs-async",
-    "concurrency-models-backend",
-    "garbage-collection",
-    "inheritance",
-    "error-handling",
-    "type-systems",
-    "profiling",
-  ],
+  relatedTopics: ["concurrency-vs-parallelism", "threads-vs-async", "concurrency-models-backend", "garbage-collection", "inheritance", "error-handling", "type-systems", "profiling"],
 };

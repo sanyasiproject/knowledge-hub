@@ -270,16 +270,5 @@ export const networking: Area = {
     { label: "Ports", value: "80 HTTP, 443 HTTPS, 53 DNS, 22 SSH", note: "5432 Postgres, 3306 MySQL, 6379 Redis." },
   ],
 
-  relatedTopics: [
-    "osi-tcpip-model",
-    "tcp-udp",
-    "tcp-handshake",
-    "dns",
-    "http",
-    "tls-ssl",
-    "load-balancing",
-    "latency-throughput",
-    "request-lifecycle",
-    "resilience-patterns",
-  ],
+  relatedTopics: ["osi-tcpip-model", "tcp-udp", "tcp-handshake", "dns", "http", "tls-ssl", "load-balancing", "latency-throughput", "request-lifecycle", "resilience-patterns"],
 };

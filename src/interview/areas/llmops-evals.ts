@@ -250,14 +250,5 @@ export const llmopsEvals: Area = {
     { label: "Alert on", value: "Cost per request", note: "Total spend moves too slowly to catch a regression." },
   ],
 
-  relatedTopics: [
-    "ml-evaluation",
-    "prompting-fundamentals",
-    "structured-output",
-    "rag-fundamentals",
-    "model-serving",
-    "metrics",
-    "logging",
-    "distributed-tracing",
-  ],
+  relatedTopics: ["ml-evaluation", "prompting-fundamentals", "structured-output", "rag-fundamentals", "model-serving", "metrics", "logging", "distributed-tracing"],
 };
