@@ -205,6 +205,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <SearchTrigger onClick={() => setSearchOpen(true)} />
         </div>
         <NavLink
+          to="/practice"
+          className={({ isActive }) =>
+            `hidden rounded-lg px-2.5 py-1.5 text-sm font-semibold sm:inline-block ${
+              isActive
+                ? "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-200"
+                : "text-brand-600 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-900/30"
+            }`
+          }
+          title="Algorithm Practice — question banks with C++ solutions"
+        >
+          Practice
+        </NavLink>
+        <NavLink
           to="/interview"
           className={({ isActive }) =>
             `hidden rounded-lg px-2.5 py-1.5 text-sm font-semibold sm:inline-block ${

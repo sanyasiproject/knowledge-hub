@@ -4,6 +4,7 @@ import { findTopicBySlug, getCategory, getDomain, getTopic, topicPath } from "..
 import { TOPIC_SECTIONS, TOPIC_SECTION_GROUPS } from "../data/topicSections";
 import type { TopicSectionDef } from "../data/topicSections";
 import { loadContent } from "../content";
+import { hasPractice } from "../practice";
 import type { TopicContent } from "../content/types";
 import { hasSectionContent, renderSection } from "../components/content/sections";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
@@ -283,6 +284,14 @@ export function TopicPage() {
                   <span aria-hidden>·</span>
                   <span>~{minutes} min read</span>
                 </div>
+              )}
+              {domain.slug === "algorithms" && hasPractice(topic.slug) && (
+                <Link
+                  to={`/practice/${topic.slug}`}
+                  className="mt-4 inline-block rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-brand-700"
+                >
+                  💪 Practice this topic →
+                </Link>
               )}
             </div>
           </header>

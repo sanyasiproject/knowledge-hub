@@ -19,6 +19,8 @@ const SearchResults = page(() => import("./pages/SearchResults"), "SearchResults
 const LearningPaths = page(() => import("./pages/LearningPaths"), "LearningPaths");
 const LearningPathDetail = page(() => import("./pages/LearningPathDetail"), "LearningPathDetail");
 const InterviewHub = page(() => import("./pages/InterviewHub"), "InterviewHub");
+const PracticeHub = page(() => import("./pages/PracticeHub"), "PracticeHub");
+const PracticeTopic = page(() => import("./pages/PracticeTopic"), "PracticeTopic");
 const InterviewArea = page(() => import("./pages/InterviewArea"), "InterviewArea");
 const InterviewTrack = page(() => import("./pages/InterviewTrack"), "InterviewTrack");
 
@@ -52,6 +54,8 @@ export default function App() {
           <Route path="/domain/:domainSlug" element={<DomainPage />} />
           <Route path="/domain/:domainSlug/:categorySlug" element={<CategoryPage />} />
           <Route path="/topic/:domainSlug/:categorySlug/:topicSlug" element={<TopicPage />} />
+          <Route path="/practice" element={<PracticeHub />} />
+          <Route path="/practice/:topicSlug" element={<PracticeTopic />} />
           <Route path="/interview" element={<InterviewHub />} />
           <Route path="/interview/track/:trackSlug" element={<InterviewTrack />} />
           <Route path="/interview/area/:areaSlug" element={<InterviewArea />} />
