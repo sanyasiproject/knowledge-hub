@@ -17,6 +17,102 @@ Run `npm run check` for live numbers — it is also wired into `npm run build`.
 
 ---
 
+## Session 5 — Algorithm Practice: every topic now has a question bank
+
+The Practice section (`src/practice/`) mirrors the Algorithms taxonomy as a pure
+problem-solving surface: no theory, only problems. Each `topics/<slug>.ts` file
+exports one `TopicPractice` whose questions each carry a full statement with
+worked examples and constraints, a C++ solution, an explanation of why it works,
+and a link to the original problem.
+
+Coverage went from 50/147 topics to **147/147 — 1,790 questions**.
+
+| Category | Topics | Questions |
+|---|---|---|
+| `interview-patterns` | 8 | 129 |
+| `searching-sorting` | 7 | 119 |
+| `problem-patterns` | 8 | 129 |
+| `graph-algorithms` | 17 | 266 |
+| `flows-matching` | 4 | 56 |
+| `tree-algorithms` | 8 | 84 |
+| `dynamic-programming` | 28 | 298 |
+| `range-queries` | 16 | 168 |
+| `string-algorithms` | 18 | 196 |
+| `math-number-theory` | 18 | 191 |
+| `combinatorics-counting` | 5 | 48 |
+| `game-theory-probability` | 4 | 44 |
+| `geometry` | 6 | 62 |
+| **Total** | **147** | **1,790** |
+
+### How the 97 new banks were authored
+
+Fanned out one agent per topic across seven category-scoped workflow runs, each
+agent working from the same spec: read `src/practice/types.ts` plus
+`dp-fundamentals.ts` and `dijkstra.ts` as style references, grep its own
+taxonomy line for the title/useCase, then author and typecheck a single file.
+Agents were forbidden from touching anything but their own file; the whole tree
+was verified centrally after each wave with `npx tsc -b`, `npm run check` and
+`npm run build`.
+
+Standards the agents held to, which are worth keeping for future banks:
+
+- **Examples are executed, not eyeballed.** Most agents extracted their C++,
+  compiled it with `g++ -std=c++17`, ran every stated example, and several
+  stress-tested against a brute force over hundreds to tens of thousands of
+  random cases. That caught real bugs — the popular range-assign formulation of
+  CF 343D (Water Tree) passes the official sample and fails on random input; a
+  VLATTICE example was off by a wide margin on first draft.
+- **No invented problems, no guessed URLs.** Where an agent could not verify a
+  link (most often a restructured GeeksforGeeks slug) the optional `link` field
+  was omitted rather than filled with a plausible guess.
+- **Thin patterns are admitted, not padded.** `boyer-moore`, `merge-sort-tree`,
+  `segmented-sieve` and `spf-mobius` have few problems where the pattern is the
+  *intended* solution; those banks say so in the explanations and name the
+  faster real-world alternative instead of pretending otherwise.
+
+### Practice UI
+
+Three controls were added on top of the banks:
+
+- **Interview-frequency filter** on `/practice` (Very High / High / Medium / Low,
+  with counts), because with 147 topics "what do I study first" matters more
+  than browsing. Category headings recount against the filtered set. It is
+  multi-select: pills toggle independently and combine as OR, an empty selection
+  means no filter, and *All* clears. The difficulty filter on a topic page works
+  the same way.
+- **Collapsing.** Each category on the hub and each question on a topic page
+  toggles individually, plus bulk *Expand all* / *Collapse all*. On a topic page
+  a statement and its solution collapse independently, so *Hide all solutions*
+  gives you a clean attempt-first list without losing the statements.
+- **Source labels.** `src/practice/sources.ts` maps a problem link to its judge
+  (LeetCode, CSES, Codeforces, GeeksforGeeks, SPOJ, AtCoder, POJ, Library
+  Checker, UVa, CP-Algorithms; unknown hosts fall back to the bare hostname).
+  Every "Solve it yourself" link carries a coloured source badge and a hover
+  title naming the exact destination host, and each topic header summarises
+  which judges its bank draws on.
+
+State is in-memory only — no `localStorage`, per the storage ban the checker
+enforces.
+
+### Known rough edges
+
+- Some conceptual overlap between neighbouring banks is deliberate (LC 315 in
+  both `fenwick-tree-1d` and `inversion-count-bit`; border/period problems in
+  both `lps-array` and `z-function`, solved two different ways). Worth a pass if
+  strict disjointness is ever wanted.
+- A handful of linked problems are LeetCode premium (LC 469, LC 1245, LC 1522):
+  slugs are correct but the pages need a subscription.
+- `spf-mobius` spells the function "Moebius" throughout to stay ASCII, while the
+  taxonomy title uses "Möbius".
+- C++ portability: every bank now uses `std::gcd` from `<numeric>`. GNU `__gcd`
+  was swept out of `inclusion-exclusion`, `linear-diophantine`, `eulers-totient`
+  and `miller-rabin` because it does not compile against macOS libc++.
+
+Verified with `npx tsc -b` (clean), `npm run check` (passes), `npx oxlint`
+(clean) and `npm run build` (succeeds).
+
+---
+
 ## Session 3 — Interview Prep section + consistency fixes
 
 ### Added: the Interview Prep section (`src/interview/`)
@@ -96,6 +192,8 @@ Everything else (`quickSummary`, `detailed`, `deepDive`, `code`, `diagrams`,
 ## Where to pick up
 
 1. `npm install && npm run check` — confirms the tree is consistent.
-2. Fill `followUps` for the 148 topics lacking them; the checker lists them.
-3. Then `resources`, then `animations`.
-4. `service-models.ts` remains the reference for a fully-populated topic file.
+2. The Practice section is complete (147/147 topics). Remaining work there is
+   quality, not coverage: see "Known rough edges" under Session 5.
+3. Fill `followUps` for the 148 topics lacking them; the checker lists them.
+4. Then `resources`, then `animations`.
+5. `service-models.ts` remains the reference for a fully-populated topic file.
